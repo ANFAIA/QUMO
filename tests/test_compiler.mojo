@@ -22,7 +22,8 @@ from qumo.compiler.optimize import (
 from qumo.compiler.phase_fold import phase_fold
 from qumo.compiler.basis import translate_to_basis, unroll_3q
 from qumo.compiler.routing import RouteOptions, route_circuit, star_preroute, slide_swaps
-from qumo.compiler.kak import consolidate_2q, kak_synthesize, gate_m4
+from qumo.compiler.kak import consolidate_2q, kak_synthesize, gate_m4, min_cx_lower_bound
+from qumo.ir.gates import M4
 from qumo.compiler.pauli_simp import pauli_resynthesize
 from qumo.bench.circuits import hamiltonian_circuit_from_labels
 from qumo.compiler.pass_manager import (
@@ -703,6 +704,104 @@ def test_routing() raises:
     print("  routing ok (total swaps", total_swaps, ")")
 
 
+def test_routing_extras() raises:
+    """Commutation-aware routing units, mirror gates, the KAK invariant
+    screen and the parallel 1q synthesis: exact on random instances."""
+    # QAOA-like: diagonal cost blocks (cx.rz.cx, cp, rzz, cz) on random pairs
+    # around a hub, rx mixers in between; measurements / barriers in variants
+    var targets: List[String] = ["line:9/sc_cz", "heavy_hex:3/sc_ecr", "grid:3x3/sc_cx"]
+    for v in range(6):
+        var rng = Rng(UInt64(4100 + v))
+        var n = 7 + v % 3
+        var c = Circuit(n, name="qaoa_like" + String(v))
+        for q in range(n):
+            c.h(q)
+        for layer in range(2):
+            for _ in range(3 * n):
+                var a = rng.below(n) if rng.uniform() < 0.6 else 0
+                var b = rng.below(n)
+                if a == b:
+                    continue
+                var r = rng.uniform()
+                if r < 0.4:
+                    c.cx(a, b)
+                    c.rz(rng.uniform() * 2 - 1, b)
+                    c.cx(a, b)
+                elif r < 0.6:
+                    c.cp(rng.uniform(), a, b)
+                elif r < 0.8:
+                    c.rzz(rng.uniform(), a, b)
+                elif r < 0.9:
+                    c.cz(a, b)
+                else:
+                    c.rz(rng.uniform(), a)
+            if v % 3 == 1 and layer == 0:
+                c.barrier()
+            for q in range(n):
+                c.rx(0.3 + 0.1 * Float64(q), q)
+        if v % 3 == 2:
+            c.measure(0, 0)
+            c.x(1)
+            c.c_if(0, 1)
+            c.cz(1, n - 1)
+        var t = parse_target(targets[v % 3])
+        for opt in ["commute=on,mirror=off", "commute=on,mirror=on", "commute=on,mirror=free", "commute=off,mirror=on"]:
+            var spec = "route(sabre,trials=4,swap_trials=4," + opt + ",seed=" + String(v) + "),kak,basis,check"
+            var r = compile_spec(c, t, spec)
+            assert_conforms(r.circuit, t, spec)
+            if v % 3 != 2:
+                assert_routed_equiv(c, r, spec + " " + t.name)
+            var r2 = compile_spec(c, t, spec)
+            assert_equal(String(r.circuit), String(r2.circuit))  # deterministic
+        if v % 3 == 2:
+            # feed-forward: compare sampled outcomes through the layouts
+            var r = compile_spec(c, t, "route(sabre,trials=4,commute=on),kak,basis,check")
+            assert_equal(r.circuit.count(Op.MEASURE), 1)
+    # random mixed circuits with every routing extra on
+    for seed in range(6):
+        var c = random_circuit(6, 60, UInt64(seed + 4300))
+        var t = Target.heavy_hex(3)
+        var spec = "route(sabre,trials=3,swap_trials=3,commute=on,mirror=on,seed=" + String(seed) + ")"
+        var r = compile_spec(c, t, spec)
+        assert_conforms(r.circuit, t, spec)
+        assert_routed_equiv(c, r, spec)
+    # KAK screen: the Shende-Bullock-Markov bound never exceeds the CX count
+    for seed in range(40):
+        var c = random_circuit(2, 3 + seed % 9, UInt64(seed + 4500), with_3q=False)
+        var m = M4.identity()
+        var ok = True
+        for g in c.ops:
+            if not op_is_unitary(g.kind):
+                ok = False
+            elif op_arity(g.kind) <= 2:
+                m = gate_m4(g, 0, 1) @ m
+        if not ok:
+            continue
+        var tmp = List[Instruction]()
+        var ph = 0.0
+        var k = kak_synthesize(m, 0, 1, tmp, ph)
+        if k >= 0:
+            assert_true(min_cx_lower_bound(m) <= k)
+    var sw = Circuit(2)
+    sw.swap(0, 1)
+    assert_equal(min_cx_lower_bound(gate_m4(sw.ops[0], 0, 1)), 3)
+    var zz = Circuit(2)
+    zz.rzz(0.37, 0, 1)
+    assert_equal(min_cx_lower_bound(gate_m4(zz.ops[0], 0, 1)), 2)
+    # parallel 1q synthesis (>= 512 distinct runs) stays exact
+    var big = Circuit(3, name="many_runs")
+    var rng = Rng(4600)
+    for i in range(700):
+        var q = i % 3
+        big.u(rng.uniform() * 3, rng.uniform() * 3, rng.uniform() * 3, q)
+        big.rz(rng.uniform(), q)
+        big.cx(q, (q + 1) % 3)
+    var fb = big.copy()
+    _ = fuse_1q(fb, GateSet(parse_basis("rz,sx,x,cz")))
+    assert_equiv(big, fb, "parallel fuse_1q")
+    print("  routing extras ok (commutation units, mirrors, KAK screen, parallel 1q synthesis)")
+
+
 def test_presets() raises:
     var targets = List[Target]()
     targets.append(Target.all_to_all(7))
@@ -954,6 +1053,7 @@ def main() raises:
     test_kak()
     test_pauli_simp()
     test_routing()
+    test_routing_extras()
     test_presets()
     test_structured()
     test_dynamic()

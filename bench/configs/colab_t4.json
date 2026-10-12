@@ -1,0 +1,248 @@
+{
+  "name": "colab_t4",
+  "description": "Google Colab NVIDIA T4 (Turing sm_75, 16 GB; fp64 at 1/32 rate). Free tier, ~2 vCPU, 12.7 GB RAM.",
+  "hardware": {
+    "vendor": "nvidia",
+    "gpu": "Tesla T4",
+    "arch": "sm_75",
+    "memory_gib": 15,
+    "colab_runtime": "T4 GPU",
+    "host_ram_gib": "12.7 (51 with High-RAM)"
+  },
+  "memory_fraction": 0.6,
+  "suites": {
+    "gpu_check": {
+      "enabled": true,
+      "targets": [
+        "host"
+      ],
+      "timeout_s": 2400
+    },
+    "sv_cpu": {
+      "enabled": true,
+      "families": [
+        "layered"
+      ],
+      "qubits": [
+        16,
+        26
+      ],
+      "reps": 3,
+      "timeout_s": 2400,
+      "quick": {
+        "qubits": [
+          16,
+          20
+        ],
+        "reps": 1,
+        "families": [
+          "layered"
+        ]
+      }
+    },
+    "sv_gpu": {
+      "enabled": true,
+      "precisions": [
+        "fp32",
+        "fp64"
+      ],
+      "qubits_fp32": [
+        16,
+        30
+      ],
+      "qubits_fp64": [
+        16,
+        28
+      ],
+      "reps": 3,
+      "timeout_s": 3600,
+      "build_timeout_s": 2400,
+      "quick": {
+        "qubits_fp32": [
+          16,
+          20
+        ],
+        "qubits_fp64": [
+          16,
+          20
+        ],
+        "reps": 1
+      }
+    },
+    "baseline_aer": {
+      "enabled": true,
+      "devices": [
+        "cpu",
+        "gpu"
+      ],
+      "precisions_cpu": [
+        "fp64"
+      ],
+      "precisions_gpu": [
+        "fp32",
+        "fp64"
+      ],
+      "qubits": [
+        16,
+        26
+      ],
+      "qubits_gpu": [
+        16,
+        30
+      ],
+      "qubits_gpu_fp64": [
+        16,
+        28
+      ],
+      "reps": 3,
+      "timeout_s": 3600,
+      "python": null,
+      "gpu_python": null,
+      "quick": {
+        "qubits": [
+          16,
+          20
+        ],
+        "qubits_gpu": [
+          16,
+          20
+        ],
+        "reps": 1
+      }
+    },
+    "baseline_cudaq": {
+      "enabled": true,
+      "precisions": [
+        "fp32",
+        "fp64"
+      ],
+      "qubits_fp32": [
+        16,
+        30
+      ],
+      "qubits_fp64": [
+        16,
+        28
+      ],
+      "reps": 3,
+      "cpu": false,
+      "qubits_cpu": [
+        16,
+        22
+      ],
+      "timeout_s": 3600,
+      "python": null,
+      "quick": {
+        "qubits_fp32": [
+          16,
+          20
+        ],
+        "qubits_fp64": [
+          16,
+          20
+        ],
+        "reps": 1
+      }
+    },
+    "baseline_lightning": {
+      "enabled": true,
+      "devices": [
+        "lightning.gpu"
+      ],
+      "precisions_cpu": [
+        "fp64"
+      ],
+      "precisions_gpu": [
+        "fp32",
+        "fp64"
+      ],
+      "qubits": [
+        16,
+        24
+      ],
+      "qubits_gpu": [
+        16,
+        30
+      ],
+      "qubits_gpu_fp64": [
+        16,
+        28
+      ],
+      "reps": 3,
+      "timeout_s": 3600,
+      "python": null,
+      "quick": {
+        "qubits": [
+          16,
+          18
+        ],
+        "qubits_gpu": [
+          16,
+          20
+        ],
+        "reps": 1
+      }
+    },
+    "neutral": {
+      "enabled": true,
+      "sdks": [
+        "qumo",
+        "qiskit",
+        "tket"
+      ],
+      "targets": [
+        "sc_grid",
+        "ion_all_to_all",
+        "neutral_atom"
+      ],
+      "levels": [
+        "default"
+      ],
+      "filter": "qb_small__",
+      "max_qubits": 6,
+      "job_timeout_s": 120,
+      "timeout_s": 1800,
+      "python": null,
+      "quick": {
+        "targets": [
+          "sc_grid"
+        ],
+        "max_qubits": 4
+      }
+    },
+    "qec": {
+      "enabled": false,
+      "args": [
+        "--part",
+        "A",
+        "--shots",
+        "20000"
+      ],
+      "timeout_s": 2400,
+      "python": null,
+      "quick": {
+        "args": [
+          "--part",
+          "A",
+          "--shots",
+          "2000"
+        ]
+      }
+    },
+    "tests": {
+      "enabled": true,
+      "targets": [
+        "test-gpu"
+      ],
+      "timeout_s": 3600,
+      "quick": {
+        "targets": [
+          "test"
+        ],
+        "files": [
+          "tests/test_json.mojo"
+        ]
+      }
+    }
+  }
+}

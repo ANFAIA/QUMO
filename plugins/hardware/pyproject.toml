@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qumo-hardware"
+version = "0.1.0"
+description = "Run QUMO-compiled circuits on quantum hardware (IBM Quantum, Quantinuum) through a vendor-neutral provider interface"
+readme = "README.md"
+requires-python = ">=3.10"
+# The QUMO compiler itself is the CPython extension build/qumo_py.so (`make py`
+# at the repository root); it is located automatically or via QUMO_PY_PATH.
+dependencies = []
+
+[project.optional-dependencies]
+ibm = [
+    "qiskit>=2.3",
+    "qiskit-ibm-runtime>=0.50",   # client-side executor Sampler (SamplerV2 is deprecated in 0.50)
+    "qiskit-aer>=0.17",           # local mode for fake backends
+]
+quantinuum = [
+    "qnexus>=0.51",
+    "pytket>=2.13",
+    "pytket-quantinuum>=0.59",
+]
+# Helios programs are HUGR; built from the pytket payload with guppylang
+# (pre-release line at the time of writing: pip install --pre).
+helios = ["guppylang>=1.0.0a4"]
+# Offline H2 emulator (H2-1LE); pulls pre-release quantum-pecos: pip install --pre.
+local-quantinuum = ["pytket-quantinuum[pecos]>=0.59"]
+test = ["pytest>=8", "numpy>=1.26"]
+all = ["qumo-hardware[ibm,quantinuum,test]"]
+
+[project.scripts]
+qumo-hardware = "qumo_hardware.cli:main"
+
+# Third-party providers register here (see docs/HARDWARE_PLUGINS.md):
+# [project.entry-points."qumo_hardware.providers"]
+# braket = "qumo_braket:BraketProvider"
+
+[tool.setuptools.packages.find]
+include = ["qumo_hardware*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: local emulators that take seconds to tens of seconds (run with QUMO_HW_SLOW=1)",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::UserWarning",
+]

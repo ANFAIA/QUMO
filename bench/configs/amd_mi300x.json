@@ -1,0 +1,246 @@
+{
+  "name": "amd_mi300x",
+  "description": "AMD Instinct MI300X / MI325X / MI355X (CDNA3/4, 192-288 GB HBM): AMD Developer Cloud, Azure ND MI300X v5, any ROCm host.",
+  "hardware": {
+    "vendor": "amd",
+    "gpu": "AMD Instinct MI300X",
+    "arch": "gfx942",
+    "memory_gib": 192,
+    "host_ram_gib": "240 (1-GPU droplet) / 1850 (8-GPU VM)"
+  },
+  "memory_fraction": 0.6,
+  "suites": {
+    "gpu_check": {
+      "enabled": true,
+      "targets": [
+        "host"
+      ],
+      "timeout_s": 2400
+    },
+    "sv_cpu": {
+      "enabled": true,
+      "families": [
+        "layered",
+        "qft",
+        "random"
+      ],
+      "qubits": [
+        16,
+        28
+      ],
+      "reps": 3,
+      "timeout_s": 2400,
+      "quick": {
+        "qubits": [
+          16,
+          20
+        ],
+        "reps": 1,
+        "families": [
+          "layered"
+        ]
+      }
+    },
+    "sv_gpu": {
+      "enabled": true,
+      "precisions": [
+        "fp32",
+        "fp64"
+      ],
+      "qubits_fp32": [
+        16,
+        32
+      ],
+      "qubits_fp64": [
+        16,
+        32
+      ],
+      "reps": 3,
+      "timeout_s": 7200,
+      "build_timeout_s": 2400,
+      "quick": {
+        "qubits_fp32": [
+          16,
+          20
+        ],
+        "qubits_fp64": [
+          16,
+          20
+        ],
+        "reps": 1
+      }
+    },
+    "baseline_aer": {
+      "enabled": true,
+      "devices": [
+        "cpu"
+      ],
+      "precisions_cpu": [
+        "fp64"
+      ],
+      "precisions_gpu": [
+        "fp32",
+        "fp64"
+      ],
+      "families_cpu": [
+        "layered",
+        "qft",
+        "random"
+      ],
+      "qubits": [
+        16,
+        28
+      ],
+      "qubits_gpu": [
+        16,
+        16
+      ],
+      "reps": 3,
+      "timeout_s": 3600,
+      "python": null,
+      "gpu_python": null,
+      "quick": {
+        "qubits": [
+          16,
+          20
+        ],
+        "qubits_gpu": [
+          16,
+          20
+        ],
+        "reps": 1
+      }
+    },
+    "baseline_cudaq": {
+      "enabled": false,
+      "precisions": [
+        "fp32",
+        "fp64"
+      ],
+      "qubits_fp32": [
+        16,
+        16
+      ],
+      "qubits_fp64": [
+        16,
+        16
+      ],
+      "reps": 3,
+      "cpu": false,
+      "qubits_cpu": [
+        16,
+        22
+      ],
+      "timeout_s": 3600,
+      "python": null,
+      "quick": {
+        "qubits_fp32": [
+          16,
+          20
+        ],
+        "qubits_fp64": [
+          16,
+          20
+        ],
+        "reps": 1
+      }
+    },
+    "baseline_lightning": {
+      "enabled": true,
+      "devices": [
+        "lightning.qubit",
+        "lightning.amdgpu"
+      ],
+      "precisions_cpu": [
+        "fp64"
+      ],
+      "precisions_gpu": [
+        "fp32",
+        "fp64"
+      ],
+      "qubits": [
+        16,
+        26
+      ],
+      "qubits_gpu": [
+        16,
+        32
+      ],
+      "reps": 3,
+      "timeout_s": 3600,
+      "python": null,
+      "quick": {
+        "qubits": [
+          16,
+          18
+        ],
+        "qubits_gpu": [
+          16,
+          20
+        ],
+        "reps": 1
+      }
+    },
+    "neutral": {
+      "enabled": true,
+      "sdks": [
+        "qumo",
+        "qiskit",
+        "tket"
+      ],
+      "targets": [
+        "sc_grid",
+        "ion_all_to_all",
+        "neutral_atom"
+      ],
+      "levels": [
+        "default"
+      ],
+      "filter": "qb_small__",
+      "max_qubits": 6,
+      "job_timeout_s": 120,
+      "timeout_s": 1800,
+      "python": null,
+      "quick": {
+        "targets": [
+          "sc_grid"
+        ],
+        "max_qubits": 4
+      }
+    },
+    "qec": {
+      "enabled": true,
+      "args": [
+        "--part",
+        "A",
+        "--shots",
+        "20000"
+      ],
+      "timeout_s": 2400,
+      "python": null,
+      "quick": {
+        "args": [
+          "--part",
+          "A",
+          "--shots",
+          "2000"
+        ]
+      }
+    },
+    "tests": {
+      "enabled": true,
+      "targets": [
+        "test-gpu"
+      ],
+      "timeout_s": 3600,
+      "quick": {
+        "targets": [
+          "test"
+        ],
+        "files": [
+          "tests/test_json.mojo"
+        ]
+      }
+    }
+  }
+}

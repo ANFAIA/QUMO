@@ -19,6 +19,12 @@ regardless of thread count, and the stopping point is deterministic too.
 `threshold_sweep` runs a grid of distances x physical error rates and returns
 CSV (or `threshold_sweep_results` for structured results).
 
+Decoder registry (`canonical_decoder_name`): 'mwpm' = exact minimum-weight
+perfect matching by sparse blossom (`qumo.qec.sparse_blossom`, the algorithm
+of PyMatching 2) - the default; 'sparse_blossom' (same decoder);
+'mwpm_dense' = the older exact APSP + dense-blossom `MwpmDecoder`;
+'uf' = union-find; 'lookup' = lookup table.
+
 Error codes: QM-E706 (bad code), QM-E707 (unknown decoder).
 """
 
@@ -35,6 +41,7 @@ from qumo.qec.dem import DetectorErrorModel, detector_error_model
 from qumo.qec.decoders import (
     Decoder, MatchingGraph, UnionFindDecoder, MwpmDecoder, LookupTableDecoder, batch_fired,
 )
+from qumo.qec.sparse_blossom import SparseBlossomDecoder
 
 comptime WAVE_BATCHES = 64
 
@@ -205,21 +212,49 @@ def sample_and_decode[D: Decoder](prog: FrameProgram, dec: D, shots: Int, seed: 
     return RunStats(done_shots, total_errors, Float64(perf_counter_ns() - t0) / 1e9)
 
 
-def make_decoder_and_run(name: String, dem: DetectorErrorModel, prog: FrameProgram, shots: Int, seed: UInt64, max_errors: Int, mut edges: Int) raises -> RunStats:
-    """Build decoder `name` ('uf' | 'mwpm' | 'lookup') for `dem` and run the loop."""
+def canonical_decoder_name(name: String) -> String:
+    """Registry of decoder names: 'mwpm' (sparse blossom, the default exact
+    matcher), 'sparse_blossom', 'mwpm_dense', 'uf', 'lookup' and their aliases.
+    Returns "" for an unknown name."""
     var k = name.lower()
+    if k == "mwpm" or k == "matching" or k == "pymatching":
+        return "mwpm"
+    if k == "sparse_blossom" or k == "sparse-blossom" or k == "sparseblossom" or k == "sb":
+        return "sparse_blossom"
+    if k == "mwpm_dense" or k == "mwpm-dense" or k == "dense_mwpm" or k == "dense":
+        return "mwpm_dense"
     if k == "uf" or k == "union_find" or k == "unionfind":
+        return "uf"
+    if k == "lookup" or k == "lut" or k == "table":
+        return "lookup"
+    return ""
+
+
+def make_decoder_and_run(name: String, dem: DetectorErrorModel, prog: FrameProgram, shots: Int, seed: UInt64, max_errors: Int, mut edges: Int) raises -> RunStats:
+    """Build decoder `name` for `dem` and run the fused loop.
+
+    'mwpm' / 'sparse_blossom': exact MWPM by sparse blossom
+    (`qumo.qec.sparse_blossom`, PyMatching 2's algorithm) - the default;
+    'mwpm_dense': exact MWPM by all-pairs shortest paths + dense blossom
+    (`MwpmDecoder`); 'uf': union-find; 'lookup': lookup table.
+    """
+    var k = canonical_decoder_name(name)
+    if k == "mwpm" or k == "sparse_blossom":
         var g = MatchingGraph(dem)
         edges = g.num_edges()
-        return sample_and_decode(prog, UnionFindDecoder(g^), shots, seed, max_errors)
-    if k == "mwpm" or k == "matching" or k == "pymatching":
+        return sample_and_decode(prog, SparseBlossomDecoder(g), shots, seed, max_errors)
+    if k == "mwpm_dense":
         var g = MatchingGraph(dem)
         edges = g.num_edges()
         return sample_and_decode(prog, MwpmDecoder(g^), shots, seed, max_errors)
-    if k == "lookup" or k == "lut" or k == "table":
+    if k == "uf":
+        var g = MatchingGraph(dem)
+        edges = g.num_edges()
+        return sample_and_decode(prog, UnionFindDecoder(g^), shots, seed, max_errors)
+    if k == "lookup":
         edges = 0
         return sample_and_decode(prog, LookupTableDecoder(dem, 2), shots, seed, max_errors)
-    raise Error("QM-E707: unknown decoder '" + name + "'. Hint: use 'uf', 'mwpm' or 'lookup', or call sample_and_decode() with your own Decoder.")
+    raise Error("QM-E707: unknown decoder '" + name + "'. Hint: use 'mwpm' (sparse blossom, default), 'sparse_blossom', 'mwpm_dense', 'uf' or 'lookup', or call sample_and_decode() with your own Decoder.")
 
 
 def run_circuit_experiment(cc: CodeCircuit, shots: Int, decoder: String = "mwpm", seed: UInt64 = 1, max_errors: Int = -1) raises -> ExperimentResult:
@@ -254,7 +289,8 @@ def memory_experiment(code: String = "surface_z", distance: Int = 3, rounds: Int
                       max_errors: Int = -1) raises -> ExperimentResult:
     """Memory experiment under uniform circuit-level noise p (rounds = d if < 1).
 
-    code: 'surface_z' | 'surface_x' | 'repetition'; decoder: 'mwpm' | 'uf' | 'lookup'.
+    code: 'surface_z' | 'surface_x' | 'repetition'; decoder: 'mwpm' (sparse
+    blossom) | 'sparse_blossom' | 'mwpm_dense' | 'uf' | 'lookup'.
     """
     var r = rounds if rounds >= 1 else distance
     var cc = generate_code(code, distance, r, NoiseParams.uniform(p))

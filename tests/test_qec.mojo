@@ -14,6 +14,7 @@ from qumo.qec.decoders import (
     count_logical_errors,
 )
 from qumo.qec.experiments import memory_experiment, threshold_sweep
+from qumo.qec.sparse_blossom import SparseBlossomDecoder
 from qumo.qec.characterization import (
     NoiseModel, apply_noise_model, thermal_pauli_channel, randomized_benchmarking_1q,
     clifford_group_1q, ReadoutCalibration, readout_calibration_circuits, mitigate_counts,
@@ -124,9 +125,11 @@ def main() raises:
         # every single fault is corrected by every decoder
         var uf = UnionFindDecoder(g.copy())
         var mw = MwpmDecoder(g.copy())
+        var sb = SparseBlossomDecoder(g)
         for e in dem.errors:
             assert_equal(uf.decode(e.dets), e.obs, "UF failed on a single fault")
             assert_equal(mw.decode(e.dets), e.obs, "MWPM failed on a single fault")
+            assert_equal(sb.decode(e.dets), e.obs, "sparse blossom failed on a single fault")
         if d == 3:
             var mwd = MwpmDecoder(g.copy(), use_apsp=False)  # Dijkstra path
             for e in dem.errors:
@@ -134,7 +137,7 @@ def main() raises:
             var lt = LookupTableDecoder(dem, 2)
             for e in dem.errors:
                 assert_equal(lt.decode(e.dets), e.obs, "lookup failed on a single fault")
-        print("d=" + String(d), g, "single faults corrected by UF/MWPM")
+        print("d=" + String(d), g, "single faults corrected by UF/MWPM/sparse blossom")
     var stim_txt = surface_code_memory(3, 3, NoiseParams.uniform(0.001), "Z").to_stim()
     assert_true(stim_txt.find("DETECTOR(") >= 0 and stim_txt.find("OBSERVABLE_INCLUDE(0)") >= 0 and stim_txt.find("DEPOLARIZE2(0.001)") >= 0)
 

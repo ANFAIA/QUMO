@@ -164,8 +164,29 @@ def main() raises:
                 a.apply_2q(r4, q0, q1)
                 ref_m4(b, r4, q0, q1)
                 check(a, b, "2q" + tag)
-        # multi-SWAP layer == product of the individual SWAPs, random pairings
-        for trial in range(12):
+        # multi-SWAP layer == product of the individual SWAPs: hand-picked
+        # layers (n >= 10) mixing in-vector pairs (both bits < 3), lane x
+        # vector pairs and run pairs, then random pairings
+        var fa: List[Int] = [0, 2, 1, 1, 0, 0, 1, 2, 0, 1, 2, 6, 2, 0, 3, 4, 8, 9, 1]
+        var fb: List[Int] = [1, 0, 4, 2, 3, 9, 8, 7, 3, 4, 5, 9, 1, 5, 7, 8, 3, 4, 7]
+        var fk: List[Int] = [1, 2, 2, 3, 4, 4, 2, 1]  # pairs per layer, in order
+        var off = 0
+        for li in range(len(fk)):
+            var qa = List[Int]()
+            var qb = List[Int]()
+            for i in range(fk[li]):
+                qa.append(fa[off + i])
+                qb.append(fb[off + i])
+            off += fk[li]
+            if n < 10:
+                continue
+            var a = psi.copy()
+            var b = psi.copy()
+            a.apply_swap_layer(qa, qb)
+            for i in range(len(qa)):
+                ref_m4(b, matrix_2q(Op.SWAP), qa[i], qb[i])
+            check(a, b, "swap_layer fixed " + String(li) + " n=" + String(n))
+        for trial in range(40):
             var perm = List[Int]()
             for q in range(n):
                 perm.append(q)
@@ -186,14 +207,24 @@ def main() raises:
             for i in range(k):
                 ref_m4(b, matrix_2q(Op.SWAP), qa[i], qb[i])
             check(a, b, "swap_layer trial " + String(trial) + " n=" + String(n))
-    # large state: parallel paths of the swap layer (low and high bits)
+    # large state: parallel paths of the swap layer (lane pass, run pass with
+    # short / long runs, work items cut out of runs longer than 2^12)
     var big = random_state(20, rng)
-    var qa: List[Int] = [0, 3, 17]
-    var qb: List[Int] = [19, 12, 5]
-    var a = big.copy()
-    var b = big.copy()
-    a.apply_swap_layer(qa, qb)
-    for i in range(3):
-        b.apply_swap(qa[i], qb[i])
-    check(a, b, "swap_layer n=20")
+    var la: List[Int] = [0, 3, 17, 0, 1, 6, 0, 1, 2, 10, 18, 3, 14]
+    var lb: List[Int] = [19, 12, 5, 2, 9, 18, 19, 4, 13, 11, 19, 7, 15]
+    var lk: List[Int] = [3, 3, 4, 1, 1, 1]
+    var o2 = 0
+    for li in range(len(lk)):
+        var qa = List[Int]()
+        var qb = List[Int]()
+        for i in range(lk[li]):
+            qa.append(la[o2 + i])
+            qb.append(lb[o2 + i])
+        o2 += lk[li]
+        var a = big.copy()
+        var b = big.copy()
+        a.apply_swap_layer(qa, qb)
+        for i in range(len(qa)):
+            b.apply_swap(qa[i], qb[i])
+        check(a, b, "swap_layer n=20 layer " + String(li))
     print("test_sim_kernels OK")

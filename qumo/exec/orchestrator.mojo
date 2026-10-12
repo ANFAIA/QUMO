@@ -28,7 +28,7 @@ from max.algorithm import parallelize
 from qumo.ir.circuit import Circuit
 from qumo.ir.pauli import PauliSum
 from qumo.sim.runner import sample, expectation, SampleResult
-from qumo.exec.dispatch import sample_auto
+from qumo.exec.dispatch import sample_auto, frame_eligible_gpu, sample_frame_gpu
 from qumo.gpu.device import gpu_available
 from qumo.gpu.statevector_gpu import sample_gpu, evolve_gpu
 
@@ -141,8 +141,8 @@ def _run_job_cpu(job: Job, mut r: JobResult) raises:
 
 def _run_job_gpu(job: Job, mut r: JobResult) raises:
     """A job HEFT placed on a GPU device: GPU state vector when compiled and
-    available (Clifford sample jobs keep the faster stabilizer methods),
-    otherwise the CPU, with the reason appended to `backend`."""
+    available, GPU Pauli frames for Clifford sample jobs without feed-forward
+    (noisy or not), otherwise the CPU, with the reason appended to `backend`."""
     var reason: String
     comptime if is_defined["QUMO_GPU"]():
         var ok: Bool
@@ -157,10 +157,14 @@ def _run_job_gpu(job: Job, mut r: JobResult) raises:
             r.expectation = sv.expectation(job.observable)
             r.backend = sv.method_name()
             return
+        elif len(job.params) == 0 and frame_eligible_gpu(job.circuit):
+            r.samples = sample_frame_gpu(job.circuit, job.shots, job.seed)
+            r.backend = r.samples.method
+            return
         elif job.circuit.is_dynamic() or job.circuit.has_noise():
-            reason = "dynamic or noisy circuit (GPU sampler is static-only)"
+            reason = "dynamic or noisy non-Clifford circuit (GPU state-vector sampler is static-only)"
         elif job.circuit.num_params() == 0 and job.circuit.is_clifford():
-            reason = "Clifford circuit (stabilizer methods are faster)"
+            reason = "Clifford circuit with feed-forward (stabilizer tableau)"
         else:
             r.samples = sample_gpu(job.circuit, job.shots, job.seed, job.params)
             r.backend = r.samples.method

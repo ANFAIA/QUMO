@@ -20,7 +20,8 @@ Decoders
     (Huang-Newman-Brown) cluster growth on integer edge lengths and
     peeling on a spanning forest of each cluster. Fast, slightly worse
     threshold than MWPM.
-  * `MwpmDecoder`       - exact minimum-weight perfect matching. Shortest
+  * `MwpmDecoder`       - exact minimum-weight perfect matching ("dense"
+    MWPM; registered as 'mwpm_dense' in qumo.qec.experiments). Shortest
     paths (+ observable parity) come from an all-pairs table precomputed once
     per graph (<= 3000 nodes, shared by worker threads) or from per-defect
     Dijkstra on bigger graphs. Defects split into independent components
@@ -30,8 +31,12 @@ Decoders
     reduced complete graph w'(i, j) = min(d_ij, b_i + b_j) plus one boundary
     vertex when the count is odd (equivalent to per-defect boundary copies).
     Exact for any defect count; per-shot cost grows as O(k^3) in the largest
-    component, so it is ideal for d <= 7 at p <= 0.5% (PyMatching's sparse
-    blossom is the scalable version; use UF beyond that).
+    component, so it is meant for small codes (d <= 5) and as an independent
+    reference implementation. The scalable exact
+    matcher is `qumo.qec.sparse_blossom.SparseBlossomDecoder` (PyMatching 2's
+    sparse blossom; the default 'mwpm' decoder of the experiment harness),
+    which reuses `MatchingGraph` and `min_weight_boundary_matching` (as a
+    test oracle) from this module.
   * `LookupTableDecoder` - most-likely observable flip per syndrome from all
     combinations of <= `max_weight` DEM errors; tiny codes, <= 64 detectors.
 
@@ -1301,7 +1306,7 @@ struct MwpmDecoder(Decoder):
         return MwpmDecoder(MatchingGraph(dem))
 
     def name(self) -> String:
-        return "mwpm"
+        return "mwpm_dense"
 
     def _dijkstra(mut self, src: Int, k: Int, bound: Float64, mut dout: List[Float64], mut oout: List[UInt64], row: Int):
         """Shortest paths from `src`; fills row `row` of the k x (k+1) tables for

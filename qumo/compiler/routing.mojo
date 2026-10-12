@@ -39,7 +39,11 @@ from std.collections import Dict
 from qumo.ir.gates import Op, op_arity, op_is_unitary, op_is_noise
 from qumo.ir.circuit import Circuit, Instruction
 from qumo.compiler.target import Target
-from qumo.compiler.common import shell_like, is_all_wire_op
+from qumo.compiler.common import (
+    shell_like, is_all_wire_op, is_bound, wire_axis, AX_Z, AX_ANY, AX_OTHER,
+)
+from qumo.ir.gates import M4
+from qumo.compiler.kak import mm4, gate_m4
 from qumo.sim.rng import Rng
 from max.algorithm import parallelize
 
@@ -60,8 +64,10 @@ struct RouteOptions(Copyable, Writable):
     var absorb: Float64  # score factor for swaps KAK can absorb (< 1 favours them)
     var absorb_alt: Float64  # factor used by every other swap trial (portfolio)
     var mirror: Bool  # mirror-gate routing: apply free / cheap SWAPs absorbed by the gate just executed on that pair
-    var mirror_auto: Bool  # portfolio: trials alternate mirror on / off, the cheapest estimate wins
+    var mirror_auto: Bool  # resolve `mirror` per circuit: free mirrors only when most 2q runs are >= 3-CX blocks (QV-like)
     var mirror_gain: Float64  # heuristic gain (front-distance units) a 1-CX mirror must reach (free mirrors need > 0)
+    var commute: Bool  # commutation-aware routing DAG (commuting units may be routed in any order)
+    var commute_auto: Bool  # decide per circuit (see `resolve_commute`)
 
     def __init__(out self):
         self.layout = "auto"
@@ -81,6 +87,8 @@ struct RouteOptions(Copyable, Writable):
         self.mirror = True
         self.mirror_auto = True
         self.mirror_gain = 1.0
+        self.commute = True
+        self.commute_auto = True
 
     def write_to(self, mut w: Some[Writer]):
         w.write("layout=", self.layout, ",seed=", self.seed, ",trials=", self.trials,
@@ -97,9 +105,262 @@ def kind_cost_2q(k: Int) -> Int:
 
 
 # ----------------------------------------------------------------------------
-# DAG over the flat op list (CSR successors)
+# Routing units: same-pair runs as atomic nodes, per-wire commutation axes
+# ----------------------------------------------------------------------------
+comptime _GROUP_CAP = 16  # max members of one commuting group (bounds DAG edges)
+
+
+def _combine_axis(cur: Int, ax: Int) -> Int:
+    """Fold one more gate's wire axis into a group axis (AX_ANY = no constraint)."""
+    if ax == AX_ANY:
+        return cur
+    if cur == AX_ANY:
+        return ax
+    if cur != ax:
+        return AX_OTHER
+    return cur
+
+
+def _unit_is_diagonal(ops: List[Instruction], idx: List[Int], lo: Int, hi: Int, a: Int, b: Int) -> Bool:
+    """True when the ops idx[lo:hi] (all on wires a, b, bound) multiply to a
+    diagonal 4x4 unitary (e.g. cx . rz . cx = rzz): such a run commutes with
+    every Z-type gate on both wires."""
+    var m = M4.identity()
+    var qlo = min(a, b)
+    var qhi = max(a, b)
+    for e in range(lo, hi):
+        var g = ops[idx[e]]
+        if not is_bound(g):
+            return False
+        m = mm4(gate_m4(g, qlo, qhi), m)
+    var off = 0.0
+    comptime for r in range(4):
+        comptime for c in range(4):
+            comptime if r != c:
+                off += abs(m.re[r * 4 + c]) + abs(m.im[r * 4 + c])
+    return off < 1e-10
+
+
+struct RUnits(Movable):
+    """Program-ordered routing units over a flat op list.
+
+    A unit is either a maximal same-pair run (2q gates on one pair, the 1q
+    gates between them on those wires included; executed atomically by the
+    router) or a single other op (1q gate outside runs, measurement, reset,
+    barrier, conditioned gate). Each unit carries the Pauli axis it commutes
+    with on each wire (`AX_Z` for diagonal runs such as cp / rzz / cx.rz.cx,
+    `AX_Z`/`AX_X` for cx control / target, ...; `AX_OTHER` when nothing is
+    known), which the commutation-aware DAG uses: consecutive units with the
+    same axis on a wire need not keep their program order on that wire
+    (Qiskit `CommutationAnalysis` applied to routing; TKET / 2QAN-style
+    freedom for QAOA and Trotter circuits whose diagonal terms commute).
+    """
+
+    var n: Int
+    var start: List[Int]  # CSR into idx (op indices in program order)
+    var idx: List[Int]
+    var is_run: List[Bool]
+    var a: List[Int]  # run: first member's q0 / q1; other: -1
+    var b: List[Int]
+    var ax_a: List[Int]
+    var ax_b: List[Int]
+    var cost: List[Int]  # run: summed CX cost (>= 100 when it holds a SWAP)
+
+    def __init__(out self, ops: List[Instruction], nq: Int, commute: Bool):
+        var n_ops = len(ops)
+        # pass 1: runs (same-pair 2q gates, consecutive on both wires; any
+        # non-unitary / conditioned / 3q op or barrier on a wire breaks them)
+        var last2 = List[Int](length=nq, fill=-1)
+        var run_of = List[Int](length=n_ops, fill=-1)  # run id of a member / an inside 1q op
+        var cand = List[Int](length=n_ops, fill=-1)  # 1q op: run open on its wire at that time
+        var r_first = List[Int]()
+        var r_last = List[Int]()
+        var r_a = List[Int]()
+        var r_b = List[Int]()
+        for i in range(n_ops):
+            var g = ops[i]
+            var k = g.kind
+            if is_all_wire_op(g):
+                for w in range(nq):
+                    last2[w] = -1
+                continue
+            var ar = op_arity(k)
+            if not op_is_unitary(k) or g.cond >= 0 or ar >= 3:
+                for s in range(ar):
+                    var w = g.qubit(s)
+                    if w >= 0 and w < nq:
+                        last2[w] = -1
+                continue
+            if ar == 1:
+                cand[i] = last2[g.q0]
+                continue
+            if ar != 2:
+                continue
+            var r = last2[g.q0]
+            if r >= 0 and r == last2[g.q1]:
+                run_of[i] = r
+                r_last[r] = i
+                continue
+            r = len(r_first)
+            r_first.append(i)
+            r_last.append(i)
+            r_a.append(g.q0)
+            r_b.append(g.q1)
+            run_of[i] = r
+            last2[g.q0] = r
+            last2[g.q1] = r
+        var nr = len(r_first)
+        for i in range(n_ops):
+            var r = cand[i]
+            if r >= 0 and i < r_last[r]:
+                run_of[i] = r  # 1q op inside the run's span: part of the unit
+        # pass 2: per-run op lists (CSR, program order)
+        var r_start = List[Int](length=nr + 1, fill=0)
+        for i in range(n_ops):
+            if run_of[i] >= 0:
+                r_start[run_of[i] + 1] += 1
+        for r in range(nr):
+            r_start[r + 1] += r_start[r]
+        var r_idx = List[Int](length=r_start[nr], fill=0)
+        var fillp = r_start.copy()
+        for i in range(n_ops):
+            var r = run_of[i]
+            if r >= 0:
+                r_idx[fillp[r]] = i
+                fillp[r] += 1
+        # pass 3: units in order of their first op
+        self.n = 0
+        self.start = List[Int]()
+        self.start.append(0)
+        self.idx = List[Int](capacity=n_ops)
+        self.is_run = List[Bool]()
+        self.a = List[Int]()
+        self.b = List[Int]()
+        self.ax_a = List[Int]()
+        self.ax_b = List[Int]()
+        self.cost = List[Int]()
+        for i in range(n_ops):
+            var r = run_of[i]
+            if r >= 0:
+                if i != r_first[r]:
+                    continue
+                var ra = r_a[r]
+                var rb = r_b[r]
+                var xa = AX_ANY
+                var xb = AX_ANY
+                var cst = 0
+                for e in range(r_start[r], r_start[r + 1]):
+                    var g = ops[r_idx[e]]
+                    self.idx.append(r_idx[e])
+                    var ar = op_arity(g.kind)
+                    if ar == 2:
+                        cst += kind_cost_2q(g.kind)
+                        for s in range(2):
+                            var ax = wire_axis(g.kind, s)
+                            if g.qubit(s) == ra:
+                                xa = _combine_axis(xa, ax)
+                            else:
+                                xb = _combine_axis(xb, ax)
+                    else:
+                        var ax = wire_axis(g.kind, 0)
+                        if g.q0 == ra:
+                            xa = _combine_axis(xa, ax)
+                        else:
+                            xb = _combine_axis(xb, ax)
+                if not commute:
+                    xa = AX_OTHER
+                    xb = AX_OTHER
+                elif (xa == AX_OTHER or xb == AX_OTHER) and cst < 100 and r_start[r + 1] - r_start[r] <= 24:
+                    if _unit_is_diagonal(ops, r_idx, r_start[r], r_start[r + 1], ra, rb):
+                        xa = AX_Z
+                        xb = AX_Z
+                if xa == AX_ANY:
+                    xa = AX_OTHER
+                if xb == AX_ANY:
+                    xb = AX_OTHER
+                self.is_run.append(True)
+                self.a.append(ra)
+                self.b.append(rb)
+                self.ax_a.append(xa)
+                self.ax_b.append(xb)
+                self.cost.append(cst)
+            else:
+                var g = ops[i]
+                self.idx.append(i)
+                var xa = AX_OTHER
+                if commute and op_is_unitary(g.kind) and g.cond < 0 and op_arity(g.kind) == 1:
+                    xa = wire_axis(g.kind, 0)
+                self.is_run.append(False)
+                self.a.append(-1)
+                self.b.append(-1)
+                self.ax_a.append(xa)
+                self.ax_b.append(AX_OTHER)
+                self.cost.append(0)
+            self.start.append(len(self.idx))
+            self.n += 1
+
+
+struct _GroupDag(Movable):
+    """Edge builder for the commutation-aware DAG (per-wire axis groups).
+
+    On each wire the node sequence is cut into maximal groups of equal axis
+    (AX_OTHER nodes are singleton groups); a node depends on every member of
+    the previous group on each of its wires. Groups are contiguous in the
+    per-wire sequence, so two boundaries per wire describe them."""
+
+    var seq: List[List[Int]]
+    var cur_lo: List[Int]
+    var prev_lo: List[Int]
+    var cur_ax: List[Int]
+    var src: List[Int]
+    var dst: List[Int]
+    var joins: Int  # nodes that joined an existing group (commutation used)
+
+    def __init__(out self, nq: Int, cap: Int):
+        self.seq = List[List[Int]]()
+        for _ in range(nq):
+            self.seq.append(List[Int]())
+        self.cur_lo = List[Int](length=nq, fill=0)
+        self.prev_lo = List[Int](length=nq, fill=0)
+        self.cur_ax = List[Int](length=nq, fill=AX_OTHER)
+        self.src = List[Int](capacity=cap)
+        self.dst = List[Int](capacity=cap)
+        self.joins = 0
+
+    def add(mut self, v: Int, w: Int, ax: Int):
+        if ax == AX_ANY:
+            return  # identity: no constraint
+        var ln = len(self.seq[w])
+        if ax != AX_OTHER and ax == self.cur_ax[w] and ln - self.cur_lo[w] < _GROUP_CAP:
+            self.joins += 1
+            for e in range(self.prev_lo[w], self.cur_lo[w]):
+                self.src.append(self.seq[w][e])
+                self.dst.append(v)
+        else:
+            for e in range(self.cur_lo[w], ln):
+                self.src.append(self.seq[w][e])
+                self.dst.append(v)
+            self.prev_lo[w] = self.cur_lo[w]
+            self.cur_lo[w] = ln
+            self.cur_ax[w] = ax
+        self.seq[w].append(v)
+
+
+# ----------------------------------------------------------------------------
+# DAG over routing units (CSR successors)
 # ----------------------------------------------------------------------------
 struct RDag(Movable):
+    """Routing DAG over `RUnits` (CSR successors).
+
+    Full mode (final, emitting pass): one node per unit. Skeleton mode
+    (layout / swap trials): one node per 2q unit plus, on a wire, a marker
+    node only where the 1q gates between two 2q units change which units may
+    commute (`_marker_needed`), so both modes impose the same order on the 2q
+    units and a seed routes identically in both. Edges come from per-wire
+    commutation groups (`_GroupDag`); measurements, resets, conditioned gates
+    and annotations also keep their program order (classical chain), and
+    barriers synchronise every wire (full mode)."""
+
     var n: Int
     var succ_start: List[Int]
     var succ: List[Int]
@@ -107,84 +368,143 @@ struct RDag(Movable):
     var is2q: List[Bool]
     var a: List[Int]
     var b: List[Int]
-    var op_index: List[Int]
-    var look: List[Bool]  # 2q gate that counts for the lookahead (not a same-pair repeat)
-    var mc: List[Int]  # extra 2q cost of mirroring the pair right after this gate (0: >= 3-CX block, else 1)
+    var look: List[Bool]  # 2q node that counts for the lookahead
+    var mc: List[Int]  # extra 2q cost of mirroring the pair right after this unit (0: >= 3-CX block, 1, 9: never)
+    var emit_start: List[Int]  # full mode: CSR of op indices emitted by each node
+    var emit_ops: List[Int]
+    var n2q: Int
+    var commuting: Float64  # (wire, node) group joins per 2q node: how much order freedom commutation adds
 
-    def __init__(out self, ops: List[Instruction], nq: Int, reverse: Bool,
-                 run_cost: List[Int] = List[Int]()):
-        """`run_cost[i]` (optional, per op) = 2q cost of the same-pair run op i
-        stands for (routing skeleton); otherwise runs are accumulated here."""
-        var n = len(ops)
+    def __init__(out self, ops: List[Instruction], u: RUnits, nq: Int, reverse: Bool, skeleton: Bool):
+        # ---- node list in program order -------------------------------
+        var nd_unit = List[Int]()  # unit id, -1 for a marker
+        var nd_w0 = List[Int]()  # marker wire
+        var nd_ax0 = List[Int]()  # marker axis
+        var pend = List[Int](length=nq, fill=AX_ANY)  # skeleton: combined axis of 1q ops since the last 2q unit
+        var gax = List[Int](length=nq, fill=AX_OTHER)  # skeleton: current group axis per wire
+        for t in range(u.n):
+            var first = ops[u.idx[u.start[t]]]
+            var two = u.is_run[t] or (op_is_unitary(first.kind) and op_arity(first.kind) == 2)
+            if not skeleton:
+                nd_unit.append(t)
+                nd_w0.append(-1)
+                nd_ax0.append(AX_OTHER)
+                continue
+            if not two:
+                # fold into the pending segment of its wires
+                if is_all_wire_op(first):
+                    for w in range(nq):
+                        pend[w] = _combine_axis(pend[w], AX_OTHER)
+                else:
+                    var ar = op_arity(first.kind)
+                    for s in range(ar):
+                        var w = first.qubit(s)
+                        if w >= 0 and w < nq:
+                            pend[w] = _combine_axis(pend[w], u.ax_a[t] if ar == 1 else AX_OTHER)
+                continue
+            var wa = u.a[t] if u.is_run[t] else first.q0
+            var wb = u.b[t] if u.is_run[t] else first.q1
+            var xa = u.ax_a[t] if u.is_run[t] else AX_OTHER
+            var xb = u.ax_b[t] if u.is_run[t] else AX_OTHER
+            for side in range(2):
+                var w = wa if side == 0 else wb
+                var an = xa if side == 0 else xb
+                if pend[w] != AX_ANY:
+                    var am = pend[w]
+                    var ap = gax[w]
+                    if am != ap and an == ap and ap != AX_OTHER:
+                        nd_unit.append(-1)
+                        nd_w0.append(w)
+                        nd_ax0.append(am)
+                        gax[w] = am
+                    pend[w] = AX_ANY
+                gax[w] = an
+            nd_unit.append(t)
+            nd_w0.append(-1)
+            nd_ax0.append(AX_OTHER)
+        var n = len(nd_unit)
         self.n = n
         self.npred = List[Int](length=n, fill=0)
         self.is2q = List[Bool](length=n, fill=False)
         self.a = List[Int](length=n, fill=-1)
         self.b = List[Int](length=n, fill=-1)
-        self.op_index = List[Int](length=n, fill=0)
         self.look = List[Bool](length=n, fill=False)
-        self.mc = List[Int](length=n, fill=1)
-        var cum = List[Int](length=n, fill=0)
-        var have_rc = len(run_cost) == n
-        var last2 = List[Int](length=nq, fill=-1)
-        var src = List[Int](capacity=2 * n)
-        var dst = List[Int](capacity=2 * n)
-        var last = List[Int](length=nq, fill=-1)
+        self.mc = List[Int](length=n, fill=9)
+        self.emit_start = List[Int](length=n + 1, fill=0)
+        self.emit_ops = List[Int]()
+        var gd = _GroupDag(nq, 4 * n)
         var last_cl = -1
         for v in range(n):
-            var oi = n - 1 - v if reverse else v
-            self.op_index[v] = oi
-            var g = ops[oi]
-            var k = g.kind
+            var pn = n - 1 - v if reverse else v
+            var t = nd_unit[pn]
+            if t < 0:
+                gd.add(v, nd_w0[pn], nd_ax0[pn])
+                self.emit_start[v + 1] = len(self.emit_ops)
+                continue
+            if not skeleton:
+                if reverse:
+                    var e = u.start[t + 1] - 1
+                    while e >= u.start[t]:
+                        self.emit_ops.append(u.idx[e])
+                        e -= 1
+                else:
+                    for e in range(u.start[t], u.start[t + 1]):
+                        self.emit_ops.append(u.idx[e])
+            self.emit_start[v + 1] = len(self.emit_ops)
+            var first = ops[u.idx[u.start[t]]]
+            if u.is_run[t]:
+                self.is2q[v] = True
+                self.look[v] = True
+                self.a[v] = u.a[t]
+                self.b[v] = u.b[t]
+                var cst = u.cost[t]
+                self.mc[v] = 9 if cst >= 100 else (0 if cst >= 3 else 1)
+                gd.add(v, u.a[t], u.ax_a[t])
+                gd.add(v, u.b[t], u.ax_b[t])
+                continue
+            var k = first.kind
             var chain = False
-            if k == Op.BARRIER or k == Op.TICK:
+            if is_all_wire_op(first):
                 for w in range(nq):
-                    if last[w] >= 0:
-                        src.append(last[w])
-                        dst.append(v)
-                    last[w] = v
+                    gd.add(v, w, AX_OTHER)
                 chain = True
             else:
                 var ar = op_arity(k)
                 for s in range(ar):
-                    var w = g.qubit(s)
-                    if last[w] >= 0:
-                        src.append(last[w])
-                        dst.append(v)
-                    last[w] = v
+                    var w = first.qubit(s)
+                    if w >= 0 and w < nq:
+                        gd.add(v, w, u.ax_a[t] if ar == 1 else AX_OTHER)
                 if not op_is_unitary(k) and not op_is_noise(k):
                     chain = True
-                if g.cond >= 0:
+                if first.cond >= 0:
                     chain = True
                 if op_is_unitary(k) and ar == 2:
-                    # conditioned gates need adjacency too (routing SWAPs stay unconditioned)
+                    # conditioned 2q gates need adjacency too (routing SWAPs stay unconditioned)
                     self.is2q[v] = True
-                    self.a[v] = g.q0
-                    self.b[v] = g.q1
-                    var pa = last2[g.q0]
-                    var rep = pa >= 0 and pa == last2[g.q1]
-                    self.look[v] = not rep
-                    var tot = run_cost[oi] if have_rc else kind_cost_2q(k) + (cum[pa] if rep else 0)
-                    cum[v] = tot
-                    self.mc[v] = 9 if tot >= 100 else (0 if tot >= 3 else 1)
-                    last2[g.q0] = v
-                    last2[g.q1] = v
-            if chain:
+                    self.look[v] = True
+                    self.a[v] = first.q0
+                    self.b[v] = first.q1
+            if chain and not skeleton:
                 if last_cl >= 0:
-                    src.append(last_cl)
-                    dst.append(v)
+                    gd.src.append(last_cl)
+                    gd.dst.append(v)
                 last_cl = v
+        self.n2q = 0
+        for v in range(n):
+            if self.is2q[v]:
+                self.n2q += 1
+        self.commuting = Float64(gd.joins) / Float64(max(self.n2q, 1))
         self.succ_start = List[Int](length=n + 1, fill=0)
-        for e in range(len(src)):
-            self.succ_start[src[e] + 1] += 1
-            self.npred[dst[e]] += 1
+        for e in range(len(gd.src)):
+            self.succ_start[gd.src[e] + 1] += 1
+            self.npred[gd.dst[e]] += 1
         for v in range(n):
             self.succ_start[v + 1] += self.succ_start[v]
-        self.succ = List[Int](length=len(src), fill=0)
+        self.succ = List[Int](length=len(gd.src), fill=0)
         var fillp = self.succ_start.copy()
-        for e in range(len(src)):
-            self.succ[fillp[src[e]]] = dst[e]
-            fillp[src[e]] += 1
+        for e in range(len(gd.src)):
+            self.succ[fillp[gd.src[e]]] = gd.dst[e]
+            fillp[gd.src[e]] += 1
 
 
 # ----------------------------------------------------------------------------
@@ -202,61 +522,6 @@ def _emit_mapped(g: Instruction, l2p: List[Int], mut out: List[Instruction]):
     out.append(x)
 
 
-@always_inline
-def _swap_delta(p: Int, x: Int, l2p: List[Int], p2l: List[Int], front_of_log: List[Int],
-                dag: RDag, ext_a: List[Int], ext_b: List[Int], e_first: List[Int],
-                e_next: List[Int], dist: List[Int], nphys: Int, mut df: Int, mut de: Int):
-    """Change of the front (df) and lookahead (de) distance sums if physical
-    qubits p and x are swapped (incremental: only gates on their wires)."""
-    var dp = dist.unsafe_ptr()
-    var l2pp = l2p.unsafe_ptr()
-    var p2lp = p2l.unsafe_ptr()
-    var folp = front_of_log.unsafe_ptr()
-    var dap = dag.a.unsafe_ptr()
-    var dbp = dag.b.unsafe_ptr()
-    var eap = ext_a.unsafe_ptr()
-    var ebp = ext_b.unsafe_ptr()
-    var efp = e_first.unsafe_ptr()
-    var enp = e_next.unsafe_ptr()
-    var la = p2lp[unsafe_offset=p]
-    var lb = p2lp[unsafe_offset=x]
-    df = 0
-    de = 0
-    var g1 = folp[unsafe_offset=la]
-    var g2 = folp[unsafe_offset=lb]
-    if g1 >= 0:
-        var qa = dap[unsafe_offset=g1]
-        var qb = dbp[unsafe_offset=g1]
-        var oa = l2pp[unsafe_offset=qa]
-        var ob = l2pp[unsafe_offset=qb]
-        var na = x if qa == la else (p if qa == lb else oa)
-        var nb = x if qb == la else (p if qb == lb else ob)
-        df += dp[unsafe_offset=na * nphys + nb] - dp[unsafe_offset=oa * nphys + ob]
-    if g2 >= 0 and g2 != g1:
-        var qa = dap[unsafe_offset=g2]
-        var qb = dbp[unsafe_offset=g2]
-        var oa = l2pp[unsafe_offset=qa]
-        var ob = l2pp[unsafe_offset=qb]
-        var na = x if qa == la else (p if qa == lb else oa)
-        var nb = x if qb == la else (p if qb == lb else ob)
-        df += dp[unsafe_offset=na * nphys + nb] - dp[unsafe_offset=oa * nphys + ob]
-    for side in range(2):
-        var lq = la if side == 0 else lb
-        var slot = efp[unsafe_offset=lq]
-        while slot >= 0:
-            var i = slot >> 1
-            slot = enp[unsafe_offset=slot]
-            var qa = eap[unsafe_offset=i]
-            var qb = ebp[unsafe_offset=i]
-            if side == 1 and (qa == la or qb == la):
-                continue
-            var oa = l2pp[unsafe_offset=qa]
-            var ob = l2pp[unsafe_offset=qb]
-            var na = x if qa == la else (p if qa == lb else oa)
-            var nb = x if qb == la else (p if qb == lb else ob)
-            de += dp[unsafe_offset=na * nphys + nb] - dp[unsafe_offset=oa * nphys + ob]
-
-
 def sabre_pass(ops: List[Instruction], dag: RDag, target: Target, mut l2p: List[Int],
                mut p2l: List[Int], seed: UInt64, emit: Bool, mut out: List[Instruction],
                opts: RouteOptions,
@@ -264,6 +529,11 @@ def sabre_pass(ops: List[Instruction], dag: RDag, target: Target, mut l2p: List[
     """Route one pass; updates l2p/p2l to the final layout; returns #swaps
     emitted, mirrors included (-1 when two interacting qubits sit in
     disconnected components).
+
+    The front layer may hold several 2q units on one qubit (commuting units
+    of the commutation-aware DAG), kept in per-qubit linked lists; a
+    candidate swap is scored over every front / lookahead unit on its two
+    qubits.
 
     `cost` estimates the routing overhead in CX units after KAK: 3 per plain
     SWAP, and for a SWAP on a pair whose last event was a gate on that same
@@ -275,7 +545,12 @@ def sabre_pass(ops: List[Instruction], dag: RDag, target: Target, mut l2p: List[
     chosen, every SWAP on the pair of a gate that has just executed is
     scored with the same heuristic; when it lowers the cost (free mirrors)
     or lowers the front distance by >= `mirror_gain` (1-CX mirrors) it is
-    applied without counting as a routing step. `mirrors` counts them."""
+    applied without counting as a routing step. `mirrors` counts them.
+
+    Determinism across the skeleton and the full DAG: the extended set is
+    built level by level and cut in DAG order, and ties are broken over
+    candidates sorted by physical qubits, so a seed routes identically in
+    the trials and in the final pass."""
     var absorbed = 0
     var acc = 0
     mirrors = 0
@@ -291,7 +566,20 @@ def sabre_pass(ops: List[Instruction], dag: RDag, target: Target, mut l2p: List[
         v -= 1
     var front = List[Int]()
     var front_pos = List[Int](length=n, fill=-1)
-    var front_of_log = List[Int](length=nphys, fill=-1)
+    # per logical qubit: linked list of its front units (slot e = 2u + side)
+    var fhead = List[Int](length=nphys, fill=-1)
+    var fnx = List[Int](length=2 * n + 2, fill=-1)
+    var fpv = List[Int](length=2 * n + 2, fill=-1)
+    var pstamp = List[Int](length=nphys, fill=-1)
+    var fcnt = List[Int](length=nphys, fill=0)  # front units per logical qubit
+    var nmulti = 0  # logical qubits with >= 2 front units (commuting units)
+    var fmin = List[Int](length=nphys, fill=0)
+    var fmin2 = List[Int](length=nphys, fill=0)
+    var fcmin = List[Int](length=nphys, fill=0)
+    var qs = List[Int](length=nphys, fill=-1)
+    var cmin = List[Int](length=nphys, fill=0)
+    var cat = List[Int](length=nphys, fill=0)
+    var qstamp = 0
     var decay = List[Float64](length=nphys, fill=1.0)
     var decayed = List[Int]()
     # last 2q event per physical qubit (id; swaps get negative ids): a swap on a
@@ -305,6 +593,7 @@ def sabre_pass(ops: List[Instruction], dag: RDag, target: Target, mut l2p: List[
     var bfs = List[Int]()
     var now = List[Int]()
     var dec = List[Int]()
+    var rel = List[Int]()
     var e_first = List[Int](length=nphys, fill=-1)
     var e_next = List[Int](length=2 * max(opts.lookahead, n) + 2, fill=-1)
     var rng = Rng(seed)
@@ -332,13 +621,25 @@ def sabre_pass(ops: List[Instruction], dag: RDag, target: Target, mut l2p: List[
                     if target.distance(pa, pb) >= inf:
                         cost = -1
                         return -1
+                    # front_add(u)
                     front_pos[u] = len(front)
                     front.append(u)
-                    front_of_log[dag.a[u]] = u
-                    front_of_log[dag.b[u]] = u
+                    for side in range(2):
+                        var lq = dag.a[u] if side == 0 else dag.b[u]
+                        var e = 2 * u + side
+                        var h = fhead[lq]
+                        fnx[e] = h
+                        fpv[e] = -1
+                        if h >= 0:
+                            fpv[h] = e
+                        fhead[lq] = e
+                        fcnt[lq] += 1
+                        if fcnt[lq] == 2:
+                            nmulti += 1
                     continue
             if emit:
-                _emit_mapped(ops[dag.op_index[u]], l2p, out)
+                for e in range(dag.emit_start[u], dag.emit_start[u + 1]):
+                    _emit_mapped(ops[dag.emit_ops[e]], l2p, out)
             if dag.is2q[u]:
                 ev += 1
                 var qa = l2p[dag.a[u]]
@@ -408,7 +709,9 @@ def sabre_pass(ops: List[Instruction], dag: RDag, target: Target, mut l2p: List[
                 lvl_hi = len(bfs)
             for s in dec:
                 remaining[s] += 1
-            if not layered and len(ext_v) > opts.lookahead:
+            # (layer heuristic with commuting fronts: the next layer can hold
+            # hundreds of units; it is cut the same way)
+            if (not layered or nmulti > 0) and len(ext_v) > opts.lookahead:
                 # keep the first `lookahead` in DAG (program) order
                 for i in range(1, len(ext_v)):
                     var x = ext_v[i]
@@ -434,7 +737,7 @@ def sabre_pass(ops: List[Instruction], dag: RDag, target: Target, mut l2p: List[
             var best_k = 1 << 60
             for f in front:
                 var d = target.distance(l2p[dag.a[f]], l2p[dag.b[f]])
-                var kf = min(l2p[dag.a[f]], l2p[dag.b[f]])
+                var kf = min(l2p[dag.a[f]], l2p[dag.b[f]]) * nphys + max(l2p[dag.a[f]], l2p[dag.b[f]])
                 if d < best_d or (d == best_d and kf < best_k):
                     best_d = d
                     best_u = f
@@ -467,31 +770,19 @@ def sabre_pass(ops: List[Instruction], dag: RDag, target: Target, mut l2p: List[
                 last2q[nxt] = -ev
                 swaps += 1
                 pa = nxt
-            # now executable
-            var lst = front.pop()
-            if lst != best_u:
-                var pos = front_pos[best_u]
-                front[pos] = lst
-                front_pos[lst] = pos
-            front_pos[best_u] = -1
-            front_of_log[dag.a[best_u]] = -1
-            front_of_log[dag.b[best_u]] = -1
-            stack.append(best_u)
-            # any other front gate made adjacent by the walk is released too
-            var fi = 0
-            while fi < len(front):
-                var u = front[fi]
-                if target.are_connected(l2p[dag.a[u]], l2p[dag.b[u]]):
-                    var lst2 = front.pop()
-                    if lst2 != u:
-                        front[fi] = lst2
-                        front_pos[lst2] = fi
-                    front_pos[u] = -1
-                    front_of_log[dag.a[u]] = -1
-                    front_of_log[dag.b[u]] = -1
-                    stack.append(u)
-                    continue
-                fi += 1
+            # release every front gate that is now executable (best_u included)
+            rel.clear()
+            for f in front:
+                if target.are_connected(l2p[dag.a[f]], l2p[dag.b[f]]):
+                    rel.append(f)
+            for u in rel:
+                _front_remove(u, dag, front, front_pos, fhead, fnx, fpv)
+                for side in range(2):
+                    var lq = dag.a[u] if side == 0 else dag.b[u]
+                    fcnt[lq] -= 1
+                    if fcnt[lq] == 1:
+                        nmulti -= 1
+                stack.append(u)
             since_progress = 0
             continue
         # score candidate swaps (raw pointers: this is the hot loop)
@@ -502,13 +793,46 @@ def sabre_pass(ops: List[Instruction], dag: RDag, target: Target, mut l2p: List[
         var eap = ext_a.unsafe_ptr()
         var ebp = ext_b.unsafe_ptr()
         var p2lp = p2l.unsafe_ptr()
-        var folp = front_of_log.unsafe_ptr()
+        var fhp = fhead.unsafe_ptr()
         var adjp = target.adj.unsafe_ptr()
         var adjs = target.adj_start.unsafe_ptr()
         var l2qp = last2q.unsafe_ptr()
+        var multi = nmulti > 0
+        var fscale = 1.0
         var fsum = 0
-        for f in front:
-            fsum += dp[unsafe_offset=l2pp[unsafe_offset=dap[unsafe_offset=f]] * nphys + l2pp[unsafe_offset=dbp[unsafe_offset=f]]]
+        var nfq = 0  # distinct front qubits (multi mode)
+        if multi:
+            # nearest-front-partner sum (see `_front_min_delta`)
+            fscale = 0.5
+            for f in front:
+                for side in range(2):
+                    var lq = dap[unsafe_offset=f] if side == 0 else dbp[unsafe_offset=f]
+                    fmin[lq] = 1 << 30
+                    fmin2[lq] = 1 << 30
+                    fcmin[lq] = 0
+            for f in front:
+                var d = dp[unsafe_offset=l2pp[unsafe_offset=dap[unsafe_offset=f]] * nphys + l2pp[unsafe_offset=dbp[unsafe_offset=f]]]
+                for side in range(2):
+                    var lq = dap[unsafe_offset=f] if side == 0 else dbp[unsafe_offset=f]
+                    if d < fmin[lq]:
+                        fmin2[lq] = fmin[lq]
+                        fmin[lq] = d
+                        fcmin[lq] = 1
+                    elif d == fmin[lq]:
+                        fcmin[lq] += 1
+                    elif d < fmin2[lq]:
+                        fmin2[lq] = d
+            qstamp += 1
+            for f in front:
+                for side in range(2):
+                    var lq = dap[unsafe_offset=f] if side == 0 else dbp[unsafe_offset=f]
+                    if qs[lq] != qstamp:
+                        qs[lq] = qstamp
+                        fsum += fmin[lq]
+                        nfq += 1
+        else:
+            for f in front:
+                fsum += dp[unsafe_offset=l2pp[unsafe_offset=dap[unsafe_offset=f]] * nphys + l2pp[unsafe_offset=dbp[unsafe_offset=f]]]
         var esum = 0
         for i in range(len(ext_a)):
             esum += dp[unsafe_offset=l2pp[unsafe_offset=eap[unsafe_offset=i]] * nphys + l2pp[unsafe_offset=ebp[unsafe_offset=i]]]
@@ -521,7 +845,9 @@ def sabre_pass(ops: List[Instruction], dag: RDag, target: Target, mut l2p: List[
             wf = 1.0  # Qiskit 2.x: constant-scaled basic + one lookahead layer (w / N)
             we = look_w
         else:
-            wf = 1.0 / nf
+            # average front distance: per unit, or per front qubit's nearest
+            # unit when qubits hold several commuting units
+            wf = 2.0 / Float64(nfq) if multi else 1.0 / nf
             we = opts.weight / ne if ne > 0 else 0.0
         var best_mirror_p = -1
         var best_mirror_x = -1
@@ -541,9 +867,12 @@ def sabre_pass(ops: List[Instruction], dag: RDag, target: Target, mut l2p: List[
                 keep += 1
                 var df = 0
                 var de = 0
-                _swap_delta(p, x, l2p, p2l, front_of_log, dag, ext_a, ext_b, e_first, e_next, target.dist, nphys, df, de)
+                _swap_delta(p, x, l2p, p2l, fhead, fnx, dag, ext_a, ext_b, e_first, e_next, target.dist, nphys, not multi, df, de)
+                if multi:
+                    qstamp += 1
+                    df = _front_min_delta(p, x, p2l[p], p2l[x], fhead, fnx, dag, l2p, target.dist, nphys, fmin, fcmin, fmin2, qs, cmin, cat, qstamp)
                 # gain in front-distance units
-                var gain = -(Float64(df) + we / wf * Float64(de))
+                var gain = -(fscale * Float64(df) + we / wf * Float64(de))
                 var mc = last_mc[p]
                 if (mc == 0 and gain > 1e-9) or (mc == 1 and gain >= opts.mirror_gain - 1e-9):
                     var val = 3.0 * gain - Float64(mc)
@@ -566,10 +895,13 @@ def sabre_pass(ops: List[Instruction], dag: RDag, target: Target, mut l2p: List[
                 for side in range(2):
                     var lq = dap[unsafe_offset=f] if side == 0 else dbp[unsafe_offset=f]
                     var p = l2pp[unsafe_offset=lq]
+                    if pstamp[p] == step:
+                        continue  # qubit already expanded (several front units on it)
+                    pstamp[p] = step
                     for k in range(adjs[unsafe_offset=p], adjs[unsafe_offset=p + 1]):
                         var x = adjp[unsafe_offset=k]
                         # a swap between two front qubits is generated from both ends: keep one
-                        if x < p and folp[unsafe_offset=p2lp[unsafe_offset=x]] >= 0:
+                        if x < p and fhp[unsafe_offset=p2lp[unsafe_offset=x]] >= 0:
                             continue
                         cand_p.append(p)
                         cand_x.append(x)
@@ -582,8 +914,11 @@ def sabre_pass(ops: List[Instruction], dag: RDag, target: Target, mut l2p: List[
                 var x = cxp[unsafe_offset=ci]
                 var df = 0
                 var de = 0
-                _swap_delta(p, x, l2p, p2l, front_of_log, dag, ext_a, ext_b, e_first, e_next, target.dist, nphys, df, de)
-                var h = (wf * Float64(fsum + df) + we * Float64(esum + de)) * max(decay[p], decay[x])
+                _swap_delta(p, x, l2p, p2l, fhead, fnx, dag, ext_a, ext_b, e_first, e_next, target.dist, nphys, not multi, df, de)
+                if multi:
+                    qstamp += 1
+                    df = _front_min_delta(p, x, p2l[p], p2l[x], fhead, fnx, dag, l2p, target.dist, nphys, fmin, fcmin, fmin2, qs, cmin, cat, qstamp)
+                var h = (wf * fscale * Float64(fsum + df) + we * Float64(esum + de)) * max(decay[p], decay[x])
                 var lp = l2qp[unsafe_offset=p]
                 if lp > 0 and lp == l2qp[unsafe_offset=x]:
                     h *= opts.absorb
@@ -609,10 +944,8 @@ def sabre_pass(ops: List[Instruction], dag: RDag, target: Target, mut l2p: List[
             sx = cand_x[pick]
         var l1 = p2l[sp]
         var l2 = p2l[sx]
-        if l1 >= 0:
-            l2p[l1] = sx
-        if l2 >= 0:
-            l2p[l2] = sp
+        l2p[l1] = sx
+        l2p[l2] = sp
         p2l[sp] = l2
         p2l[sx] = l1
         if emit:
@@ -643,28 +976,195 @@ def sabre_pass(ops: List[Instruction], dag: RDag, target: Target, mut l2p: List[
                 decayed.clear()
                 swaps_since_decay = 0
         # front gates that became executable
+        rel.clear()
         for side in range(2):
             var lq = l1 if side == 0 else l2
-            if lq < 0:
-                continue
-            var u = front_of_log[lq]
-            if u < 0:
-                continue
-            if target.are_connected(l2p[dag.a[u]], l2p[dag.b[u]]):
-                var lst = front.pop()
-                if lst != u:
-                    var pos = front_pos[u]
-                    front[pos] = lst
-                    front_pos[lst] = pos
-                front_pos[u] = -1
-                front_of_log[dag.a[u]] = -1
-                front_of_log[dag.b[u]] = -1
-                stack.append(u)
+            var e = fhead[lq]
+            while e >= 0:
+                var u = e >> 1
+                e = fnx[e]
+                if side == 1 and (dag.a[u] == l1 or dag.b[u] == l1):
+                    continue  # already seen from l1
+                if target.are_connected(l2p[dag.a[u]], l2p[dag.b[u]]):
+                    rel.append(u)
+        for u in rel:
+            _front_remove(u, dag, front, front_pos, fhead, fnx, fpv)
+            for side in range(2):
+                var lq = dag.a[u] if side == 0 else dag.b[u]
+                fcnt[lq] -= 1
+                if fcnt[lq] == 1:
+                    nmulti -= 1
+            stack.append(u)
     if emit:
         _ = valves
     _ = absorbed
     cost = acc
     return swaps
+
+
+@always_inline
+def _front_remove(u: Int, dag: RDag, mut front: List[Int], mut front_pos: List[Int],
+                  mut fhead: List[Int], mut fnx: List[Int], mut fpv: List[Int]):
+    """Drop unit u from the front list and from both qubits' linked lists."""
+    var pos = front_pos[u]
+    var lst = front.pop()
+    if lst != u:
+        front[pos] = lst
+        front_pos[lst] = pos
+    front_pos[u] = -1
+    for side in range(2):
+        var lq = dag.a[u] if side == 0 else dag.b[u]
+        var e = 2 * u + side
+        var p = fpv[e]
+        var nx = fnx[e]
+        if p >= 0:
+            fnx[p] = nx
+        else:
+            fhead[lq] = nx
+        if nx >= 0:
+            fpv[nx] = p
+        fnx[e] = -1
+        fpv[e] = -1
+
+
+def _front_min_delta(p: Int, x: Int, la: Int, lb: Int, fhead: List[Int], fnx: List[Int],
+                     dag: RDag, l2p: List[Int], dist: List[Int], nphys: Int,
+                     fmin: List[Int], fcmin: List[Int], fmin2: List[Int],
+                     mut qs: List[Int], mut cmin: List[Int], mut cat: List[Int], stamp: Int) -> Int:
+    """Change of sum_q min_{front units u on q} d(u) for the swap (p, x).
+
+    With commuting front units several gates wait on one qubit; summing
+    all of their distances pulls a hub qubit towards every partner at once
+    (plain SABRE oscillates). Counting, per qubit, only its nearest front
+    partner makes the router serve partners nearest-first; it equals twice
+    the plain sum when every qubit has a single front unit.
+
+    Only units on la / lb change distance: la and lb rescan their units;
+    a partner r combines the new distances of its changed units with its
+    cached minimum (`fmin`, achieved `fcmin` times; `fmin2` = next value)
+    over the unchanged ones, so a candidate costs O(units on la and lb)."""
+    var dp = dist.unsafe_ptr()
+    var l2pp = l2p.unsafe_ptr()
+    var fnp = fnx.unsafe_ptr()
+    var fhp = fhead.unsafe_ptr()
+    var dap = dag.a.unsafe_ptr()
+    var dbp = dag.b.unsafe_ptr()
+    var fmp = fmin.unsafe_ptr()
+    var fcp = fcmin.unsafe_ptr()
+    var f2p = fmin2.unsafe_ptr()
+    var qsp = qs.unsafe_ptr()
+    var cmp = cmin.unsafe_ptr()
+    var cap = cat.unsafe_ptr()
+    var df = 0
+    var nla = 1 << 30
+    var nlb = 1 << 30
+    # pass 1: new distances of every unit on la / lb, folded per qubit
+    for side in range(2):
+        var lq = la if side == 0 else lb
+        var e = fhp[unsafe_offset=lq]
+        while e >= 0:
+            var u = e >> 1
+            e = fnp[unsafe_offset=e]
+            var qa = dap[unsafe_offset=u]
+            var qb = dbp[unsafe_offset=u]
+            var r = qb if qa == lq else qa
+            if side == 1 and r == la:
+                continue  # unit (la, lb): seen from la
+            var oa = l2pp[unsafe_offset=qa]
+            var ob = l2pp[unsafe_offset=qb]
+            var na = x if qa == la else (p if qa == lb else oa)
+            var nb = x if qb == la else (p if qb == lb else ob)
+            var dn = dp[unsafe_offset=na * nphys + nb]
+            if side == 0 or r == la:
+                nla = min(nla, dn)
+            if side == 1 or r == lb:
+                nlb = min(nlb, dn)
+            if r != la and r != lb:
+                var do = dp[unsafe_offset=oa * nphys + ob]
+                var hit = 1 if do == fmp[unsafe_offset=r] else 0
+                if qsp[unsafe_offset=r] != stamp:
+                    qsp[unsafe_offset=r] = stamp
+                    cmp[unsafe_offset=r] = dn
+                    cap[unsafe_offset=r] = hit
+                else:
+                    cmp[unsafe_offset=r] = min(cmp[unsafe_offset=r], dn)
+                    cap[unsafe_offset=r] += hit
+    if fhp[unsafe_offset=la] >= 0:
+        df += nla - fmp[unsafe_offset=la]
+    if fhp[unsafe_offset=lb] >= 0:
+        df += nlb - fmp[unsafe_offset=lb]
+    # pass 2: partners (each once)
+    for side in range(2):
+        var lq = la if side == 0 else lb
+        var e = fhp[unsafe_offset=lq]
+        while e >= 0:
+            var u = e >> 1
+            e = fnp[unsafe_offset=e]
+            var qa = dap[unsafe_offset=u]
+            var r = dbp[unsafe_offset=u] if qa == lq else qa
+            if qsp[unsafe_offset=r] != stamp:
+                continue
+            qsp[unsafe_offset=r] = -1 - stamp
+            var rest = fmp[unsafe_offset=r] if cap[unsafe_offset=r] < fcp[unsafe_offset=r] else f2p[unsafe_offset=r]
+            df += min(cmp[unsafe_offset=r], rest) - fmp[unsafe_offset=r]
+    return df
+
+
+@always_inline
+def _swap_delta(p: Int, x: Int, l2p: List[Int], p2l: List[Int], fhead: List[Int], fnx: List[Int],
+                dag: RDag, ext_a: List[Int], ext_b: List[Int], e_first: List[Int],
+                e_next: List[Int], dist: List[Int], nphys: Int, front_part: Bool,
+                mut df: Int, mut de: Int):
+    """Change of the front (df) and lookahead (de) distance sums if physical
+    qubits p and x are swapped (incremental: only units on their wires);
+    `front_part` = False skips df (computed by `_front_min_delta`)."""
+    var dp = dist.unsafe_ptr()
+    var l2pp = l2p.unsafe_ptr()
+    var p2lp = p2l.unsafe_ptr()
+    var fhp = fhead.unsafe_ptr()
+    var fnp = fnx.unsafe_ptr()
+    var dap = dag.a.unsafe_ptr()
+    var dbp = dag.b.unsafe_ptr()
+    var eap = ext_a.unsafe_ptr()
+    var ebp = ext_b.unsafe_ptr()
+    var efp = e_first.unsafe_ptr()
+    var enp = e_next.unsafe_ptr()
+    var la = p2lp[unsafe_offset=p]
+    var lb = p2lp[unsafe_offset=x]
+    df = 0
+    de = 0
+    for side in range(2):
+        if not front_part:
+            break
+        var lq = la if side == 0 else lb
+        var e = fhp[unsafe_offset=lq]
+        while e >= 0:
+            var u = e >> 1
+            e = fnp[unsafe_offset=e]
+            var qa = dap[unsafe_offset=u]
+            var qb = dbp[unsafe_offset=u]
+            if side == 1 and (qa == la or qb == la):
+                continue
+            var oa = l2pp[unsafe_offset=qa]
+            var ob = l2pp[unsafe_offset=qb]
+            var na = x if qa == la else (p if qa == lb else oa)
+            var nb = x if qb == la else (p if qb == lb else ob)
+            df += dp[unsafe_offset=na * nphys + nb] - dp[unsafe_offset=oa * nphys + ob]
+    for side in range(2):
+        var lq = la if side == 0 else lb
+        var slot = efp[unsafe_offset=lq]
+        while slot >= 0:
+            var i = slot >> 1
+            slot = enp[unsafe_offset=slot]
+            var qa = eap[unsafe_offset=i]
+            var qb = ebp[unsafe_offset=i]
+            if side == 1 and (qa == la or qb == la):
+                continue
+            var oa = l2pp[unsafe_offset=qa]
+            var ob = l2pp[unsafe_offset=qb]
+            var na = x if qa == la else (p if qa == lb else oa)
+            var nb = x if qb == la else (p if qb == lb else ob)
+            de += dp[unsafe_offset=na * nphys + nb] - dp[unsafe_offset=oa * nphys + ob]
 
 
 # ----------------------------------------------------------------------------
@@ -1233,7 +1733,6 @@ def _layout_trial(t: Int, ops: List[Instruction], fwd: RDag, rev: RDag, target: 
     var trng = Rng(UInt64(opts.seed)).split(t)
     var o = opts.copy()
     o.heuristic = trial_heuristic(opts.heuristic, t)
-    o.mirror = trial_mirror(opts, t)
     var l2p: List[Int]
     if (t == 0 or t == 2) and len(seed_layout) == N and not random_only:
         l2p = seed_layout.copy()  # relaxed-VF2 embedding of the spanning forest
@@ -1264,12 +1763,41 @@ def _layout_trial(t: Int, ops: List[Instruction], fwd: RDag, rev: RDag, target: 
     return cst if sw >= 0 else -1
 
 
-def trial_mirror(opts: RouteOptions, t: Int) -> Bool:
-    """`mirror_auto`: trials 2, 3 (mod 4) route with mirror gates, 0, 1 without
-    (crossed with the heuristic alternation)."""
+def resolve_mirror(opts: RouteOptions, run_cost: List[Int]) -> RouteOptions:
+    """`mirror_auto`: mirror-gate routing pays off when most 2q runs are
+    generic >= 3-CX blocks (QV, SU(4)-structured circuits: mirroring them is
+    free); on CX / CP-structured circuits the 1-CX mirrors were measured to
+    cost more than they save. Auto therefore enables *free* mirrors only, and
+    only when >= 50% of the routing skeleton's runs are such blocks."""
+    var o = opts.copy()
     if not opts.mirror_auto:
-        return opts.mirror
-    return t % 4 >= 2
+        return o^
+    var free = 0
+    for k in run_cost:
+        if k >= 3 and k < 100:
+            free += 1
+    o.mirror = len(run_cost) > 0 and 2 * free >= len(run_cost)
+    o.mirror_gain = 1e9  # free mirrors only
+    return o^
+
+
+def resolve_commute(opts: RouteOptions, u: RUnits) -> Bool:
+    """`commute_auto`: commutation-aware routing pays off on circuits whose
+    2q units are mostly diagonal (QAOA cost layers, ZZ Trotter steps: cp /
+    rzz / cx.rz.cx commute and the router may serve them nearest-first);
+    on CX networks (Clifford) and QFT the program order was measured to be
+    the better routing order, so auto enables it only when >= 50% of the
+    runs are diagonal (Z, Z) units."""
+    if not opts.commute_auto:
+        return opts.commute
+    var runs = 0
+    var diag = 0
+    for t in range(u.n):
+        if u.is_run[t]:
+            runs += 1
+            if u.ax_a[t] == AX_Z and u.ax_b[t] == AX_Z:
+                diag += 1
+    return runs > 0 and 2 * diag >= runs
 
 
 def trial_heuristic(h: String, t: Int) -> String:
@@ -1344,7 +1872,10 @@ struct RoutePlan(Copyable):
     var trivial: Bool  # all-to-all target: nothing to route
     var note: String
     var heuristic: String  # heuristic of the winning trial (used by finish_route)
-    var mirror: Bool  # mirror-gate routing in the winning trial
+    var mirror: Bool  # mirror-gate routing (resolved, see `resolve_mirror`)
+    var mirror_gain: Float64
+    var commute: Bool  # commutation-aware DAG (resolved, see `resolve_commute`)
+    var reduced: Bool  # commuting fronts: trial counts were reduced
 
     def __init__(out self):
         self.layout = List[Int]()
@@ -1354,6 +1885,9 @@ struct RoutePlan(Copyable):
         self.note = String()
         self.heuristic = "extended"
         self.mirror = False
+        self.mirror_gain = 1.0
+        self.commute = False
+        self.reduced = False
 
 
 def _check_routable(c: Circuit, target: Target) raises:
@@ -1387,7 +1921,49 @@ def plan_route(c: Circuit, target: Target, opts: RouteOptions) raises -> RoutePl
     var lay = opts.layout
     var src = List[Int]()
     var skel = routing_skeleton(c.ops, n, src)
-    var sfwd = RDag(skel, n, False, src)
+    var units = RUnits(c.ops, n, opts.commute or opts.commute_auto)
+    plan.commute = resolve_commute(opts, units)
+    var units_off = RUnits(c.ops, n, False)
+    var sfwd = RDag(c.ops, units if plan.commute else units_off, n, False, True)
+    var ropts = resolve_mirror(opts, src)
+    plan.mirror = ropts.mirror
+    plan.mirror_gain = ropts.mirror_gain
+    # Routing variants. Large circuits: the per-circuit rules above. Small
+    # ones (<= 300 2q units, trials cost microseconds) run a portfolio:
+    # commutation-aware DAG on / off (when units can commute) x free mirror
+    # gates on / off (when >= 3-CX blocks exist); every variant gets the full
+    # set of layout trials (same seeds, paired) and the cheapest estimate wins.
+    var v_comm = List[Bool]()
+    var v_mir = List[Bool]()
+    var any_comm = False
+    var any_free = False
+    for t in range(units.n):
+        if units.is_run[t]:
+            if units.ax_a[t] != AX_OTHER or units.ax_b[t] != AX_OTHER:
+                any_comm = True
+            if units.cost[t] >= 3 and units.cost[t] < 100:
+                any_free = True
+    var small = sfwd.n2q <= 300
+    for ci in range(2):
+        var cm = ci == 1
+        if not (small and opts.commute_auto and any_comm) and cm != plan.commute:
+            continue
+        for mi in range(2):
+            var mr = mi == 1
+            if not (small and opts.mirror_auto and any_free) and mr != plan.mirror:
+                continue
+            v_comm.append(cm)
+            v_mir.append(mr)
+    var nv = len(v_comm)
+    if nv > 1:
+        ropts.mirror_gain = 1e9  # portfolio mirrors are free ones only
+    if nv == 1 and plan.commute and sfwd.commuting > 0.25:
+        # commuting fronts make a SABRE pass several times costlier (many
+        # front units per qubit); the extra order freedom more than pays for
+        # fewer trials (QAOA: -20% 2q with 2/5 of the trials)
+        ropts.trials = max(4, ropts.trials * 2 // 5)
+        ropts.iterations = min(ropts.iterations, 1)
+        plan.reduced = True
     var best = List[Int]()
     var fixed = len(opts.initial_layout) > 0
     if fixed:
@@ -1415,15 +1991,19 @@ def plan_route(c: Circuit, target: Target, opts: RouteOptions) raises -> RoutePl
             # SabreLayout: independent seeded trials (greedy / dense / random
             # seeds, forward-backward refinement) in parallel, best kept
             var ops = skel.copy()
-            var rev = RDag(ops, n, True, src)
-            var T = max(opts.trials, 1)
+            var f_on = RDag(c.ops, units, n, False, True)
+            var r_on = RDag(c.ops, units, n, True, True)
+            var f_off = RDag(c.ops, units_off, n, False, True)
+            var r_off = RDag(c.ops, units_off, n, True, True)
+            var TB = max(ropts.trials, 1)
+            var T = TB * nv
             var sws = List[Int](length=T, fill=0)
             var lays = List[Int](length=T * N, fill=0)
             var swp = sws.unsafe_ptr().as_unsafe_any_origin()
             var lyp = lays.unsafe_ptr().as_unsafe_any_origin()
             var random_only = lay == "random"
             var ig = InteractionGraph(ops, n, 0.5)
-            var starts = _start_qubits(target, T)
+            var starts = _start_qubits(target, TB)
             var seed_layout = List[Int]()
             if not random_only:
                 var maxdeg = 0
@@ -1431,9 +2011,16 @@ def plan_route(c: Circuit, target: Target, opts: RouteOptions) raises -> RoutePl
                     maxdeg = max(maxdeg, target.degree(p))
                 seed_layout = relaxed_vf2_seed(ops, n, target, maxdeg, opts.vf2_steps)
 
-            def task(t: Int) {imm ops, imm sfwd, imm rev, imm target, imm opts, imm n, imm N, imm random_only, imm swp, imm lyp, imm ig, imm starts, imm seed_layout}:
+            def task(t: Int) {imm ops, imm f_on, imm r_on, imm f_off, imm r_off, imm target, imm ropts, imm n, imm N, imm random_only, imm swp, imm lyp, imm ig, imm starts, imm seed_layout, imm nv, imm v_comm, imm v_mir}:
                 var start = List[Int]()
-                var sw = _layout_trial(t, ops, sfwd, rev, target, opts, n, random_only, ig, starts, seed_layout, start)
+                var v = t % nv
+                var o = ropts.copy()
+                o.mirror = v_mir[v]
+                var sw: Int
+                if v_comm[v]:
+                    sw = _layout_trial(t // nv, ops, f_on, r_on, target, o, n, random_only, ig, starts, seed_layout, start)
+                else:
+                    sw = _layout_trial(t // nv, ops, f_off, r_off, target, o, n, random_only, ig, starts, seed_layout, start)
                 swp[unsafe_offset=t] = sw
                 for i in range(N):
                     lyp[unsafe_offset=t * N + i] = start[i]
@@ -1452,8 +2039,11 @@ def plan_route(c: Circuit, target: Target, opts: RouteOptions) raises -> RoutePl
             for i in range(N):
                 best[i] = lays[bt * N + i]
             est = sws[bt]
-            plan.heuristic = trial_heuristic(opts.heuristic, bt)
-            plan.mirror = trial_mirror(opts, bt)
+            plan.heuristic = trial_heuristic(opts.heuristic, bt // nv)
+            plan.commute = v_comm[bt % nv]
+            plan.mirror = v_mir[bt % nv]
+            if nv > 1:
+                plan.mirror_gain = 1e9
     if plan.vf2:
         est = 0
     elif est < 0:
@@ -1462,9 +2052,9 @@ def plan_route(c: Circuit, target: Target, opts: RouteOptions) raises -> RoutePl
         var scratch = List[Instruction]()
         var o = opts.copy()
         o.heuristic = trial_heuristic(opts.heuristic, 0)
-        o.mirror = trial_mirror(opts, 0)
+        o.mirror = plan.mirror
+        o.mirror_gain = plan.mirror_gain
         plan.heuristic = o.heuristic
-        plan.mirror = o.mirror
         var cst = 0
         var mm = 0
         est = sabre_pass(skel, sfwd, target, l, pl, UInt64(opts.seed) + 17, False, scratch, o, cst, mm)
@@ -1497,38 +2087,38 @@ def finish_route(mut c: Circuit, target: Target, opts: RouteOptions, plan: Route
         init_layout = plan.layout.copy()
         final_layout = plan.layout.copy()
         return 0
-    var fwd = RDag(c.ops, n, False)
+    var units = RUnits(c.ops, n, plan.commute)
+    var fwd = RDag(c.ops, units, n, False, False)
     var best = plan.layout.copy()
     init_layout = best.copy()
     var hopts = opts.copy()
     hopts.heuristic = plan.heuristic
     hopts.mirror = plan.mirror
+    hopts.mirror_gain = plan.mirror_gain
     if len(c.ops) > 6000:
         # absorbable-swap portfolio only pays off on small circuits; on large
         # ones the cost estimate is too noisy, plain swap count wins
         hopts.absorb_alt = hopts.absorb
     var best_seed = UInt64(opts.seed) + 17
     var ST = max(opts.swap_trials, 1)
+    if plan.reduced:
+        ST = max(4, ST * 2 // 5)
     if ST > 1 and not plan.vf2:
-        var src = List[Int]()
-        var skel = routing_skeleton(c.ops, n, src)
-        var sfwd = RDag(skel, n, False, src)
+        var sfwd = RDag(c.ops, units, n, False, True)
         var sres = List[Int](length=ST, fill=0)
         var srp = sres.unsafe_ptr().as_unsafe_any_origin()
         var seed0 = UInt64(opts.seed) + 17
 
-        def strial(k: Int) {imm skel, imm sfwd, imm target, imm hopts, imm best, imm srp, imm seed0}:
+        def strial(k: Int) {imm c, imm sfwd, imm target, imm hopts, imm best, imm srp, imm seed0}:
             var l = best.copy()
             var pl = _inverse(l)
             var scratch = List[Instruction]()
             var o = hopts.copy()
             if k % 2 == 1:
                 o.absorb = hopts.absorb_alt
-            if hopts.mirror_auto and k % 3 == 2:
-                o.mirror = not hopts.mirror
             var cst = 0
             var mm = 0
-            var sw = sabre_pass(skel, sfwd, target, l, pl, seed0 + UInt64(k) * 7919, False, scratch, o, cst, mm)
+            var sw = sabre_pass(c.ops, sfwd, target, l, pl, seed0 + UInt64(k) * 7919, False, scratch, o, cst, mm)
             srp[unsafe_offset=k] = cst if sw >= 0 else -1
 
         parallelize(strial, ST)
@@ -1539,8 +2129,6 @@ def finish_route(mut c: Circuit, target: Target, opts: RouteOptions, plan: Route
         best_seed = seed0 + UInt64(bk) * 7919
         if bk % 2 == 1:
             hopts.absorb = hopts.absorb_alt
-        if hopts.mirror_auto and bk % 3 == 2:
-            hopts.mirror = not hopts.mirror
     var l2p = best^
     var p2l = _inverse(l2p)
     var out_ops = List[Instruction](capacity=len(c.ops) + len(c.ops) // 2)

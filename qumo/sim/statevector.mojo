@@ -170,19 +170,60 @@ def run_chunks[F: def(Int, Int) -> None](f: F, total: Int):
     parallelize(task, nchunks)
 
 
+comptime LOG_LINE = 4  # log2(Float64 values per 128-byte cache line)
+comptime SWAP_RUN_BITS = 12  # swap-layer work item: <= 2^12 amplitudes (32 KiB re + 32 KiB im)
+
+
 @always_inline
-def _copy_run(dr: FPtr, di: FPtr, d: Int, sr: FPtr, si: FPtr, s: Int, run: Int):
-    """Copy `run` complex amplitudes (split re/im) from offset s to offset d."""
-    if run >= W:
-        var e = 0
-        while e < run:
-            dr.unsafe_store(d + e, sr.unsafe_load[width=W](s + e))
-            di.unsafe_store(d + e, si.unsafe_load[width=W](s + e))
-            e += W
-    else:
-        for e in range(run):
-            dr[unsafe_offset=d + e] = sr[unsafe_offset=s + e]
-            di[unsafe_offset=d + e] = si[unsafe_offset=s + e]
+def _swap_runs(rp: FPtr, ip: FPtr, i: Int, j: Int, run: Int):
+    """Exchange the `run` (a multiple of W) contiguous amplitudes starting at
+    i with those starting at j, in place (vector loads/stores, no buffer)."""
+    var e = 0
+    while e < run:
+        var ar = rp.unsafe_load[width=W](i + e)
+        var ai = ip.unsafe_load[width=W](i + e)
+        rp.unsafe_store(i + e, rp.unsafe_load[width=W](j + e))
+        ip.unsafe_store(i + e, ip.unsafe_load[width=W](j + e))
+        rp.unsafe_store(j + e, ar)
+        ip.unsafe_store(j + e, ai)
+        e += W
+
+
+@always_inline
+def _swap_in_lane_loop[t: Int, u: Int](rp: FPtr, ip: FPtr, glo: Int, ghi: Int):
+    """SWAP of two in-vector bits t < u < LOGW on W-groups [glo, ghi): lanes
+    whose bits t and u differ take lane j ^ (1 << t) ^ (1 << u)."""
+    var f = VF(0)
+    comptime for j in range(W):
+        if ((j >> t) ^ (j >> u)) & 1 == 1:
+            f[j] = 1.0
+    var mask = f.eq(VF(1.0))
+    for g in range(glo, ghi):
+        var i = g << LOGW
+        var vr = rp.unsafe_load[width=W](i)
+        var vi = ip.unsafe_load[width=W](i)
+        rp.unsafe_store(i, mask.select(_flip[u](_flip[t](vr)), vr))
+        ip.unsafe_store(i, mask.select(_flip[u](_flip[t](vi)), vi))
+
+
+@always_inline
+def _swap_cross_loop[t: Int](rp: FPtr, ip: FPtr, hb: Int, glo: Int, ghi: Int):
+    """SWAP of in-vector bit t < LOGW with bit hb >= LOGW on groups [glo, ghi)
+    (a group = the vector pair i0 (bit hb clear), i1 = i0 | 1 << hb):
+    element (hb=0, t=1) <-> (hb=1, t=0)."""
+    var mt = _lane_mask(t)
+    var stride = 1 << hb
+    for g in range(glo, ghi):
+        var i0 = insert_zero(g, hb - LOGW) << LOGW
+        var i1 = i0 + stride
+        var ar = rp.unsafe_load[width=W](i0)
+        var ai = ip.unsafe_load[width=W](i0)
+        var br = rp.unsafe_load[width=W](i1)
+        var bi = ip.unsafe_load[width=W](i1)
+        rp.unsafe_store(i0, mt.select(_flip[t](br), ar))
+        ip.unsafe_store(i0, mt.select(_flip[t](bi), ai))
+        rp.unsafe_store(i1, mt.select(br, _flip[t](ar)))
+        ip.unsafe_store(i1, mt.select(bi, _flip[t](ai)))
 
 
 struct StateVector(Copyable, Writable):
@@ -221,7 +262,8 @@ struct StateVector(Copyable, Writable):
 
     # ------------------------------------------------------------ 1q kernels
     # Each method is a thin parallel driver around a `k*_range` kernel; the
-    # same kernels run sequentially on cache-sized blocks in `apply_block`.
+    # same kernels run sequentially on cache-sized blocks in
+    # `qumo.sim.runner.apply_kop_block` (cache-blocked executor).
     def apply_1q(mut self, m: M2, t: Int):
         if m.is_diagonal():
             self.apply_diag_1q(m.re[0], m.im[0], m.re[3], m.im[3], t)
@@ -394,32 +436,66 @@ struct StateVector(Copyable, Writable):
         run_chunks(body, self.size())
 
     # ------------------------------------------------------------ bit swaps
-    def apply_swap_layer(mut self, qa: List[Int], qb: List[Int]):
-        """Apply the disjoint SWAP gates (qa[i], qb[i]) together in ONE
-        in-place pass, i.e. exchange amplitude-index bits qa[i] <-> qb[i] for
-        every i (cuStateVec `swapIndexBits`, Aer chunk swap). All 2k bit
-        positions must be distinct.
+    def apply_swap_layer(mut self, qa: List[Int], qb: List[Int]) raises:
+        """Apply the disjoint SWAP gates (qa[i], qb[i]) together, i.e. exchange
+        amplitude-index bits qa[i] <-> qb[i] for every i (cuStateVec
+        `swapIndexBits`, Aer chunk swap). Used by the cache-blocked executor
+        (`qumo.sim.runner`) to move qubits in and out of cache blocks.
 
-        The permutation is a transpose: write every index as (rest, H, P, low)
-        with H the bits {max(qa_i, qb_i)}, P the bits {min(qa_i, qb_i)} and
-        `low` the 2^r contiguous amplitudes below the lowest swapped bit r;
-        the pass exchanges element (H, P) with (P, H). Like a cache-oblivious
-        matrix transpose it is processed in 2^j x 2^j sub-tiles over the j
-        lowest pairs, so both sides are read as rows of 2^(j+r) contiguous
-        amplitudes and every cache line is read and written once. Measured
-        cost: ~1 streaming pass when r >= 4, a few passes when the lowest
-        swapped bit is < 3 (scalar element moves).
+        All 2k bit positions must be distinct and in [0, num_qubits),
+        otherwise QM-E407 is raised.
+
+        Algorithm (in place, no scratch memory):
+          * Pairs whose low bit is < LOGW (at most 3) are in-vector bits; each
+            is one vectorized `apply_swap` pass (lane shuffles / masks).
+          * The other pairs are done in ONE pass. Write every index as
+            (rest, H, P, low): H = the bits {max(qa_i, qb_i)}, P = the bits
+            {min(qa_i, qb_i)}, `low` = the 2^r contiguous amplitudes below the
+            lowest swapped bit r (>= LOGW). The permutation exchanges the run
+            at (H = h, P = p) with the run at (H = p, P = h); runs with h == p
+            are fixed points and are never touched, so a k-pair layer reads
+            and writes a fraction 1 - 2^-k of the state exactly once.
+          * Runs are swapped directly with vector loads/stores. When a run is
+            shorter than a cache line (r = 3) the lowest pair is folded into a
+            2x2 tile so both halves of every line are used while resident.
+            Long runs are cut into <= 2^SWAP_RUN_BITS-amplitude work items so
+            every core gets work even when only a few runs move.
         """
         var k = len(qa)
+        var n = self.num_qubits
+        if len(qb) != k:
+            raise Error("QM-E407: apply_swap_layer got " + String(k) + " bits in qa but " + String(len(qb)) + " in qb. Hint: pass one partner bit per entry: qa[i] <-> qb[i].")
+        var used = List[Bool](length=max(n, 1), fill=False)
+        for i in range(2 * k):
+            var b = qa[i] if i < k else qb[i - k]
+            if b < 0 or b >= n:
+                raise Error("QM-E407: apply_swap_layer bit " + String(b) + " is outside [0, " + String(n) + "). Hint: bit positions are qubit indices of this " + String(n) + "-qubit state.")
+            if used[b]:
+                raise Error("QM-E407: apply_swap_layer bit " + String(b) + " appears twice. Hint: the 2k bit positions of a swap layer must be distinct (disjoint pairs, no self-swaps).")
+            used[b] = True
         if k == 0:
             return
-        var n = self.num_qubits
-        # pairs sorted by their low bit; xs[i] < ys[i]
+        # split: pairs with an in-vector bit (one vectorized SWAP pass each;
+        # a combined pass measured no faster) / run pairs (one pass)
         var xs = List[Int](capacity=k)
         var ys = List[Int](capacity=k)
         for i in range(k):
-            xs.append(min(qa[i], qb[i]))
-            ys.append(max(qa[i], qb[i]))
+            var x = min(qa[i], qb[i])
+            var y = max(qa[i], qb[i])
+            if x < LOGW:
+                self.apply_swap(x, y)
+            else:
+                xs.append(x)
+                ys.append(y)
+        if len(xs) > 0:
+            self._swap_run_pairs(xs, ys)
+
+    def _swap_run_pairs(mut self, mut xs: List[Int], mut ys: List[Int]):
+        """One in-place pass exchanging bits xs[i] <-> ys[i] (all >= LOGW,
+        2k distinct positions); see `apply_swap_layer`."""
+        var k = len(xs)
+        var n = self.num_qubits
+        # pairs sorted by their low bit; xs[i] < ys[i]
         for i in range(1, k):
             var j = i
             while j > 0 and xs[j - 1] > xs[j]:
@@ -431,14 +507,12 @@ struct StateVector(Copyable, Writable):
                 ys[j - 1] = ty
                 j -= 1
         var r = xs[0]
-        # sub-tile = 2^jt x 2^jt runs of 2^r amplitudes, staged through a
-        # thread-local buffer of 2 x 2^(2 jt + r) complex values (<= 32 KiB):
-        # rows of 2^(jt + r) contiguous amplitudes are streamed in and out once,
-        # so power-of-two strides cannot thrash L1 sets (classic buffered
-        # transpose).
+        # tile = 2^jt x 2^jt runs over the jt lowest pairs (only for runs
+        # shorter than a cache line); work item = run of 2^rr amplitudes
         var jt = 0
-        if r < 10:
-            jt = min(k, (10 - r) // 2)
+        if r < LOG_LINE:
+            jt = min(k, LOG_LINE - r)
+        var rr = min(r, SWAP_RUN_BITS)
         var kh = k - jt
         var nlo = 1 << jt
         var nhi = 1 << kh
@@ -463,7 +537,7 @@ struct StateVector(Copyable, Writable):
             special.append(ys[i])
         sort(special)
         var nsp = 2 * k
-        var nrest = n - 2 * k - r
+        var nrest = n - 2 * k - rr
         var total = (1 << nrest) * nhi * nhi
         var rp = self._rp()
         var ip = self._ip()
@@ -472,61 +546,43 @@ struct StateVector(Copyable, Writable):
         var pxh = dx_hi.unsafe_ptr().as_unsafe_any_origin()
         var pyh = dy_hi.unsafe_ptr().as_unsafe_any_origin()
         var psp = special.unsafe_ptr().as_unsafe_any_origin()
-        var run = 1 << r
-        var tsz = nlo * nlo * run
+        var run = 1 << rr
         var nchunks = 1
         if self.size() >= PAR_MIN_ITEMS:
-            nchunks = min(total, parallelism_level() * 4)
+            nchunks = min(total, parallelism_level() * 8)
         var chunk = (total + nchunks - 1) // nchunks
         nchunks = (total + chunk - 1) // chunk
 
         def task(c: Int) {imm rp, imm ip, imm pxl, imm pyl, imm pxh, imm pyh, imm psp,
-                           imm nsp, imm kh, imm nhi, imm nlo, imm r, imm run, imm tsz,
+                           imm nsp, imm kh, imm nhi, imm nlo, imm rr, imm run,
                            imm chunk, imm total}:
-            var buf = List[Float64](length=4 * tsz, fill=0.0)
-            var bp = buf.unsafe_ptr().as_unsafe_any_origin()
-            var bar = bp
-            var bai = bp.unsafe_offset(tsz)
-            var bbr = bp.unsafe_offset(2 * tsz)
-            var bbi = bp.unsafe_offset(3 * tsz)
             var lo = c * chunk
             var hi = min(lo + chunk, total)
             for o in range(lo, hi):
                 var ph = o & (nhi - 1)
                 var hh = (o >> kh) & (nhi - 1)
                 if hh > ph:
-                    continue
-                var base = (o >> (2 * kh)) << r
+                    continue  # handled by its partner tile (ph, hh)
+                if hh == ph and nlo == 1:
+                    continue  # fixed point: H == P
+                var base = (o >> (2 * kh)) << rr
                 for s in range(nsp):
                     base = insert_zero(base, psp[unsafe_offset=s])
                 var a_hi = base | pyh[unsafe_offset=hh] | pxh[unsafe_offset=ph]
-                var b_hi = base | pyh[unsafe_offset=ph] | pxh[unsafe_offset=hh]
-                # stage tile A (row hl, col pl) and, off the diagonal, tile B
-                for hl in range(nlo):
-                    var row = a_hi | pyl[unsafe_offset=hl]
-                    for pl in range(nlo):
-                        _copy_run(bar, bai, (hl * nlo + pl) * run, rp, ip, row | pxl[unsafe_offset=pl], run)
-                if hh != ph:
-                    for pl in range(nlo):
-                        var row = b_hi | pyl[unsafe_offset=pl]
-                        for hl in range(nlo):
-                            _copy_run(bbr, bbi, (pl * nlo + hl) * run, rp, ip, row | pxl[unsafe_offset=hl], run)
-                    # A(hl, pl) <- B(pl, hl) ; B(pl, hl) <- A(hl, pl)
+                if hh == ph:
+                    # diagonal tile: transpose in place, skip its diagonal
                     for hl in range(nlo):
-                        var row = a_hi | pyl[unsafe_offset=hl]
-                        for pl in range(nlo):
-                            _copy_run(rp, ip, row | pxl[unsafe_offset=pl], bbr, bbi, (pl * nlo + hl) * run, run)
-                    for pl in range(nlo):
-                        var row = b_hi | pyl[unsafe_offset=pl]
-                        for hl in range(nlo):
-                            _copy_run(rp, ip, row | pxl[unsafe_offset=hl], bar, bai, (hl * nlo + pl) * run, run)
+                        for pl in range(hl + 1, nlo):
+                            _swap_runs(rp, ip, a_hi | pyl[unsafe_offset=hl] | pxl[unsafe_offset=pl],
+                                       a_hi | pyl[unsafe_offset=pl] | pxl[unsafe_offset=hl], run)
                 else:
-                    # diagonal tile: in-place transpose through the buffer
+                    # A(hl, pl) <-> B(pl, hl)
+                    var b_hi = base | pyh[unsafe_offset=ph] | pxh[unsafe_offset=hh]
                     for hl in range(nlo):
                         var row = a_hi | pyl[unsafe_offset=hl]
                         for pl in range(nlo):
-                            _copy_run(rp, ip, row | pxl[unsafe_offset=pl], bar, bai, (pl * nlo + hl) * run, run)
-            _ = len(buf)
+                            _swap_runs(rp, ip, row | pxl[unsafe_offset=pl],
+                                       b_hi | pyl[unsafe_offset=pl] | pxl[unsafe_offset=hl], run)
 
         if nchunks == 1:
             task(0)
@@ -1055,6 +1111,22 @@ def kswap_range(rp: FPtr, ip: FPtr, a: Int, b: Int, lo: Int, hi: Int):
             rp.unsafe_store(i10, tr)
             ip.unsafe_store(i10, ti)
             p += W
+    elif (lo & 3) == 0 and (hi & 3) == 0:
+        if hi_b < LOGW:
+            # both bits inside the vector: 8 amplitudes = 2 quads per group
+            if lo_b == 0 and hi_b == 1:
+                _swap_in_lane_loop[0, 1](rp, ip, lo >> 1, hi >> 1)
+            elif lo_b == 0:
+                _swap_in_lane_loop[0, 2](rp, ip, lo >> 1, hi >> 1)
+            else:
+                _swap_in_lane_loop[1, 2](rp, ip, lo >> 1, hi >> 1)
+        elif lo_b == 0:
+            # in-vector bit x cross-vector bit: 16 amplitudes = 4 quads per group
+            _swap_cross_loop[0](rp, ip, hi_b, lo >> 2, hi >> 2)
+        elif lo_b == 1:
+            _swap_cross_loop[1](rp, ip, hi_b, lo >> 2, hi >> 2)
+        else:
+            _swap_cross_loop[2](rp, ip, hi_b, lo >> 2, hi >> 2)
     else:
         for p in range(lo, hi):
             var base = insert_zero2(p, lo_b, hi_b)

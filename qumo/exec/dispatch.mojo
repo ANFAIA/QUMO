@@ -11,8 +11,10 @@ backends or CUDA-Q's target choice, but per call and without global state:
     state vector (`qumo.gpu`), only in builds made with `-D QUMO_GPU` and
     when a device is usable; any GPU failure falls back to the CPU;
   * everything else -> state vector (static sampling or trajectories).
-The returned `SampleResult.method` records which path ran
-("gpu:statevector:fp32" etc. for the GPU).
+An explicit `device="gpu"` (`sample_on`) additionally sends Clifford circuits
+without feed-forward (noisy or not) to the GPU Pauli-frame sampler
+(`qumo.gpu.frame_gpu`). The returned `SampleResult.method` records which path
+ran ("gpu:statevector:fp32", "gpu:pauli_frame", ...).
 """
 
 from std.sys.defines import is_defined
@@ -21,9 +23,10 @@ from qumo.ir.circuit import Circuit
 from qumo.ir.gates import Op
 from qumo.sim.runner import sample, SampleResult
 from qumo.sim.stabilizer import sample_stabilizer
-from qumo.sim.frame import FrameSimulator
+from qumo.sim.frame import FrameSimulator, MeasurementSamples
 from qumo.gpu.device import GPU_MIN_QUBITS, gpu_available
 from qumo.gpu.statevector_gpu import sample_gpu
+from qumo.gpu.frame_gpu import GpuFrameSampler
 
 comptime STABILIZER_MIN_QUBITS = 16
 
@@ -80,11 +83,30 @@ def sample_frame(c: Circuit, shots: Int, seed: UInt64) raises -> SampleResult:
     """Counts from the Pauli-frame sampler (measurement record -> clbit map)."""
     var fs = FrameSimulator(c)
     var ms = fs.sample_measurements(shots, seed)
+    return counts_from_measurements(c, ms, shots, "stabilizer:pauli_frame")
+
+
+def frame_eligible_gpu(c: Circuit) -> Bool:
+    """Clifford, measured, no parameters and no classical conditions: the GPU
+    Pauli-frame sampler handles it (noise optional)."""
+    return c.num_params() == 0 and c.num_measurements > 0 and c.num_clbits <= 62 and c.is_clifford() and not _has_conditions(c)
+
+
+def sample_frame_gpu(c: Circuit, shots: Int, seed: UInt64) raises -> SampleResult:
+    """Counts from the GPU Pauli-frame sampler (needs -D QUMO_GPU and a device;
+    QM-E470 otherwise). SampleResult.method = 'gpu:pauli_frame'."""
+    var gs = GpuFrameSampler(c)
+    var ms = gs.sample_measurements(shots, seed)
+    return counts_from_measurements(c, ms, shots, gs.method_name())
+
+
+def counts_from_measurements(c: Circuit, ms: MeasurementSamples, shots: Int, method: String) -> SampleResult:
+    """Bit-packed measurement records -> classical-register counts."""
     var rec_to_clbit = List[Int](length=c.num_measurements, fill=-1)
     for g in c.ops:
         if g.kind == Op.MEASURE:
             rec_to_clbit[g.q1] = g.clbit
-    var res = SampleResult(c.num_clbits, shots, "stabilizer:pauli_frame")
+    var res = SampleResult(c.num_clbits, shots, method)
     for s in range(shots):
         var creg = 0
         for m in range(c.num_measurements):  # later records overwrite earlier ones
@@ -137,9 +159,10 @@ def _sample_cpu(c: Circuit, shots: Int, seed: UInt64, params: List[Float64]) rai
 def sample_on(c: Circuit, shots: Int, seed: UInt64, params: List[Float64],
               device: String, mut note: String) raises -> SampleResult:
     """Sample on an explicit device: 'auto' (= sample_auto), 'cpu' (never the
-    GPU) or 'gpu' (GPU state vector; falls back to the CPU and explains why in
-    `note` when the GPU is not compiled/available or the circuit is dynamic or
-    noisy)."""
+    GPU) or 'gpu' (Clifford circuits without feed-forward -> GPU Pauli frames,
+    other static circuits -> GPU state vector; falls back to the CPU and
+    explains why in `note` when the GPU is not compiled/available or the
+    circuit is dynamic/noisy non-Clifford)."""
     note = ""
     if device == "auto":
         return sample_auto(c, shots, seed, params)
@@ -148,17 +171,19 @@ def sample_on(c: Circuit, shots: Int, seed: UInt64, params: List[Float64],
     if device != "gpu":
         raise Error("QM-E940: unknown device '" + device + "'. Hint: use 'auto', 'cpu' or 'gpu'.")
     comptime if is_defined["QUMO_GPU"]():
-        if c.is_dynamic() or c.has_noise():
-            note = "dynamic or noisy circuit: ran on the CPU (the GPU sampler is static-only)"
-        else:
-            var ok: Bool
-            try:
-                ok = gpu_available()
-            except:
-                ok = False
-            if ok:
-                return sample_gpu(c, shots, seed, params)
+        var ok: Bool
+        try:
+            ok = gpu_available()
+        except:
+            ok = False
+        if not ok:
             note = "no usable GPU device: ran on the CPU"
+        elif len(params) == 0 and frame_eligible_gpu(c):
+            return sample_frame_gpu(c, shots, seed)
+        elif c.is_dynamic() or c.has_noise():
+            note = "dynamic or noisy non-Clifford circuit: ran on the CPU (the GPU state-vector sampler is static-only)"
+        else:
+            return sample_gpu(c, shots, seed, params)
     else:
         note = "GPU support not compiled (build with -D QUMO_GPU): ran on the CPU"
     return _sample_cpu(c, shots, seed, params)

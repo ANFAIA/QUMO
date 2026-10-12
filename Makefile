@@ -38,7 +38,8 @@ bench-neutral: py  ## hardware-neutral compiler benchmark (QUMO, Qiskit, TKET, C
 # -D QUMO_GPU for the host's accelerator: CUDA (NVIDIA) / ROCm (AMD) drivers on
 # Linux, or Xcode + `xcodebuild -downloadComponent MetalToolchain` on macOS.
 GPU_TARGETS ?= sm_90 gfx942 metal:4
-GPU_CHECK_SRCS := tests/test_gpu.mojo bench/bench_gpu.mojo
+GPU_CHECK_SRCS := tests/test_gpu.mojo tests/test_gpu_frame.mojo bench/bench_gpu.mojo
+GPU_TESTS := $(wildcard tests/test_gpu*.mojo)
 
 .PHONY: gpu-check test-gpu cli-gpu py-gpu bench-gpu
 
@@ -55,8 +56,11 @@ gpu-check:  ## cross-compile every GPU kernel for NVIDIA sm_90, AMD gfx942, Appl
 		done; \
 	done; exit $$fail
 
-test-gpu:  ## GPU test suite on the real device (+ emulation suites)
-	$(MOJO) run -I . -D QUMO_GPU tests/test_gpu.mojo
+test-gpu:  ## GPU test suites on the real device (+ emulation suites)
+	@fail=0; for t in $(GPU_TESTS); do \
+		out=$$($(MOJO) run -I . -D QUMO_GPU $$t 2>&1 | grep -v Crashpad | tail -1); \
+		case "$$out" in *OK*) echo "PASS $$t";; *) echo "FAIL $$t: $$out"; fail=1;; esac; \
+	done; exit $$fail
 
 cli-gpu:  ## CLI + MCP server with GPU dispatch (build/gpu/qumo)
 	@mkdir -p build/gpu

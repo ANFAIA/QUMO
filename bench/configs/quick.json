@@ -1,0 +1,162 @@
+{
+  "name": "quick",
+  "description": "Smoke test of every suite with tiny sizes (minutes, any machine; GPU suites skip cleanly without a GPU).",
+  "hardware": {
+    "vendor": "any"
+  },
+  "memory_fraction": 0.6,
+  "suites": {
+    "gpu_check": {
+      "enabled": false,
+      "targets": [
+        "host"
+      ],
+      "timeout_s": 2400
+    },
+    "sv_cpu": {
+      "enabled": true,
+      "families": [
+        "layered"
+      ],
+      "qubits": [
+        16,
+        20
+      ],
+      "reps": 1,
+      "timeout_s": 2400
+    },
+    "sv_gpu": {
+      "enabled": true,
+      "precisions": [
+        "fp32",
+        "fp64"
+      ],
+      "qubits_fp32": [
+        16,
+        18
+      ],
+      "qubits_fp64": [
+        16,
+        18
+      ],
+      "reps": 1,
+      "timeout_s": 3600,
+      "build_timeout_s": 2400
+    },
+    "baseline_aer": {
+      "enabled": true,
+      "devices": [
+        "cpu",
+        "gpu"
+      ],
+      "precisions_cpu": [
+        "fp64"
+      ],
+      "precisions_gpu": [
+        "fp32",
+        "fp64"
+      ],
+      "qubits": [
+        16,
+        20
+      ],
+      "qubits_gpu": [
+        16,
+        20
+      ],
+      "reps": 1,
+      "timeout_s": 3600,
+      "python": null,
+      "gpu_python": null
+    },
+    "baseline_cudaq": {
+      "enabled": true,
+      "precisions": [
+        "fp32",
+        "fp64"
+      ],
+      "qubits_fp32": [
+        16,
+        20
+      ],
+      "qubits_fp64": [
+        16,
+        20
+      ],
+      "reps": 1,
+      "cpu": false,
+      "qubits_cpu": [
+        16,
+        22
+      ],
+      "timeout_s": 3600,
+      "python": null
+    },
+    "baseline_lightning": {
+      "enabled": true,
+      "devices": [
+        "lightning.qubit",
+        "lightning.gpu",
+        "lightning.amdgpu"
+      ],
+      "precisions_cpu": [
+        "fp64"
+      ],
+      "precisions_gpu": [
+        "fp32",
+        "fp64"
+      ],
+      "qubits": [
+        16,
+        18
+      ],
+      "qubits_gpu": [
+        16,
+        20
+      ],
+      "reps": 1,
+      "timeout_s": 3600,
+      "python": null
+    },
+    "neutral": {
+      "enabled": true,
+      "sdks": [
+        "qumo",
+        "qiskit",
+        "tket"
+      ],
+      "targets": [
+        "sc_grid"
+      ],
+      "levels": [
+        "default"
+      ],
+      "filter": "qb_small__",
+      "max_qubits": 4,
+      "job_timeout_s": 120,
+      "timeout_s": 1800,
+      "python": null
+    },
+    "qec": {
+      "enabled": true,
+      "args": [
+        "--part",
+        "A",
+        "--shots",
+        "2000"
+      ],
+      "timeout_s": 2400,
+      "python": null
+    },
+    "tests": {
+      "enabled": true,
+      "targets": [
+        "test"
+      ],
+      "timeout_s": 3600,
+      "files": [
+        "tests/test_json.mojo"
+      ]
+    }
+  }
+}

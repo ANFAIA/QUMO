@@ -9,7 +9,7 @@ conversion step anywhere.
 
 ```
 qumo.qec.codes ──► Circuit (+coords) ──► qumo.qec.dem ──► DetectorErrorModel ──► qumo.qec.decoders
-     │                 │                                   (Stim-exact)            MatchingGraph
+     │                 │                                   (Stim-exact)            MatchingGraph ──► qumo.qec.sparse_blossom
      │                 ├──► qumo.sim.stabilizer  (tableau: reference sample, exact trajectories)
      │                 └──► qumo.sim.frame       (bit-packed Pauli frames: 512 shots / SIMD op)
      │                                │
@@ -22,11 +22,13 @@ Run the tests / examples / benchmarks:
 ```bash
 .venv/bin/mojo run -I . tests/test_stabilizer.mojo      # tableau vs state vector
 .venv/bin/mojo run -I . tests/test_qec.mojo             # whole QEC stack
+.venv/bin/mojo run -I . tests/test_qec_sparse_blossom.mojo  # sparse blossom exactness suite
 .venv/bin/mojo run -I . examples/qec_memory_experiment.mojo
 .venv/bin/mojo run -I . examples/qec_characterization.mojo
 .venv/bin/mojo run -I . examples/qec_custom_decoder.mojo
 .venv/bin/mojo run -I . bench/bench_qec.mojo 200000     # throughput + LER grid
-bench/.venv/bin/python bench/bench_qec.py 1000000       # cross-check vs Stim + PyMatching
+bench/.venv/bin/python bench/bench_qec.py --shots 1000000   # cross-check vs Stim + PyMatching (parts A + B)
+bench/.venv/bin/python bench/bench_qec.py --part B --tp-shots 30000 --reps 5   # identical-syndrome decoder table
 ```
 
 ## Where each idea comes from
@@ -39,7 +41,8 @@ bench/.venv/bin/python bench/bench_qec.py 1000000       # cross-check vs Stim + 
 | Detector error model, backward sensitivity propagation, disjoint→independent channel conversion, `^` decomposition | Stim `ErrorAnalyzer` | `qumo/qec/dem.mojo` |
 | Matching graph from DEM, log((1-p)/p) weights, virtual boundary node | PyMatching | `qumo/qec/decoders.mojo` |
 | Union-Find decoder with weighted growth + peeling | Delfosse–Nickerson; Huang–Newman–Brown | `UnionFindDecoder` |
-| Exact MWPM (APSP table, Edmonds blossom) | PyMatching v0, van Rantwijk's mwmatching | `MwpmDecoder`, `BlossomMatcher` |
+| Exact MWPM on the detector graph: graph fill regions, integer event queue, alternating trees, blossoms, compressed edges | Sparse blossom (Higgott & Gidney 2023, PyMatching 2) | `qumo/qec/sparse_blossom.mojo` |
+| Dense exact MWPM (APSP table, Edmonds blossom) | PyMatching v0, van Rantwijk's mwmatching | `MwpmDecoder`, `BlossomMatcher` |
 | Decoder plug-in interface, batch decode | CUDA-Q QEC `decoder` API | `trait Decoder` |
 | Fused sample+decode, `max_errors` early stop, Wilson intervals, CSV/JSON tables | Sinter | `qumo/qec/experiments.mojo` |
 | Noise model from calibration (T1/T2/gate/readout), RB, T1/Ramsey, readout mitigation | Qibocal, Cirq experiments, Qiskit Experiments / Aer `NoiseModel.from_backend` | `qumo/qec/characterization.mojo` |
@@ -142,23 +145,102 @@ trait Decoder(Copyable, Deinitable):
 * `UnionFindDecoder`: weighted cluster growth on integer edge lengths (32 per
   nat), event-driven growth step, union by size, boundary vertex grounds
   clusters, peeling on a BFS spanning forest rooted at the boundary.
-* `MwpmDecoder`: exact. All-pairs shortest paths (distance + observable
-  parity) precomputed once per graph (≤ 3000 nodes, ≤ 8 observables, shared
-  by thread copies through an `ArcPointer`), otherwise per-defect Dijkstra.
-  Defects are split into independent components (i, j interact only if
-  d_ij < b_i + b_j); each component is solved by subset DP (≤ 10 defects) or
-  Edmonds' blossom (port of van Rantwijk's O(n³) algorithm) on the reduced
-  graph w'(i,j) = min(d_ij, b_i + b_j) plus one boundary vertex for odd
-  counts. Limits: per-shot cost is O(k³) in the largest component, so it is
-  the right tool for d ≤ 7 at p ≲ 0.5 %; beyond that use UF (PyMatching's
-  sparse blossom would be the next step).
+* `SparseBlossomDecoder` (`qumo.qec.sparse_blossom`, decoder name `mwpm` /
+  `sparse_blossom`): exact MWPM by sparse blossom — the default matcher, see
+  the next section.
+* `MwpmDecoder` (decoder name `mwpm_dense`): exact, dense. All-pairs shortest
+  paths (distance + observable parity) precomputed once per graph (≤ 3000
+  nodes, ≤ 8 observables, shared by thread copies through an `ArcPointer`),
+  otherwise per-defect Dijkstra. Defects are split into independent
+  components (i, j interact only if d_ij < b_i + b_j); each component is
+  solved by subset DP (≤ 10 defects) or Edmonds' blossom (port of van
+  Rantwijk's O(n³) algorithm) on the reduced graph
+  w'(i,j) = min(d_ij, b_i + b_j) plus one boundary vertex for odd counts.
+  Per-shot cost is O(k³) in the largest component: fine for d ≤ 5, slow
+  beyond (kept as an independent reference implementation).
 * `LookupTableDecoder(dem, max_weight=2)`: most likely observable per
   syndrome over all ≤ max_weight error combinations; ≤ 64 detectors.
 * Batch helpers: `decode_samples`, `count_logical_errors` (parallel over
   512-shot batches, one decoder copy per worker).
 
-All three correct every single fault of the d = 3, 5, 7 surface codes
-(Z and X memory) — checked in `tests/test_qec.mojo`.
+All of them correct every single fault of the d = 3, 5, 7 surface codes
+(Z and X memory) — checked in `tests/test_qec.mojo` and
+`tests/test_qec_sparse_blossom.mojo`.
+
+### Sparse blossom (`qumo.qec.sparse_blossom`)
+
+Port of the algorithm behind PyMatching 2 — O. Higgott & C. Gidney,
+*"Sparse Blossom: correcting a million errors per core second with
+minimum-weight matching"*, Quantum 9, 1600 (2025), arXiv:2303.15933. Instead
+of building shortest paths and a complete graph of defects (the dense
+decoder), Edmonds' primal-dual blossom algorithm runs **directly on the
+detector graph**; dual variables are regions of the graph, so per-shot work
+is proportional to the area the regions sweep (local at low p).
+
+```mojo
+from qumo.qec.sparse_blossom import SparseBlossomDecoder, MatchingOracle, CompressedEdge
+var dec = SparseBlossomDecoder(MatchingGraph(dem))   # or SparseBlossomDecoder.from_dem(dem)
+var obs  = dec.decode(fired)               # UInt64 observable mask (trait Decoder)
+var es   = dec.decode_to_edges(fired)      # List[CompressedEdge(a, b, obs)], b = -1: boundary
+var prs  = dec.decode_to_matches(fired)    # [a0, b0, a1, b1, ...] (PyMatching's decode_to_matched_dets_array)
+var w    = dec.last_weight()               # matching weight (integer units; / (2 * dec.weight_scale()) = nats)
+# counters: dec.failures (odd component without boundary), dec.ignored (bad / repeated ids), dec.anomalies (QM-E712, must be 0)
+```
+
+* **Integer weights** (PyMatching's discretisation): w_int = 2·round(w·c)
+  with c = (2²⁴ − 1)/max|w|. Even weights make every collision happen at an
+  integer time (two growing fronts close an even gap at rate 2), so all
+  arithmetic is exact `Int` (`discretize_weights`, `weight_scale()`).
+* **Graph fill regions**: one per detection event plus one per blossom. A
+  region's radius is `y + slope·t` with slope +1 (outer node of an
+  alternating tree), −1 (inner) or 0 (matched, or a blossom child). Each
+  detector node stores the region that reached it, its top-level blossom, the
+  source detection event, the arrival radius, a cached "wrapped radius"
+  (frozen radii of intermediate blossom children) and the observables
+  crossed from the source. Node data are graph-sized arrays allocated once
+  and reset lazily through a touched-node list; regions and tree nodes come
+  from pools that keep their capacity across shots (no per-shot allocation).
+* **Event queue (flooder)**: a binary min-heap of (time, node | region)
+  with PyMatching's queued/desired-time trackers, so stale entries are
+  dropped lazily. Node events: a growing region reaches an empty neighbour,
+  hits another region, or hits the boundary; the next event time at a node
+  is one branch-free scan of its CSR neighbours (empty nodes belong to a
+  frozen zero-radius sentinel region). Region events: a shrinking region gives
+  back its last node (LIFO shell), a trivial inner region implodes (its two
+  tree neighbours touch → blossom), an inner blossom reaches radius 0 and
+  shatters.
+* **Matcher**: alternating trees of (inner, outer) region pairs. A collision
+  either grows a tree by a matched pair, augments (two trees meet, or a tree
+  meets the boundary or a boundary-matched region: re-root at the collision
+  and dissolve the tree into matches), or forms a blossom (a tree hits
+  itself: the odd cycle through the lowest common ancestor becomes a new
+  growing region). Shattering puts the even path between the blossom's two
+  tree edges back into the tree and matches the rest of the cycle in pairs.
+* **Compressed edges**: every match / tree / blossom edge stores only its two
+  endpoint detection events and the XOR of the observables along the region
+  path between them; the prediction is the XOR over the final matching's
+  compressed edges (blossoms expanded recursively), so no path is traced.
+* **Thread safety**: the immutable integer graph is shared by decoder copies
+  through an `ArcPointer`; each copy owns its mutable state, so
+  `sample_and_decode` / `decode_samples` run one copy per worker.
+
+**Verification.** `tests/test_qec_sparse_blossom.mojo` compares every result
+against `MatchingOracle` — an independent reference on the *same* integer
+weights (Dijkstra from every node on the product graph node × observable
+mask, plus the dense exact matcher): primal weight of the returned pairs ==
+dual objective == oracle optimum, every detection event matched exactly once,
+and each pair's observable mask is that of some shortest path between its
+endpoints (so the prediction is the observable of a minimum-weight
+correction). Suite: surface Z/X and repetition codes, d = 3, 5, 7,
+p ∈ {0.001, 0.005, 0.01}, sampled + dense random syndromes (10k), and 300
+random graphs with heterogeneous / tied weights and 1–3 observables (7.5k
+syndromes): **0 mismatches**. Offline we ran the same check on 198k
+syndromes (d ≤ 7) and 4.8k syndromes at d = 9, 11 (up to 245 detection
+events per syndrome): 0 mismatches, 0 anomalies. Because the discretisation
+is PyMatching's, QUMO and PyMatching 2.4 return **the same prediction on
+299 999 of 300 000** identical Stim-sampled syndromes in the benchmark below;
+the single difference is a degenerate tie (two minimum-weight matchings of
+exactly equal integer weight with different observable parity).
 
 ## Experiments (`qumo.qec.experiments`)
 
@@ -167,8 +249,12 @@ var r = memory_experiment("surface_z", distance=5, rounds=-1, p=0.002,
                           shots=2_000_000, decoder="mwpm", seed=7, max_errors=200)
 print(r)              # p_L, Wilson 95% interval, per-round rate, throughput
 print(r.to_json())    # machine-readable for agents
-print(threshold_sweep("surface_z", [3, 5, 7], [0.003, 0.006, 0.01], 200_000, "uf"))
+print(threshold_sweep("surface_z", [3, 5, 7], [0.003, 0.006, 0.01], 200_000, "mwpm"))
 ```
+
+Decoder names (`canonical_decoder_name`): `mwpm` (= sparse blossom, the
+default; aliases `matching`, `pymatching`), `sparse_blossom`, `mwpm_dense`
+(APSP + dense blossom `MwpmDecoder`), `uf`, `lookup`.
 
 `sample_and_decode(prog, decoder, shots, seed, max_errors)` is the fused
 loop: each worker propagates a 512-shot frame batch, extracts fired detectors
@@ -245,41 +331,110 @@ struct NeuralDecoder(Decoder):
 | QM-E704 | Unsupported feed-forward for frame simulation / Stim export (only X/Y/Z conditioned on one measured clbit) | use `sample_stabilizer()` |
 | QM-E705 | Size limit (clbits > 62 for integer counts, > 64 observables, > 64 detectors for lookup, > 24 qubits for dense mitigation) | use bit-packed outputs / another decoder |
 | QM-E706 | Invalid code parameters (name, distance, rounds, basis) | `surface_z`, `surface_x`, `repetition`; d ≥ 2, rounds ≥ 1 |
-| QM-E707 | Unknown decoder name | `uf`, `mwpm`, `lookup`, or pass a `Decoder` to `sample_and_decode` |
+| QM-E707 | Unknown decoder name | `mwpm` (sparse blossom), `sparse_blossom`, `mwpm_dense`, `uf`, `lookup`, or pass a `Decoder` to `sample_and_decode` |
 | QM-E708 | Reserved: decoding failure (decoders currently count isolated defects in `failures` instead of raising) | check DEM connectivity |
 | QM-E709 | Invalid calibration / noise model (T2 > 2·T1, probabilities out of range, singular confusion matrix, empty counts) | check units and calibration data |
 | QM-E710 | Fit failure (fewer than 3 points, RB inverse not found) | more lengths / delays |
 | QM-E711 | Noise probability outside [0, 1] | e.g. `NoiseParams.uniform(0.001)` |
+| QM-E712 | Internal invariant violation in sparse blossom (never raised per shot; counted in `SparseBlossomDecoder.anomalies`, must stay 0) | report the syndrome; decode it with `mwpm_dense` meanwhile |
 
 ## Benchmarks
 
-`bench/bench_qec.py` (Apple M-series laptop, 1 M shots per point, rotated
-surface code memory-Z, rounds = d, uniform circuit noise p). Stim and
-PyMatching run on the *identical* circuit exported by `to_stim()`.
+All numbers: Apple M5 laptop (4 performance + 6 efficiency cores;
+`parallelism_level()` = 4), shared with other jobs while measuring, so
+absolute throughputs carry ±30 % noise; ratios come from interleaved A/B
+runs. Rotated surface code memory-Z (rounds = d) unless stated, uniform
+circuit noise p; Stim 1.16 and PyMatching 2.4.0 run on the *identical*
+circuit exported by `to_stim()`.
 
-| d | p | DEM == Stim | p_L PyMatching | p_L QUMO MWPM | z | p_L QUMO UF | Stim sample shots/s | QUMO sample shots/s (1 thread) | QUMO sample shots/s (all threads) | PyMatching decode/s (1 thread) | QUMO MWPM sample+decode/s | QUMO UF sample+decode/s |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 3 | 0.001 | yes | 7.72e-04 | 8.15e-04 | +1.08 | 8.42e-04 | 1.23e7 | 5.39e7 | 2.03e8 | 1.37e7 | 1.33e7 | 7.71e6 |
-| 3 | 0.002 | yes | 3.09e-03 | 3.07e-03 | -0.27 | 3.17e-03 | 1.06e7 | 3.63e7 | 1.36e8 | 9.53e6 | 6.39e6 | 3.16e6 |
-| 3 | 0.003 | yes | 6.74e-03 | 6.82e-03 | +0.75 | 6.99e-03 | 6.74e6 | 3.18e7 | 1.24e8 | 5.91e6 | 4.36e6 | 2.91e6 |
-| 3 | 0.005 | yes | 1.78e-02 | 1.79e-02 | +0.18 | 1.83e-02 | 5.87e6 | 2.48e7 | 6.88e7 | 3.62e6 | 2.70e6 | 1.55e6 |
-| 5 | 0.001 | yes | 1.34e-04 | 1.25e-04 | -0.56 | 1.36e-04 | 2.96e6 | 9.75e6 | 2.76e7 | 2.51e6 | 2.03e6 | 1.29e6 |
-| 5 | 0.002 | yes | 1.00e-03 | 1.07e-03 | +1.45 | 1.14e-03 | 2.62e6 | 7.92e6 | 3.22e7 | 1.26e6 | 1.22e6 | 8.73e5 |
-| 5 | 0.003 | yes | 3.29e-03 | 3.39e-03 | +1.16 | 3.65e-03 | 2.13e6 | 6.63e6 | 2.68e7 | 8.00e5 | 6.06e5 | 6.33e5 |
-| 5 | 0.005 | yes | 1.42e-02 | 1.42e-02 | -0.15 | 1.52e-02 | 1.37e6 | 5.11e6 | 1.68e7 | 4.22e5 | 1.81e5 | 3.41e5 |
+### Part A — logical error rates (`bench/bench_qec.py --part A --shots 500000 --dense`)
+
+QUMO samples with its own frame simulator and decodes in the fused parallel
+loop; PyMatching decodes Stim samples (decode-only, one thread). 500 k shots
+per point.
+
+| d | p | DEM == Stim | p_L PyMatching | p_L QUMO `mwpm` (sparse blossom) | z | p_L QUMO `mwpm_dense` | p_L QUMO UF | Stim sample/s | QUMO sample/s (1 thr) | QUMO sample/s (all thr) | PyMatching dec/s (1 thr) | QUMO `mwpm` sample+dec/s (all thr) | QUMO UF sample+dec/s (all thr) |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 3 | 0.001 | yes | 8.12e-04 | 8.46e-04 | +0.59 | 8.46e-04 | 8.74e-04 | 1.21e7 | 4.58e7 | 1.07e8 | 1.84e7 | 2.25e7 | 6.12e6 |
+| 3 | 0.002 | yes | 3.10e-03 | 3.11e-03 | +0.05 | 3.11e-03 | 3.19e-03 | 6.5e6 | 2.93e7 | 6.28e7 | 4.47e6 | 4.23e6 | 2.15e6 |
+| 3 | 0.003 | yes | 6.94e-03 | 6.86e-03 | -0.52 | 6.86e-03 | 7.04e-03 | 7.61e6 | 1.98e7 | 6.77e7 | 5.29e6 | 9.85e6 | 1.74e6 |
+| 3 | 0.005 | yes | 1.76e-02 | 1.77e-02 | +0.61 | 1.77e-02 | 1.82e-02 | 4.99e6 | 1.86e7 | 4.68e7 | 3.15e6 | 8.24e6 | 1.02e6 |
+| 5 | 0.001 | yes | 1.30e-04 | 1.22e-04 | -0.36 | 1.22e-04 | 1.34e-04 | 2.29e6 | 9.32e6 | 3.65e7 | 2.11e6 | 4.17e6 | 9.57e5 |
+| 5 | 0.002 | yes | 9.96e-04 | 1.06e-03 | +1.03 | 1.06e-03 | 1.15e-03 | 1.72e6 | 7.48e6 | 2.82e7 | 7.87e5 | 3.97e6 | 5.81e5 |
+| 5 | 0.003 | yes | 3.43e-03 | 3.44e-03 | +0.03 | 3.44e-03 | 3.67e-03 | 1.72e6 | 7.73e6 | 2.38e7 | 7.88e5 | 3.35e6 | 5.06e5 |
+| 5 | 0.005 | yes | 1.40e-02 | 1.43e-02 | +1.28 | 1.43e-02 | 1.54e-02 | 1.15e6 | 6.01e6 | 1.04e7 | 3.04e5 | 1.39e6 | 2.0e5 |
+| 7 | 0.001 | yes | 2.40e-05 | 1.40e-05 | -1.15 | 1.40e-05 | 1.60e-05 | 9.74e5 | 3.58e6 | 1.22e7 | 8.1e5 | 2.35e6 | 3.74e5 |
+| 7 | 0.002 | yes | 2.84e-04 | 2.82e-04 | -0.06 | 2.82e-04 | 3.16e-04 | 6.87e5 | 1.92e6 | 5.25e6 | 3.27e5 | 1.26e6 | 1.66e5 |
+| 7 | 0.003 | yes | 1.40e-03 | 1.41e-03 | +0.16 | 1.41e-03 | 1.52e-03 | 7.65e5 | 2.03e6 | 6.9e6 | 2.35e5 | 7.36e5 | 1.15e5 |
+| 7 | 0.005 | yes | 1.03e-02 | 1.00e-02 | -1.36 | 1.00e-02 | 1.11e-02 | 3.97e5 | 2.48e6 | 7.4e6 | 8.02e4 | 3.36e5 | 5.91e4 |
 
 * **DEM**: identical mechanism sets, max relative probability difference ≤ 7e-13.
-* **MWPM vs PyMatching**: max |z| = 1.45 over 8 points (1 M shots each) —
-  statistically indistinguishable. UF is 0–7 % worse (expected).
-* **Sampling**: 3.3–4.3× Stim single-threaded (512-shot SIMD batches,
-  geometric noise skipping, no output transposition), 12–17× with all cores
-  (Stim timed with `bit_packed=True`, single-threaded as Stim is).
-* **Decoding**: QUMO numbers are fused sample+decode on all threads;
-  PyMatching is decode-only on one thread. At low p the exact MWPM keeps up;
-  at d=5, p=0.5 % PyMatching's sparse blossom is ~2.3× faster per shot (per
-  core: ~20×) — the dense O(k³) blossom is the known bottleneck.
+* **MWPM vs PyMatching**: max |z| = 1.36 over 12 points — statistically
+  indistinguishable. Sparse and dense MWPM report the *same* error count on
+  all 12 points (same QUMO samples). UF is 3–14 % worse (expected), and
+  with sparse blossom in place the exact matcher is now also 2–7× *faster*
+  than QUMO's UF in the fused loop (UF still allocates per shot).
+* **Sampling**: 2.6–6× Stim single-threaded, 8–19× with all cores (Stim
+  timed with `bit_packed=True`, single-threaded as Stim is).
 
-`bench/bench_qec.mojo 200000` (QUMO only, same machine):
+### Part B — identical syndromes (`bench/bench_qec.py --part B --tp-shots 30000 --reps 5`)
+
+Stim samples detection events once (b8 file); PyMatching (`decode_batch`)
+and QUMO's sparse blossom (`bench/bench_qec_decoders.mojo --decode`) decode
+the *same* shots. Decode-only throughput, medians of 5 interleaved A/B
+repetitions; QUMO "all thr" = one decoder copy per worker (4 workers).
+
+| code | d | p | shots | events/shot | predictions differ | errors PyMatching | errors QUMO | PyMatching dec/s (1 thr) | QUMO dec/s (1 thr) | QUMO / PyMatching (1 thr) | QUMO dec/s (all thr) |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| surface_z | 5 | 0.001 | 30000 | 1.7 | 0 | 4 | 4 | 2.73e6 | 3.88e6 | 1.42 | 9.24e6 |
+| surface_z | 5 | 0.005 | 30000 | 8.3 | 0 | 444 | 444 | 5.12e5 | 7.26e5 | 1.42 | 2.16e6 |
+| surface_z | 7 | 0.001 | 30000 | 5.4 | 0 | 0 | 0 | 1.08e6 | 1.70e6 | 1.57 | 4.12e6 |
+| surface_z | 7 | 0.005 | 30000 | 25.0 | 0 | 310 | 310 | 1.72e5 | 2.32e5 | 1.34 | 6.67e5 |
+| surface_z | 9 | 0.001 | 30000 | 12.0 | 0 | 0 | 0 | 5.34e5 | 7.40e5 | 1.38 | 1.77e6 |
+| surface_z | 9 | 0.005 | 10000 | 55.7 | 0 | 68 | 68 | 7.44e4 | 1.04e5 | 1.39 | 2.91e5 |
+| surface_z | 11 | 0.001 | 30000 | 22.6 | 0 | 0 | 0 | 2.19e5 | 3.56e5 | 1.63 | 9.61e5 |
+| surface_z | 11 | 0.005 | 10000 | 105.2 | 0 | 49 | 49 | 4.14e4 | 5.56e4 | 1.34 | 1.50e5 |
+| surface_x | 5 | 0.005 | 30000 | 8.4 | 0 | 486 | 486 | - | - | - | - |
+| surface_x | 7 | 0.005 | 30000 | 25.3 | 1 | 365 | 366 | - | - | - | - |
+| repetition | 7 | 0.01 | 30000 | 3.5 | 0 | 9 | 9 | - | - | - | - |
+| repetition | 11 | 0.005 | 10000 | 4.7 | 0 | 0 | 0 | - | - | - | - |
+
+* **Agreement**: identical predictions on 299 999 of 300 000 shots. The one
+  difference (surface_x d=7, shot 26723, 54 detection events) is a genuine
+  degenerate tie: QUMO's and PyMatching's matchings have the same integer
+  weight 640 799 958 (= the oracle optimum; 126.3746815 nats) but pair six
+  events differently, with opposite observable parity.
+* **Speed**: QUMO's sparse blossom decodes 1.34–1.63× more shots per second
+  than PyMatching 2 on one thread for d = 5–11 at p = 0.1 % and 0.5 % (the
+  DoD target was "within 2×"). Hardware instruction counts (`/usr/bin/time
+  -l`, decode-only deltas, single thread, same syndrome distribution) agree:
+  at p = 0.5 % QUMO retires 0.81–0.96× PyMatching's instructions per shot
+  (d = 7: 47.8 k vs 50.8 k; d = 11: 236 k vs 246 k), at p = 0.1 % and
+  d ≥ 7 ~0.7×. PyMatching's figures include its batch-API overhead (one
+  dense uint8 detector row per shot), so per-algorithm the two are close
+  to parity rather than QUMO being fundamentally faster.
+* **Profile** (d = 7, p = 0.5 %, 25 events/shot): ~93 node scans, 64 heap
+  push/pop pairs, ~14 region collisions, 3.4 boundary hits and 0.4 blossoms
+  per shot; neighbour scans are ~42 % of the time, the binary-heap event
+  queue ~22 %, the rest is the matcher, region pools and extraction. About
+  half the node events are lazy re-checks of nodes whose region froze (the
+  same lazy-invalidation strategy as PyMatching).
+
+### Sparse vs dense MWPM (`bench_qec_decoders --self ... 3`, single thread)
+
+| d | p | events/shot | `mwpm_dense` µs/shot | `mwpm` (sparse blossom) µs/shot | speed-up |
+|---|---|---|---|---|---|
+| 3 | 0.001 | 0.3 | 0.13 | 0.024 | 5.4× |
+| 3 | 0.005 | 1.4 | 0.66 | 0.17 | 3.7× |
+| 5 | 0.001 | 1.8 | 0.69 | 0.17 | 4.0× |
+| 5 | 0.005 | 8.3 | 16.3 | 1.09 | 15× |
+| 7 | 0.001 | 5.4 | 5.4 | 0.82 | 6.6× |
+| 7 | 0.005 | 25.0 | 223 | 4.3 | 52× |
+
+(Measured back-to-back on the loaded machine; an earlier, quieter run gave
+~64 µs/shot for the dense decoder at d = 7, p = 0.5 %.)
+
+### QUMO only (`bench/bench_qec.mojo 200000`, earlier run, same machine; the MWPM column was measured with the dense decoder, which gives the same predictions)
 
 | d | qubits | ops | detectors | DEM mechanisms | DEM extraction | sample shots/s (all thr) | shot·ops/s | UF p_L @ p=0.3 % | MWPM p_L @ p=0.3 % |
 |---|---|---|---|---|---|---|---|---|---|
@@ -293,8 +448,21 @@ d=3 8e-4 → d=5 1.3e-4 → d=7 ~2e-5; UF crossing point ≈ 0.6–0.8 % from th
 
 ## Limitations / next steps
 
-* MWPM is exact but uses a dense O(k³) blossom per component — for d ≥ 9 or
-  p ≥ 0.5 % prefer UF (or add a sparse-blossom implementation).
+* Sparse blossom (`mwpm`) is exact w.r.t. the discretised weights
+  (2²⁴ levels, PyMatching's choice): two matchings whose float weights differ
+  by less than the rounding step can be ranked differently than with exact
+  real weights. Edge weights come from `MatchingGraph`, i.e. log((1−p)/p)
+  clamped to [1e−3, 50] nats — p > 0.5 edges are *not* turned into negative
+  weights as PyMatching does. Not ported from PyMatching: correlated
+  (two-pass) matching, per-shot edge reweighting, and `decode_to_edges_array`
+  (the explicit edge set of the correction — QUMO returns the matched
+  detection-event pairs with their observable masks). Events in an odd
+  component without a boundary are counted in `failures`.
+* Single-thread throughput is on par with PyMatching 2 (see Benchmarks); the
+  remaining cost is dominated by neighbour scans (~45 % of instructions) and
+  the binary-heap event queue (~20 %); PyMatching's radix heap and 32-bit
+  cyclic times are not ported.
+* The dense `mwpm_dense` decoder is O(k³) per component — only for small codes.
 * Lookup decoder ≤ 64 detectors; DEM ≤ 64 observables; APSP table ≤ 3000 nodes.
 * Frame simulation supports only single-clbit Pauli feedback; general
   feed-forward uses tableau trajectories (`sample_stabilizer`).

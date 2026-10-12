@@ -101,6 +101,19 @@ out, initial, final = q.transpile(c, 7, [[0,1],[1,2],[2,3],[3,4],[4,5],[5,6]], [
 print(out.count_ops(), q.sample(c, 1000, 7))
 ```
 
+## Running on quantum hardware
+
+`plugins/hardware` (`qumo_hardware`) runs QUMO-compiled circuits on **IBM Quantum** (qiskit-ibm-runtime client-side Sampler) and **Quantinuum** (Nexus: H2 and Helios) behind one vendor-neutral provider interface; QUMO does the compilation for every provider from a neutral `TargetSpec`, and results come back in your circuit's bit order. Offline emulators (QUMO simulator on any topology, IBM snapshots with Aer noise, Quantinuum H2-1LE / Selene) need no account. Remote submission only happens with `--yes`:
+
+```bash
+export PYTHONPATH=plugins/hardware        # after `make py`
+python -m qumo_hardware run examples/ghz.qasm -p ibm -b fake_torino              # local, noisy IBM snapshot
+python -m qumo_hardware run examples/ghz.qasm -p quantinuum -b H2-1 --dry-run    # native payload + HQC estimate
+python -m qumo_hardware run examples/ghz.qasm -p ibm -b ibm_fez --yes            # real QPU (QISKIT_IBM_TOKEN / saved account)
+```
+
+Credentials, costs, safety model, error codes (QM-E950–E959) and how to add Braket/IonQ/IQM: [docs/HARDWARE_PLUGINS.md](docs/HARDWARE_PLUGINS.md); examples in [examples/hardware](examples/hardware).
+
 ## GPU support
 
 State-vector kernels are written once in Mojo and compiled by MAX for **NVIDIA, AMD and Apple** GPUs ([docs/GPU.md](docs/GPU.md)). GPU code is compiled only with `-D QUMO_GPU`, so default builds never need a GPU toolchain:

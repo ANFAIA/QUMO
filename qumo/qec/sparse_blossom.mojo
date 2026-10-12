@@ -55,15 +55,28 @@ Ingredients (names follow the paper / PyMatching's C++ sources):
   come from pools whose lists keep their capacity across shots.
 
 Exactness: the output is a minimum-weight perfect matching with respect to
-the discretised integer weights (tests/test_qec_sparse_blossom.mojo checks
-primal weight == dual objective == dense MWPM optimum on thousands of
-random syndromes). `last_weight()` returns the dual objective (= matching
-weight at optimality) in integer units; divide by `2 * weight_scale()` to
-get nats. Defects in a connected component without boundary and with odd
-parity cannot be matched: they are counted in `failures` (no exception).
+the discretised integer weights. tests/test_qec_sparse_blossom.mojo checks,
+on ~18k sampled and random syndromes (surface Z/X and repetition codes,
+d = 3..7, random graphs with heterogeneous weights and several observables),
+primal weight == dual objective == optimum of an independent oracle (integer
+APSP + dense exact matcher, `MatchingOracle`) and that every matched pair's
+observable mask belongs to a shortest path between its endpoints. Since the
+discretisation is PyMatching's, predictions agree shot-for-shot with
+PyMatching 2 on identical syndromes up to degenerate ties
+(bench/bench_qec.py, part B). `last_weight()` returns the dual objective
+(= matching weight at optimality) in integer units; divide by
+`2 * weight_scale()` to get nats.
+
+Limitations: weights come from `MatchingGraph` (log((1-p)/p) clamped to
+[1e-3, 50] nats, so p > 0.5 edges are not treated as negative weights as
+PyMatching does); <= 64 observables; node ids < 2^32. Defects in a connected
+component without boundary and with odd parity cannot be matched: they are
+counted in `failures` (no exception). Out-of-range or repeated detector ids in
+`fired` are skipped and counted in `ignored`.
 
 Error codes: QM-E712 (internal invariant violation in sparse blossom,
-reported through `anomalies`, never raised per shot).
+reported through the `anomalies` counter, never raised per shot; any nonzero
+value is a bug).
 """
 
 from std.memory import ArcPointer
@@ -290,10 +303,11 @@ struct SparseBlossomDecoder(Decoder):
     var shrink_l: _UVec[Int]
     var matched: List[CompressedEdge]  # filled by decode_to_edges
     var record: Bool
-    # ---- statistics ----
-    var failures: Int
-    var anomalies: Int
-    var weight: Int
+    # ---- statistics (cumulative over shots, except `weight`) ----
+    var failures: Int  # unmatchable defects (odd component without boundary)
+    var anomalies: Int  # internal invariant violations (QM-E712; must stay 0)
+    var ignored: Int  # out-of-range / repeated detector ids skipped
+    var weight: Int  # dual objective of the last decode (integer units)
 
     def __init__(out self, graph: MatchingGraph, num_distinct_weights: Int = SB_NUM_DISTINCT_WEIGHTS):
         var nd = graph.num_detectors
@@ -355,6 +369,7 @@ struct SparseBlossomDecoder(Decoder):
         self.record = False
         self.failures = 0
         self.anomalies = 0
+        self.ignored = 0
         self.weight = 0
         # region 0: the _EMPTY sentinel (radius 0, frozen, never live)
         _ = self._new_region()
@@ -1136,6 +1151,11 @@ struct SparseBlossomDecoder(Decoder):
         self.now = 0
         for i in range(len(fired)):
             var d = fired[i]
+            # guard the unchecked node arrays: ids out of range or repeated
+            # are ignored (and counted) instead of corrupting the state
+            if d < 0 or d >= self.num_detectors or self.n_src[d] >= 0:
+                self.ignored += 1
+                continue
             var r = self._new_region()
             self.r_s[r] = 1
             self.r_shell[r].append(d)
@@ -1150,7 +1170,9 @@ struct SparseBlossomDecoder(Decoder):
             self.a_outer[a] = r
             self.r_alt[r] = a
         for i in range(len(fired)):
-            self._reschedule(fired[i])
+            var d = fired[i]
+            if d >= 0 and d < self.num_detectors:
+                self._reschedule(d)
         while len(self.hk) > 0:
             var top = self._pop()
             var t = top[0]

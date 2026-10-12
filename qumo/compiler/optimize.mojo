@@ -43,6 +43,9 @@ from qumo.compiler.common import (
     rot_angle, combine_rotations, emit_rotation, wire_axis,
 )
 from qumo.compiler.synth import synth_1q
+from max.algorithm import parallelize
+
+comptime _SYN_SLOT = 8  # max gates synth_1q emits for one 1q unitary
 
 comptime COMB_NONE = 0
 comptime COMB_MERGED = 1
@@ -405,32 +408,28 @@ def fuse_1q(mut c: Circuit, gs: GateSet) -> Int:
             if q >= 0 and q < nq:
                 cur[q] = -1
     var nr = len(run_last)
+    # memoised synthesis: structured circuits (Clifford, QFT, ...) repeat a
+    # handful of distinct 1q runs; key = rounded matrix, verified exactly.
+    # Distinct matrices are collected first and synthesised in parallel.
     var cache_head = Dict[UInt64, Int]()
     var cache_next = List[Int]()
     var cache_mat = List[M2]()
-    var cache_ok = List[Bool]()
-    var cache_start = List[Int]()
-    var cache_len = List[Int]()
-    var cache_phase = List[Float64]()
-    var cache_ops = List[Instruction]()
+    var uid = List[Int](length=nr, fill=-1)
     var rep_start = List[Int](length=nr, fill=-1)
     var rep_len = List[Int](length=nr, fill=0)
     var rep = List[Instruction]()
     var saved = 0
     var phase = 0.0
     for r in range(nr):
-        var tmp = List[Instruction]()
-        var ph = 0.0
         if run_count[r] == 1 and not run_bad[r]:
             # a single basis gate only improves when it is the identity
+            var ph = 0.0
             if m2_identity_phase(run_mat[r], ph):
                 rep_start[r] = len(rep)
                 rep_len[r] = 0
                 phase += ph
                 saved += 1
             continue
-        # memoised synthesis: structured circuits (Clifford, QFT, ...) repeat a
-        # handful of distinct 1q runs; key = rounded matrix, verified exactly
         var m = run_mat[r]
         var key = _mat_key(m)
         var hit = -1
@@ -445,37 +444,58 @@ def fuse_1q(mut c: Circuit, gs: GateSet) -> Int:
                 hit = e
                 break
             e = cache_next[e]
-        if hit >= 0:
-            if not cache_ok[hit]:
-                continue
-            for k in range(cache_len[hit]):
-                var t = cache_ops[cache_start[hit] + k]
-                t.q0 = run_q[r]
-                tmp.append(t)
-            ph = cache_phase[hit]
-        else:
-            var ok = synth_1q(m, 0, gs, tmp, ph)
-            var ce = len(cache_mat)
+        if hit < 0:
+            hit = len(cache_mat)
             cache_mat.append(m)
             cache_next.append(cache_head.get(key, -1))
-            cache_head[key] = ce
-            cache_ok.append(ok)
-            cache_start.append(len(cache_ops))
-            cache_len.append(len(tmp))
-            cache_phase.append(ph)
-            for t in tmp:
-                cache_ops.append(t)
-            if not ok:
-                continue
-            for ref t in tmp:
-                t.q0 = run_q[r]
-        if len(tmp) < run_count[r] or run_bad[r]:
+            cache_head[key] = hit
+        uid[r] = hit
+    var nu = len(cache_mat)
+    var u_ok = List[Bool](length=nu, fill=False)
+    var u_len = List[Int](length=nu, fill=0)
+    var u_ph = List[Float64](length=nu, fill=0.0)
+    var u_ops = List[Instruction](length=nu * _SYN_SLOT, fill=Instruction.make(Op.I, 0))
+    var okp = u_ok.unsafe_ptr().as_unsafe_any_origin()
+    var lnp = u_len.unsafe_ptr().as_unsafe_any_origin()
+    var php = u_ph.unsafe_ptr().as_unsafe_any_origin()
+    var opp = u_ops.unsafe_ptr().as_unsafe_any_origin()
+    var nchunks = 1 if nu < 512 else min(nu // 128, 128)
+
+    def work(t: Int) {imm cache_mat, imm gs, imm nu, imm nchunks, imm okp, imm lnp, imm php, imm opp}:
+        var tmp = List[Instruction](capacity=_SYN_SLOT)
+        for j in range(t * nu // nchunks, (t + 1) * nu // nchunks):
+            tmp.clear()
+            var ph = 0.0
+            var ok = synth_1q(cache_mat[j], 0, gs, tmp, ph)
+            if ok and len(tmp) <= _SYN_SLOT:
+                okp[unsafe_offset=j] = True
+                lnp[unsafe_offset=j] = len(tmp)
+                php[unsafe_offset=j] = ph
+                for k in range(len(tmp)):
+                    opp[unsafe_offset=j * _SYN_SLOT + k] = tmp[k]
+
+    if nchunks == 1:
+        work(0)
+    else:
+        parallelize(work, nchunks)
+    _ = len(u_ok)
+    _ = len(u_len)
+    _ = len(u_ph)
+    _ = len(u_ops)
+    for r in range(nr):
+        var hit = uid[r]
+        if hit < 0 or not u_ok[hit]:
+            continue
+        var ln = u_len[hit]
+        if ln < run_count[r] or run_bad[r]:
             rep_start[r] = len(rep)
-            rep_len[r] = len(tmp)
-            for t in tmp:
+            rep_len[r] = ln
+            for k in range(ln):
+                var t = u_ops[hit * _SYN_SLOT + k]
+                t.q0 = run_q[r]
                 rep.append(t)
-            phase += ph
-            saved += run_count[r] - len(tmp)
+            phase += u_ph[hit]
+            saved += run_count[r] - ln
     var out = List[Instruction](capacity=n)
     var changed = False
     for i in range(n):

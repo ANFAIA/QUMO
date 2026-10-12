@@ -30,11 +30,16 @@ def main() raises:
     var ds = fs.sample_detectors(1_000_000, seed=1)
     print(ds, "in", ds.seconds, "s ->", fs.throughput(ds) / 1e9, "G shot*ops/s")
 
-    # 4. Logical error rates (Sinter-like: stop at 200 errors).
+    # 4. Logical error rates (Sinter-like: stop at 200 errors). 'mwpm' is the
+    #    exact sparse-blossom matcher (PyMatching 2's algorithm); 'mwpm_dense'
+    #    the older APSP + dense blossom one (same answers, slower at large d / p).
     for d in range(3, 8, 2):
         print(memory_experiment("surface_z", d, -1, 0.002, 2_000_000, "mwpm", 7, 200))
+    print(memory_experiment("surface_z", 9, -1, 0.005, 2_000_000, "mwpm", 7, 200))
 
-    # 5. Threshold sweep with the Union-Find decoder (CSV for plotting / agents).
+    # 5. Threshold sweep (CSV for plotting / agents) with the exact matcher;
+    #    pass "uf" for the union-find decoder (slightly worse p_L, and in
+    #    QUMO currently slower than sparse blossom).
     var ds_: List[Int] = [3, 5, 7]
     var ps: List[Float64] = [0.003, 0.006, 0.01]
-    print(threshold_sweep("surface_z", ds_, ps, 200_000, "uf", 3, 300))
+    print(threshold_sweep("surface_z", ds_, ps, 200_000, "mwpm", 3, 300))

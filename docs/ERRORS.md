@@ -575,3 +575,37 @@ Fix: Rename the gate.
 
 **OpenQASM delay is ignored.**  
 Fix: Model idle noise with '#pragma qumo depolarize1(p) q[i];'.
+
+<!-- Appended by the state-vector front (qumo.sim). Not yet mirrored in
+     qumo.ai.diagnostics.error_catalog(); add the two entries there to make
+     them visible to `qumo describe errors`. -->
+## QM-E4xx — State-vector cache blocking (appended)
+
+### QM-E407
+
+**Invalid index-bit swap layer (`StateVector.apply_swap_layer`): the qa/qb lists differ in length, a bit is outside [0, num_qubits), or a bit appears twice.**  
+Fix: Pass disjoint pairs of distinct in-range bits, one partner per entry (qa[i] <-> qb[i]).
+
+### QM-E408
+
+**Invalid cache-block size for `execute_plan_reordered` (need 1 <= nb <= num_qubits).**  
+Fix: Use execute_plan(), which picks nb = min(15, n - 5), or pass nb in [1, num_qubits].
+
+<!-- Hand-written block (not generated from error_catalog()): benchmark harness. -->
+## QM-E96x — Benchmark harness (bench/run_benchmarks.py)
+
+Reported in the result JSON (`suites.<name>.reason`) and on stderr; a suite failure never aborts
+the run. See [BENCHMARKING_ON_CLOUD_GPUS.md](BENCHMARKING_ON_CLOUD_GPUS.md).
+
+| Code | Meaning | Fix |
+|---|---|---|
+| QM-E960 | Unknown or invalid config, preset, suite or option | `python bench/run_benchmarks.py --list` |
+| QM-E961 | Mojo build of a benchmark binary failed | Run the recorded build command by hand; GPU toolchains: docs/GPU.md |
+| QM-E962 | A suite, command or build exceeded its timeout (process group killed) | Raise `timeout_s` in the config or use `--quick` / smaller `qubits` |
+| QM-E963 | Required tool or binary missing (mojo, make, ...) | `make setup`, or install the tool |
+| QM-E964 | Benchmark output could not be parsed | Inspect `output_tail` in the JSON; the binary's output format changed |
+| QM-E965 | Third-party baseline not installed or unusable (CUDA-Q, Aer GPU, Lightning) | Install it in the interpreter named by the config / `QUMO_*_PYTHON` |
+| QM-E966 | Qubit width dropped: does not fit `memory_fraction` of GPU memory or free host RAM | Larger GPU / High-RAM runtime, or lower `qubits` |
+| QM-E967 | No GPU, GPU outside the Mojo/MAX support list, or unsupported precision (fp64 on Metal) | Check `nvidia-smi` / `rocminfo`; `QUMO_FORCE_GPU=1` to try anyway |
+| QM-E968 | A benchmark binary (e.g. a GPU runtime error) or a baseline worker crashed / produced no result | Rerun the recorded command; for GPU errors add `MODULAR_DEBUG=device-sync-mode` |
+| QM-E969 | A test, `gpu-check` target or correctness check reported FAIL | Rerun the failing file: `.venv/bin/mojo run -I . <file>` |

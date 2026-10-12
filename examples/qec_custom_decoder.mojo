@@ -8,7 +8,8 @@ runs inside the parallel, bit-packed sample+decode loop.
 
 from qumo.qec.codes import repetition_code_memory, NoiseParams
 from qumo.qec.dem import detector_error_model
-from qumo.qec.decoders import Decoder, MatchingGraph, MwpmDecoder
+from qumo.qec.decoders import Decoder, MatchingGraph
+from qumo.qec.sparse_blossom import SparseBlossomDecoder
 from qumo.qec.experiments import sample_and_decode
 from qumo.sim.frame import FrameProgram
 
@@ -43,6 +44,6 @@ def main() raises:
     var prog = FrameProgram(cc.circuit)
     var toy = FinalRoundMajority(dem.num_detectors, dem.num_detectors - 1)
     var a = sample_and_decode(prog, toy, 500_000, 1)
-    var b = sample_and_decode(prog, MwpmDecoder(MatchingGraph(dem)), 500_000, 1)
+    var b = sample_and_decode(prog, SparseBlossomDecoder(MatchingGraph(dem)), 500_000, 1)
     print("toy decoder (illustration):", a, " p_L =", Float64(a.errors) / Float64(a.shots))
-    print("MWPM                      :", b, " p_L =", Float64(b.errors) / Float64(b.shots))
+    print("MWPM (sparse blossom)     :", b, " p_L =", Float64(b.errors) / Float64(b.shots))

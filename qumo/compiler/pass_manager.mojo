@@ -264,9 +264,9 @@ def _validate_args(id: Int, args: List[String]) raises:
             elif key == "heuristic":
                 if val != "layer" and val != "extended" and val != "auto":
                     raise Error("QM-E602: route heuristic must be 'auto', 'layer' or 'extended', got '" + val + "'. Hint: route(sabre,heuristic=auto).")
-            elif key == "star" or key == "mirror":
-                if val != "0" and val != "1" and val != "true" and val != "false" and val != "on" and val != "off" and not (key == "mirror" and val == "auto"):
-                    raise Error("QM-E602: route argument '" + key + "' must be on/off" + ("/auto" if key == "mirror" else "") + ", got '" + val + "'. Hint: route(sabre," + key + "=off).")
+            elif key == "star" or key == "mirror" or key == "commute":
+                if val != "0" and val != "1" and val != "true" and val != "false" and val != "on" and val != "off" and not (key == "mirror" and (val == "auto" or val == "free")) and not (key == "commute" and val == "auto"):
+                    raise Error("QM-E602: route argument '" + key + "' must be on/off" + ("/free/auto" if key == "mirror" else ("/auto" if key == "commute" else "")) + ", got '" + val + "'. Hint: route(sabre," + key + "=off).")
             elif key == "seed" or key == "trials" or key == "iterations" or key == "lookahead" or key == "vf2_steps" or key == "valve" or key == "swap_trials":
                 if not _is_int(val):
                     raise Error("QM-E602: route argument '" + key + "' needs an integer, got '" + val + "'. Hint: e.g. route(sabre," + key + "=4).")
@@ -274,7 +274,7 @@ def _validate_args(id: Int, args: List[String]) raises:
                 if not _is_float(val):
                     raise Error("QM-E602: route argument '" + key + "' needs a number, got '" + val + "'. Hint: e.g. route(sabre," + key + "=0.5).")
             else:
-                raise Error("QM-E602: unknown route argument '" + key + "'. Hint: valid keys are layout, seed, trials, iterations, lookahead, weight, decay, vf2_steps, valve, star, heuristic, swap_trials, absorb, absorb_alt, mirror, mirror_gain.")
+                raise Error("QM-E602: unknown route argument '" + key + "'. Hint: valid keys are layout, seed, trials, iterations, lookahead, weight, decay, vf2_steps, valve, star, heuristic, swap_trials, absorb, absorb_alt, mirror, mirror_gain, commute.")
         return
     if id == PassId.FIXPOINT:
         var inner = String()
@@ -607,7 +607,12 @@ def _apply(p: PassSpec, mut c: Circuit, target: Target, mut st: _State) raises -
             elif key == "mirror":
                 opts.mirror_auto = val == "auto"
                 opts.mirror = val != "0" and val != "false" and val != "off"
+                if val == "free":
+                    opts.mirror_gain = 1e9
             elif key == "mirror_gain": opts.mirror_gain = Float64(val)
+            elif key == "commute":
+                opts.commute_auto = val == "auto"
+                opts.commute = val != "0" and val != "false" and val != "off"
         _ = unroll_3q(c)
         var star_map = List[Int]()
         var star_note = String()
@@ -695,18 +700,61 @@ def _apply(p: PassSpec, mut c: Circuit, target: Target, mut st: _State) raises -
 
 
 def _stats(c: Circuit, mut g: Int, mut t: Int, mut d: Int):
-    g = c.num_unitary_gates()
-    t = c.num_2q_gates()
-    d = c.depth()
+    """Unitary gate count, 2q count and depth in one sweep (same values as
+    `num_unitary_gates`, `num_2q_gates`, `depth`)."""
+    var nq = c.num_qubits
+    var level = List[Int](length=nq, fill=0)
+    var lp = level.unsafe_ptr()
+    g = 0
+    t = 0
+    d = 0
+    for i in range(len(c.ops)):
+        var k = c.ops[i].kind
+        if k == Op.BARRIER:
+            var m = 0
+            for q in range(nq):
+                m = max(m, lp[unsafe_offset=q])
+            for q in range(nq):
+                lp[unsafe_offset=q] = m
+            continue
+        if not op_is_unitary(k):
+            continue
+        var a = op_arity(k)
+        if k != Op.I:
+            g += 1
+        if a == 2:
+            t += 1
+        var q0 = c.ops[i].q0
+        if a == 1:
+            var l = lp[unsafe_offset=q0] + 1
+            lp[unsafe_offset=q0] = l
+            d = max(d, l)
+        elif a == 2:
+            var q1 = c.ops[i].q1
+            var l = max(lp[unsafe_offset=q0], lp[unsafe_offset=q1]) + 1
+            lp[unsafe_offset=q0] = l
+            lp[unsafe_offset=q1] = l
+            d = max(d, l)
+        elif a == 3:
+            var q1 = c.ops[i].q1
+            var q2 = c.ops[i].q2
+            var l = max(max(lp[unsafe_offset=q0], lp[unsafe_offset=q1]), lp[unsafe_offset=q2]) + 1
+            lp[unsafe_offset=q0] = l
+            lp[unsafe_offset=q1] = l
+            lp[unsafe_offset=q2] = l
+            d = max(d, l)
+    _ = len(level)
 
 
 def _run_list(passes: List[PassSpec], mut c: Circuit, target: Target, mut st: _State,
               mut reports: List[PassReport]) raises:
+    # the "after" statistics of a pass are the "before" statistics of the
+    # next one: each pass boundary is measured once (one fused sweep)
+    var g0 = 0
+    var t0 = 0
+    var d0 = 0
+    _stats(c, g0, t0, d0)
     for p in passes:
-        var g0 = 0
-        var t0 = 0
-        var d0 = 0
-        _stats(c, g0, t0, d0)
         var start = perf_counter_ns()
         var note: String
         if p.id == PassId.FIXPOINT:
@@ -724,17 +772,19 @@ def _run_list(passes: List[PassSpec], mut c: Circuit, target: Target, mut st: _S
             var inner = parse_pipeline(inner_txt)
             var deltas = List[Int](length=len(inner), fill=0)
             var it = 0
+            var gb = g0
+            var tb = t0
+            var db = d0
             while it < max_it:
-                var gb = 0
-                var tb = 0
-                var db = 0
-                _stats(c, gb, tb, db)
                 for k in range(len(inner)):
                     var before = c.num_unitary_gates()
-                    var sub = List[PassReport]()
-                    var one = List[PassSpec]()
-                    one.append(inner[k].copy())
-                    _run_list(one, c, target, st, sub)
+                    if inner[k].id == PassId.FIXPOINT:
+                        var sub = List[PassReport]()
+                        var one = List[PassSpec]()
+                        one.append(inner[k].copy())
+                        _run_list(one, c, target, st, sub)
+                    else:
+                        _ = _apply(inner[k], c, target, st)
                     deltas[k] += c.num_unitary_gates() - before
                 it += 1
                 var ga = 0
@@ -742,19 +792,30 @@ def _run_list(passes: List[PassSpec], mut c: Circuit, target: Target, mut st: _S
                 var da = 0
                 _stats(c, ga, ta, da)
                 var improved = ta < tb or (ta == tb and ga < gb) or (ta == tb and ga == gb and da < db)
+                gb = ga
+                tb = ta
+                db = da
                 if not improved:
                     break
             note = String(it) + " iters:"
             for k in range(len(inner)):
                 note += " " + pass_name(inner[k].id) + " " + String(deltas[k])
-        else:
-            note = _apply(p, c, target, st)
+            var us = Float64(perf_counter_ns() - start) / 1000.0
+            reports.append(PassReport(String(p), g0, gb, t0, tb, d0, db, us, note))
+            g0 = gb
+            t0 = tb
+            d0 = db
+            continue
+        note = _apply(p, c, target, st)
         var us = Float64(perf_counter_ns() - start) / 1000.0
         var g1 = 0
         var t1 = 0
         var d1 = 0
         _stats(c, g1, t1, d1)
         reports.append(PassReport(String(p), g0, g1, t0, t1, d0, d1, us, note))
+        g0 = g1
+        t0 = t1
+        d0 = d1
 
 
 struct PassManager(Copyable, Writable):

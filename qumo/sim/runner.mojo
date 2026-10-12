@@ -18,7 +18,7 @@ from qumo.ir.gates import (
 from qumo.ir.circuit import Circuit, Instruction
 from qumo.ir.pauli import PauliSum
 from qumo.sim.statevector import (
-    StateVector, FPtr, k1_range, kdiag_range, kx_range, kc1_range, kcx_range,
+    StateVector, FPtr, LOGW, k1_range, kdiag_range, kx_range, kc1_range, kcx_range,
     kcphase_range, krzz_range, kswap_range, k2_range, kscale_range,
 )
 from qumo.sim.rng import Rng
@@ -295,55 +295,11 @@ def apply_kop(mut sv: StateVector, op: KOp):
         apply_instruction(sv, op.inst, List[Float64]())
 
 
-@always_inline
-def apply_kop_local(rp: FPtr, ip: FPtr, nb: Int, op: KOp):
-    """Apply one kernel op sequentially to a block of 2^nb amplitudes."""
-    var k = op.kind
-    var half = 1 << (nb - 1)
-    var quarter = 1 << (nb - 2)
-    if k == K.ONE:
-        var m = op.m
-        if m.is_diagonal():
-            kdiag_range(rp, ip, op.a, m.re[0], m.im[0], m.re[3], m.im[3], 0, half)
-        else:
-            k1_range(rp, ip, op.a, m, 0, half)
-    elif k == K.CX:
-        kcx_range(rp, ip, op.a, op.b, 0, quarter)
-    elif k == K.CPHASE:
-        kcphase_range(rp, ip, op.a, op.b, op.f0, op.f1, 0, quarter)
-    elif k == K.C1:
-        kc1_range(rp, ip, op.a, op.b, op.m, 0, quarter)
-    elif k == K.RZZ:
-        krzz_range(rp, ip, op.a, op.b, op.f0, op.f1, 0, 1 << nb)
-    elif k == K.SWAP:
-        kswap_range(rp, ip, op.a, op.b, 0, quarter)
-    elif k == K.TWO:
-        k2_range(rp, ip, op.a, op.b, op.m4, 0, quarter)
-
-
-def _apply_block(mut sv: StateVector, plan: List[KOp], lo: Int, hi: Int, nb: Int):
-    """Apply plan[lo:hi] (all on qubits < nb) block by block: each 2^nb
-    amplitude block is loaded once into cache and receives every op."""
-    var rp = sv.re.unsafe_ptr().as_unsafe_any_origin()
-    var ip = sv.im.unsafe_ptr().as_unsafe_any_origin()
-    var pp = plan.unsafe_ptr().as_unsafe_any_origin()
-    var nblocks = 1 << (sv.num_qubits - nb)
-
-    def task(blk: Int) {imm rp, imm ip, imm pp, imm lo, imm hi, imm nb}:
-        var base = blk << nb
-        var brp = rp.unsafe_offset(base)
-        var bip = ip.unsafe_offset(base)
-        for i in range(lo, hi):
-            apply_kop_local(brp, bip, nb, pp[unsafe_offset=i])
-
-    parallelize(task, nblocks)
-    _ = len(plan)
-
-
-def execute_plan(mut sv: StateVector, plan: List[KOp]):
+def execute_plan(mut sv: StateVector, plan: List[KOp]) raises:
     """Run a plan. Below BLOCK_MIN_QUBITS every op is one parallel pass (the
     state lives in cache anyway); above, the qubit-reordering cache-blocked
-    executor runs (`execute_plan_reordered`)."""
+    executor runs (`execute_plan_reordered`). Either way the state is left in
+    canonical little-endian order (qubit k = amplitude-index bit k)."""
     var n = sv.num_qubits
     if n < BLOCK_MIN_QUBITS:
         for op in plan:
@@ -374,11 +330,16 @@ def execute_plan(mut sv: StateVector, plan: List[KOp]):
 #     pass exchanges the global bits of S with local bits that are not needed
 #     soon (Belady: farthest next use). Otherwise the op runs as one global
 #     pass.
-#   * At the end the permutation is undone with <= 2 swap-layer passes (any
+#   * At the end the permutation is undone with <= 2 swap layers (any
 #     permutation is a product of two involutions), so the StateVector seen
 #     by every caller is in canonical little-endian order (qubit k = bit k):
 #     amplitudes, probabilities, sampling, expectation, measurement and reset
-#     are unaffected.
+#     are unaffected. A layer is one in-place pass, plus one vectorized SWAP
+#     pass per pair that involves an in-vector bit 0..2 (only SWAP gates on
+#     qubits 0..2 cause those: swap-in victims are chosen among bits >= 3).
+#   * Memory: no scratch buffers; the plan bookkeeping is O(len(plan)).
+#   * `execute_plan_reordered_stats` reports what was done (`ReorderStats`).
+#     See docs/SIMULATION.md for the design, numbers and limitations.
 # ---------------------------------------------------------------------------
 struct QubitMap(Copyable, Movable):
     """Logical <-> physical qubit permutation of the amplitude index bits."""
@@ -491,8 +452,8 @@ def apply_kop_block(rp: FPtr, ip: FPtr, nb: Int, base: Int, op: KOp):
     var a = op.a
     var b = op.b
     var full = 1 << nb
-    var half = 1 << (nb - 1)
-    var quarter = 1 << (nb - 2)
+    var half = full >> 1
+    var quarter = full >> 2  # 0 when nb < 2: no 2q op is then fully local
     if k == K.ONE:
         var m = op.m
         if a >= nb:  # diagonal on a global bit: one scalar per block
@@ -641,7 +602,7 @@ def _select_local(plan: List[KOp], wires: List[Int], need: List[Int], done: List
 
 
 def _swap_in(mut sv: StateVector, mut qm: QubitMap, smask: Int, plan: List[KOp],
-             need: List[Int], done: List[Bool], head: Int, nb: Int):
+             need: List[Int], done: List[Bool], head: Int, nb: Int) raises:
     """One index-bit swap pass making every bit of `smask` local; evicts the
     local bits outside `smask` whose next use is farthest away."""
     var local = (1 << nb) - 1
@@ -669,7 +630,9 @@ def _swap_in(mut sv: StateVector, mut qm: QubitMap, smask: Int, plan: List[KOp],
     for p in range(nb, sv.num_qubits):
         if (incoming >> p) & 1 == 1:
             ins.append(p)
-    # victims: farthest next use first, ties -> higher bit (longer contiguous runs)
+    # victims: bits >= LOGW first (an in-vector bit costs an extra vectorized
+    # pass in apply_swap_layer), then farthest next use, ties -> higher bit
+    # (longer contiguous runs in the swap pass)
     var outs = List[Int]()
     var taken = 0
     for _ in range(len(ins)):
@@ -677,7 +640,16 @@ def _swap_in(mut sv: StateVector, mut qm: QubitMap, smask: Int, plan: List[KOp],
         for p in range(nb):
             if (cand >> p) & 1 == 0 or (taken >> p) & 1 == 1:
                 continue
-            if best < 0 or dist[p] > dist[best] or (dist[p] == dist[best] and p > best):
+            if best < 0:
+                best = p
+                continue
+            var lane_p = p < LOGW
+            var lane_b = best < LOGW
+            if lane_p != lane_b:
+                if lane_b:
+                    best = p
+                continue
+            if dist[p] > dist[best] or (dist[p] == dist[best] and p > best):
                 best = p
         taken |= 1 << best
         outs.append(best)
@@ -719,10 +691,45 @@ def _collect_run(plan: List[KOp], wires: List[Int], need: List[Int], mut done: L
         done[j] = True
 
 
-def _restore_identity(mut sv: StateVector, mut qm: QubitMap):
+struct ReorderStats(Copyable, Writable):
+    """What the cache-blocked executor did (for tests, tuning and agents)."""
+
+    var block_bits: Int  # nb: log2 of the cache block size in amplitudes
+    var block_passes: Int  # cache-blocked passes (each = one sweep over the state)
+    var block_ops: Int  # ops applied inside those passes
+    var global_ops: Int  # ops applied as their own full-state pass
+    var swap_layers: Int  # index-bit swap passes that moved qubits into blocks
+    var swapped_bits: Int  # qubits moved in by those passes
+    var relabels: Int  # SWAP gates absorbed into the qubit map (no data moved)
+    var restore_layers: Int  # swap-layer passes of the final restore (0..2)
+    var restore_pairs: Int  # bit pairs exchanged by the final restore
+    var restore_min_bit: Int  # lowest physical bit moved by the restore (-1: none)
+
+    def __init__(out self, nb: Int):
+        self.block_bits = nb
+        self.block_passes = 0
+        self.block_ops = 0
+        self.global_ops = 0
+        self.swap_layers = 0
+        self.swapped_bits = 0
+        self.relabels = 0
+        self.restore_layers = 0
+        self.restore_pairs = 0
+        self.restore_min_bit = -1
+
+    def write_to(self, mut w: Some[Writer]):
+        w.write("ReorderStats(nb=", self.block_bits, ", block_passes=", self.block_passes,
+                ", block_ops=", self.block_ops, ", global_ops=", self.global_ops,
+                ", swap_layers=", self.swap_layers, ", swapped_bits=", self.swapped_bits,
+                ", relabels=", self.relabels, ", restore_layers=", self.restore_layers,
+                ", restore_pairs=", self.restore_pairs, ", restore_min_bit=", self.restore_min_bit, ")")
+
+
+def _restore_identity(mut sv: StateVector, mut qm: QubitMap, mut stats: ReorderStats) raises:
     """Undo the permutation with <= 2 swap-layer passes: the bit permutation
     (data at physical p must move to bit p2l[p]) is written as tau2 o tau1 of
-    two involutions, cycle by cycle (c_i -> c_{-i}, then c_i -> c_{1-i})."""
+    two involutions, cycle by cycle (c_i -> c_{-i}, then c_i -> c_{1-i}).
+    A 2-cycle needs only tau2; the identity needs nothing."""
     if qm.is_identity():
         return
     var n = sv.num_qubits
@@ -734,6 +741,8 @@ def _restore_identity(mut sv: StateVector, mut qm: QubitMap):
     for p in range(n):
         if visited[p] or qm.p2l[p] == p:
             continue
+        if stats.restore_min_bit < 0:
+            stats.restore_min_bit = p  # p ascends: first moved bit is the lowest
         var cyc = List[Int]()
         var x = p
         while not visited[x]:
@@ -750,30 +759,47 @@ def _restore_identity(mut sv: StateVector, mut qm: QubitMap):
             if i < j2:
                 a2.append(cyc[i])
                 b2.append(cyc[j2])
-    sv.apply_swap_layer(a1, b1)
-    for i in range(len(a1)):
-        qm.swap_phys(a1[i], b1[i])
-    sv.apply_swap_layer(a2, b2)
-    for i in range(len(a2)):
-        qm.swap_phys(a2[i], b2[i])
+    if len(a1) > 0:
+        sv.apply_swap_layer(a1, b1)
+        for i in range(len(a1)):
+            qm.swap_phys(a1[i], b1[i])
+        stats.restore_layers += 1
+        stats.restore_pairs += len(a1)
+    if len(a2) > 0:
+        sv.apply_swap_layer(a2, b2)
+        for i in range(len(a2)):
+            qm.swap_phys(a2[i], b2[i])
+        stats.restore_layers += 1
+        stats.restore_pairs += len(a2)
 
 
-def execute_plan_reordered(mut sv: StateVector, plan: List[KOp], nb: Int):
+def execute_plan_reordered(mut sv: StateVector, plan: List[KOp], nb: Int) raises:
     """Cache-blocked execution with qubit reordering (see the design notes
-    above). `nb` = log2 of the block size in amplitudes (BLOCK_BITS by
-    default; exposed for tuning). The state is in canonical order on return."""
+    above). `nb` = log2 of the block size in amplitudes, 1 <= nb <= n
+    (`execute_plan` uses min(BLOCK_BITS, n - MIN_BLOCKS_LOG2); other values
+    are for tuning and tests; QM-E408 otherwise). The state is in canonical
+    order on return."""
+    _ = execute_plan_reordered_stats(sv, plan, nb)
+
+
+def execute_plan_reordered_stats(mut sv: StateVector, plan: List[KOp], nb: Int) raises -> ReorderStats:
+    """`execute_plan_reordered` that also reports what it did."""
     var n = sv.num_qubits
+    if nb < 1 or nb > n:
+        raise Error("QM-E408: cache block of 2^" + String(nb) + " amplitudes is invalid for a " + String(n) + "-qubit state (need 1 <= nb <= " + String(n) + "). Hint: use execute_plan(), which picks nb = min(" + String(BLOCK_BITS) + ", n - " + String(MIN_BLOCKS_LOG2) + "), or pass nb in [1, num_qubits].")
+    var stats = ReorderStats(nb)
     var m = len(plan)
     var wires = List[Int](capacity=m)
     var need = List[Int](capacity=m)
     for op in plan:
         wires.append(_op_wires(op))
         need.append(_op_need(op))
+        if op.kind == K.SWAP:
+            stats.relabels += 1  # every SWAP gate becomes a relabel
     var done = List[Bool](length=m, fill=False)
     var qm = QubitMap(n)
     var local = (1 << nb) - 1
     var allw = (1 << n) - 1
-    var swaps = 0
     var run = List[KOp]()
     var head = 0
     while True:
@@ -785,6 +811,7 @@ def execute_plan_reordered(mut sv: StateVector, plan: List[KOp], nb: Int):
         if op.kind == K.OTHER:
             apply_kop(sv, _phys(op, qm))
             done[head] = True
+            stats.global_ops += 1
             continue
         if op.kind == K.SWAP:
             qm.relabel(op.a, op.b)
@@ -792,21 +819,27 @@ def execute_plan_reordered(mut sv: StateVector, plan: List[KOp], nb: Int):
             continue
         var head_local = (qm.phys_mask(need[head]) & ~local) == 0
         var sel = _select_local(plan, wires, need, done, head, qm, nb, allw)
-        var thr = SWAP_GAIN if swaps > 0 else SWAP_GAIN_FIRST
+        var thr = SWAP_GAIN if stats.swap_layers > 0 else SWAP_GAIN_FIRST
         if sel.gain >= thr:
+            stats.swapped_bits += Int(pop_count(sel.mask & ~local))
             _swap_in(sv, qm, sel.mask, plan, need, done, head, nb)
-            swaps += 1
+            stats.swap_layers += 1
         elif not head_local:
             apply_kop(sv, _phys(op, qm))
             done[head] = True
+            stats.global_ops += 1
             continue
         _collect_run(plan, wires, need, done, head, qm, nb, allw, run)
         if len(run) == 1:
             apply_kop(sv, run[0])
+            stats.global_ops += 1
         elif len(run) > 1:
             _apply_run(sv, run, nb)
+            stats.block_passes += 1
+            stats.block_ops += len(run)
         run.clear()
-    _restore_identity(sv, qm)
+    _restore_identity(sv, qm, stats)
+    return stats^
 
 
 def evolve_into(mut sv: StateVector, circuit: Circuit, params: List[Float64]) raises:
