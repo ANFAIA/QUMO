@@ -1,0 +1,20 @@
+TKET failures in published run: 26
+category                                         n time tk/qk  2q tk/qk  qk<  tk<  tie
+test_BV_100_transpile                            1      41.23     3.137    1    0    0
+test_BVlike_simplification_transpile             1       2.71     1.000    0    0    1
+test_QAOA_100_transpile                          1     125.89     1.223    1    0    0
+test_QASMBench_large:all-to-all                 53      63.21     1.033    4    5   44
+test_QASMBench_large:heavy-hex                  51      96.89     1.537   34   17    0
+test_QASMBench_medium:all-to-all                21      78.90     0.984    1    5   15
+test_QASMBench_medium:heavy-hex                 21     113.50     1.234   14    7    0
+test_QASMBench_small:all-to-all                 42      55.09     0.990    5    6   31
+test_QASMBench_small:heavy-hex                  42      47.30     1.037   12    8   22
+test_QFT_100_transpile                           1     364.16     1.913    1    0    0
+test_QV_100_transpile                            1     137.03     1.087    1    0    0
+test_clifford_100_transpile                      1     278.04     1.282    1    0    0
+test_feynman_transpile                          48      71.23     1.100   27   11   10
+test_hamiltonians:all-to-all                   100     162.58     1.212   57    8   35
+test_hamiltonians:heavy-hex                     97     246.43     1.643   81   10    6
+test_hamlib_hamiltonians_transpile              78     193.11     1.767   67    1   10
+test_square_heisenberg_100_transpile             1     185.19     1.007    1    0    0
+ALL n=560 time=116.47 2q=1.301 tket_fewer_2q=78 qiskit_fewer_2q=308

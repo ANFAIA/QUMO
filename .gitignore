@@ -1,0 +1,49 @@
+# ---------------------------------------------------------------- environments
+# Mojo toolchain + MAX runtime (make setup) and the Python benchmark venv
+.venv/
+bench/.venv/
+.pixi/
+.magic/
+.modular/
+*.egg-info/
+
+# ---------------------------------------------------------------- Mojo build output
+build/
+*.mojoc
+*.mojopkg
+__mojocache__/
+# compiled executables / shared libraries / debug info
+*.so
+*.dylib
+*.dll
+*.exe
+*.o
+*.a
+*.dSYM/
+# GPU cross-compilation sidecars (make gpu-check writes them under build/)
+*.ptx
+*.amdgcn
+*.metallib
+*.air
+
+# ---------------------------------------------------------------- Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.benchmarks/
+.ipynb_checkpoints/
+
+# ---------------------------------------------------------------- benchmarks
+# raw pytest-benchmark JSON is large; the gzipped copies are committed
+bench/results/benchpress/*.json
+bench/analysis/.cache/
+# local reference checkouts (Benchpress, published results)
+.ref/
+
+# ---------------------------------------------------------------- editors / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*~
+bench/results/neutral_campaign1.jsonl
