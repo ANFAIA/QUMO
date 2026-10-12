@@ -1,0 +1,13 @@
+QUMO
+Copyright 2026 The QUMO Authors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Third-party material redistributed in this repository keeps its own license:
+
+- bench/neutral/circuits/qb_small__*, qb_medium__*: normalised circuits from
+  QASMBench (Ang Li et al., Pacific Northwest National Laboratory);
+  license in bench/neutral/circuits/LICENSES/QASMBench-LICENSE.
+- bench/neutral/circuits/feynman__*: normalised circuits from the Feynman
+  benchmark suite (Matthew Amy); license in
+  bench/neutral/circuits/LICENSES/Feynman-LICENSE.md.

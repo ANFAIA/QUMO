@@ -165,3 +165,7 @@ The benchmark venv needs `qiskit qiskit-aer qiskit-ibm-runtime pytket pytket-qis
 ## Status
 
 Research prototype (v0.1.0). Public APIs are small and documented but may still change; Mojo itself is evolving quickly (the dialect is pinned in the contributor guide). Work in progress: GPU execution on real devices, qubit reordering in the simulator, sparse-blossom MWPM decoding, parity with Qiskit on the densest 100+-qubit circuits.
+
+## License
+
+QUMO is licensed under the [Apache License, Version 2.0](LICENSE). See [NOTICE](NOTICE) for attribution; the third-party benchmark circuits in `bench/neutral/circuits` keep their own licenses (`bench/neutral/circuits/LICENSES`).
