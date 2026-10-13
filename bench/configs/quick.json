@@ -41,6 +41,22 @@
       ],
       "reps": 1,
       "timeout_s": 3600,
+      "build_timeout_s": 2400,
+      "cpu_max": 20
+    },
+    "sv_gpu_probe": {
+      "enabled": false,
+      "precisions": [
+        "fp32",
+        "fp64"
+      ],
+      "qubits": [
+        18,
+        20
+      ],
+      "reps": 1,
+      "args": [],
+      "timeout_s": 1800,
       "build_timeout_s": 2400
     },
     "baseline_aer": {
@@ -50,7 +66,8 @@
         "gpu"
       ],
       "precisions_cpu": [
-        "fp64"
+        "fp64",
+        "fp32"
       ],
       "precisions_gpu": [
         "fp32",
@@ -108,7 +125,7 @@
       ],
       "qubits": [
         16,
-        18
+        20
       ],
       "qubits_gpu": [
         16,

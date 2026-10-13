@@ -67,6 +67,57 @@
           20
         ],
         "reps": 1
+      },
+      "cpu_max": 26,
+      "variants": [
+        {
+          "label": "REG_BITS=4",
+          "defines": [
+            "QUMO_GPU_REG_BITS=4"
+          ],
+          "precisions": [
+            "fp32"
+          ],
+          "note": "diagnostic A/B of 16 amplitudes per thread (GPU plan step 3); default stays REG_BITS=3"
+        },
+        {
+          "label": "LOW_BITS=4",
+          "env": {
+            "QUMO_GPU_LOW_BITS": "4"
+          },
+          "enabled": false,
+          "note": "needs the runtime knob of GPU plan step 4; without it this series would duplicate the default"
+        },
+        {
+          "label": "LOW_BITS=3",
+          "env": {
+            "QUMO_GPU_LOW_BITS": "3"
+          },
+          "enabled": false,
+          "note": "needs the runtime knob of GPU plan step 4; without it this series would duplicate the default"
+        }
+      ]
+    },
+    "sv_gpu_probe": {
+      "enabled": true,
+      "precisions": [
+        "fp32",
+        "fp64"
+      ],
+      "qubits": [
+        24,
+        26
+      ],
+      "reps": 3,
+      "args": [],
+      "timeout_s": 1800,
+      "build_timeout_s": 2400,
+      "quick": {
+        "qubits": [
+          18,
+          20
+        ],
+        "reps": 1
       }
     },
     "baseline_aer": {
@@ -76,7 +127,8 @@
         "gpu"
       ],
       "precisions_cpu": [
-        "fp64"
+        "fp64",
+        "fp32"
       ],
       "precisions_gpu": [
         "fp32",
@@ -108,7 +160,37 @@
           20
         ],
         "reps": 1
-      }
+      },
+      "variants": [
+        {
+          "label": "fusion<=2q",
+          "options": {
+            "fusion_max_qubit": 2
+          },
+          "devices": [
+            "gpu"
+          ],
+          "qubits": [
+            20,
+            40
+          ],
+          "note": "diagnostic: narrower Aer fusion"
+        },
+        {
+          "label": "cuStateVec",
+          "options": {
+            "cuStateVec_enable": true
+          },
+          "devices": [
+            "gpu"
+          ],
+          "qubits": [
+            20,
+            40
+          ],
+          "note": "diagnostic: Aer on cuStateVec (records a variant problem if this qiskit-aer-gpu build lacks it)"
+        }
+      ]
     },
     "baseline_cudaq": {
       "enabled": true,
@@ -142,7 +224,76 @@
           20
         ],
         "reps": 1
-      }
+      },
+      "variants": [
+        {
+          "label": "no fusion",
+          "env": {
+            "CUDAQ_FUSION_MAX_QUBITS": "0",
+            "CUDAQ_FUSION_DIAGONAL_GATE_MAX_QUBITS": "0"
+          },
+          "qubits": [
+            20,
+            40
+          ],
+          "note": "diagnostic: one cuStateVec call per gate (unfused execution model); the default series stays primary"
+        },
+        {
+          "label": "fusion<=2q",
+          "env": {
+            "CUDAQ_FUSION_MAX_QUBITS": "2"
+          },
+          "qubits": [
+            24,
+            26
+          ],
+          "note": "diagnostic: dense fusion width sweep (tests the ~40-45 sweeps inferred from the T4 timings)"
+        },
+        {
+          "label": "fusion<=3q",
+          "env": {
+            "CUDAQ_FUSION_MAX_QUBITS": "3"
+          },
+          "qubits": [
+            24,
+            26
+          ],
+          "note": "diagnostic: dense fusion width sweep (tests the ~40-45 sweeps inferred from the T4 timings)"
+        },
+        {
+          "label": "fusion<=4q",
+          "env": {
+            "CUDAQ_FUSION_MAX_QUBITS": "4"
+          },
+          "qubits": [
+            24,
+            26
+          ],
+          "note": "diagnostic: dense fusion width sweep (tests the ~40-45 sweeps inferred from the T4 timings)"
+        },
+        {
+          "label": "fusion<=5q",
+          "env": {
+            "CUDAQ_FUSION_MAX_QUBITS": "5"
+          },
+          "qubits": [
+            24,
+            26
+          ],
+          "note": "diagnostic: dense fusion width sweep (tests the ~40-45 sweeps inferred from the T4 timings)"
+        },
+        {
+          "label": "fusion<=6q",
+          "env": {
+            "CUDAQ_FUSION_MAX_QUBITS": "6"
+          },
+          "qubits": [
+            24,
+            26
+          ],
+          "note": "diagnostic: dense fusion width sweep (tests the ~40-45 sweeps inferred from the T4 timings)"
+        }
+      ]
     },
     "baseline_lightning": {
       "enabled": true,
@@ -158,7 +309,7 @@
       ],
       "qubits": [
         16,
-        24
+        26
       ],
       "qubits_gpu": [
         16,
@@ -174,7 +325,7 @@
       "quick": {
         "qubits": [
           16,
-          18
+          20
         ],
         "qubits_gpu": [
           16,

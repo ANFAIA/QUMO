@@ -87,23 +87,37 @@ Rules every provider follows:
 | `CompiledCircuit` | `qasm` (physical, OpenQASM 2), `source_qasm` (logical), `num_qubits/num_logical/num_clbits`, `initial_layout/final_layout` (physical qubit of logical *l*), `measure_map` (clbit → physical), `ops`, `two_qubit_gates`, `depth`, `region`, `estimated_success()` |
 | `CostEstimate` | `unit` (`QPU-seconds`, `HQC`, `eHQC`, `free`), `amount`, `formula`, `usd` (only with a known list price), `breakdown`, `notes` |
 | `JobHandle` | `job_id, provider, backend, shots, local, status, meta` (layouts, measure map, provider options; never tokens), `counts` (local runs) |
-| `Provider` (protocol) | `name`, `list_backends(online)`, `target(backend)`, `is_local(backend)`, `prepare(compiled, backend) -> (payload, report)`, `validate(payload, backend)`, `estimate_cost(compiled, shots, backend, payload=None)`, `submit(compiled, shots, backend, seed=None, payload=None, report=None, **opts) -> JobHandle`, `status(job)`, `result(job) -> counts`; optional `provider_compile` / `circuit_stats` (comparison), `public_options()` |
+| `Provider` (protocol) | `name`, `list_backends(online)`, `target(backend)`, `is_local(backend)`, `prepare(compiled, backend) -> (payload, report)`, `validate(payload, backend)`, `estimate_cost(compiled, shots, backend, payload=None)`, `submit(compiled, shots, backend, seed=None, payload=None, report=None, confirm=False, **opts) -> JobHandle` (refuses remote backends with QM-E957 unless `confirm=True`), `status(job)`, `result(job) -> counts`; optional `provider_compile` / `circuit_stats` (comparison), `public_options()` |
 
-High-level workflow (`qumo_hardware.runner`), used by the CLI, examples and agents:
+High-level workflow (`qumo_hardware.runner`), used by the CLI, examples and agents.
+This snippet runs from the repository root without any account (`make py` first):
 
 ```python
 import sys; sys.path.insert(0, "plugins/hardware")
 from qumo_hardware import runner, HardwareError
 
-plan = runner.plan(open("examples/ghz.qasm").read(), "quantinuum", "H2-1", shots=200)   # never submits
+qasm = open("examples/ghz.qasm").read()
+plan = runner.plan(qasm, "quantinuum", "H2-1", shots=200)            # never submits, needs no login
 print(plan.to_dict()["cost_summary"], plan.compiled.two_qubit_gates)
-out = runner.run(qasm, "local", "qumo-sim:ibm:fake_torino", shots=1000)                # local: runs
+out = runner.run(qasm, "local", "qumo-sim:ibm:fake_torino", shots=1000)   # local: runs now
+print(out["counts"])
 try:
-    runner.run(qasm, "ibm", "ibm_fez", shots=1000)                                       # remote: QM-E957
+    runner.run(qasm, "quantinuum", "H2-1", shots=200)                 # remote: refused with QM-E957
 except HardwareError as e:
-    print(e.code, e.details["plan"]["cost"])                                             # review, then confirm=True
-st = runner.job_status(job_id); res = runner.job_result(job_id, wait=True)
+    if e.code != "QM-E957":                                             # e.g. QM-E952 (credentials)
+        raise
+    print(e.details["plan"]["cost_summary"])                            # review, then confirm=True
+# After a confirmed remote run (out = runner.run(..., confirm=True, wait=False)):
+#   runner.job_status(out["job_id"]); runner.job_result(out["job_id"], wait=True)
 ```
+
+`runner.run` returns a JSON-ready dict: the plan plus `submitted`, `job_id`,
+`status`, `counts`; `warning` and `next` when a waited-for job has no result
+(still queued at `timeout`, or ended in `ERROR`/`CANCELLED`);
+`server_dry_run`/`mock_results` when the counts are mock data (IBM
+`--ibm-dry-run`). `on_submitted=callback` is called with the `JobHandle` right
+after submission; if the wait is interrupted (Ctrl-C), the `KeyboardInterrupt`
+carries the job id as `exc.qumo_job_id`.
 
 ## 3. CLI
 
@@ -113,22 +127,31 @@ Every command takes `--json` (machine output on stdout; failures as
 
 | Command | Purpose |
 |---|---|
-| `run CIRCUIT -p PROVIDER -b BACKEND [--shots N] [--level 0-3] [--seed S] [--dry-run] [--yes] [--max-cost X] [--no-wait] [--timeout S] [--provider-transpile] [--fractional] [--ibm-dry-run] [--params JSON] [--show-qasm]` | compile with QUMO, validate, estimate, and run (remote only with `--yes`) |
+| `run CIRCUIT -p PROVIDER -b BACKEND [--shots N] [--level 0-3] [--seed S] [--dry-run] [--yes] [--max-cost X] [--no-wait] [--timeout S] [--provider-transpile] [--fractional] [--ibm-dry-run] [--params JSON] [--show-qasm]` | compile with QUMO, validate, estimate, and run (remote only with `--yes`). `--max-cost` is in the provider's unit (IBM: QPU seconds; Quantinuum: HQC/eHQC) and is also sent as the server-side cap |
 | `estimate CIRCUIT -p P -b B --shots N` | plan only, never submits |
 | `backends [-p P] [--online]` | static/offline list; `--online` also asks the provider (credentials) |
 | `target -p P -b B [--full]` | the neutral `TargetSpec` |
 | `status JOB` / `result JOB [--wait]` / `jobs` | job store and provider queries |
 | `errors` | the QM-E95x catalogue |
 
-Exit codes: `0` ok, `1` error (QM-E95x), `2` usage, `3` **not submitted: confirmation required**.
+Exit codes: `0` ok, `1` error (QM-E95x; also when `run` waited for a job that
+ended in `ERROR` or `CANCELLED`), `2` usage, `3` **not submitted: confirmation
+required**, `130` interrupted (Ctrl-C) while waiting: the job id is printed
+and the job keeps running (`result JOB --wait` fetches it later). While `run`
+waits for a remote job it prints `submitted job <id>` to stderr first.
+Plan notes (for example `--fractional ignored: ...`) are printed as `note`
+lines and returned in `notes`.
 `CIRCUIT` may be `-` (stdin). IBM options: `--channel`, `--instance`, `--account`;
 Quantinuum: `--project` (Nexus project, default `qumo-hardware`).
 
 ## 4. IBM Quantum
 
 **Access.** Create an IBM Cloud account at <https://quantum.cloud.ibm.com>, an
-instance (Open Plan: free QPU minutes each period; Pay-As-You-Go: billed per QPU
-second, list price USD 96/min), and an API key. Credentials are read **only**
+instance and an API key. Plans (IBM pricing page, checked 2026-10-12): Open
+Plan, free, "up to 10 minutes of runtime per month" (IBM's documentation
+describes it as 10 QPU minutes per 28-day rolling window); Pay-As-You-Go
+"starts at $96 USD / minute", billed per second of QPU usage; Flex and
+Premium are contracts with lower per-minute prices. Credentials are read **only**
 through qiskit-ibm-runtime's standard mechanisms; the plugin never reads, stores
 or prints a token:
 
@@ -142,7 +165,11 @@ python -c "from qiskit_ibm_runtime import QiskitRuntimeService as S; S.save_acco
 `QiskitRuntimeService()` resolves the account (env vars first, then the saved
 default; channel `ibm_quantum_platform` unless `QISKIT_IBM_CHANNEL`/`--channel`
 says `ibm_cloud`). Missing or rejected credentials raise **QM-E952** with this
-hint, never a stack trace.
+hint, never a stack trace. Other IBM SDK failures are mapped too: backend
+lookup → QM-E953, job submission → QM-E959 (QM-E955 for input validation
+errors, QM-E952 for authorisation errors), job lookup/status/result →
+QM-E959. Their message keeps the exception type and a shortened first line in
+which anything that looks like a credential is replaced by `<redacted>`.
 
 **Target.** `target_from_qiskit(backend)` reads `backend.target`: basis
 `rz, sx, x` + `cz` (Heron: ibm_torino, ibm_fez, ibm_marrakesh, ibm_kingston, ...)
@@ -151,7 +178,10 @@ readout errors, per-edge 2q errors, `max_shots`, `default_rep_delay`. Directiona
 gates set `directed_edges`. `--fractional` fetches the backend with
 `use_fractional_gates=True` and adds `rzz` and `rx` to the basis (Heron); QUMO
 then emits arbitrary-angle `rzz`, folded into IBM's allowed range [0, π/2] by
-`FoldRzzAngle` and checked with qiskit-ibm-runtime's rzz validator.
+`FoldRzzAngle` and checked with qiskit-ibm-runtime's rzz validator. If the
+backend has no fractional gates, `--fractional` has no effect and the plan says
+so in a note (`--fractional ignored: ...`). Offline, the snapshot
+`fake_fractional` (5 qubits) has them; `backends --provider ibm` lists it.
 
 **Payload.** QUMO's compiled circuit is an ISA circuit over all device qubits:
 `to_qiskit` maps every gate to the Qiskit standard gate class (`ECRGate`,
@@ -162,15 +192,26 @@ and Qiskit's `GatesInBasis(target)`.
 the plugin uses the replacement client-side
 `qiskit_ibm_runtime.executor_sampler.Sampler` (built on `Executor`) in job mode,
 with gate/measure twirling and dynamical decoupling **off** (QUMO's circuit runs
-as compiled). `--ibm-dry-run` forwards IBM's server-side `dry_run=True` (job
-validation and usage estimate with mock results; access may be restricted).
+as compiled). Every remote job carries a server-side cap,
+`SamplerOptions.max_execution_time` (IBM cancels a job whose QPU usage exceeds
+it): `--max-cost` (QPU seconds, rounded up) when given, otherwise
+`max(30 s, 2 × estimate)`, recorded in the job record as
+`max_execution_time`. `--ibm-dry-run` forwards IBM's server-side
+`dry_run=True` (job validation and usage estimate; access may be restricted);
+its counts are **mock data**, so `run` and `result` mark them with
+`"server_dry_run": true, "mock_results": true` and a `warning`.
 Results: `PrimitiveResult[0].join_data().get_counts()`.
 
 **Local mode.** Backends named `fake_*` (FakeTorino, FakeFez, FakeKingston,
 FakeSherbrooke, ...; calibration snapshots in qiskit-ibm-runtime) run through
 the *same* Sampler code path on Qiskit Aer with the snapshot's noise model, no
-account. `qumo-sim:ibm:fake_torino` simulates the exact ISA payload ideally with
-QUMO (only active qubits are simulated).
+account. Aer simulates only the active qubits, but with memory exponential in
+their number, so payloads with more than 26 active qubits are refused with
+QM-E956 before Aer starts. `qumo-sim:ibm:fake_torino` simulates the exact ISA
+payload ideally with QUMO (only active qubits are simulated). Loading the
+snapshots makes qiskit-ibm-runtime warn that `fake_nighthawk`'s properties are
+not typical; the plugin silences that warning and shows it as a note on
+`fake_nighthawk` only.
 
 **Cost.** IBM bills QPU time. Estimate (IBM's run-time guide):
 `2 s + shots × (rep_delay + circuit_duration)`, with `rep_delay =
@@ -198,7 +239,7 @@ python -c "import qnexus as qnx; qnx.login_with_credentials()"   # prompt (email
 | `H2-1E`, `H2-2E`, `H2-Emulator` | Nexus emulators (eHQC) | pytket circuit |
 | `H2-1SC`, `H2-2SC` | syntax checkers (free) | pytket circuit |
 | `Helios-1` | hardware, 98 qubits | HUGR, `HeliosConfig(system_name=...)` |
-| `Helios-1E`, `Helios-1E-lite` | Nexus emulators (eHQC) | HUGR + `HeliosEmulatorConfig(n_qubits=...)` |
+| `Helios-1E`, `Helios-1E-lite` | Nexus emulators (eHQC) | HUGR + `HeliosEmulatorConfig()`; the qubit count goes with the job (`start_execute_job(n_qubits=[...])`; the `HeliosEmulatorConfig.n_qubits` field is deprecated) |
 | `Helios-1SC` | syntax checker / cost estimator | HUGR |
 | `H2-1LE` | **local**, offline | pytket circuit, pytket-quantinuum local emulator (`[pecos]` extra) |
 | `selene` | **local**, offline | HUGR, Guppy + Selene state-vector emulator |
@@ -218,6 +259,24 @@ circuit, emits `result("c", bits)` and discards the qubits; the HUGR package is
 uploaded with `qnx.hugr.upload` and run with `HeliosConfig`. Submission:
 `qnx.start_execute_job(programs, n_shots, backend_config, name, project, max_cost, n_qubits)`;
 status: `qnx.jobs.status`; results: `qnx.jobs.results(job)[0].download_result()`.
+
+**Classical registers.** QUMO payloads have one register `c` with one bit per
+user clbit. pytket's OpenQASM reader limits registers to 32 bits by default;
+the bridge raises that limit to the register width. H2 programs allow at most
+63 bits per register (`max_classical_register_width` in pytket-quantinuum's
+device data), so for H2 a wider `c` is split into `c_0, c_1, ...` of 63 bits
+(clbit *k* → `c_{k // 63}[k % 63]`). The plan shows the layout
+(`finishing.clbit_registers`), the job record stores it, and results are read
+back through it, so counts stay in the user's bit order. Helios and Selene
+return bool arrays and keep one register `c` (up to 98 bits on Helios-1).
+Conditions (`if(c==k)`) compare a whole register, so a condition on a register
+wider than 63 bits cannot run on H2 and is refused with QM-E956.
+
+**Classical conditions on Helios.** Helios programs are HUGR built by
+guppylang's `load_pytket`, which cannot lower conditional gates yet (the Selene
+HUGR-QIS compiler reports "Pytket op 'Conditional' is not currently
+supported"). Such circuits are refused with QM-E955 before anything is
+uploaded; run them on an H2 backend (`H2-1`, `H2-1E`, `H2-1SC`, `H2-1LE`).
 
 **Cost.** `HQC = 5 + C (N1q + 10 N2q + 5 Nm) / 5000`, C = shots, computed on the
 native payload: N1q = PhasedX gates (Rz is virtual), N2q = ZZPhase/ZZMax/TK2,
@@ -246,10 +305,21 @@ the syntax checker). Set `QUMO_QUANTINUUM_USD_PER_HQC` to get a USD figure
 * Default is safe: `run` submits to a **remote** backend (anything not local)
   only with `--yes` / `confirm=True`. Without it, it compiles, validates,
   estimates, prints backend, shots and cost, and exits with code 3 / raises
-  QM-E957 whose `details.plan` holds the full plan for review.
+  QM-E957 whose `details.plan` holds the full plan for review. The providers
+  enforce the same rule again: `Provider.submit(..., confirm=False)` refuses a
+  remote backend with QM-E957, so calling a provider directly is not a way
+  around the gate.
 * `--dry-run` and `estimate` never submit. `--max-cost` refuses (QM-E956)
-  when the estimate is above the limit; Quantinuum jobs always carry a
-  server-side `max_cost`.
+  when the estimate is above the limit. Every remote job also carries a
+  server-side cap: Quantinuum `max_cost` (`--max-cost`, else
+  `1.25 × estimate + 1` HQC) and IBM `max_execution_time` (`--max-cost`, else
+  `max(30 s, 2 × estimate)` QPU seconds).
+* `qumo_py.so` (the QUMO compiler) is loaded from an explicit path only:
+  `QUMO_PY_PATH` (a `.so` file or a directory that holds `qumo_py.so`), else
+  `build/qumo_py.so` of the checkout that contains the package. The current
+  directory and `sys.path` are never searched, so running the CLI inside an
+  untrusted directory cannot load a planted extension. A non-editable
+  `pip install` of the plugin therefore needs `QUMO_PY_PATH`.
 * Credentials only through the providers' standard mechanisms (IBM env vars or
   saved account; qnexus login store). No token is read, written or printed by
   the plugins, and none is stored in the repository or in job records
@@ -272,8 +342,8 @@ New range **QM-E950–QM-E959** (inside QUMO's `QM-E9xx` interface range;
 | QM-E952 | credentials missing, expired or rejected | IBM: `QISKIT_IBM_TOKEN` + `QISKIT_IBM_INSTANCE` or `save_account`; Quantinuum: `qnx.login()` |
 | QM-E953 | unknown provider/backend, or not available to the account | `backends --provider P [--online]` |
 | QM-E954 | cannot compile (parse error, too many qubits, unbound parameters, missing file) | fix the circuit / pick a larger device |
-| QM-E955 | payload rejected by the provider's own validation | report; compare with `--provider-transpile` |
-| QM-E956 | shot / size / cost limit exceeded | fewer shots, or raise `--max-cost` |
+| QM-E955 | payload rejected by the provider's own validation, or it cannot be lowered to the provider's program format (e.g. conditions on Helios) | follow the hint; for a bridge failure report the payload (`--show-qasm`) |
+| QM-E956 | shot, size or cost limit exceeded; the hint is specific to the limit | shots: lower `--shots` or split the run; local emulator size: shrink the circuit or use a cloud emulator; cost: raise `--max-cost` only if intended |
 | QM-E957 | not submitted: confirmation required | review the plan, add `--yes` |
 | QM-E958 | unknown job id | `jobs` |
 | QM-E959 | job failed, cancelled or not finished | `status JOB`, `result JOB --wait` |
@@ -292,8 +362,8 @@ guppylang-internals 1.0.0a4), selene-sim 0.2.18.
 uv pip install --python bench/.venv/bin/python qnexus pytket-quantinuum          # IBM deps already in bench/.venv
 uv pip install --prerelease=allow --python bench/.venv/bin/python \
     "pytket-quantinuum[pecos]==0.59.3" "pytket==2.18.5" "guppylang==1.0.0a4" "guppylang-internals==1.0.0a4"
-bench/.venv/bin/python -m pytest plugins/hardware/tests -q                        # ~115 tests, no accounts
-QUMO_HW_SLOW=1 bench/.venv/bin/python -m pytest plugins/hardware/tests -q -m slow # H2-1LE + selene emulators
+bench/.venv/bin/python -m pytest plugins/hardware/tests -q                        # 160 tests (156 run, 4 slow skipped), no accounts
+QUMO_HW_SLOW=1 bench/.venv/bin/python -m pytest plugins/hardware/tests -q -m slow # + the 4 slow H2-1LE / Selene emulator tests
 ```
 
 Pin `pytket` when adding the `pecos` extra: an unpinned resolve can downgrade
@@ -301,11 +371,20 @@ pytket to 1.x. The tests cover: TargetSpec extraction from five IBM snapshots
 (+ fractional, directionality), Quantinuum and local targets; QUMO compilation
 → valid ISA (plugin and qiskit-ibm-runtime checks) and statevector
 equivalence up to layout on IBM, Quantinuum and five local topologies; bit
-order end to end (single X on each qubit, routed circuits, permuted
-measurements, auto measure-all, GHZ, noisy FakeTorino, H2-1LE, Selene);
+order end to end with non-palindromic expected keys (single X on each qubit,
+routed circuits, permuted measurements, auto measure-all, GHZ, noisy
+FakeTorino, H2-1LE, Selene); wide classical registers on Quantinuum (33, 63,
+64 and 98 clbits: plan, payload registers, and a round trip through a mocked
+Nexus whose fake device evaluates the uploaded payload; register split on the
+real H2-1LE emulator); conditions refused on Helios and on > 63-bit H2
+registers; both OpenQASM 2 exporter styles loading 1:1 into Qiskit and pytket;
 native Quantinuum payloads (1:1 gate counts, operator equivalence); HQC and
-QPU-time formulas; mocked qnexus and IBM submissions/status/results; CLI JSON,
-exit codes, refusal without `--yes`, credential errors without tracebacks.
+QPU-time formulas; IBM server-side cap, mock-result flags, SDK errors mapped to
+QM-E95x with redaction, the fake-backend size guard and `--fractional` notes;
+mocked qnexus and IBM submissions/status/results; provider-level confirmation;
+`qumo_py.so` never loaded from the working directory; CLI JSON, exit codes
+(including failed jobs and Ctrl-C), refusal without `--yes`, credential errors
+without tracebacks, no `fake_nighthawk` warning.
 
 ## 9. Adding a provider (Braket, IonQ, IQM, ...)
 
@@ -344,10 +423,11 @@ Notes for the next ones:
 * Single circuit per job (no PUB broadcasting / parameter sweeps / sessions or
   batches yet); parameters are bound once before submission.
 * Dynamic circuits: mid-circuit measurements and conditions on whole classical
-  registers (`if(c==k)`) compile and run locally; single-bit conditions (e.g.
-  `examples/teleport.qasm`) are refused with QM-E954 because the bridges use
-  OpenQASM 2 (an OpenQASM 3 bridge is the fix). Dynamic circuits are untested
-  on IBM and Helios hardware.
+  registers (`if(c==k)`) compile and run locally and on H2 (registers up to 63
+  bits); single-bit conditions (e.g. `examples/teleport.qasm`) are refused
+  with QM-E954 because the bridges use OpenQASM 2 (an OpenQASM 3 bridge is the
+  fix); Helios refuses conditions (QM-E955, see section 5). Dynamic circuits
+  are untested on IBM and Quantinuum hardware.
 * Region selection is a greedy heuristic on per-qubit readout and per-edge
   two-qubit errors; QUMO's own layout does not yet consume error rates.
 * Cost figures are estimates (IBM: QPU-time heuristic; Quantinuum: HQC formula
@@ -360,9 +440,18 @@ Notes for the next ones:
   and with mocked Nexus calls, not on Helios hardware.
 * The IBM ECR direction fix and fractional-angle folding use Qiskit passes
   (semantics-preserving and reported); everything else is QUMO's output.
-* QUMO's OpenQASM 2 export declares `ecr` through `rzx`, which `qelib1.inc`
-  does not define; `qasm_bridge` replaces such declarations by native gate
-  classes (the exporter in `qumo/ir/qasm2.mojo` should declare `rzx` too).
+* `qasm_bridge` removes the `gate` definitions of gates the SDK knows natively
+  with the same matrix (Qiskit: `ecr`, `iswap`, `iswapdg`, `ryy`, `rzx`, `ccz`
+  as built-in classes, the rest via `LEGACY_CUSTOM_INSTRUCTIONS`; pytket:
+  `sx, sxdg, swap, cswap, crx, cry, rxx, rzz, ecr`), so each hardware gate
+  stays one SDK gate. This started as a workaround for an older exporter that
+  defined `ecr` through the undeclared `rzx`; it is also what keeps `rzz` a
+  single `ZZPhase` now that the fixed exporter defines every non-qelib1 gate.
+  Both exporter styles are covered by tests.
+* The IBM fake-backend guard (26 active qubits) and the local emulator limits
+  are memory guards, not properties of the devices.
+* The IBM server-side cap uses a heuristic estimate; if IBM cancels a job for
+  exceeding `max_execution_time`, rerun with a larger `--max-cost`.
 
 ## Sources
 
@@ -371,7 +460,11 @@ Notes for the next ones:
   <https://quantum.cloud.ibm.com/docs/en/api/qiskit-ibm-runtime/release-notes>
 * IBM, "Estimate job run time" (overhead + (rep_delay + circuit length) × executions):
   <https://quantum.cloud.ibm.com/docs/en/guides/estimate-job-run-time>
-* IBM Quantum pricing (Open Plan, Pay-As-You-Go USD 96/min): <https://www.ibm.com/quantum/pricing>
+* IBM Quantum pricing (Open Plan "up to 10 minutes of runtime per month"; Pay-As-You-Go
+  "starts at $96 USD / minute", billed per second; checked 2026-10-12): <https://www.ibm.com/quantum/pricing>
+* IBM, "Maximum execution time" (`max_execution_time` is QPU usage, jobs over it are cancelled,
+  three-hour service maximum; Open Plan 10 minutes per 28-day rolling window):
+  <https://quantum.cloud.ibm.com/docs/en/guides/max-execution-time>
 * qiskit-ibm-runtime 0.50 source: `accounts/management.py` (QISKIT_IBM_* variables,
   `~/.qiskit/qiskit-ibm.json`), `executor_sampler/sampler.py`, `utils/utils.py`
   (`is_isa_circuit`, rzz angle check), `transpiler/passes/basis/fold_rzz_angle.py`.
@@ -388,4 +481,8 @@ Notes for the next ones:
 * pytket-quantinuum changelog (remote submission removed in 0.56, local emulator kept):
   <https://docs.quantinuum.com/tket/extensions/pytket-quantinuum/changelog.html>
 * qnexus 0.51.1 and quantinuum-schemas 7.8.2 source (`QuantinuumConfig`,
-  `HeliosConfig`, `KNOWN_NEXUS_HELIOS_EMULATORS`, token store `~/.qnx/auth`).
+  `HeliosConfig`, `HeliosEmulatorConfig.n_qubits` deprecation,
+  `KNOWN_NEXUS_HELIOS_EMULATORS`, token store `~/.qnx/auth`).
+* pytket 2.18.5 `pytket.qasm.circuit_from_qasm_str(..., maxwidth=32)` and
+  pytket-quantinuum 0.59.3 `backends/api_wrappers.py`
+  (`max_classical_register_width: 63`).

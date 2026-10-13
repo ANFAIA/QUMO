@@ -1,0 +1,984 @@
+{
+ "schema": "qumo-bench/1",
+ "label": "Apple M5 (MacBook), commit 1750a81, quiet machine",
+ "config": {
+  "name": "apple_metal",
+  "path": "bench/configs/apple_metal.json",
+  "quick": false,
+  "content": {
+   "name": "apple_metal",
+   "description": "Apple silicon GPU through Metal (fp32 only; unified memory). Local comparison point for the cloud runs.",
+   "hardware": {
+    "vendor": "apple",
+    "gpu": "Apple M-series",
+    "arch": "metal:4",
+    "memory_gib": "75% of RAM (unified)"
+   },
+   "memory_fraction": 0.6,
+   "suites": {
+    "gpu_check": {
+     "enabled": true,
+     "targets": [
+      "host"
+     ],
+     "timeout_s": 2400
+    },
+    "sv_cpu": {
+     "enabled": true,
+     "families": [
+      "layered"
+     ],
+     "qubits": [
+      16,
+      26
+     ],
+     "reps": 3,
+     "timeout_s": 2400,
+     "quick": {
+      "qubits": [
+       16,
+       20
+      ],
+      "reps": 1,
+      "families": [
+       "layered"
+      ]
+     }
+    },
+    "sv_gpu": {
+     "enabled": true,
+     "precisions": [
+      "fp32"
+     ],
+     "qubits_fp32": [
+      16,
+      28
+     ],
+     "qubits_fp64": [
+      16,
+      16
+     ],
+     "reps": 3,
+     "timeout_s": 3600,
+     "build_timeout_s": 2400,
+     "quick": {
+      "qubits_fp32": [
+       16,
+       20
+      ],
+      "qubits_fp64": [
+       16,
+       20
+      ],
+      "reps": 1
+     }
+    },
+    "baseline_aer": {
+     "enabled": true,
+     "devices": [
+      "cpu"
+     ],
+     "precisions_cpu": [
+      "fp64"
+     ],
+     "precisions_gpu": [
+      "fp32",
+      "fp64"
+     ],
+     "qubits": [
+      16,
+      26
+     ],
+     "qubits_gpu": [
+      16,
+      16
+     ],
+     "reps": 3,
+     "timeout_s": 3600,
+     "python": null,
+     "gpu_python": null,
+     "quick": {
+      "qubits": [
+       16,
+       20
+      ],
+      "qubits_gpu": [
+       16,
+       20
+      ],
+      "reps": 1
+     }
+    },
+    "baseline_cudaq": {
+     "enabled": false,
+     "precisions": [
+      "fp32",
+      "fp64"
+     ],
+     "qubits_fp32": [
+      16,
+      16
+     ],
+     "qubits_fp64": [
+      16,
+      16
+     ],
+     "reps": 3,
+     "cpu": false,
+     "qubits_cpu": [
+      16,
+      22
+     ],
+     "timeout_s": 3600,
+     "python": null,
+     "quick": {
+      "qubits_fp32": [
+       16,
+       20
+      ],
+      "qubits_fp64": [
+       16,
+       20
+      ],
+      "reps": 1
+     }
+    },
+    "baseline_lightning": {
+     "enabled": true,
+     "devices": [
+      "lightning.qubit"
+     ],
+     "precisions_cpu": [
+      "fp64"
+     ],
+     "precisions_gpu": [
+      "fp32",
+      "fp64"
+     ],
+     "qubits": [
+      16,
+      24
+     ],
+     "qubits_gpu": [
+      16,
+      16
+     ],
+     "reps": 3,
+     "timeout_s": 3600,
+     "python": null,
+     "quick": {
+      "qubits": [
+       16,
+       18
+      ],
+      "qubits_gpu": [
+       16,
+       20
+      ],
+      "reps": 1
+     }
+    },
+    "neutral": {
+     "enabled": true,
+     "sdks": [
+      "qumo",
+      "qiskit",
+      "tket"
+     ],
+     "targets": [
+      "sc_grid",
+      "ion_all_to_all",
+      "neutral_atom"
+     ],
+     "levels": [
+      "default"
+     ],
+     "filter": "qb_small__",
+     "max_qubits": 6,
+     "job_timeout_s": 120,
+     "timeout_s": 1800,
+     "python": null,
+     "quick": {
+      "targets": [
+       "sc_grid"
+      ],
+      "max_qubits": 4
+     }
+    },
+    "qec": {
+     "enabled": false,
+     "args": [
+      "--part",
+      "A",
+      "--shots",
+      "20000"
+     ],
+     "timeout_s": 2400,
+     "python": null,
+     "quick": {
+      "args": [
+       "--part",
+       "A",
+       "--shots",
+       "2000"
+      ]
+     }
+    },
+    "tests": {
+     "enabled": true,
+     "targets": [
+      "test-gpu"
+     ],
+     "timeout_s": 3600,
+     "quick": {
+      "targets": [
+       "test"
+      ],
+      "files": [
+       "tests/test_json.mojo"
+      ]
+     }
+    }
+   }
+  }
+ },
+ "environment": {
+  "timestamp_utc": "2026-10-13T03:22:51+00:00",
+  "loadavg_start": [
+   3.4,
+   3.5,
+   3.34
+  ],
+  "os": {
+   "system": "Darwin",
+   "release": "25.5.0",
+   "platform": "macOS-26.5.2-arm64-arm-64bit",
+   "macos": "26.5.2"
+  },
+  "cpu": {
+   "logical_cores": 10,
+   "machine": "arm64",
+   "model": "Apple M5",
+   "usable_cores": 10,
+   "physical_cores": 10
+  },
+  "ram": {
+   "total_bytes": 34359738368,
+   "available_bytes": 11596660736
+  },
+  "python": {
+   "version": "3.12.13",
+   "implementation": "CPython"
+  },
+  "toolchain": {
+   "mojo_path": ".venv/bin/mojo",
+   "mojo": "1.1.0",
+   "mojo-compiler": "1.1.0",
+   "max-core": "26.6.0",
+   "max-mojo-libs": "26.6.0"
+  },
+  "git": {
+   "commit": "1750a819634f5135160564928a1e898f5bb4433b",
+   "branch": "HEAD",
+   "describe": "1750a81",
+   "dirty_files": 2,
+   "remote": "https://github.com/ANFAIA/QUMO.git"
+  },
+  "gpus": [
+   {
+    "vendor": "apple",
+    "index": 0,
+    "source": "system_profiler",
+    "arch": "metal:4",
+    "name": "Apple M5",
+    "gpu_cores": 10,
+    "metal_family": "metal4",
+    "memory_bytes": 25769803776,
+    "memory_note": "unified memory: 75% of host RAM (Metal working-set limit)",
+    "metal_toolchain": true,
+    "mojo_max_supported": true,
+    "support_note": ""
+   }
+  ],
+  "cloud": {
+   "env": {
+    "MODULAR_NVPTX_COMPILER_PATH_set": false
+   }
+  }
+ },
+ "suites": {
+  "gpu_check": {
+   "status": "ok",
+   "rows": [
+    {
+     "kind": "gpu_check",
+     "status": "PASS",
+     "target": "metal:4",
+     "file": "tests/test_gpu.mojo",
+     "kernels": 19
+    },
+    {
+     "kind": "gpu_check",
+     "status": "PASS",
+     "target": "metal:4",
+     "file": "tests/test_gpu_frame.mojo",
+     "kernels": 17
+    },
+    {
+     "kind": "gpu_check",
+     "status": "PASS",
+     "target": "metal:4",
+     "file": "bench/bench_gpu.mojo",
+     "kernels": 18
+    }
+   ],
+   "commands": [
+    "make MOJO=.venv/bin/mojo GPU_TARGETS=metal:4 gpu-check"
+   ],
+   "targets": [
+    "metal:4"
+   ],
+   "summary": {
+    "pass": 3,
+    "fail": 0
+   },
+   "output_tail": "PASS metal:4 tests/test_gpu.mojo (19 kernels)\nPASS metal:4 tests/test_gpu_frame.mojo (17 kernels)\nPASS metal:4 bench/bench_gpu.mojo (18 kernels)",
+   "duration_s": 81.28,
+   "loadavg_before": [
+    3.4,
+    3.5,
+    3.34
+   ],
+   "loadavg_after": [
+    4.85,
+    3.89,
+    3.49
+   ],
+   "config": {
+    "enabled": true,
+    "targets": [
+     "host"
+    ],
+    "timeout_s": 2400
+   }
+  },
+  "sv_cpu": {
+   "status": "ok",
+   "rows": [
+    {
+     "kind": "statevector",
+     "engine": "qumo",
+     "device": "cpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 16,
+     "gates": 395,
+     "depth": 10,
+     "seconds": 0.00569,
+     "gates_per_sec": 69420.03514938489,
+     "reps": 3,
+     "series": "QUMO CPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "qumo",
+     "device": "cpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 18,
+     "gates": 445,
+     "depth": 10,
+     "seconds": 0.014087,
+     "gates_per_sec": 31589.408674664584,
+     "reps": 3,
+     "series": "QUMO CPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "qumo",
+     "device": "cpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 20,
+     "gates": 495,
+     "depth": 10,
+     "seconds": 0.033819,
+     "gates_per_sec": 14636.742659451787,
+     "reps": 3,
+     "series": "QUMO CPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "qumo",
+     "device": "cpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 22,
+     "gates": 545,
+     "depth": 10,
+     "seconds": 0.153946,
+     "gates_per_sec": 3540.2024086367946,
+     "reps": 3,
+     "series": "QUMO CPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "qumo",
+     "device": "cpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 24,
+     "gates": 595,
+     "depth": 10,
+     "seconds": 0.793273,
+     "gates_per_sec": 750.0570421532058,
+     "reps": 3,
+     "series": "QUMO CPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "qumo",
+     "device": "cpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 26,
+     "gates": 645,
+     "depth": 10,
+     "seconds": 3.496927,
+     "gates_per_sec": 184.44765933060657,
+     "reps": 3,
+     "series": "QUMO CPU fp64"
+    }
+   ],
+   "commands": [
+    "build/bench_sv 26 layered 16 3"
+   ],
+   "build": {
+    "binary": "build/bench_sv",
+    "built": false
+   },
+   "clamp": null,
+   "duration_s": 14.47,
+   "loadavg_before": [
+    4.85,
+    3.89,
+    3.49
+   ],
+   "loadavg_after": [
+    5.19,
+    4.01,
+    3.54
+   ],
+   "config": {
+    "enabled": true,
+    "families": [
+     "layered"
+    ],
+    "qubits": [
+     16,
+     26
+    ],
+    "reps": 3,
+    "timeout_s": 2400,
+    "quick": {
+     "qubits": [
+      16,
+      20
+     ],
+     "reps": 1,
+     "families": [
+      "layered"
+     ]
+    }
+   }
+  },
+  "sv_gpu": {
+   "status": "failed",
+   "rows": [],
+   "reason": "QM-E968: Unhandled exception caught during execution: At max/mojo/max/gpu/host/_device_context_extras.mojo:170:17: Failed to create compute pipeline state (GPU machine code generation): Internal compiler error. Hint: rerun the command recorded in `commands` to see the full error (MODULAR_DEBUG=device-sync-mode for GPU errors).",
+   "commands": [
+    "build/gpu/bench_gpu_fp32 26 3"
+   ],
+   "builds": [
+    {
+     "binary": "build/gpu/bench_gpu_fp32",
+     "built": false
+    }
+   ],
+   "notes": [
+    {
+     "precision": "fp32",
+     "clamp": {
+      "requested": [
+       16,
+       18,
+       20,
+       22,
+       24,
+       26,
+       28
+      ],
+      "used": [
+       16,
+       18,
+       20,
+       22,
+       24,
+       26
+      ],
+      "reason": "28q needs 9.2 GiB > host RAM budget 6.8 GiB",
+      "code": "QM-E966"
+     }
+    }
+   ],
+   "skipped": [],
+   "failures": [
+    {
+     "precision": "fp32",
+     "output_tail": "# GPU: Apple M5 (api=metal, vendor=apple, precision=fp32, fp64=False)\nqubits,gates,cpu_s,gpu_s,speedup,gpu_gates_per_s,gpu_expect_s,gpu_sample10k_s,abs_err_expect,fidelity,method\nstack trace was not collected. Enable stack trace collection with environment variable `MODULAR_DEBUG=stack-trace-on-error`\nUnhandled exception caught during execution: At max/mojo/max/gpu/host/_device_context_extras.mojo:170:17: Failed to create compute pipeline state (GPU machine code generation): Internal compiler error.\nTo get more accurate error information, set MODULAR_DEBUG=device-sync-mode.",
+     "reason": "QM-E968: Unhandled exception caught during execution: At max/mojo/max/gpu/host/_device_context_extras.mojo:170:17: Failed to create compute pipeline state (GPU machine code generation): Internal compiler error. Hint: rerun the command recorded in `commands` to see the full error (MODULAR_DEBUG=device-sync-mode for GPU errors)."
+    }
+   ],
+   "duration_s": 0.39,
+   "loadavg_before": [
+    5.19,
+    4.01,
+    3.54
+   ],
+   "loadavg_after": [
+    5.19,
+    4.01,
+    3.54
+   ],
+   "config": {
+    "enabled": true,
+    "precisions": [
+     "fp32"
+    ],
+    "qubits_fp32": [
+     16,
+     28
+    ],
+    "qubits_fp64": [
+     16,
+     16
+    ],
+    "reps": 3,
+    "timeout_s": 3600,
+    "build_timeout_s": 2400,
+    "quick": {
+     "qubits_fp32": [
+      16,
+      20
+     ],
+     "qubits_fp64": [
+      16,
+      20
+     ],
+     "reps": 1
+    }
+   }
+  },
+  "baseline_aer": {
+   "status": "ok",
+   "rows": [
+    {
+     "kind": "statevector",
+     "engine": "aer",
+     "device": "cpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 16,
+     "gates": 395,
+     "seconds": 0.014118292136117816,
+     "gates_per_sec": 27977.88827371689,
+     "reps": 3,
+     "times": [
+      0.014073125086724758,
+      0.0141808339394629,
+      0.014118292136117816
+     ],
+     "series": "Aer CPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "aer",
+     "device": "cpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 18,
+     "gates": 445,
+     "seconds": 0.037357459077611566,
+     "gates_per_sec": 11911.945056956238,
+     "reps": 3,
+     "times": [
+      0.03429945884272456,
+      0.037357459077611566,
+      0.03914249991066754
+     ],
+     "series": "Aer CPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "aer",
+     "device": "cpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 20,
+     "gates": 495,
+     "seconds": 0.16030200012028217,
+     "gates_per_sec": 3087.9215457609894,
+     "reps": 3,
+     "times": [
+      0.16030200012028217,
+      0.1592859998345375,
+      0.16061474988237023
+     ],
+     "series": "Aer CPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "aer",
+     "device": "cpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 22,
+     "gates": 545,
+     "seconds": 0.5708234580233693,
+     "gates_per_sec": 954.7610427350165,
+     "reps": 3,
+     "times": [
+      0.6008122079074383,
+      0.5708234580233693,
+      0.5446585421450436
+     ],
+     "series": "Aer CPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "aer",
+     "device": "cpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 24,
+     "gates": 595,
+     "seconds": 2.4447691249661148,
+     "gates_per_sec": 243.37676467026182,
+     "reps": 3,
+     "times": [
+      2.4824206670746207,
+      2.4447691249661148,
+      2.310403750045225
+     ],
+     "series": "Aer CPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "aer",
+     "device": "cpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 26,
+     "gates": 645,
+     "seconds": 8.832275166874751,
+     "gates_per_sec": 73.02761608006259,
+     "reps": 3,
+     "times": [
+      8.816309832967818,
+      8.832275166874751,
+      10.445378832984716
+     ],
+     "series": "Aer CPU fp64"
+    }
+   ],
+   "commands": [
+    "bench/.venv/bin/python bench/run_benchmarks.py --worker aer '{\"qubits\": [16, 18, 20, 22, 24, 26], \"reps\": 3, \"depth\": 10, \"precision\": \"fp64\", \"device\": \"cpu\", \"clamp\": null, \"verify_qubits\": 8, \"families\": [\"layered\"]}'"
+   ],
+   "versions": [
+    {
+     "engine": "aer",
+     "versions": {
+      "qiskit-aer": "0.17.2",
+      "qiskit": "2.5.2",
+      "qiskit_aer_module": "0.17.2"
+     },
+     "available_devices": [
+      "CPU"
+     ],
+     "verify": {
+      "qubits": 8,
+      "fidelity": 1.0000000000000044,
+      "order": "little-endian"
+     },
+     "device": "cpu",
+     "precision": "fp64"
+    }
+   ],
+   "skipped": [],
+   "clamps": [],
+   "duration_s": 38.35,
+   "loadavg_before": [
+    5.19,
+    4.01,
+    3.54
+   ],
+   "loadavg_after": [
+    10.89,
+    5.57,
+    4.13
+   ],
+   "config": {
+    "enabled": true,
+    "devices": [
+     "cpu"
+    ],
+    "precisions_cpu": [
+     "fp64"
+    ],
+    "precisions_gpu": [
+     "fp32",
+     "fp64"
+    ],
+    "qubits": [
+     16,
+     26
+    ],
+    "qubits_gpu": [
+     16,
+     16
+    ],
+    "reps": 3,
+    "timeout_s": 3600,
+    "python": null,
+    "gpu_python": null,
+    "quick": {
+     "qubits": [
+      16,
+      20
+     ],
+     "qubits_gpu": [
+      16,
+      20
+     ],
+     "reps": 1
+    }
+   }
+  },
+  "baseline_lightning": {
+   "status": "skipped",
+   "rows": [],
+   "reason": "QM-E965: lightning: No module named 'pennylane' (interpreter bench/.venv/bin/python). Hint: install the baseline in the interpreter given by the config (see docs/BENCHMARKING_ON_CLOUD_GPUS.md).",
+   "commands": [
+    "bench/.venv/bin/python bench/run_benchmarks.py --worker lightning '{\"qubits\": [16, 18, 20, 22, 24], \"reps\": 3, \"depth\": 10, \"precision\": \"fp64\", \"device\": \"cpu\", \"clamp\": null, \"verify_qubits\": 8, \"families\": [\"layered\"], \"pl_device\": \"lightning.qubit\"}'"
+   ],
+   "versions": [],
+   "skipped": [
+    {
+     "device": "cpu",
+     "precision": "fp64",
+     "reason": "QM-E965: lightning: No module named 'pennylane' (interpreter bench/.venv/bin/python). Hint: install the baseline in the interpreter given by the config (see docs/BENCHMARKING_ON_CLOUD_GPUS.md)."
+    }
+   ],
+   "clamps": [],
+   "not_applicable": [],
+   "duration_s": 0.14,
+   "loadavg_before": [
+    10.89,
+    5.57,
+    4.13
+   ],
+   "loadavg_after": [
+    10.89,
+    5.57,
+    4.13
+   ],
+   "config": {
+    "enabled": true,
+    "devices": [
+     "lightning.qubit"
+    ],
+    "precisions_cpu": [
+     "fp64"
+    ],
+    "precisions_gpu": [
+     "fp32",
+     "fp64"
+    ],
+    "qubits": [
+     16,
+     24
+    ],
+    "qubits_gpu": [
+     16,
+     16
+    ],
+    "reps": 3,
+    "timeout_s": 3600,
+    "python": null,
+    "quick": {
+     "qubits": [
+      16,
+      18
+     ],
+     "qubits_gpu": [
+      16,
+      20
+     ],
+     "reps": 1
+    }
+   }
+  },
+  "neutral": {
+   "status": "ok",
+   "rows": [
+    {
+     "kind": "compiler",
+     "engine": "qiskit",
+     "jobs": 90,
+     "n_ok": 90,
+     "n_unsupported": 0,
+     "n_invalid": 0,
+     "n_incorrect": 0,
+     "n_error": 0,
+     "n_timeout": 0,
+     "median_compile_s": 0.004070499911904335,
+     "median_n2q": 6,
+     "mean_esp": 0.9010274497988429
+    },
+    {
+     "kind": "compiler",
+     "engine": "qumo",
+     "jobs": 90,
+     "n_ok": 90,
+     "n_unsupported": 0,
+     "n_invalid": 0,
+     "n_incorrect": 0,
+     "n_error": 0,
+     "n_timeout": 0,
+     "median_compile_s": 0.0003502918407320976,
+     "median_n2q": 6,
+     "mean_esp": 0.9132273194760709
+    },
+    {
+     "kind": "compiler",
+     "engine": "tket",
+     "jobs": 90,
+     "n_ok": 90,
+     "n_unsupported": 0,
+     "n_invalid": 0,
+     "n_incorrect": 0,
+     "n_error": 0,
+     "n_timeout": 0,
+     "median_compile_s": 0.07004133285954595,
+     "median_n2q": 6,
+     "mean_esp": 0.9067268237975461
+    }
+   ],
+   "commands": [
+    "bench/.venv/bin/python bench/neutral/run_neutral.py --circuits bench/neutral/circuits --sdks qumo,qiskit,tket --targets sc_grid,ion_all_to_all,neutral_atom --levels default --max-qubits 6 --filter qb_small__ --timeout 120 --out <results>/qumo_bench_apple_metal_apple-m5_20261012-232251_neutral.jsonl"
+   ],
+   "records_file": "qumo_bench_apple_metal_apple-m5_20261012-232251_neutral.jsonl",
+   "output_tail": "qb_small__vqe_uccsd_n6             ion_all_to_all               default qumo    ok          n2q=254 esp=0.522 t=0.004s\nqb_small__vqe_uccsd_n6             ion_all_to_all               default qiskit  ok          n2q=783 esp=0.131 t=0.013s\nqb_small__vqe_uccsd_n6             ion_all_to_all               default tket    ok          n2q=743 esp=0.147 t=8.358s\nqb_small__vqe_uccsd_n6             neutral_atom                 default qumo    ok          n2q=323 esp=0.158 t=0.007s\nqb_small__vqe_uccsd_n6             neutral_atom                 default qiskit  ok          n2q=923 esp=0.005 t=0.014s\nqb_small__vqe_uccsd_n6             neutral_atom                 default tket    ok          n2q=848 esp=0.008 t=9.766s\nqb_small__wstate_n3                sc_grid                      default qumo    ok          n2q=8 esp=0.947 t=0.001s\nqb_small__wstate_n3                sc_grid                      default qiskit  ok          n2q=12 esp=0.915 t=0.005s\nqb_small__wstate_n3                sc_grid                      default tket    ok          n2q=12 esp=0.916 t=0.069s\nqb_small__wstate_n3                ion_all_to_all               default qumo    ok          n2q=6 esp=0.989 t=0.000s\nqb_small__wstate_n3                ion_all_to_all               default qiskit  ok          n2q=6 esp=0.989 t=0.005s\nqb_small__wstate_n3                ion_all_to_all               default tket    ok          n2q=6 esp=0.989 t=0.061s\nqb_small__wstate_n3                neutral_atom                 default qumo    ok          n2q=6 esp=0.965 t=0.000s\nqb_small__wstate_n3                neutral_atom                 default qiskit  ok          n2q=6 esp=0.965 t=0.004s\nqb_small__wstate_n3                neutral_atom                 default tket    ok          n2q=6 esp=0.966 t=0.062s",
+   "duration_s": 56.21,
+   "loadavg_before": [
+    10.89,
+    5.57,
+    4.13
+   ],
+   "loadavg_after": [
+    7.0,
+    5.38,
+    4.15
+   ],
+   "config": {
+    "enabled": true,
+    "sdks": [
+     "qumo",
+     "qiskit",
+     "tket"
+    ],
+    "targets": [
+     "sc_grid",
+     "ion_all_to_all",
+     "neutral_atom"
+    ],
+    "levels": [
+     "default"
+    ],
+    "filter": "qb_small__",
+    "max_qubits": 6,
+    "job_timeout_s": 120,
+    "timeout_s": 1800,
+    "python": null,
+    "quick": {
+     "targets": [
+      "sc_grid"
+     ],
+     "max_qubits": 4
+    }
+   }
+  },
+  "tests": {
+   "status": "partial",
+   "rows": [
+    {
+     "kind": "test",
+     "target": "test-gpu",
+     "file": "tests/test_gpu.mojo",
+     "status": "FAIL",
+     "detail": ".venv/bin/mojo: error: execution exited with a non-zero result: 1"
+    },
+    {
+     "kind": "test",
+     "target": "test-gpu",
+     "file": "tests/test_gpu_frame.mojo",
+     "status": "PASS",
+     "detail": null
+    }
+   ],
+   "reason": "QM-E969: 1 test file(s) failed. Hint: rerun the failing test by hand: .venv/bin/mojo run -I . <file>.",
+   "commands": [
+    "make MOJO=.venv/bin/mojo test-gpu"
+   ],
+   "summary": {
+    "test-gpu": {
+     "pass": 1,
+     "fail": 1
+    }
+   },
+   "duration_s": 69.36,
+   "loadavg_before": [
+    7.0,
+    5.38,
+    4.15
+   ],
+   "loadavg_after": [
+    5.12,
+    5.15,
+    4.16
+   ],
+   "config": {
+    "enabled": true,
+    "targets": [
+     "test-gpu"
+    ],
+    "timeout_s": 3600,
+    "quick": {
+     "targets": [
+      "test"
+     ],
+     "files": [
+      "tests/test_json.mojo"
+     ]
+    }
+   }
+  }
+ },
+ "started_utc": "2026-10-13T03:22:51+00:00",
+ "finished_utc": "2026-10-13T03:27:11+00:00",
+ "loadavg_end": [
+  5.12,
+  5.15,
+  4.16
+ ]
+}

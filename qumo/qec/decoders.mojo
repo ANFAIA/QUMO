@@ -19,7 +19,8 @@ Decoders
   * `UnionFindDecoder`  - Delfosse-Nickerson almost-linear UF with weighted
     (Huang-Newman-Brown) cluster growth on integer edge lengths and
     peeling on a spanning forest of each cluster. Fast, slightly worse
-    threshold than MWPM.
+    threshold than MWPM. Allocation-free per shot (buffers reused, state
+    reset lazily with timestamps).
   * `MwpmDecoder`       - exact minimum-weight perfect matching ("dense"
     MWPM; registered as 'mwpm_dense' in qumo.qec.experiments). Shortest
     paths (+ observable parity) come from an all-pairs table precomputed once
@@ -272,25 +273,55 @@ comptime UF_SCALE = 32.0
 
 
 struct UnionFindDecoder(Decoder):
-    """Weighted Union-Find decoder (Delfosse & Nickerson 2017; weighted growth)."""
+    """Weighted Union-Find decoder (Delfosse & Nickerson 2017; weighted growth).
+
+    Allocation-free per shot: every per-shot structure (cluster forest, edge
+    growth, frontier lists, peeling forest) is a field that keeps its capacity
+    across `decode` calls. Per-vertex and per-edge state is reset lazily with
+    timestamps (`vstamp`/`estamp` == `shot` means "initialised in this shot"),
+    the trick PyMatching and Stim use for their search buffers, so no cleanup
+    pass runs between shots. Cluster growth scans only frontier vertices:
+    a vertex whose incident edges have all grown is unlinked from its
+    cluster's scan ring (it can never add a boundary edge again), so a growth
+    round costs O(frontier) instead of O(cluster volume). The visiting order
+    of the remaining vertices is unchanged, so predictions are bit-identical
+    to the original allocate-per-shot version (checked against a verbatim
+    copy of it in tests/test_qec.mojo)."""
 
     var g: MatchingGraph
     var elen: List[Int]
+    # per-vertex state, valid iff vstamp[v] == shot
+    var vstamp: List[Int]
     var parent: List[Int]
     var csize: List[Int]
     var odd: List[UInt8]
     var grounded: List[UInt8]
-    var nxt: List[Int]
+    var nxt: List[Int]  # cluster scan ring (frontier vertices + the root)
     var defect: List[UInt8]
+    var lid: List[Int]
+    var seen: List[Int]  # root visited in growth round `stamp` (global counter)
+    # per-edge state, valid iff estamp[e] == shot
+    var estamp: List[Int]
     var growth: List[Int]
     var grown: List[UInt8]
     var rate: List[Int]
-    var etouched: List[UInt8]
+    # per-shot work lists (cleared, never freed)
     var touched_v: List[Int]
     var touched_e: List[Int]
-    var lid: List[Int]
-    var seen: List[Int]
+    var cand: List[Int]
+    var roots: List[Int]
+    var bedges: List[Int]
+    var newly: List[Int]
+    # peeling scratch
+    var gl: List[Int]
+    var deg: List[Int]
+    var off: List[Int]
+    var fillp: List[Int]
+    var ladj: List[Int]
+    var pe: List[Int]
+    var order: List[Int]
     var stamp: Int
+    var shot: Int
     var failures: Int
 
     def __init__(out self, var graph: MatchingGraph):
@@ -300,21 +331,34 @@ struct UnionFindDecoder(Decoder):
         for i in range(ne):
             self.elen.append(max(1, Int(graph.ew[i] * UF_SCALE + 0.5)))
         self.g = graph^
+        self.vstamp = List[Int](length=nn, fill=0)
         self.parent = List[Int](length=nn, fill=-1)
         self.csize = List[Int](length=nn, fill=0)
         self.odd = List[UInt8](length=nn, fill=0)
         self.grounded = List[UInt8](length=nn, fill=0)
         self.nxt = List[Int](length=nn, fill=-1)
         self.defect = List[UInt8](length=nn, fill=0)
+        self.lid = List[Int](length=nn, fill=-1)
+        self.seen = List[Int](length=nn, fill=0)
+        self.estamp = List[Int](length=max(1, ne), fill=0)
         self.growth = List[Int](length=max(1, ne), fill=0)
         self.grown = List[UInt8](length=max(1, ne), fill=0)
         self.rate = List[Int](length=max(1, ne), fill=0)
-        self.etouched = List[UInt8](length=max(1, ne), fill=0)
         self.touched_v = List[Int]()
         self.touched_e = List[Int]()
-        self.lid = List[Int](length=nn, fill=-1)
-        self.seen = List[Int](length=nn, fill=0)
+        self.cand = List[Int]()
+        self.roots = List[Int]()
+        self.bedges = List[Int]()
+        self.newly = List[Int]()
+        self.gl = List[Int]()
+        self.deg = List[Int]()
+        self.off = List[Int]()
+        self.fillp = List[Int]()
+        self.ladj = List[Int]()
+        self.pe = List[Int]()
+        self.order = List[Int]()
         self.stamp = 0
+        self.shot = 1
         self.failures = 0
 
     @staticmethod
@@ -325,12 +369,14 @@ struct UnionFindDecoder(Decoder):
         return "union_find"
 
     def _make(mut self, v: Int):
-        if self.parent[v] < 0:
+        if self.vstamp[v] != self.shot:
+            self.vstamp[v] = self.shot
             self.parent[v] = v
             self.csize[v] = 1
             self.odd[v] = 0
             self.grounded[v] = 1 if v == self.g.boundary else 0
             self.nxt[v] = v
+            self.defect[v] = 0
             self.touched_v.append(v)
 
     def _find(mut self, v: Int) -> Int:
@@ -361,23 +407,14 @@ struct UnionFindDecoder(Decoder):
         self.nxt[ra] = self.nxt[rb]
         self.nxt[rb] = t2
 
-    def _touch_edge(mut self, e: Int):
-        if self.etouched[e] == 0:
-            self.etouched[e] = 1
-            self.touched_e.append(e)
-
-    def _cleanup(mut self):
-        for v in self.touched_v:
-            self.parent[v] = -1
-            self.defect[v] = 0
-            self.lid[v] = -1
-        for e in self.touched_e:
+    def _edge(mut self, e: Int):
+        """Lazy reset of edge `e` on its first visit in this shot."""
+        if self.estamp[e] != self.shot:
+            self.estamp[e] = self.shot
             self.growth[e] = 0
             self.grown[e] = 0
             self.rate[e] = 0
-            self.etouched[e] = 0
-        self.touched_v.clear()
-        self.touched_e.clear()
+            self.touched_e.append(e)
 
     def decode(mut self, fired: List[Int]) -> UInt64:
         if len(fired) == 0:
@@ -386,61 +423,80 @@ struct UnionFindDecoder(Decoder):
             self._make(d)
             self.defect[d] = 1
             self.odd[d] = 1
-        var cand = fired.copy()
-        var roots = List[Int]()
-        var bedges = List[Int]()
-        var newly = List[Int]()
+        self.cand.clear()
+        for d in fired:
+            self.cand.append(d)
         while True:
             # active clusters: odd parity and not touching the boundary
             self.stamp += 1
-            roots.clear()
-            for v in cand:
-                var r = self._find(v)
+            self.roots.clear()
+            for i in range(len(self.cand)):
+                var r = self._find(self.cand[i])
                 if self.seen[r] != self.stamp:
                     self.seen[r] = self.stamp
                     if self.odd[r] != 0 and self.grounded[r] == 0:
-                        roots.append(r)
-            if len(roots) == 0:
+                        self.roots.append(r)
+            if len(self.roots) == 0:
                 break
-            bedges.clear()
-            for r in roots:
+            self.bedges.clear()
+            for i in range(len(self.roots)):
+                var r = self.roots[i]
+                var prev = r
                 var v = r
                 while True:
+                    var frontier = False
                     for a in range(self.g.adj_off[v], self.g.adj_off[v + 1]):
                         var e = self.g.adj_edge[a]
+                        self._edge(e)
                         if self.grown[e] == 0:
+                            frontier = True
                             if self.rate[e] == 0:
-                                bedges.append(e)
+                                self.bedges.append(e)
                             self.rate[e] += 1
-                    v = self.nxt[v]
+                    var nx = self.nxt[v]
+                    if frontier or v == r:
+                        prev = v
+                    else:
+                        # interior vertex (every incident edge grown): it can
+                        # never contribute again, so unlink it from the scan
+                        # ring; the order of the remaining vertices is kept.
+                        self.nxt[prev] = nx
+                    v = nx
                     if v == r:
                         break
-            if len(bedges) == 0:
+            if len(self.bedges) == 0:
                 self.failures += 1  # isolated odd cluster: cannot be neutralised
                 break
             var delta = -1
-            for e in bedges:
+            for i in range(len(self.bedges)):
+                var e = self.bedges[i]
                 var rem = self.elen[e] - self.growth[e]
                 var steps = (rem + self.rate[e] - 1) // self.rate[e]
                 if delta < 0 or steps < delta:
                     delta = steps
-            newly.clear()
-            for e in bedges:
-                self._touch_edge(e)
+            self.newly.clear()
+            for i in range(len(self.bedges)):
+                var e = self.bedges[i]
                 self.growth[e] += delta * self.rate[e]
                 self.rate[e] = 0
                 if self.growth[e] >= self.elen[e]:
                     self.grown[e] = 1
-                    newly.append(e)
-            for e in newly:
+                    self.newly.append(e)
+            for i in range(len(self.newly)):
+                var e = self.newly[i]
                 var u = self.g.eu[e]
                 var w = self.g.ev[e]
                 self._make(u)
                 self._make(w)
                 self._union(u, w)
-            cand = roots.copy()
+            self.cand.clear()
+            for i in range(len(self.roots)):
+                self.cand.append(self.roots[i])
         var obs = self._peel()
-        self._cleanup()
+        # lazy reset: bumping the shot stamp invalidates all vertex/edge state
+        self.touched_v.clear()
+        self.touched_e.clear()
+        self.shot += 1
         return obs
 
     def _peel(mut self) -> UInt64:
@@ -448,57 +504,62 @@ struct UnionFindDecoder(Decoder):
         var nv = len(self.touched_v)
         for i in range(nv):
             self.lid[self.touched_v[i]] = i
-        var deg = List[Int](length=nv + 1, fill=0)
-        var gl = List[Int]()
-        for e in self.touched_e:
+        self.deg.clear()
+        self.deg.resize(nv + 1, 0)
+        self.gl.clear()
+        for i in range(len(self.touched_e)):
+            var e = self.touched_e[i]
             if self.grown[e] != 0:
-                gl.append(e)
-                deg[self.lid[self.g.eu[e]]] += 1
-                deg[self.lid[self.g.ev[e]]] += 1
-        var off = List[Int](length=nv + 1, fill=0)
+                self.gl.append(e)
+                self.deg[self.lid[self.g.eu[e]]] += 1
+                self.deg[self.lid[self.g.ev[e]]] += 1
+        self.off.clear()
+        self.off.resize(nv + 1, 0)
         for i in range(nv):
-            off[i + 1] = off[i] + deg[i]
-        var fillp = off.copy()
-        var ladj = List[Int](length=max(1, off[nv]), fill=0)
-        for e in gl:
+            self.off[i + 1] = self.off[i] + self.deg[i]
+        self.fillp.clear()
+        for i in range(nv + 1):
+            self.fillp.append(self.off[i])
+        self.ladj.clear()
+        self.ladj.resize(max(1, self.off[nv]), 0)
+        for i in range(len(self.gl)):
+            var e = self.gl[i]
             var a = self.lid[self.g.eu[e]]
             var b = self.lid[self.g.ev[e]]
-            ladj[fillp[a]] = e
-            fillp[a] += 1
-            ladj[fillp[b]] = e
-            fillp[b] += 1
-        var pe = List[Int](length=nv, fill=-2)  # -2 unvisited, -1 root
-        var order = List[Int](capacity=nv)
-        var bl = self.lid[self.g.boundary] if self.parent[self.g.boundary] >= 0 else -1
-        var starts = List[Int]()
-        if bl >= 0:
-            starts.append(bl)
-        for i in range(nv):
-            starts.append(i)
-        for s in starts:
-            if pe[s] != -2:
+            self.ladj[self.fillp[a]] = e
+            self.fillp[a] += 1
+            self.ladj[self.fillp[b]] = e
+            self.fillp[b] += 1
+        self.pe.clear()
+        self.pe.resize(nv, -2)  # -2 unvisited, -1 root
+        self.order.clear()
+        var bl = self.lid[self.g.boundary] if self.vstamp[self.g.boundary] == self.shot else -1
+        # BFS roots: the boundary first (if touched), then every vertex in touch order
+        for si in range(-1, nv):
+            var s = bl if si < 0 else si
+            if s < 0 or self.pe[s] != -2:
                 continue
-            pe[s] = -1
-            var head = len(order)
-            order.append(s)
-            while head < len(order):
-                var x = order[head]
+            self.pe[s] = -1
+            var head = len(self.order)
+            self.order.append(s)
+            while head < len(self.order):
+                var x = self.order[head]
                 head += 1
                 var vx = self.touched_v[x]
-                for a in range(off[x], off[x + 1]):
-                    var e = ladj[a]
+                for a in range(self.off[x], self.off[x + 1]):
+                    var e = self.ladj[a]
                     var y = self.lid[self.g.other(e, vx)]
-                    if pe[y] == -2:
-                        pe[y] = e
-                        order.append(y)
+                    if self.pe[y] == -2:
+                        self.pe[y] = e
+                        self.order.append(y)
         var obs: UInt64 = 0
-        var i = len(order) - 1
+        var i = len(self.order) - 1
         while i >= 0:
-            var x = order[i]
+            var x = self.order[i]
             i -= 1
             var vx = self.touched_v[x]
-            if self.defect[vx] != 0 and pe[x] >= 0:
-                var e = pe[x]
+            if self.defect[vx] != 0 and self.pe[x] >= 0:
+                var e = self.pe[x]
                 obs ^= self.g.eobs[e]
                 self.defect[vx] = 0
                 var u = self.g.other(e, vx)

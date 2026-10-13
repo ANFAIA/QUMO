@@ -13,12 +13,19 @@ Philosophy (rustc/clang diagnostics + LSP, applied to quantum programs):
   (unused qubits, gates after measurement, overwritten bits, cancelling
   pairs, ...), each pointing at an instruction index.
 * `error_catalog()` is the single source of truth behind
-  `qumo describe errors`, the `qumo_describe` MCP tool and docs/ERRORS.md.
+  `qumo describe errors`, the `qumo_describe` MCP tool and docs/ERRORS.md,
+  which is generated from it (`qumo.ai.describe.describe_errors_markdown`;
+  regenerate with `QUMO_UPDATE_DOCS=1 .venv/bin/mojo run -I . tests/test_mcp.mojo`).
+  tests/test_mcp.mojo fails when the file is stale, or when a code raised
+  anywhere in qumo/, cli/, python/, plugins/hardware/ or
+  bench/run_benchmarks.py is not in the catalogue.
 
-Code ranges: E0xx circuit structure, E1xx parameters, E2xx functors,
-E3xx Pauli observables, E4xx simulation/execution, E5xx OpenQASM,
-E6xx compiler, E7xx stabilizer/QEC, E8xx algorithms, E9xx JSON/MCP/CLI
-interface (E999 = uncategorized), W0xx lint warnings.
+Code ranges (`error_ranges()`): E0xx circuit structure, E1xx parameters,
+E2xx functors, E3xx Pauli observables, E4xx simulation/execution (E47x GPU),
+E5xx OpenQASM parsing and export, E6xx compiler, E7xx stabilizer/QEC,
+E8xx algorithms, E9xx JSON/MCP/CLI interface and device selection
+(E95x hardware plugins and E96x benchmark harness, both Python; E999 =
+uncategorized), W0xx warnings (lint, execution notes, parser).
 """
 
 from std.math import pi
@@ -199,37 +206,96 @@ struct ErrorInfo(Copyable):
     var hint: String
 
 
+@fieldwise_init
+struct ErrorRange(Copyable):
+    """A block of codes owned by one subsystem (one section of docs/ERRORS.md).
+
+    `first`..`last` are the numeric bounds; a code belongs to the narrowest
+    range that contains it (QM-E472 -> QM-E47x, QM-E404 -> QM-E4xx)."""
+
+    var code: String  # "QM-E4xx", "QM-E47x"
+    var category: String
+    var title: String  # section title in docs/ERRORS.md
+    var owner: String  # owning subsystem / module
+    var note: String  # extra paragraph for docs/ERRORS.md ("" = none)
+    var warning: Bool  # QM-Wxxx range
+    var first: Int
+    var last: Int
+
+    def contains(self, code: String) -> Bool:
+        var bs = code.as_bytes()
+        if len(bs) != 7 or not code.startswith("QM-"):
+            return False
+        var k = Int(bs[3])
+        if k != ord("E") and k != ord("W"):
+            return False
+        if not (_is_d(Int(bs[4])) and _is_d(Int(bs[5])) and _is_d(Int(bs[6]))):
+            return False
+        if (k == ord("W")) != self.warning:
+            return False
+        var n = _parse_int_at(code, 4)
+        return n >= self.first and n <= self.last
+
+
 def _e(mut out: List[ErrorInfo], code: String, cat: String, meaning: String, hint: String):
     out.append(ErrorInfo(code, cat, meaning, hint))
 
 
-def error_ranges() -> List[ErrorInfo]:
-    """Code ranges -> owning subsystem (codes are never reused across ranges)."""
-    var r = List[ErrorInfo]()
-    _e(r, "QM-E0xx", "circuit", "Circuit structure (qumo.ir.circuit.validate)", "")
-    _e(r, "QM-E1xx", "parameters", "Symbolic parameters and binding", "")
-    _e(r, "QM-E2xx", "functors", "inverse()/controlled()/power() transforms", "")
-    _e(r, "QM-E3xx", "pauli", "Pauli strings / observables", "")
-    _e(r, "QM-E4xx", "simulation", "State-vector simulation and execution (qumo.sim, qumo.exec)", "")
-    _e(r, "QM-E5xx", "qasm", "OpenQASM 2/3 parsing (qumo.ir.qasm)", "")
-    _e(r, "QM-E6xx", "compiler", "Compiler passes, pass pipelines and targets (qumo.compiler)", "")
-    _e(r, "QM-E7xx", "stabilizer", "Stabilizer / Pauli-frame simulation and QEC (qumo.sim.stabilizer, qumo.qec)", "")
-    _e(r, "QM-E8xx", "algorithms", "Algorithms library (qumo.algorithms)", "")
-    _e(r, "QM-E9xx", "interface", "JSON, MCP tools and CLI (qumo.ai, cli); QM-E999 = uncategorized", "")
-    _e(r, "QM-W0xx", "lint", "Lint warnings from qumo.ai.diagnostics.lint", "")
+def _r(mut out: List[ErrorRange], code: String, cat: String, title: String, owner: String,
+       first: Int, last: Int, note: String = ""):
+    out.append(ErrorRange(code, cat, title, owner, note, code.startswith("QM-W"), first, last))
+
+
+def error_ranges() -> List[ErrorRange]:
+    """Code ranges -> owning subsystem (codes are never reused across ranges).
+    Ordered as the sections of docs/ERRORS.md."""
+    var r = List[ErrorRange]()
+    _r(r, "QM-E0xx", "circuit", "Circuit structure", "Circuit structure (qumo.ir.circuit: validate, builders)", 0, 99)
+    _r(r, "QM-E1xx", "parameters", "Parameters", "Symbolic parameters and binding", 100, 199)
+    _r(r, "QM-E2xx", "functors", "Functors (inverse / controlled / power)", "inverse()/controlled()/power() transforms", 200, 299)
+    _r(r, "QM-E3xx", "pauli", "Pauli observables", "Pauli strings / observables (qumo.ir.pauli)", 300, 399)
+    _r(r, "QM-E4xx", "simulation", "Simulation and execution", "CPU state-vector simulation, sampling and execution (qumo.sim, qumo.exec)", 400, 499)
+    _r(r, "QM-E47x", "gpu", "GPU acceleration", "GPU state vector and GPU Pauli frames (qumo.gpu; builds made with -D QUMO_GPU)", 470, 479,
+       "See [GPU.md](GPU.md). Only GPU entry points raise these codes. The MCP tool `qumo_run_device` and `qumo.exec.dispatch.sample_on(..., \"gpu\")` never fail because the GPU is missing: they run on the CPU and report warning QM-W020.")
+    _r(r, "QM-E5xx", "qasm", "OpenQASM", "OpenQASM 2/3 parsing and export (qumo.ir.qasm, qumo.ir.qasm2)", 500, 599)
+    _r(r, "QM-E6xx", "compiler", "Compiler", "Compiler passes, pass pipelines and targets (qumo.compiler)", 600, 699)
+    _r(r, "QM-E7xx", "stabilizer", "Stabilizer simulation and QEC", "Stabilizer / Pauli-frame simulation and QEC (qumo.sim.stabilizer, qumo.sim.frame, qumo.qec)", 700, 799,
+       "See [QEC.md](QEC.md).")
+    _r(r, "QM-E8xx", "algorithms", "Algorithms", "Algorithms library (qumo.algorithms)", 800, 899)
+    _r(r, "QM-E9xx", "interface", "Interface", "JSON, MCP tools, CLI and device selection (qumo.ai, qumo.exec.tools, cli); QM-E999 = uncategorized", 900, 999)
+    _r(r, "QM-E95x", "hardware", "Hardware plugins", "Hardware plugins (Python package plugins/hardware: IBM Quantum via Qiskit Runtime, Quantinuum via pytket/qnexus)", 950, 959,
+       "Raised by the Python package `qumo_hardware`, not by the Mojo core. This block mirrors `CATALOG` in plugins/hardware/qumo_hardware/errors.py (tests/test_mcp.mojo checks that every code used there is listed here). See [HARDWARE_PLUGINS.md](HARDWARE_PLUGINS.md#error-codes); `python -m qumo_hardware errors --json` prints the plugin's own catalogue. Messages never contain credentials.")
+    _r(r, "QM-E96x", "benchmark", "Benchmark harness", "Benchmark harness (bench/run_benchmarks.py, Python)", 960, 969,
+       "Raised by the Python benchmark harness, not by the Mojo core. Reported in the result JSON (`suites.<name>.reason`) and on stderr; a suite failure never aborts the run. See [BENCHMARKING_ON_CLOUD_GPUS.md](BENCHMARKING_ON_CLOUD_GPUS.md).")
+    _r(r, "QM-W0xx", "warning", "Warnings", "Warnings: lint findings QM-W001..W019 (qumo.ai.diagnostics.lint), execution notes QM-W020..W049, OpenQASM parser warnings QM-W050..W059", 0, 99)
     return r^
 
 
+def range_index_of(code: String, ranges: List[ErrorRange]) -> Int:
+    """Index of the narrowest range containing `code`, -1 if none."""
+    var best = -1
+    for i in range(len(ranges)):
+        if ranges[i].contains(code):
+            if best < 0 or ranges[i].last - ranges[i].first < ranges[best].last - ranges[best].first:
+                best = i
+    return best
+
+
 def error_catalog() -> List[ErrorInfo]:
-    """All documented codes. Keep in sync with docs/ERRORS.md."""
+    """All documented codes: the single source of truth behind
+    `qumo describe errors`, the `qumo_describe` MCP tool and docs/ERRORS.md
+    (generated; tests/test_mcp.mojo fails when the file is stale or when a
+    code raised in qumo/, cli/, python/, plugins/hardware or
+    bench/run_benchmarks.py is missing here)."""
     var c = List[ErrorInfo]()
     # circuit structure
     _e(c, "QM-E001", "circuit", "An instruction uses a qubit index outside the circuit.", "Valid qubits are 0..num_qubits-1; enlarge the register or fix the index.")
     _e(c, "QM-E002", "circuit", "A multi-qubit gate repeats the same qubit.", "Each operand of a gate must be a distinct qubit.")
     _e(c, "QM-E003", "circuit", "A condition refers to a classical bit beyond the classical register.", "Declare enough classical bits or fix the condition bit.")
+    _e(c, "QM-E004", "circuit", "A register condition (Circuit.c_if_register, OpenQASM 2 'if(c==N)') needs matching non-empty bit and value lists.", "Pass one value (0 or 1) per condition bit.")
     # parameters
     _e(c, "QM-E101", "parameters", "Number of parameter values does not match the circuit's symbolic parameters.", "Pass one value per parameter, in circuit.param_names order (or a name->value object).")
-    _e(c, "QM-E102", "parameters", "Operation needs a circuit without unbound parameters.", "Call circuit.bind(values) first.")
+    _e(c, "QM-E102", "parameters", "Operation needs a circuit without unbound parameters (e.g. OpenQASM 2 export).", "Call circuit.bind(values) first.")
     # functors
     _e(c, "QM-E201", "functors", "inverse() on a circuit with non-unitary operations.", "Remove measurements/resets/noise or split the circuit.")
     _e(c, "QM-E202", "functors", "controlled() does not support a gate, or needs bound parameters.", "Bind parameters, or translate to the {u, cx} basis first.")
@@ -243,10 +309,21 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E402", "simulation", "Sampling a circuit without measurements.", "Add measurements (measure_all) or use statevector/expectation.")
     _e(c, "QM-E403", "simulation", "Estimator task failed for at least one parameter set.", "Inspect the nested error of the failing parameter set.")
     _e(c, "QM-E404", "simulation", "State vector too large for the requested operation.", "Reduce the number of qubits or use a stabilizer method.")
-    _e(c, "QM-E450", "simulation", "Invalid physical error rate.", "Probabilities must lie in [0, 1].")
+    _e(c, "QM-E405", "simulation", "Observable acts on a qubit outside the state.", "Check Pauli indices (0-based, qubit 0 = least significant).")
+    _e(c, "QM-E406", "simulation", "The sampler packs classical registers into 62 bits; the circuit has more clbits.", "Measure fewer bits or split the register.")
+    _e(c, "QM-E407", "simulation", "Invalid index-bit swap layer (StateVector.apply_swap_layer): the qa/qb lists differ in length, a bit is outside [0, num_qubits), or a bit appears twice.", "Pass disjoint pairs of distinct in-range bits, one partner per entry.")
+    _e(c, "QM-E408", "simulation", "Invalid cache-block size for execute_plan_reordered (need 1 <= nb <= num_qubits).", "Use execute_plan(), or pass nb in [1, num_qubits].")
+    _e(c, "QM-E450", "simulation", "Invalid physical error rate (out of [0, 1], or above the surface-code threshold for fault-tolerant estimates).", "Probabilities must lie in [0, 1]; fault-tolerant estimation needs p < 1e-2.")
     _e(c, "QM-E460", "execution", "No devices available in the execution pool.", "Add Device.cpu() at least.")
-    _e(c, "QM-E461", "execution", "Job failed or is unknown.", "Check the job id and the nested error.")
-    _e(c, "QM-E462", "execution", "Job state does not allow the operation.", "Wait for completion or resubmit.")
+    _e(c, "QM-E461", "execution", "A workflow job fits no device in the pool (too many qubits).", "Add a device with more qubits, or a stabilizer device for Clifford circuits.")
+    _e(c, "QM-E462", "execution", "A workflow job depends on a job that is not an earlier job.", "Add jobs in dependency order; a job may only depend on earlier jobs.")
+    # gpu
+    _e(c, "QM-E470", "gpu", "GPU support is not compiled into this build.", "Rebuild with -D QUMO_GPU (make cli-gpu / py-gpu / test-gpu); on macOS install Xcode and run 'xcodebuild -downloadComponent MetalToolchain' first.")
+    _e(c, "QM-E471", "gpu", "Dynamic or noisy circuit given to the GPU state-vector sampler (it runs static circuits: terminal measurements, no noise).", "Use qumo.exec.dispatch.sample_auto or sample_on, which fall back to CPU trajectories.")
+    _e(c, "QM-E472", "gpu", "float64 requested on an Apple GPU (Metal has no double precision).", "Use GpuStateVector[DType.float32], the default on Apple.")
+    _e(c, "QM-E473", "gpu", "Sampling a GPU state with zero norm.", "Check the circuit and the initial state.")
+    _e(c, "QM-E474", "gpu", "Circuit or host state is wider than the allocated GPU state.", "Allocate GpuStateVector(circuit.num_qubits).")
+    _e(c, "QM-E475", "gpu", "The GPU executor has no kernel for an operation of the execution plan.", "Run this circuit on the CPU state vector (qumo.sim.runner).")
     # qasm
     _e(c, "QM-E500", "qasm", "OpenQASM syntax error (unexpected or missing token).", "Check the token at line:col; every statement ends with ';'.")
     _e(c, "QM-E501", "qasm", "Unexpected character in OpenQASM source.", "Remove it or check for a missing quote/comment marker.")
@@ -271,6 +348,7 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E541", "qasm", "Unsupported condition (multi-bit register value, nested or compound if).", "QUMO conditions test one bit: if (c[i] == 1) ...")
     _e(c, "QM-E550", "qasm", "Invalid gate modifier (non-integer pow, bad ctrl count).", "Use inv @, ctrl(n) @, negctrl @ or pow(k) @ with integer k.")
     _e(c, "QM-E551", "qasm", "Gate definition expands recursively.", "Gates must not call themselves.")
+    _e(c, "QM-E552", "qasm", "OpenQASM export cannot express a classical condition: a single-bit condition on a multi-bit register (OpenQASM 2), or a register condition that does not cover every clbit.", "Export OpenQASM 3 (to_qasm) for single-bit conditions; condition on single bits or on the whole register.")
     _e(c, "QM-E560", "qasm", "Invalid '#pragma qumo' directive.", "See docs/AI_NATIVE.md for detector/observable/tick/param pragmas.")
     _e(c, "QM-E570", "qasm", "Invalid or too large for-loop range.", "Use constant inclusive ranges [a:b] / [a:step:b] or sets {a, b}.")
     # compiler
@@ -294,11 +372,12 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E704", "stabilizer", "Unsupported feed-forward for the stabilizer/frame simulator.", "Only Pauli X/Y/Z conditioned on one measured bit is supported.")
     _e(c, "QM-E705", "stabilizer", "Register too large for the requested output.", "Reduce clbits/observables or use another output format.")
     _e(c, "QM-E706", "qec", "Invalid QEC code parameters.", "Check code name, distance, rounds and basis.")
-    _e(c, "QM-E707", "qec", "Unknown decoder name.", "Use 'mwpm', 'uf' or 'lookup'.")
+    _e(c, "QM-E707", "qec", "Unknown decoder name.", "Use 'mwpm' (exact matching by sparse blossom, the default; aliases 'matching', 'pymatching'), 'sparse_blossom' (same decoder), 'mwpm_dense' (dense-blossom MWPM, small codes), 'uf' (union-find) or 'lookup', or pass your own Decoder to sample_and_decode().")
     _e(c, "QM-E708", "qec", "Decoding failure (reserved; decoders currently count isolated defects in a failures field).", "Check the detector error model / syndrome size.")
     _e(c, "QM-E709", "qec", "Invalid calibration data or noise model.", "Check T1/T2 > 0, T2 <= 2*T1, error probabilities in [0, 1].")
     _e(c, "QM-E710", "qec", "Exponential/decay fit failed.", "Use more sequence lengths or shots; check the data decays.")
     _e(c, "QM-E711", "qec", "Invalid noise probabilities.", "Probabilities must lie in [0, 1].")
+    _e(c, "QM-E712", "qec", "Internal invariant violation in the sparse-blossom decoder (never raised per shot; counted in SparseBlossomDecoder.anomalies, which must stay 0).", "Report the syndrome; decode it with 'mwpm_dense' meanwhile.")
     # algorithms
     _e(c, "QM-E801", "algorithms", "Invalid algorithm option.", "Check the option names/values in the function docstring.")
     _e(c, "QM-E802", "algorithms", "Invalid size or index for an algorithm builder.", "Check qubit counts and indices.")
@@ -311,7 +390,7 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E809", "algorithms", "Invalid graph specification.", "Edges are 'i-j' pairs of distinct non-negative nodes.")
     _e(c, "QM-E810", "algorithms", "Invalid QPE options.", "1 <= n_eval <= 16 and a unitary on >= 1 qubit.")
     _e(c, "QM-E820", "algorithms", "Invalid multi-controlled gate construction.", "Check control/target/ancilla counts.")
-    # interface (JSON / MCP / CLI)
+    # interface (JSON / MCP / CLI / device selection)
     _e(c, "QM-E900", "interface", "Malformed JSON.", "Fix the JSON at the reported line/col (double-quoted keys, no trailing commas).")
     _e(c, "QM-E901", "interface", "Invalid JSON-RPC request.", "Send {\"jsonrpc\":\"2.0\",\"id\":1,\"method\":...,\"params\":{...}}.")
     _e(c, "QM-E910", "interface", "Missing required tool argument.", "See the tool's inputSchema in tools/list.")
@@ -322,8 +401,31 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E920", "interface", "Cannot read input file.", "Check the path; use '-' to read from stdin.")
     _e(c, "QM-E921", "interface", "Invalid command-line usage.", "Run 'qumo help'.")
     _e(c, "QM-E930", "interface", "Circuit too large for dense state-vector output.", "Use sampling, fewer qubits, or raise max_qubits explicitly.")
+    _e(c, "QM-E940", "interface", "Unknown simulator device name (qumo.exec.dispatch.sample_on, qumo_run_device).", "Use 'auto', 'cpu' or 'gpu'.")
+    # hardware plugins (Python; mirrors plugins/hardware/qumo_hardware/errors.py CATALOG)
+    _e(c, "QM-E950", "hardware", "The QUMO Python extension (build/qumo_py.so) could not be loaded.", "Run `make py` at the repository root, or set QUMO_PY_PATH to the directory containing qumo_py.so.")
+    _e(c, "QM-E951", "hardware", "A provider SDK needed for this operation is not installed.", "Install the extra: pip install 'qumo-hardware[ibm]' or 'qumo-hardware[quantinuum]'.")
+    _e(c, "QM-E952", "hardware", "Provider credentials are missing, expired or rejected.", "IBM: export QISKIT_IBM_TOKEN (and QISKIT_IBM_INSTANCE) or QiskitRuntimeService.save_account(); Quantinuum: run qnexus.login() once.")
+    _e(c, "QM-E953", "hardware", "Unknown provider or backend name, or the backend is not available to this account.", "List backends with `python -m qumo_hardware backends --provider <name>`.")
+    _e(c, "QM-E954", "hardware", "The circuit cannot be compiled for the backend (too many qubits, unsupported operation, parse error).", "Reduce the circuit width or check the circuit with `build/qumo validate`.")
+    _e(c, "QM-E955", "hardware", "The compiled payload failed the provider's own validation (not ISA / not native).", "Report the circuit; retry with --provider-transpile to compare with the provider's compiler.")
+    _e(c, "QM-E956", "hardware", "A shot, size or cost limit would be exceeded.", "Lower --shots, or raise --max-cost if the cost is intended.")
+    _e(c, "QM-E957", "hardware", "Submission to a remote (billable) backend needs explicit confirmation.", "Review backend, shots and cost estimate, then re-run with --yes (CLI) or confirm=True (API).")
+    _e(c, "QM-E958", "hardware", "Unknown job id (not in the local job store and not found at the provider).", "List known jobs with `python -m qumo_hardware jobs`.")
+    _e(c, "QM-E959", "hardware", "The job failed, was cancelled, or its result is not available yet.", "Check `python -m qumo_hardware status <job>`; results exist only for completed jobs.")
+    # benchmark harness (Python; bench/run_benchmarks.py)
+    _e(c, "QM-E960", "benchmark", "Unknown or invalid config, preset, suite or option.", "Run `python bench/run_benchmarks.py --list`.")
+    _e(c, "QM-E961", "benchmark", "Mojo build of a benchmark binary failed.", "Run the recorded build command by hand; GPU toolchains: docs/GPU.md.")
+    _e(c, "QM-E962", "benchmark", "A suite, command or build exceeded its timeout (process group killed).", "Raise `timeout_s` in the config or use `--quick` / smaller `qubits`.")
+    _e(c, "QM-E963", "benchmark", "Required tool or binary missing (mojo, make, ...).", "Run `make setup`, or install the tool.")
+    _e(c, "QM-E964", "benchmark", "Benchmark output could not be parsed.", "Inspect `output_tail` in the JSON; the binary's output format changed.")
+    _e(c, "QM-E965", "benchmark", "Third-party baseline not installed or unusable (CUDA-Q, Aer GPU, Lightning).", "Install it in the interpreter named by the config / `QUMO_*_PYTHON`.")
+    _e(c, "QM-E966", "benchmark", "Qubit width dropped: it does not fit `memory_fraction` of GPU memory or free host RAM.", "Use a larger GPU / High-RAM runtime, or lower `qubits`.")
+    _e(c, "QM-E967", "benchmark", "No GPU, a GPU outside the Mojo/MAX support list, or unsupported precision (fp64 on Metal).", "Check `nvidia-smi` / `rocminfo`; `QUMO_FORCE_GPU=1` to try anyway.")
+    _e(c, "QM-E968", "benchmark", "A benchmark binary (e.g. a GPU runtime error) or a baseline worker crashed or produced no result.", "Rerun the recorded command; for GPU errors add `MODULAR_DEBUG=device-sync-mode`.")
+    _e(c, "QM-E969", "benchmark", "A test, `gpu-check` target or correctness check reported FAIL.", "Rerun the failing file: `.venv/bin/mojo run -I . <file>`.")
     _e(c, "QM-E999", "internal", "Uncategorized internal error (no QUMO code in the message).", "Report it with the input that triggered it.")
-    # lint
+    # warnings: lint (W001-W019), execution notes (W020-W049), OpenQASM parser (W050-W059)
     _e(c, "QM-W001", "lint", "Qubits are declared but never used.", "Shrink the register to save simulation memory (2x per qubit).")
     _e(c, "QM-W002", "lint", "A gate acts on a qubit after it was measured (no reset): the circuit becomes dynamic.", "Intended for mid-circuit measurement; otherwise move measurements to the end.")
     _e(c, "QM-W003", "lint", "A qubit is measured without any prior operation (always 0).", "Check the qubit index of the measurement.")
@@ -337,8 +439,9 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-W011", "lint", "Rotation by angle 0 (no-op).", "Remove the gate.")
     _e(c, "QM-W012", "lint", "Very deep circuit.", "Consider optimization passes before simulation.")
     _e(c, "QM-W014", "lint", "Noise probability outside [0, 1].", "Probabilities must lie in [0, 1].")
-    _e(c, "QM-W050", "lint", "OpenQASM gate definition shadows a native gate with a different signature.", "Rename the gate.")
-    _e(c, "QM-W051", "lint", "OpenQASM delay is ignored.", "Model idle noise with '#pragma qumo depolarize1(p) q[i];'.")
+    _e(c, "QM-W020", "execution", "Device 'gpu' was requested but the run fell back to the CPU; the warning gives the reason (GPU support not compiled, no usable device, or a dynamic/noisy non-Clifford circuit).", "Check qumo_gpu_info; use a build made with -D QUMO_GPU (make cli-gpu / py-gpu) on a supported GPU, or request device 'auto' / 'cpu'.")
+    _e(c, "QM-W050", "qasm", "OpenQASM gate definition shadows a native gate with a different signature.", "Rename the gate.")
+    _e(c, "QM-W051", "qasm", "OpenQASM delay is ignored.", "Model idle noise with '#pragma qumo depolarize1(p) q[i];'.")
     return c^
 
 

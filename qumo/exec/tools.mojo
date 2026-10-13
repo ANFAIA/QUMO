@@ -1,4 +1,5 @@
-"""Agent tools for compilation, resource estimation and variational algorithms.
+"""Agent tools for compilation, resource estimation, variational algorithms,
+QEC experiments and device-explicit simulation (CPU / GPU).
 
 Registered in `qumo.ai.registry.full_registry()`, so they appear in MCP
 `tools/list`, `qumo tool <name> '<json>'` and the capabilities document.
@@ -12,9 +13,12 @@ from qumo.ir.circuit import Circuit
 from qumo.ir.pauli import parse_pauli_sum
 from qumo.ir.qasm import to_qasm
 from qumo.ai.json import JsonWriter, JsonValue
-from qumo.ai.tools import ToolRegistry, ToolResult, ToolContext, tool_ok, arg_circuit, arg_int, arg_required, arg_params
+from qumo.ai.tools import (
+    ToolRegistry, ToolResult, ToolContext, tool_ok, arg_circuit, arg_int, arg_required, arg_params,
+    write_warnings,
+)
 from qumo.exec.dispatch import sample_on
-from qumo.gpu.device import query_gpu
+from qumo.gpu.device import query_gpu, GPU_MIN_QUBITS
 from qumo.compiler.target import Target, parse_target
 from qumo.compiler.pass_manager import transpile, compile_spec
 from qumo.exec.resources import (
@@ -216,7 +220,7 @@ def _run_device_tool(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
     var r = sample_on(c, shots, UInt64(seed), params, device, note)
     var t1 = perf_counter_ns()
     if note.byte_length() > 0:
-        warnings.append("QM-W020: device 'gpu' requested but " + note + ". Hint: see qumo_gpu_info.")
+        warnings.append("QM-W020: device 'gpu' requested but " + note + ". Hint: check qumo_gpu_info; GPU runs need a build made with -D QUMO_GPU (make cli-gpu) and a supported GPU.")
     if auto:
         warnings.append("QM-W004: circuit had no measurements; all qubits were measured into c[0..n-1]. Hint: add 'c = measure q;' to control readout.")
     var w = JsonWriter()
@@ -229,11 +233,12 @@ def _run_device_tool(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
     w.kv_int("shots", shots)
     w.kv_int("seed", seed)
     w.kv_string("device", device)
+    w.kv_string("device_used", "gpu" if r.method.startswith("gpu") else "cpu")
     w.kv_string("method", r.method)
     w.kv_int("num_qubits", c.num_qubits)
     w.kv_string("most_frequent", r.most_frequent())
     w.kv_string("bit_order", "leftmost character = highest classical bit c[n-1]")
-    w.kv_string_list("warnings", warnings)
+    write_warnings(w, warnings)
     w.kv_float("total_ms", _ms(t0, t1))
     w.end_object()
     return tool_ok(w.finish())
@@ -269,8 +274,8 @@ def register_exec_tools(mut reg: ToolRegistry):
     )
     reg.add(
         "qumo_qec_memory", "QEC memory experiment",
-        "Sinter-style logical error rate of a memory experiment: code 'surface_z' | 'surface_x' | 'repetition', distance d, rounds (default d), uniform circuit-level noise p (Stim SI1000-like parameters), decoder 'mwpm' (exact) | 'uf' (union-find) | 'lookup'. Bit-packed Pauli-frame sampling; returns logical error rate, std error, Wilson interval, per-round rate, timing.",
-        "{\"type\":\"object\",\"properties\":{\"code\":{\"type\":\"string\",\"enum\":[\"surface_z\",\"surface_x\",\"repetition\"],\"default\":\"surface_z\"},\"distance\":{\"type\":\"integer\",\"default\":3},\"rounds\":{\"type\":\"integer\",\"default\":-1},\"p\":{\"type\":\"number\",\"default\":0.001},\"shots\":{\"type\":\"integer\",\"default\":100000},\"decoder\":{\"type\":\"string\",\"enum\":[\"mwpm\",\"uf\",\"lookup\"],\"default\":\"mwpm\"},\"seed\":{\"type\":\"integer\",\"default\":1},\"max_errors\":{\"type\":\"integer\",\"default\":-1}},\"additionalProperties\":false}",
+        "Sinter-style logical error rate of a memory experiment: code 'surface_z' | 'surface_x' | 'repetition', distance d, rounds (default d), uniform circuit-level noise p (Stim SI1000-like parameters), decoder 'mwpm' (default: exact minimum-weight perfect matching by sparse blossom, PyMatching 2's algorithm; aliases 'matching', 'pymatching') | 'sparse_blossom' (same decoder) | 'mwpm_dense' (exact MWPM by all-pairs shortest paths + dense blossom; small codes, d <= 5) | 'uf' (union-find; fast, slightly lower threshold) | 'lookup' (lookup table; tiny codes, <= 64 detectors). Bit-packed Pauli-frame sampling; returns logical error rate, std error, Wilson interval, per-round rate, timing and the decoder that ran.",
+        "{\"type\":\"object\",\"properties\":{\"code\":{\"type\":\"string\",\"enum\":[\"surface_z\",\"surface_x\",\"repetition\"],\"default\":\"surface_z\"},\"distance\":{\"type\":\"integer\",\"default\":3},\"rounds\":{\"type\":\"integer\",\"default\":-1},\"p\":{\"type\":\"number\",\"default\":0.001},\"shots\":{\"type\":\"integer\",\"default\":100000},\"decoder\":{\"type\":\"string\",\"enum\":[\"mwpm\",\"sparse_blossom\",\"mwpm_dense\",\"uf\",\"lookup\"],\"default\":\"mwpm\"},\"seed\":{\"type\":\"integer\",\"default\":1},\"max_errors\":{\"type\":\"integer\",\"default\":-1}},\"additionalProperties\":false}",
         _qec_memory_tool,
     )
     reg.add(
@@ -281,13 +286,13 @@ def register_exec_tools(mut reg: ToolRegistry):
     )
     reg.add(
         "qumo_gpu_info", "GPU status",
-        "Report whether this QUMO build has GPU support (-D QUMO_GPU) and a usable device: name, API (cuda/hip/metal), vendor, default precision (fp32 on Apple, fp64 on NVIDIA/AMD), fp64 support and the qubit threshold above which automatic dispatch uses the GPU.",
+        "Report whether this QUMO build has GPU support (-D QUMO_GPU) and a usable device: name, API (cuda/hip/metal), vendor, default precision (fp32 on Apple, fp64 on NVIDIA/AMD), fp64 support and the qubit threshold above which automatic dispatch uses the GPU. Call it before qumo_run_device with device 'gpu'.",
         "{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}",
         _gpu_info_tool,
     )
     reg.add(
         "qumo_run_device", "Run circuit on a device",
-        "Like qumo_run_qasm but with an explicit simulator device: 'auto' (default dispatch: Pauli frames / tableau / GPU state vector for wide static non-Clifford circuits / CPU state vector), 'cpu' (never the GPU) or 'gpu' (GPU state vector; falls back to the CPU with warning QM-W020 when the GPU is not compiled/available or the circuit is dynamic/noisy). Returns counts and the method that ran (e.g. 'gpu:statevector:fp32').",
+        "Like qumo_run_qasm but with an explicit simulator device (vendor-neutral: NVIDIA CUDA, AMD ROCm or Apple Metal through MAX). 'auto' (default) = qumo_run_qasm's dispatch: noisy Clifford circuits without feed-forward -> CPU Pauli frames, other wide/noisy/dynamic Clifford circuits -> stabilizer tableau, static non-Clifford circuits with >= " + String(GPU_MIN_QUBITS) + " qubits -> GPU state vector when this build has GPU support (-D QUMO_GPU) and a usable device (CPU on any GPU failure), everything else -> CPU state vector. 'cpu' = the same choice restricted to CPU simulators. 'gpu' = Clifford circuits without parameters or classical feed-forward (noise, mid-circuit measurement and reset allowed) -> GPU Pauli frames ('gpu:pauli_frame'); other static, noiseless circuits -> GPU state vector ('gpu:statevector:fp32' on Apple, fp64 on NVIDIA/AMD); dynamic or noisy non-Clifford circuits, builds without -D QUMO_GPU, or no usable device -> run on the CPU as with 'cpu' plus warning QM-W020 giving the reason. Returns counts, 'method' (the simulator that ran), 'device_used' and structured 'warnings'.",
         "{\"type\":\"object\",\"properties\":{" + _CIRC + ",\"shots\":{\"type\":\"integer\",\"minimum\":1,\"default\":1024},\"seed\":{\"type\":\"integer\",\"minimum\":0,\"default\":1234},\"params\":{\"description\":\"Values for 'input float' parameters: array in declaration order or object name->value\"},\"device\":{\"type\":\"string\",\"enum\":[\"auto\",\"cpu\",\"gpu\"],\"default\":\"auto\"},\"max_qubits\":{\"type\":\"integer\",\"default\":30}},\"additionalProperties\":false}",
         _run_device_tool,
     )

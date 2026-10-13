@@ -16,5 +16,8 @@ python -m pytest plugins/hardware/tests -q                                      
 ```
 
 Nothing is submitted to a remote backend without `--yes` (CLI) or
-`confirm=True` (Python). Full documentation:
+`confirm=True` (Python, both `runner.run` and `Provider.submit`). The compiler
+extension is loaded only from `QUMO_PY_PATH` or from `build/qumo_py.so` of the
+checkout that contains this package (never from the current directory), so a
+non-editable install needs `QUMO_PY_PATH=/path/to/qumo_py.so`. Full documentation:
 [docs/HARDWARE_PLUGINS.md](../../docs/HARDWARE_PLUGINS.md).

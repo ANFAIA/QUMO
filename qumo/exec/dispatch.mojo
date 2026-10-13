@@ -11,9 +11,12 @@ backends or CUDA-Q's target choice, but per call and without global state:
     state vector (`qumo.gpu`), only in builds made with `-D QUMO_GPU` and
     when a device is usable; any GPU failure falls back to the CPU;
   * everything else -> state vector (static sampling or trajectories).
-An explicit `device="gpu"` (`sample_on`) additionally sends Clifford circuits
-without feed-forward (noisy or not) to the GPU Pauli-frame sampler
-(`qumo.gpu.frame_gpu`). The returned `SampleResult.method` records which path
+An explicit `device="gpu"` (`sample_on`) routes with `gpu_sample_route`:
+Clifford circuits without feed-forward (noisy or not) -> GPU Pauli frames
+(`qumo.gpu.frame_gpu`); other static, noiseless circuits -> GPU state vector;
+everything else runs on the CPU and the returned note says exactly why
+(no GPU build / device, > 62 classical bits, Clifford feed-forward, dynamic or
+noisy non-Clifford). The returned `SampleResult.method` records which path
 ran ("gpu:statevector:fp32", "gpu:pauli_frame", ...).
 """
 
@@ -92,6 +95,21 @@ def frame_eligible_gpu(c: Circuit) -> Bool:
     return c.num_params() == 0 and c.num_measurements > 0 and c.num_clbits <= 62 and c.is_clifford() and not _has_conditions(c)
 
 
+def gpu_sample_route(c: Circuit, params: List[Float64]) -> Tuple[String, String]:
+    """Where `device="gpu"` sampling of `c` runs, ignoring device availability:
+    ("frames", ""), ("statevector", "") or ("cpu", reason). The reason is
+    phrased to follow "device 'gpu' requested but " (QM-W020 / fallback notes)."""
+    if c.num_clbits > 62:
+        return ("cpu", String("the circuit has more than 62 classical bits (the GPU samplers pack registers into 62 bits): ran on the CPU"))
+    if len(params) == 0 and frame_eligible_gpu(c):
+        return ("frames", String(""))
+    if c.num_params() == 0 and c.is_clifford() and _has_conditions(c):
+        return ("cpu", String("the circuit is Clifford with classically-conditioned gates (feed-forward), which the GPU Pauli-frame sampler does not run: ran on the CPU stabilizer simulator"))
+    if c.is_dynamic() or c.has_noise():
+        return ("cpu", String("the circuit is dynamic (mid-circuit measurement, reset or feed-forward) or noisy and not Clifford, and the GPU state-vector sampler runs static noiseless circuits only: ran on the CPU"))
+    return ("statevector", String(""))
+
+
 def sample_frame_gpu(c: Circuit, shots: Int, seed: UInt64) raises -> SampleResult:
     """Counts from the GPU Pauli-frame sampler (needs -D QUMO_GPU and a device;
     QM-E470 otherwise). SampleResult.method = 'gpu:pauli_frame'."""
@@ -159,10 +177,10 @@ def _sample_cpu(c: Circuit, shots: Int, seed: UInt64, params: List[Float64]) rai
 def sample_on(c: Circuit, shots: Int, seed: UInt64, params: List[Float64],
               device: String, mut note: String) raises -> SampleResult:
     """Sample on an explicit device: 'auto' (= sample_auto), 'cpu' (never the
-    GPU) or 'gpu' (Clifford circuits without feed-forward -> GPU Pauli frames,
-    other static circuits -> GPU state vector; falls back to the CPU and
-    explains why in `note` when the GPU is not compiled/available or the
-    circuit is dynamic/noisy non-Clifford)."""
+    GPU) or 'gpu' (routed by `gpu_sample_route`: Clifford circuits without
+    feed-forward -> GPU Pauli frames, other static noiseless circuits -> GPU
+    state vector). When the GPU cannot run it (not compiled, no usable device,
+    or the route is "cpu") the call runs on the CPU and `note` says why."""
     note = ""
     if device == "auto":
         return sample_auto(c, shots, seed, params)
@@ -178,12 +196,13 @@ def sample_on(c: Circuit, shots: Int, seed: UInt64, params: List[Float64],
             ok = False
         if not ok:
             note = "no usable GPU device: ran on the CPU"
-        elif len(params) == 0 and frame_eligible_gpu(c):
-            return sample_frame_gpu(c, shots, seed)
-        elif c.is_dynamic() or c.has_noise():
-            note = "dynamic or noisy non-Clifford circuit: ran on the CPU (the GPU state-vector sampler is static-only)"
         else:
-            return sample_gpu(c, shots, seed, params)
+            var route = gpu_sample_route(c, params)
+            if route[0] == "frames":
+                return sample_frame_gpu(c, shots, seed)
+            if route[0] == "statevector":
+                return sample_gpu(c, shots, seed, params)
+            note = route[1]
     else:
         note = "GPU support not compiled (build with -D QUMO_GPU): ran on the CPU"
     return _sample_cpu(c, shots, seed, params)

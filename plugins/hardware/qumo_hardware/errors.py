@@ -51,8 +51,11 @@ CATALOG: dict[str, tuple[str, str]] = {
         "Reduce the circuit width or check the circuit with `build/qumo validate`.",
     ),
     E_INVALID_PAYLOAD: (
-        "The compiled payload failed the provider's own validation (not ISA / not native).",
-        "Report the circuit; retry with --provider-transpile to compare with the provider's compiler.",
+        "The compiled payload failed the provider's own validation (not ISA / not native) or cannot be "
+        "translated into the provider's program format.",
+        "The message names the failed check. If it is a QUMO bug, report the circuit and its payload "
+        "(--show-qasm); for ISA/native-gate failures, --provider-transpile submits the provider compiler's "
+        "output instead.",
     ),
     E_LIMIT: (
         "A shot, size or cost limit would be exceeded.",

@@ -26,6 +26,27 @@ var e = expectation(circuit, parse_pauli_sum("Z0 Z1"))
 | Executor | `runner.execute_plan` | n < 19: one parallel pass per op. n >= 19: `execute_plan_reordered` (below). |
 | Entry points | `evolve`, `evolve_into`, `sample`, `expectation` | Static circuits evolve once and sample all shots; dynamic or noisy circuits run per-shot trajectories (gate by gate, `apply_instruction`). |
 
+### 1.1 Classical bits written more than once
+
+`sample` packs measurement results into a classical register (bit c =
+clbit c; keys are Qiskit-style, leftmost = highest clbit). When several
+MEASUREs write the same clbit, **the last one in program order wins**, as in
+Qiskit/Aer: `x q[0]; measure q[0]->c[1]; measure q[1]->c[1]; measure q[0]->c[0]`
+gives `01` on every shot. All samplers agree:
+
+| Path | `SampleResult.method` | How the last write wins |
+|---|---|---|
+| static (terminal measurements only) | `statevector:static` | `terminal_measure_map(circuit)` keeps one source qubit per clbit (the last MEASURE into it); `TerminalMeasureMap.pack(index)` ORs those bits (`outcome & mask` when every pair is qubit k -> clbit k) |
+| per-shot trajectories | `statevector:trajectories` | each MEASURE sets or clears its clbit |
+| stabilizer / Pauli frames | `stabilizer`, `pauli_frame` | per-clbit store / records replayed in order (`qumo.sim.stabilizer`, `qumo.exec.dispatch.counts_from_measurements`) |
+
+`terminal_measure_map` is public so that other static samplers (the GPU
+state vector) can share the exact semantics. Before 2026-10-12 the static
+path ORed every MEASURE into the register, so an earlier 1 survived a later
+0 (the example above gave `11`); `tests/test_sim.mojo`
+(`test_repeated_clbit_last_write_wins`) covers the reported cases and 150
+random circuits against the trajectory path and the stabilizer sampler.
+
 ## 2. Cache blocking with qubit reordering
 
 Above 2^19 amplitudes (8 MiB) the state no longer fits in cache and a pass
@@ -82,6 +103,14 @@ global bit = a diagonal 1q phase on the local bit).
   bit would cost an extra pass in the swap layer), then the bit whose next
   use is farthest away (Belady), ties -> the higher bit (longer contiguous
   runs in the swap pass).
+* The "bits >= 3 first" rule is only a preference: when S fills the whole
+  block there is no spare local bit >= 3 and in-vector bits 0..2 must go
+  (one extra vectorized full-state pass each at swap-in, and usually again
+  in the restore). In that case (`nb >= 6`) the selection is recomputed
+  with bits 0..2 pinned local (they occupy 3 of the nb slots) and the pinned
+  set is used when it loses at most as many upcoming ops as lane victims it
+  avoids and still meets the gain threshold. Lane pairs remain possible
+  (`ReorderStats.vector_pairs` counts them).
 
 ### 2.4 Restore at the end
 
@@ -111,11 +140,35 @@ state, so measurement, reset, feed-forward, noise, adjoint gradients
 
 `execute_plan_reordered_stats(sv, plan, nb) -> ReorderStats` runs the
 executor and reports `block_passes`, `block_ops`, `global_ops`,
-`swap_layers`, `swapped_bits`, `relabels`, `restore_layers`, `restore_pairs`
-and `restore_min_bit`. Example (QFT, 24 qubits, nb = 15):
-`block_passes=2, block_ops=300, global_ops=0, swap_layers=2, swapped_bits=18,
-relabels=12, restore_layers=2, restore_pairs=20` - the 312-gate circuit costs
-about 2 block passes + 4 swap passes + the restore instead of ~300 passes.
+`swap_layers`, `swapped_bits`, `relabels`, `restore_layers`, `restore_pairs`,
+`restore_min_bit` and `vector_pairs` (pairs with an in-vector bit 0..2, at
+swap-in or restore: each is one extra vectorized full-state pass). Example
+(QFT, 24 qubits, nb = 15): `block_passes=2, block_ops=300, global_ops=0,
+swap_layers=2, swapped_bits=18, relabels=12, restore_layers=2,
+restore_pairs=20, vector_pairs=3` - the 312-gate circuit costs 2 block
+passes + 2 swap-in passes + 2 restore passes + 3 vectorized lane passes
+instead of ~300 passes (the 3 lane pairs come from QFT's final SWAPs of
+qubits 0..2, which are relabels).
+
+In-vector pairs before / after the pinned re-selection of §2.3
+(deterministic counts, nb = 15, `vector_pairs` / swap-in layers / restore
+layers):
+
+| circuit | before | after |
+|---|---|---|
+| layered 20 | 4 / 1 / 1 | 0 / 2 / 2 (and one more block pass) |
+| layered 22 | 6 / 2 / 2 | 0 / 2 / 2 |
+| layered 24 | 6 / 2 / 2 | 0 / 2 / 1 |
+| qft 20 / 22 / 24 | 5 / 6 / 6 | 3 / 5 / 3 (swap-in and restore layers unchanged) |
+| random 20 / 22 / 24 | 7 / 10 / 11 | 5 / 7 / 7 (swap-in layers unchanged) |
+
+Wall time of the two variants was within noise on the loaded development
+machine (interleaved, order flipped every round): 22 qubits, 15 rounds at
+load 44-69: the new variant won 28 of 45 paired runs, medians 0.99-1.07x;
+24 qubits, 6 rounds at load 37-48: 9 of 18, medians 0.96-1.03x; 22 + 24
+qubits, 7 rounds at load 15-48: 26 of 42, medians 1.00-1.15x. The change is
+kept because it removes passes by count and, by construction, gives up at
+most one op per avoided lane pass; no wall-time gain is claimed.
 
 ## 3. `apply_swap_layer`: index-bit swaps
 
@@ -188,10 +241,27 @@ Absolute times are 2-3x above the quiet-machine figures quoted in the
 README (e.g. layered 26: 5.65 s baseline) because of the load; the ratios are
 what the interleaving protects.
 
+The tables above rest on 3 samples per configuration and the spread is wide
+(e.g. layered 26 reordered: 7.54-11.05 s). An independent re-run on the same
+machine under heavier load confirms the direction but with smaller ratios
+(baseline / reordered, medians):
+
+| run | layered | qft | random | reordered faster |
+|---|---|---|---|---|
+| 22 q, 5 rounds, load 141-276 | 1.19x | 1.56x | 1.53x | 15/15 rounds |
+| 24 q, 5 rounds, load 141-276 | 1.26x | 1.53x | 1.14x | 13/15 rounds |
+| 26 q, 3 rounds, load 44-83 | 1.22x | 1.57x | 1.27x | 9/9 rounds |
+
+Treat the speedups as "1.1-2.7x depending on load and family"; a quiet
+machine is needed for tighter numbers.
+
 **Where the time goes** (24 qubits, instrumented copy): block passes
 dominate (L2-resident compute); each swap-in layer costs ~0.02-0.04 s
-(about half a streaming pass); the restore 0.04-0.09 s (more when SWAP gates
-moved qubits 0..2, e.g. QFT's final reversal).
+(about half a streaming pass); the restore 0.04-0.09 s (more when it must
+move in-vector bits 0..2, e.g. after QFT's final reversal). A swap layer with
+3 in-vector pairs measured 0.033-0.058 s against 0.014-0.017 s for a 4-pair
+layer on bits >= 3 (24 qubits, load ~87), which is why lane victims are
+avoided (§2.3).
 
 **Swap-layer memory/time fix** (`apply_swap_layer` with the lowest swapped
 bit r >= 10 used to allocate and zero-fill a 4 x 2^r-double staging buffer
@@ -256,12 +326,15 @@ back-to-back, repeat >= 3 times, report medians and the load average.
   next step).
 * The scheduler is greedy (lookahead window 4096, fixed gain thresholds);
   it is not an optimal swap schedule.
-* SWAP gates on qubits 0..2 make the final restore touch in-vector bits:
-  one extra vectorized pass per such pair.
+* In-vector bits 0..2 are still moved when SWAP gates relabel qubits that
+  sit on them (e.g. QFT's final reversal: the restore must undo it) and when
+  a full selection is worth more than the lane passes it costs: one extra
+  vectorized pass per such pair (`ReorderStats.vector_pairs`).
 * `BLOCK_BITS = 15` was kept: a sweep of nb = 12..16 at 24 qubits was within
   noise on the (heavily loaded) development machine.
-* fp64, shared memory, one node. The GPU backend executes the same plan op by
-  op without reordering (docs/GPU.md).
+* fp64, shared memory, one node. The GPU backend consumes the same fused plan
+  (`build_plan`) but not this executor or its index-bit swaps: it has its own
+  shared-memory tile scheduler (`qumo/gpu/tiles.mojo`, docs/GPU.md).
 
 ## 7. Origins
 

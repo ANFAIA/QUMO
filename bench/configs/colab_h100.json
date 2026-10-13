@@ -69,6 +69,29 @@
           20
         ],
         "reps": 1
+      },
+      "cpu_max": 28
+    },
+    "sv_gpu_probe": {
+      "enabled": false,
+      "precisions": [
+        "fp32",
+        "fp64"
+      ],
+      "qubits": [
+        24,
+        26
+      ],
+      "reps": 3,
+      "args": [],
+      "timeout_s": 1800,
+      "build_timeout_s": 2400,
+      "quick": {
+        "qubits": [
+          18,
+          20
+        ],
+        "reps": 1
       }
     },
     "baseline_aer": {
@@ -78,7 +101,8 @@
         "gpu"
       ],
       "precisions_cpu": [
-        "fp64"
+        "fp64",
+        "fp32"
       ],
       "precisions_gpu": [
         "fp32",
@@ -114,8 +138,41 @@
           16,
           20
         ],
-        "reps": 1
-      }
+        "reps": 1,
+        "families_cpu": [
+          "layered"
+        ]
+      },
+      "variants": [
+        {
+          "label": "fusion<=2q",
+          "options": {
+            "fusion_max_qubit": 2
+          },
+          "devices": [
+            "gpu"
+          ],
+          "qubits": [
+            20,
+            40
+          ],
+          "note": "diagnostic: narrower Aer fusion"
+        },
+        {
+          "label": "cuStateVec",
+          "options": {
+            "cuStateVec_enable": true
+          },
+          "devices": [
+            "gpu"
+          ],
+          "qubits": [
+            20,
+            40
+          ],
+          "note": "diagnostic: Aer on cuStateVec (records a variant problem if this qiskit-aer-gpu build lacks it)"
+        }
+      ]
     },
     "baseline_cudaq": {
       "enabled": true,
@@ -149,7 +206,21 @@
           20
         ],
         "reps": 1
-      }
+      },
+      "variants": [
+        {
+          "label": "no fusion",
+          "env": {
+            "CUDAQ_FUSION_MAX_QUBITS": "0",
+            "CUDAQ_FUSION_DIAGONAL_GATE_MAX_QUBITS": "0"
+          },
+          "qubits": [
+            20,
+            40
+          ],
+          "note": "diagnostic: one cuStateVec call per gate (unfused execution model); the default series stays primary"
+        }
+      ]
     },
     "baseline_lightning": {
       "enabled": true,
@@ -165,7 +236,7 @@
       ],
       "qubits": [
         16,
-        24
+        28
       ],
       "qubits_gpu": [
         16,
@@ -181,7 +252,7 @@
       "quick": {
         "qubits": [
           16,
-          18
+          20
         ],
         "qubits_gpu": [
           16,

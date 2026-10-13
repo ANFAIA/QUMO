@@ -7,8 +7,10 @@
     python -m qumo_hardware status JOB      |  result JOB [--wait]  |  jobs  |  errors
 
 Every command accepts --json (machine output on stdout, errors as
-{"error": {...}} like the qumo CLI). Exit codes: 0 ok, 1 error, 2 usage,
-3 not submitted because confirmation (--yes) is required.
+{"error": {...}} like the qumo CLI). Exit codes: 0 ok, 1 error (also: the
+job `run` waited for ended in ERROR or CANCELLED), 2 usage, 3 not submitted
+because confirmation (--yes) is required, 130 interrupted (Ctrl-C) while
+waiting for a submitted job (its id is printed; the job keeps running).
 Remote submission is opt-in: without --yes, `run` prints the plan (backend,
 shots, cost estimate) and exits with code 3; --dry-run never submits.
 """
@@ -20,14 +22,16 @@ import json
 import os
 import sys
 import traceback
+import warnings
 from pathlib import Path
 
 from . import jobs as job_store
 from . import runner
+from .base import CANCELLED, ERROR
 from .errors import E_COMPILE, E_CONFIRM, HardwareError, catalog
 from .registry import get_provider, provider_names
 
-EXIT_OK, EXIT_ERR, EXIT_USAGE, EXIT_CONFIRM = 0, 1, 2, 3
+EXIT_OK, EXIT_ERR, EXIT_USAGE, EXIT_CONFIRM, EXIT_INTERRUPTED = 0, 1, 2, 3, 130
 
 
 def _read_circuit(path: str) -> str:
@@ -82,11 +86,14 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common(r)
     r.add_argument("--dry-run", action="store_true", help="compile, validate and estimate only")
     r.add_argument("--yes", "-y", action="store_true", help="confirm submission to a remote/billable backend")
-    r.add_argument("--max-cost", type=float, help="refuse if the estimate exceeds this (HQC / QPU-seconds)")
+    r.add_argument("--max-cost", type=float,
+                   help="refuse if the estimate exceeds this (Quantinuum: HQC/eHQC, IBM: QPU seconds); "
+                        "also sent as the server-side cap (max_cost / max_execution_time)")
     r.add_argument("--no-wait", action="store_true", help="return right after submission")
     r.add_argument("--timeout", type=float, default=600.0, help="seconds to wait for a remote result")
     r.add_argument("--ibm-dry-run", action="store_true",
-                   help="IBM: server-side dry run (validates + estimates usage, mock results; needs --yes)")
+                   help="IBM: server-side dry run (validates + estimates usage; counts are mock data and are "
+                        "flagged mock_results; needs --yes)")
 
     e = sub.add_parser("estimate", help="compile, validate and estimate cost (never submits)")
     _add_common(e)
@@ -162,6 +169,8 @@ def _human_plan(d: dict) -> None:
             print(f"                   - {n}")
     if c.get("region"):
         print(f"region           : {len(c['region'])} best-calibrated connected qubits {c['region']}")
+    for n in d.get("notes", []):
+        print(f"note             : {n}")
     if "qasm" in d:
         print("payload (OpenQASM 2):")
         print(d["qasm"])
@@ -190,9 +199,24 @@ def cmd_run(args, estimate_only: bool = False) -> int:
         d = p.to_dict(include_qasm=args.show_qasm)
         _emit(d, args.json, _human_plan)
         return EXIT_OK
-    out = runner.run(src, prov, backend, args.shots, args.level, args.seed, dry_run=args.dry_run,
-                     confirm=args.yes, max_cost=args.max_cost, wait=not args.no_wait, timeout=args.timeout,
-                     provider_transpile=args.provider_transpile, include_qasm=args.show_qasm, params=params)
+    wait = not args.no_wait
+
+    def submitted(job):
+        if not job.local and wait:
+            print(f"submitted job {job.job_id} ({job.provider} / {job.backend}); waiting up to {args.timeout:g} s "
+                  "(Ctrl-C stops waiting, the job keeps running)", file=sys.stderr, flush=True)
+
+    try:
+        out = runner.run(src, prov, backend, args.shots, args.level, args.seed, dry_run=args.dry_run,
+                         confirm=args.yes, max_cost=args.max_cost, wait=wait, timeout=args.timeout,
+                         provider_transpile=args.provider_transpile, include_qasm=args.show_qasm, params=params,
+                         on_submitted=submitted)
+    except KeyboardInterrupt as exc:
+        job_id = getattr(exc, "qumo_job_id", None)
+        if job_id:
+            print(f"interrupted: job {job_id} was submitted and keeps running; fetch it later with "
+                  f"`python -m qumo_hardware result {job_id} --wait`", file=sys.stderr)
+        raise
 
     def human(d):
         _human_plan(d)
@@ -204,8 +228,12 @@ def cmd_run(args, estimate_only: bool = False) -> int:
         else:
             print(f"submitted job {d['job_id']} ({d['status']}); "
                   f"fetch with: python -m qumo_hardware result {d['job_id']} --wait")
+        if d.get("warning"):
+            print(f"warning: {d['warning']}", file=sys.stderr)
 
     _emit(out, args.json, human)
+    if out.get("submitted") and out.get("status") in (ERROR, CANCELLED):
+        return EXIT_ERR
     return EXIT_OK
 
 
@@ -253,6 +281,8 @@ def cmd_result(args) -> int:
     def human(x):
         print(f"{x['job_id']}: {x['status']} ({x['provider']} / {x['backend']}); counts ({x['bit_order']}):")
         _human_counts(x["counts"])
+        if x.get("warning"):
+            print(f"warning: {x['warning']}", file=sys.stderr)
 
     _emit(d, args.json, human)
     return EXIT_OK
@@ -274,6 +304,9 @@ def cmd_errors(args) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # qiskit-ibm-runtime warns about fake_nighthawk's properties whenever its snapshots are
+    # loaded, even for unrelated backends; the plugin reports it as a note on that backend only.
+    warnings.filterwarnings("ignore", message=r"Properties of fake_\w+ are not intended", category=UserWarning)
     ap = build_parser()
     try:
         args = ap.parse_args(argv)
@@ -294,7 +327,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: {exc}", file=sys.stderr)
         return EXIT_CONFIRM if exc.code == E_CONFIRM else EXIT_ERR
     except KeyboardInterrupt:
-        return EXIT_ERR
+        return EXIT_INTERRUPTED
     except Exception as exc:  # no stack traces for users; QUMO_HW_DEBUG=1 shows them
         if os.environ.get("QUMO_HW_DEBUG"):
             traceback.print_exc()

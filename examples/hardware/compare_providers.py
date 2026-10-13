@@ -1,7 +1,7 @@
 """Compile one circuit for several real devices with QUMO and compare them side by side.
 
     python examples/hardware/compare_providers.py                       # GHZ-6, plans only (no account, no cost)
-    python examples/hardware/compare_providers.py --circuit examples/teleport.qasm
+    python examples/hardware/compare_providers.py --circuit examples/ghz.qasm
     python examples/hardware/compare_providers.py --qv 5                # quantum-volume style circuit (QUMO generator)
     python examples/hardware/compare_providers.py --provider-compilers   # also Qiskit's / TKET's own compilers
     python examples/hardware/compare_providers.py --run-local           # + noisy IBM snapshot and Quantinuum local emulator
@@ -11,6 +11,12 @@ IBM rows use the public calibration snapshots shipped with qiskit-ibm-runtime
 cost on the real device (QPU-time heuristic). Quantinuum rows use the HQC
 formula. "ESP" is the estimated success probability from median error rates.
 Nothing is ever submitted by this script.
+
+--circuit takes any OpenQASM 2/3 file the hardware plugins accept: bound
+parameters, no simulation-only noise pragmas, and classical conditions only on
+whole registers (`if(c==k)`). Circuits with single-bit conditions, such as
+examples/teleport.qasm, are refused with QM-E954 (see the limitations in
+docs/HARDWARE_PLUGINS.md); a refused device is reported in its row.
 """
 
 from __future__ import annotations
@@ -44,12 +50,10 @@ def source(args) -> tuple[str, str]:
 
 def ibm_snapshot_provider():
     """IBMProvider whose real device names resolve to the bundled snapshots (offline)."""
-    from qiskit_ibm_runtime.fake_provider import FakeProviderForBackendV2
-
-    from qumo_hardware.ibm import IBMProvider
+    from qumo_hardware.ibm import IBMProvider, fake_provider
 
     prov = IBMProvider()
-    fp = FakeProviderForBackendV2()
+    fp = fake_provider()
     for real, fake in IBM_DEVICES:
         prov._backends[real] = fp.backend(fake)
     return prov
@@ -74,7 +78,13 @@ def main() -> int:
         qtm = QuantinuumProvider()
         targets = [(ibm, real, f"{real} (snapshot)") for real, _ in IBM_DEVICES] + [(qtm, d, d) for d in QTM_DEVICES]
         for prov, backend, name in targets:
-            p = runner.plan(src, prov, backend, shots=args.shots, provider_transpile=args.provider_compilers)
+            try:
+                p = runner.plan(src, prov, backend, shots=args.shots, provider_transpile=args.provider_compilers)
+            except HardwareError as exc:
+                if exc.code == "QM-E954":  # the circuit itself cannot be compiled: same for every device
+                    raise
+                rows.append({"target": name, "refused": f"{exc.code}: {exc.message}"})
+                continue
             c = p.compiled
             row = {
                 "target": name,
@@ -96,6 +106,9 @@ def main() -> int:
         hdr = hdr.replace("  cost", " vendor-2q  cost")
     print(hdr)
     for r in rows:
+        if "refused" in r:
+            print(f"{r['target']:<28} refused: {r['refused']}")
+            continue
         esp = f"{r['esp']:.3f}" if r["esp"] is not None else "-"
         extra = f" {r['provider_2q']:>9}" if "provider_2q" in r else ""
         print(f"{r['target']:<28} {r['basis']:<18} {r['2q']:>4} {r['depth']:>6} {esp:>6}{extra}  {r['cost']}")

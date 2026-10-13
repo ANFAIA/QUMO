@@ -4,7 +4,8 @@ plain gate-by-gate application.
 Covers: random circuits on 19-22 qubits with gates on high, low and mixed
 qubits (every 1q/2q/3q unitary opcode); probabilities, sampling and
 expectation values; the final-permutation restore (identity, only high bits,
-only low bits including in-vector bits, mixed); non-unitary ops skipped by
+only low bits including in-vector bits, mixed); the in-vector-bit (lane)
+cost accounting (`vector_pairs`, pinned re-selection); non-unitary ops skipped by
 the plan path; the n < 19 path; every block size nb on small states; and the
 QM-E407 / QM-E408 argument checks.
 """
@@ -198,6 +199,7 @@ def main() raises:
     st = stats_of(clo)
     assert_equal(st.swap_layers, 0)
     assert_true(st.restore_layers == 2 and st.restore_min_bit == 0, String(st))
+    assert_true(st.vector_pairs >= 2, String(st))  # SWAP relabels of bits 0..2
     # 4d mixed: QFT reversal swaps (low <-> high) after real swap-ins
     var cq = Circuit(20)
     for q in range(20):
@@ -223,6 +225,20 @@ def main() raises:
             cs.cx(q + 1, q)
     st = stats_of(cs)
     assert_true(st.swap_layers >= 1 and st.block_passes >= 2, String(st))
+    # 4f full selections without SWAP gates (the bench `layered` family at
+    # 20 qubits): S fills the block, the pinned re-selection keeps bits 0..2
+    # local, so no swap-in or restore pair touches an in-vector bit
+    var cl = Circuit(20)
+    for d in range(10):
+        for q in range(20):
+            cl.ry(0.1 + 0.01 * Float64(q + d), q)
+            cl.rz(0.2 + 0.03 * Float64(q * d), q)
+        for q in range(d % 2, 19, 2):
+            cl.cx(q, q + 1)
+    st = stats_of(cl)
+    assert_true(st.swap_layers >= 1 and st.relabels == 0, String(st))
+    assert_equal(st.vector_pairs, 0, String(st))
+    assert_true(st.restore_min_bit < 0 or st.restore_min_bit >= 3, String(st))
 
     # 5. non-unitary ops are skipped by the plan path (evolve semantics)
     var cm = random_circuit(19, 60, 3, rng)

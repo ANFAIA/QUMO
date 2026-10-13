@@ -243,3 +243,108 @@ def test_single_bit_condition_is_a_coded_limitation():
     with pytest.raises(HardwareError) as ei:
         compile_for_target(tele, parse_sim_backend("qumo-sim"))
     assert ei.value.code == E_COMPILE and "single-bit conditions" in ei.value.hint
+
+
+def test_qumo_py_is_never_loaded_from_the_working_directory(tmp_path, monkeypatch):
+    """Security: a planted ./build/qumo_py.so (or ./qumo_py.so) must not be picked up."""
+    from qumo_hardware import compile as comp
+
+    (tmp_path / "build").mkdir()
+    (tmp_path / "build" / "qumo_py.so").write_bytes(b"not a real extension")
+    (tmp_path / "qumo_py.so").write_bytes(b"not a real extension")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("QUMO_PY_PATH", raising=False)
+    paths = comp._candidate_paths()
+    assert all(tmp_path not in p.parents for p in paths)
+    root = comp.repo_root()
+    assert root is not None and paths == [root / "build" / "qumo_py.so"]
+    # Explicit opt-in: a file or a directory.
+    monkeypatch.setenv("QUMO_PY_PATH", str(tmp_path / "custom.so"))
+    assert comp._candidate_paths()[0] == tmp_path / "custom.so"
+    monkeypatch.setenv("QUMO_PY_PATH", str(tmp_path / "dir"))
+    assert comp._candidate_paths()[0] == tmp_path / "dir" / "qumo_py.so"
+
+
+# OpenQASM 2 as written by QUMO's exporter before and after the definition fix
+# (old: ecr defined through the undeclared rzx, most gates undefined; new: every
+# non-qelib1 gate defined with qelib1 gates only). Both must load 1:1.
+_BODY = """qreg q[3];
+creg c[3];
+sx q[0];
+sxdg q[1];
+swap q[0],q[1];
+ecr q[0],q[1];
+rzz(0.3) q[0],q[1];
+rxx(0.2) q[1],q[2];
+ryy(0.25) q[1],q[2];
+iswap q[0],q[2];
+iswapdg q[0],q[2];
+ccz q[0],q[1],q[2];
+cswap q[0],q[1],q[2];
+crx(0.4) q[0],q[1];
+cry(0.45) q[0],q[1];
+u3(0.1,0.2,0.3) q[0];
+u1(0.2) q[1];
+cu1(0.3) q[0],q[1];
+measure q -> c;
+"""
+_OLD_DEFS = """gate iswap a,b { s a; s b; h a; cx a,b; cx b,a; h b; }
+gate iswapdg a,b { h b; cx b,a; cx a,b; h a; sdg b; sdg a; }
+gate ecr a,b { rzx(pi/4) a,b; x a; rzx(-pi/4) a,b; }
+gate ryy(theta) a,b { rx(pi/2) a; rx(pi/2) b; cx a,b; rz(theta) b; cx a,b; rx(-pi/2) a; rx(-pi/2) b; }
+gate ccz a,b,c { h c; ccx a,b,c; h c; }
+"""
+_NEW_DEFS = """gate sx a { h a; s a; h a; }
+gate sxdg a { h a; sdg a; h a; }
+gate swap a,b { cx a,b; cx b,a; cx a,b; }
+gate iswap a,b { s a; s b; h a; cx a,b; cx b,a; h b; }
+gate iswapdg a,b { h b; cx b,a; cx a,b; h a; sdg b; sdg a; }
+gate ecr a,b { rz(pi/2) a; h b; s b; h b; cx a,b; x a; }
+gate crx(theta) a,b { u1(pi/2) b; cx a,b; u3(-theta/2,0,0) b; cx a,b; u3(theta/2,-pi/2,0) b; }
+gate cry(theta) a,b { ry(theta/2) b; cx a,b; ry(-theta/2) b; cx a,b; }
+gate rxx(theta) a,b { h a; h b; cx a,b; rz(theta) b; cx a,b; h a; h b; }
+gate ryy(theta) a,b { rx(pi/2) a; rx(pi/2) b; cx a,b; rz(theta) b; cx a,b; rx(-pi/2) a; rx(-pi/2) b; }
+gate rzz(theta) a,b { cx a,b; rz(theta) b; cx a,b; }
+gate cswap a,b,c { cx c,b; ccx a,b,c; cx c,b; }
+gate ccz a,b,c { h c; ccx a,b,c; h c; }
+"""
+_HEADER = 'OPENQASM 2.0;\ninclude "qelib1.inc";\n'
+
+
+@needs_pytket
+@pytest.mark.parametrize("defs", [_OLD_DEFS, _NEW_DEFS], ids=["old-exporter", "fixed-exporter"])
+def test_bridges_load_both_exporter_styles_one_to_one(defs):
+    pytest.importorskip("pytket.extensions.qiskit")
+    from pytket.circuit import OpType
+    from pytket.extensions.qiskit import tk_to_qiskit
+    from qiskit.quantum_info import Operator
+
+    from qumo_hardware.qasm_bridge import to_pytket, to_qiskit
+
+    text = _HEADER + defs + _BODY
+    qc = to_qiskit(text)
+    names = {i.operation.name: type(i.operation).__name__ for i in qc.data}
+    assert "ECRGate" in names["ecr"] and "RZZGate" in names["rzz"] and "SXGate" in names["sx"]
+    tk = to_pytket(text)
+    types = {cmd.op.type for cmd in tk.get_commands()}
+    # Hardware gates stay single native operations (no inlined definitions).
+    assert {OpType.SX, OpType.SXdg, OpType.SWAP, OpType.ECR, OpType.ZZPhase, OpType.XXPhase, OpType.CRx,
+            OpType.CRy, OpType.CSWAP} <= types
+    assert tk.n_gates_of_type(OpType.ZZPhase) == 1
+    a = Operator(qc.remove_final_measurements(inplace=False))
+    b = Operator(tk_to_qiskit(tk).remove_final_measurements(inplace=False))
+    assert a.equiv(b)
+
+
+@needs_pytket
+def test_rzz_payload_stays_one_to_one_with_definitions():
+    """With the fixed exporter, `rzz` comes with a definition; Quantinuum must still get one ZZPhase per rzz."""
+    from pytket.circuit import OpType
+
+    from qumo_hardware.qasm_bridge import to_pytket
+    from qumo_hardware.quantinuum import to_native
+
+    text = (_HEADER + "gate rzz(theta) a,b { cx a,b; rz(theta) b; cx a,b; }\nqreg q[2];\ncreg c[2];\n"
+            "rzz(0.7) q[0],q[1];\nrx(0.2) q[0];\nmeasure q -> c;\n")
+    circ = to_native(to_pytket(text))
+    assert circ.n_gates_of_type(OpType.ZZPhase) == 1 and circ.n_gates_of_type(OpType.CX) == 0

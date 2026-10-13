@@ -8,6 +8,18 @@
 #   bash run_on_any_gpu.sh --ref 0dc37a7 --dir ~/src/QUMO --no-baselines
 #   bash run_on_any_gpu.sh --mojo-version "" --max-version ""   # latest Mojo/MAX instead of the pinned ones
 #
+# Options:
+#   --config NAME|PATH   preset from bench/configs/ or a JSON path (default: auto, picked from the GPU)
+#   --quick              tiny sizes (16-20 qubits), 1 repetition
+#   --suites a,b,...     run (and build) only these suites (default: the preset's enabled suites)
+#   --label TEXT         free text stored in the result (no personal data)
+#   --ref REF            branch, tag or commit to clone (default: main)
+#   --repo URL           repository to clone (default: https://github.com/ANFAIA/QUMO)
+#   --dir PATH           checkout to use or clone into (default: this checkout, else ./QUMO)
+#   --out PATH           result .json or directory (default: bench/results/cloud/)
+#   --no-baselines       do not install the vendor GPU baselines (their suites record a skip)
+#   --mojo-version V / --max-version V   pinned toolchain (default 1.1.0 / 26.6.0; "" = latest)
+#
 # Inside an existing QUMO checkout it uses that checkout (no clone). GPU vendor
 # detection: nvidia-smi -> NVIDIA, rocminfo / amd-smi / rocm-smi -> AMD,
 # macOS arm64 -> Apple (Metal), otherwise CPU only. Vendor-specific baselines go
@@ -30,7 +42,10 @@ OUT="bench/results/cloud/"
 MOJO_VERSION="1.1.0"   # pinned: the versions QUMO is developed and benchmarked with
 MAX_VERSION="26.6.0"
 
-usage() { sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() {  # the comment block at the top of this file, up to the first non-comment line
+  awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"
+  exit "${1:-0}"
+}
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -160,12 +175,13 @@ if [ "$BASELINES" = 1 ]; then
 fi
 
 # ---------------------------------------------------------------- build + run
-ARGS=(--config "$CONFIG" --out "$OUT")
+SEL=(--config "$CONFIG")
+[ -n "$SUITES" ] && SEL+=(--suites "$SUITES")
+ARGS=("${SEL[@]}" --out "$OUT")
 [ -n "$QUICK" ] && ARGS+=("$QUICK")
-[ -n "$SUITES" ] && ARGS+=(--suites "$SUITES")
 [ -n "$LABEL" ] && ARGS+=(--label "$LABEL")
-log "build (failures are recorded by the run, not fatal)"
-bench/.venv/bin/python bench/run_benchmarks.py --config "$CONFIG" --build-only || true
+log "build what the selected suites need (failures are recorded by the run, not fatal)"
+bench/.venv/bin/python bench/run_benchmarks.py "${SEL[@]}" ${QUICK:+"$QUICK"} --build-only || true  # --quick: no variant builds
 log "load average at start: $(uptime)"
 bench/.venv/bin/python bench/run_benchmarks.py "${ARGS[@]}"
 log "done. Compare runs with: bench/.venv/bin/python examples/colab/compare_results.py $OUT*.json --out compare.md --plot compare.png"

@@ -1,6 +1,6 @@
 # QUMO
 
-> QUMO is a fast, AI-native quantum software stack written in Mojo 1.1. It provides a flat circuit IR with affine symbolic parameters, OpenQASM 2/3 input and OpenQASM 3 output, SIMD and multithreaded state-vector simulation, stabilizer and Pauli-frame simulation, a compiler (optimization, routing, basis translation), QEC (codes, detector error models, decoders), and an algorithms library (VQE, QAOA, QPE, Grover, gradients). LLM agents use it through an MCP server and a JSON-speaking CLI.
+> QUMO is a fast, AI-native, hardware-neutral quantum software stack written in Mojo 1.1. It provides a flat circuit IR with affine symbolic parameters, OpenQASM 2/3 input and output, SIMD and multithreaded state-vector simulation, optional GPU acceleration through MAX (NVIDIA, AMD and Apple GPUs with the same kernels), stabilizer and Pauli-frame simulation, a vendor-neutral compiler (optimization, routing, basis translation), QEC (codes, detector error models, sparse-blossom MWPM, union-find and lookup decoders), and an algorithms library (VQE, QAOA, QPE, Grover, gradients). LLM agents use it through an MCP server and a JSON-speaking CLI. Python plugins run compiled circuits on quantum hardware (IBM Quantum, Quantinuum).
 
 Conventions an agent must know:
 - Circuits are exchanged as OpenQASM 3.0 text (2.0 is also accepted), for example: `OPENQASM 3.0; include "stdgates.inc"; qubit[2] q; bit[2] c; h q[0]; cx q[0], q[1]; c = measure q;`
@@ -9,29 +9,32 @@ Conventions an agent must know:
 - Symbolic angles: declare `input float theta;` and use any expression affine in one input (`2*theta + pi/2`). Bind values with `params` as an array in declaration order or an object `{"theta": 0.1}`.
 - Observables are Pauli sums such as `"0.5*Z0 Z1 - 1.2*X0 + 0.3"` or dense labels like `"ZZI"` (leftmost character = highest qubit).
 - Results are deterministic: every random process takes a `seed` (default 1234).
-- Errors look like `QM-Exxx: message (line L, col C). Hint: fix`. Codes are stable. Branch on the code and apply the hint.
+- Errors look like `QM-Exxx: message (line L, col C). Hint: fix`. Codes are stable. Branch on the code and apply the hint. Warnings (`QM-Wxxx`) in tool results have the same JSON shape; QM-W020 means a requested GPU run fell back to the CPU.
 - QUMO-only operations (noise, detectors, observables) use `#pragma qumo ...` lines.
 
 ## Agent interfaces
 
 - [AI-native interface design](docs/AI_NATIVE.md): OpenQASM subset, diagnostics, MCP tools, CLI, determinism, and how to register new tools and commands
-- [Error and warning codes](docs/ERRORS.md): every QM-Exxx and QM-Wxxx code with its meaning and fix
-- MCP server: run `build/qumo mcp` (MCP 2025-06-18, stdio). Tools: `qumo_run_qasm` (counts), `qumo_statevector`, `qumo_expectation`, `qumo_validate_qasm` (diagnostics and lint), `qumo_circuit_info` (depth, gate counts, T-count, flags), `qumo_convert` (canonical QASM 3 or circuit JSON), `qumo_describe` (gates, errors, capabilities), `qumo_transpile` (vendor-neutral compile: target spec like `grid:4x4/sc_cz`, `trapped_ion:11`, or edges + basis), `qumo_estimate_resources` (logical, NISQ per modality, fault-tolerant), `qumo_vqe`, `qumo_qaoa_maxcut`, `qumo_qec_memory` (surface/repetition code logical error rate, MWPM/UF/lookup decoders), `qumo_qec_dem` (Stim-format detector error model)
+- [Error and warning codes](docs/ERRORS.md): every QM-Exxx and QM-Wxxx code with its meaning and fix (generated from `error_catalog()`; includes the Python hardware-plugin range QM-E95x and benchmark-harness range QM-E96x)
+- MCP server: run `build/qumo mcp` (MCP 2025-06-18, stdio). Tools: `qumo_run_qasm` (counts), `qumo_statevector`, `qumo_expectation`, `qumo_validate_qasm` (diagnostics and lint), `qumo_circuit_info` (depth, gate counts, T-count, flags), `qumo_convert` (canonical QASM 3, portable QASM 2 with `to: "qasm2"`, or circuit JSON), `qumo_describe` (gates, errors, capabilities; `format: "markdown"` for the error catalogue), `qumo_transpile` (vendor-neutral compile: target spec like `grid:4x4/sc_cz`, `trapped_ion:11`, or edges + basis), `qumo_estimate_resources` (logical, NISQ per modality, fault-tolerant), `qumo_vqe`, `qumo_qaoa_maxcut`, `qumo_qec_memory` (surface/repetition code logical error rate; decoders `mwpm` = sparse blossom (default), `sparse_blossom`, `mwpm_dense`, `uf`, `lookup`), `qumo_qec_dem` (Stim-format detector error model), `qumo_gpu_info` (is GPU support compiled in, which device), `qumo_run_device` (sample with `device` `auto`, `cpu` or `gpu`; falls back to the CPU with warning QM-W020)
 - Client config: `{"mcpServers":{"qumo":{"command":"/abs/path/QUMO/build/qumo","args":["mcp"]}}}`, or `claude mcp add qumo -- /abs/path/QUMO/build/qumo mcp`
-- CLI: `qumo run|statevector|expect|validate|info|describe|convert|tool|mcp|version|help`. Add `--json` for machine output. Exit codes: 0 ok, 1 failed, 2 usage. Build with `.venv/bin/mojo build -I . -o build/qumo cli/main.mojo`.
+- CLI: `qumo run|statevector|expect|validate|info|describe|convert|tool|mcp|version|help`. Add `--json` for machine output. Exit codes: 0 ok, 1 failed, 2 usage. Build with `make cli` (CPU only) or `make cli-gpu` (`-D QUMO_GPU`, for NVIDIA CUDA, AMD ROCm or Apple Metal).
+- Hardware: `plugins/hardware` (Python package `qumo_hardware`) compiles with QUMO and submits to IBM Quantum or Quantinuum only after explicit confirmation (`--yes`); a `local` provider runs offline. See [Hardware plugins](docs/HARDWARE_PLUGINS.md).
 - Self-description: `qumo describe gates|errors|capabilities --json` (generated from the implementation)
 
 ## Mojo API (compile with `-I .`)
 
 - `qumo.ir.circuit`: `Circuit(n_qubits, n_clbits)` with methods `h x y z s t sx rx ry rz p u cx cz cp crx rzz swap ccx ...`, `measure(q, c)`, `measure_all()`, `reset`, `c_if(bit, val)`, `parameter(name)`, `bind(values)`, `inverse()`, `controlled(q)`, `power(k)`, `compose`, `depth()`, `t_count()`, `is_clifford()`, `validate()`
 - `qumo.ir.gates`: opcodes `Op.*` and metadata (`op_name`, `op_arity`, `op_num_params`, `op_is_clifford`, `matrix_1q`, `matrix_2q`)
-- `qumo.ir.qasm`: `parse_qasm(text) -> Circuit`, `parse_qasm_with_warnings(text, warnings)`, `load_qasm(path)`, `to_qasm(circuit) -> String`
+- `qumo.ir.qasm`: `parse_qasm(text) -> Circuit`, `parse_qasm_with_warnings(text, warnings)`, `load_qasm(path)`, `to_qasm(circuit) -> String` (OpenQASM 3)
+- `qumo.ir.qasm2`: `to_qasm2(circuit) -> String`, portable OpenQASM 2 (original `qelib1.inc` plus exact gate definitions; loads in Qiskit strict and legacy modes, pytket and Cirq)
 - `qumo.ir.pauli`: `parse_pauli_sum(text) -> PauliSum`
-- `qumo.exec.dispatch`: `sample_auto(circuit, shots, seed)` picks Pauli-frame / tableau / state vector automatically (reported in `.method`)
+- `qumo.exec.dispatch`: `sample_auto(circuit, shots, seed)` picks Pauli-frame / tableau / CPU or GPU state vector automatically (reported in `.method`); `sample_on(circuit, shots, seed, params, device, note)` with device `auto`, `cpu` or `gpu`
+- `qumo.gpu`: `query_gpu()`, `GpuStateVector`, `GpuFrameSampler` (build with `-D QUMO_GPU`; see [GPU](docs/GPU.md))
 - `qumo.sim.runner`: `sample(circuit, shots, seed, params) -> SampleResult` (`.counts`, `.method`), `evolve(circuit, params) -> StateVector`, `expectation(circuit, H, params)`
 - `qumo.sim.stabilizer`: `sample_stabilizer(circuit, shots, seed)` for Clifford circuits. `qumo.sim.frame` provides Pauli-frame batch sampling.
 - `qumo.compiler.pass_manager`: `transpile(circuit, parse_target("grid:4x4"), level) -> CompileResult` (`.circuit`), `compile_spec(circuit, target, "pipeline text")`
-- `qumo.qec`: `codes.surface_code_memory(d, rounds, NoiseParams)`, `codes.repetition_code_memory`, `codes.to_stim`, `dem.detector_error_model(circuit)`, `decoders.MwpmDecoder` / `UnionFindDecoder`
+- `qumo.qec`: `codes.surface_code_memory(d, rounds, NoiseParams)`, `codes.repetition_code_memory`, `codes.to_stim`, `dem.detector_error_model(circuit)`, `sparse_blossom.SparseBlossomDecoder` (default `mwpm`), `decoders.MwpmDecoder` (`mwpm_dense`) / `UnionFindDecoder` / `LookupTableDecoder`, `experiments.memory_experiment(code, d, rounds, p, shots, decoder)`
 - `qumo.algorithms`: `library` (`ghz`, `qft`, `grover`, `qpe`, `trotter`), `variational` (`vqe`, `qaoa_maxcut`), `gradients.gradient`, `optimizers.minimize`, `hamiltonians` (`transverse_field_ising`, `heisenberg_xxz`, `h2_sto3g`, `ground_state`)
 - `qumo.exec`: `primitives.run_sampler` / `run_estimator` (PUBs with parameter broadcasting), `orchestrator.Workflow` (HEFT over CPU/GPU/QPU pools), `resources.estimate_resources` / `estimate_hardware` / `estimate_fault_tolerant`
 - Python: `build/qumo_py.so` (`make py`): `load_qasm`, `transpile(circ, n, edges, basis, level, seed)`, `sample`, `expectation`, benchmark generators
@@ -49,5 +52,8 @@ Conventions an agent must know:
 ## Optional
 
 - [Mojo 1.1 contributor guide](docs/MOJO_GUIDE.md): the exact Mojo dialect QUMO uses
+- [GPU acceleration](docs/GPU.md): vendor-neutral MAX kernels, dispatch rules, error codes QM-E470..QM-E475
+- [QEC](docs/QEC.md): codes, detector error models, decoders, benchmarks against Stim and PyMatching
+- [Benchmarking on cloud GPUs](docs/BENCHMARKING_ON_CLOUD_GPUS.md): `bench/run_benchmarks.py` and the Google Colab notebooks in `examples/colab/`
 - [Algorithms](docs/ALGORITHMS.md): the `qumo.algorithms` reference
 - [Framework analysis](docs/ANALYSIS.md): the design synthesis of Qiskit, TKET, CUDA-Q, PennyLane, Cirq, Q#, Braket and Qibo

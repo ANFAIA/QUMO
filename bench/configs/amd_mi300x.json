@@ -68,6 +68,29 @@
           20
         ],
         "reps": 1
+      },
+      "cpu_max": 28
+    },
+    "sv_gpu_probe": {
+      "enabled": false,
+      "precisions": [
+        "fp32",
+        "fp64"
+      ],
+      "qubits": [
+        24,
+        26
+      ],
+      "reps": 3,
+      "args": [],
+      "timeout_s": 1800,
+      "build_timeout_s": 2400,
+      "quick": {
+        "qubits": [
+          18,
+          20
+        ],
+        "reps": 1
       }
     },
     "baseline_aer": {
@@ -76,7 +99,8 @@
         "cpu"
       ],
       "precisions_cpu": [
-        "fp64"
+        "fp64",
+        "fp32"
       ],
       "precisions_gpu": [
         "fp32",
@@ -108,7 +132,10 @@
           16,
           20
         ],
-        "reps": 1
+        "reps": 1,
+        "families_cpu": [
+          "layered"
+        ]
       }
     },
     "baseline_cudaq": {
@@ -160,7 +187,7 @@
       ],
       "qubits": [
         16,
-        26
+        28
       ],
       "qubits_gpu": [
         16,
@@ -172,7 +199,7 @@
       "quick": {
         "qubits": [
           16,
-          18
+          20
         ],
         "qubits_gpu": [
           16,

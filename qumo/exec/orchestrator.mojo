@@ -16,9 +16,15 @@ Best-of synthesis:
 Execution runs dependency "waves"; independent small jobs inside a wave run in
 parallel threads. Jobs mapped to remote QPUs are executed on the local
 emulator and flagged (the OpenQASM 3 payload is what would be submitted).
-Jobs mapped to a GPU device run on the GPU state vector (`qumo.gpu`) when the
-build has `-D QUMO_GPU` and a device is usable; otherwise they run on the CPU
-and `JobResult.backend` says so ("... (gpu fallback: <reason>)").
+Jobs that HEFT maps to a GPU device (`Device.gpu`) run on the GPU when the
+build has `-D QUMO_GPU` and a device is usable: estimate jobs on the GPU state
+vector (`qumo.gpu.statevector_gpu`), sample jobs as routed by
+`qumo.exec.dispatch.gpu_sample_route` (Clifford circuits without feed-forward
+-> GPU Pauli frames, other static noiseless circuits -> GPU state vector).
+Otherwise they run on the CPU and `JobResult.backend` ends with
+"(gpu fallback: <reason>)" (no GPU build, no usable device, > 62 classical
+bits, Clifford feed-forward, or a dynamic / noisy non-Clifford circuit). GPU
+jobs of a wave run one after another (they share the device).
 """
 
 from std.time import perf_counter_ns
@@ -28,7 +34,7 @@ from max.algorithm import parallelize
 from qumo.ir.circuit import Circuit
 from qumo.ir.pauli import PauliSum
 from qumo.sim.runner import sample, expectation, SampleResult
-from qumo.exec.dispatch import sample_auto, frame_eligible_gpu, sample_frame_gpu
+from qumo.exec.dispatch import sample_auto, gpu_sample_route, sample_frame_gpu
 from qumo.gpu.device import gpu_available
 from qumo.gpu.statevector_gpu import sample_gpu, evolve_gpu
 
@@ -140,9 +146,10 @@ def _run_job_cpu(job: Job, mut r: JobResult) raises:
 
 
 def _run_job_gpu(job: Job, mut r: JobResult) raises:
-    """A job HEFT placed on a GPU device: GPU state vector when compiled and
-    available, GPU Pauli frames for Clifford sample jobs without feed-forward
-    (noisy or not), otherwise the CPU, with the reason appended to `backend`."""
+    """A job HEFT placed on a GPU device: estimate jobs on the GPU state
+    vector; sample jobs routed by `gpu_sample_route` (GPU Pauli frames or GPU
+    state vector). Otherwise the CPU runs it and the reason is appended to
+    `backend` as "(gpu fallback: <reason>)"."""
     var reason: String
     comptime if is_defined["QUMO_GPU"]():
         var ok: Bool
@@ -157,18 +164,17 @@ def _run_job_gpu(job: Job, mut r: JobResult) raises:
             r.expectation = sv.expectation(job.observable)
             r.backend = sv.method_name()
             return
-        elif len(job.params) == 0 and frame_eligible_gpu(job.circuit):
-            r.samples = sample_frame_gpu(job.circuit, job.shots, job.seed)
-            r.backend = r.samples.method
-            return
-        elif job.circuit.is_dynamic() or job.circuit.has_noise():
-            reason = "dynamic or noisy non-Clifford circuit (GPU state-vector sampler is static-only)"
-        elif job.circuit.num_params() == 0 and job.circuit.is_clifford():
-            reason = "Clifford circuit with feed-forward (stabilizer tableau)"
         else:
-            r.samples = sample_gpu(job.circuit, job.shots, job.seed, job.params)
-            r.backend = r.samples.method
-            return
+            var route = gpu_sample_route(job.circuit, job.params)
+            if route[0] == "frames":
+                r.samples = sample_frame_gpu(job.circuit, job.shots, job.seed)
+                r.backend = r.samples.method
+                return
+            if route[0] == "statevector":
+                r.samples = sample_gpu(job.circuit, job.shots, job.seed, job.params)
+                r.backend = r.samples.method
+                return
+            reason = route[1]
     else:
         reason = "QUMO built without -D QUMO_GPU"
     _run_job_cpu(job, r)

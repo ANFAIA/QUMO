@@ -509,7 +509,7 @@ class IBMProvider:
             cap = sampler.options.max_execution_time  # may be overridden through sampler_options
         dry = bool(self.server_dry_run and not local)
         try:
-            job = sampler.run([payload], shots=int(shots), dry_run=True) if dry else sampler.run([payload], shots=int(shots))
+            job = sampler.run([payload], shots=int(shots), **({"dry_run": True} if dry else {}))
         except HardwareError:
             raise
         except Exception as exc:
@@ -527,7 +527,8 @@ class IBMProvider:
                 res = job.result()
             except Exception as exc:
                 raise HardwareError(E_JOB, f"local Aer simulation of '{backend}' failed ({safe_exc_text(exc)})",
-                                    HINT_LOCAL_QUBITS) from None
+                                    "check free memory and the qiskit-aer installation "
+                                    "(pip install 'qumo-hardware[ibm]')") from None
             counts = counts_from_primitive_result(res, compiled.num_clbits)
             return JobHandle(new_local_job_id("ibm-local"), self.name, backend, shots, True, DONE, meta=meta,
                              counts=counts)

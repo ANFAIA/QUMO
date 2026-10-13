@@ -21,6 +21,7 @@ device == emulator bit-for-bit (the kernel is integer-only).
 
 from std.math import sqrt
 from std.sys.defines import is_defined
+from std.os import getenv
 from std.testing import assert_equal, assert_true
 
 from qumo.ir.gates import Op
@@ -319,5 +320,8 @@ def main() raises:
             var emu = GpuFrameSampler(c, emulate=True).sample_detectors(100000, 3)
             same_detectors(dev, emu, "device vs emulator")
         else:
-            print("no usable GPU device: device suites skipped (", gpu_info(), ")")
+            var why = "no usable GPU device: device suites skipped (" + gpu_info() + ")"
+            if getenv("QUMO_GPU_REQUIRE_DEVICE") == "1":  # make test-gpu: a skip is a failure
+                raise Error("QUMO_GPU_REQUIRE_DEVICE=1 but " + why)
+            print(why)
     print("test_gpu_frame OK")

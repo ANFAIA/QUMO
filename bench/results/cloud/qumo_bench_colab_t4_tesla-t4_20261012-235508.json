@@ -1,0 +1,2117 @@
+{
+ "schema": "qumo-bench/1",
+ "label": "",
+ "config": {
+  "name": "colab_t4",
+  "path": "bench/configs/colab_t4.json",
+  "quick": false,
+  "content": {
+   "name": "colab_t4",
+   "description": "Google Colab NVIDIA T4 (Turing sm_75, 16 GB; fp64 at 1/32 rate). Free tier, ~2 vCPU, 12.7 GB RAM.",
+   "hardware": {
+    "vendor": "nvidia",
+    "gpu": "Tesla T4",
+    "arch": "sm_75",
+    "memory_gib": 15,
+    "colab_runtime": "T4 GPU",
+    "host_ram_gib": "12.7 (51 with High-RAM)"
+   },
+   "memory_fraction": 0.6,
+   "suites": {
+    "gpu_check": {
+     "enabled": true,
+     "targets": [
+      "host"
+     ],
+     "timeout_s": 2400
+    },
+    "sv_cpu": {
+     "enabled": true,
+     "families": [
+      "layered"
+     ],
+     "qubits": [
+      16,
+      26
+     ],
+     "reps": 3,
+     "timeout_s": 2400,
+     "quick": {
+      "qubits": [
+       16,
+       20
+      ],
+      "reps": 1,
+      "families": [
+       "layered"
+      ]
+     }
+    },
+    "sv_gpu": {
+     "enabled": true,
+     "precisions": [
+      "fp32",
+      "fp64"
+     ],
+     "qubits_fp32": [
+      16,
+      30
+     ],
+     "qubits_fp64": [
+      16,
+      28
+     ],
+     "reps": 3,
+     "timeout_s": 3600,
+     "build_timeout_s": 2400,
+     "quick": {
+      "qubits_fp32": [
+       16,
+       20
+      ],
+      "qubits_fp64": [
+       16,
+       20
+      ],
+      "reps": 1
+     }
+    },
+    "baseline_aer": {
+     "enabled": true,
+     "devices": [
+      "cpu",
+      "gpu"
+     ],
+     "precisions_cpu": [
+      "fp64"
+     ],
+     "precisions_gpu": [
+      "fp32",
+      "fp64"
+     ],
+     "qubits": [
+      16,
+      26
+     ],
+     "qubits_gpu": [
+      16,
+      30
+     ],
+     "qubits_gpu_fp64": [
+      16,
+      28
+     ],
+     "reps": 3,
+     "timeout_s": 3600,
+     "python": null,
+     "gpu_python": null,
+     "quick": {
+      "qubits": [
+       16,
+       20
+      ],
+      "qubits_gpu": [
+       16,
+       20
+      ],
+      "reps": 1
+     }
+    },
+    "baseline_cudaq": {
+     "enabled": true,
+     "precisions": [
+      "fp32",
+      "fp64"
+     ],
+     "qubits_fp32": [
+      16,
+      30
+     ],
+     "qubits_fp64": [
+      16,
+      28
+     ],
+     "reps": 3,
+     "cpu": false,
+     "qubits_cpu": [
+      16,
+      22
+     ],
+     "timeout_s": 3600,
+     "python": null,
+     "quick": {
+      "qubits_fp32": [
+       16,
+       20
+      ],
+      "qubits_fp64": [
+       16,
+       20
+      ],
+      "reps": 1
+     }
+    },
+    "baseline_lightning": {
+     "enabled": true,
+     "devices": [
+      "lightning.gpu"
+     ],
+     "precisions_cpu": [
+      "fp64"
+     ],
+     "precisions_gpu": [
+      "fp32",
+      "fp64"
+     ],
+     "qubits": [
+      16,
+      24
+     ],
+     "qubits_gpu": [
+      16,
+      30
+     ],
+     "qubits_gpu_fp64": [
+      16,
+      28
+     ],
+     "reps": 3,
+     "timeout_s": 3600,
+     "python": null,
+     "quick": {
+      "qubits": [
+       16,
+       18
+      ],
+      "qubits_gpu": [
+       16,
+       20
+      ],
+      "reps": 1
+     }
+    },
+    "neutral": {
+     "enabled": true,
+     "sdks": [
+      "qumo",
+      "qiskit",
+      "tket"
+     ],
+     "targets": [
+      "sc_grid",
+      "ion_all_to_all",
+      "neutral_atom"
+     ],
+     "levels": [
+      "default"
+     ],
+     "filter": "qb_small__",
+     "max_qubits": 6,
+     "job_timeout_s": 120,
+     "timeout_s": 1800,
+     "python": null,
+     "quick": {
+      "targets": [
+       "sc_grid"
+      ],
+      "max_qubits": 4
+     }
+    },
+    "qec": {
+     "enabled": false,
+     "args": [
+      "--part",
+      "A",
+      "--shots",
+      "20000"
+     ],
+     "timeout_s": 2400,
+     "python": null,
+     "quick": {
+      "args": [
+       "--part",
+       "A",
+       "--shots",
+       "2000"
+      ]
+     }
+    },
+    "tests": {
+     "enabled": true,
+     "targets": [
+      "test-gpu"
+     ],
+     "timeout_s": 3600,
+     "quick": {
+      "targets": [
+       "test"
+      ],
+      "files": [
+       "tests/test_json.mojo"
+      ]
+     }
+    }
+   }
+  }
+ },
+ "environment": {
+  "timestamp_utc": "2026-10-12T23:55:08+00:00",
+  "loadavg_start": [
+   0.62,
+   0.41,
+   0.86
+  ],
+  "os": {
+   "system": "Linux",
+   "release": "6.6.122+",
+   "platform": "Linux-6.6.122+-x86_64-with-glibc2.39",
+   "distro": "Ubuntu 24.04.4 LTS",
+   "libc": "glibc-2.39"
+  },
+  "cpu": {
+   "logical_cores": 2,
+   "machine": "x86_64",
+   "model": "Intel(R) Xeon(R) CPU @ 2.00GHz",
+   "usable_cores": 2,
+   "x86_64_v3": true
+  },
+  "ram": {
+   "total_bytes": 13605830656,
+   "available_bytes": 12063412224
+  },
+  "python": {
+   "version": "3.12.3",
+   "implementation": "CPython"
+  },
+  "toolchain": {
+   "mojo_path": ".venv/bin/mojo",
+   "mojo": "1.1.0",
+   "mojo-compiler": "1.1.0",
+   "max-core": "26.6.0",
+   "max-mojo-libs": "26.6.0"
+  },
+  "git": {
+   "commit": "1750a819634f5135160564928a1e898f5bb4433b",
+   "branch": "main",
+   "describe": "1750a81",
+   "dirty_files": 1,
+   "remote": "https://github.com/ANFAIA/QUMO"
+  },
+  "gpus": [
+   {
+    "vendor": "nvidia",
+    "index": 0,
+    "name": "Tesla T4",
+    "source": "nvidia-smi",
+    "memory_bytes": 16106127360,
+    "driver": "580.82.07",
+    "compute_capability": "7.5",
+    "arch": "sm_75",
+    "cuda_driver_api": "13.0",
+    "mojo_max_supported": true,
+    "support_note": ""
+   }
+  ],
+  "cloud": {
+   "provider": "google-colab",
+   "colab_release": "release-colab-external-images_20261009-060058_RC00",
+   "env": {
+    "MODULAR_NVPTX_COMPILER_PATH_set": false
+   }
+  }
+ },
+ "suites": {
+  "gpu_check": {
+   "status": "ok",
+   "rows": [
+    {
+     "kind": "gpu_check",
+     "status": "PASS",
+     "target": "sm_75",
+     "file": "tests/test_gpu.mojo",
+     "kernels": 37
+    },
+    {
+     "kind": "gpu_check",
+     "status": "PASS",
+     "target": "sm_75",
+     "file": "tests/test_gpu_frame.mojo",
+     "kernels": 17
+    },
+    {
+     "kind": "gpu_check",
+     "status": "PASS",
+     "target": "sm_75",
+     "file": "bench/bench_gpu.mojo",
+     "kernels": 18
+    }
+   ],
+   "commands": [
+    "make MOJO=.venv/bin/mojo GPU_TARGETS=sm_75 gpu-check"
+   ],
+   "targets": [
+    "sm_75"
+   ],
+   "summary": {
+    "pass": 3,
+    "fail": 0
+   },
+   "output_tail": "PASS sm_75 tests/test_gpu.mojo (37 kernels)\nPASS sm_75 tests/test_gpu_frame.mojo (17 kernels)\nPASS sm_75 bench/bench_gpu.mojo (18 kernels)",
+   "duration_s": 45.78,
+   "loadavg_before": [
+    0.62,
+    0.41,
+    0.86
+   ],
+   "loadavg_after": [
+    1.22,
+    0.59,
+    0.9
+   ],
+   "config": {
+    "enabled": true,
+    "targets": [
+     "host"
+    ],
+    "timeout_s": 2400
+   }
+  },
+  "sv_cpu": {
+   "status": "ok",
+   "rows": [
+    {
+     "kind": "statevector",
+     "engine": "qumo",
+     "device": "cpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 16,
+     "gates": 395,
+     "depth": 10,
+     "seconds": 0.017700807,
+     "gates_per_sec": 22315.36675135772,
+     "reps": 3,
+     "series": "QUMO CPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "qumo",
+     "device": "cpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 18,
+     "gates": 445,
+     "depth": 10,
+     "seconds": 0.0592913,
+     "gates_per_sec": 7505.316968931361,
+     "reps": 3,
+     "series": "QUMO CPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "qumo",
+     "device": "cpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 20,
+     "gates": 495,
+     "depth": 10,
+     "seconds": 0.124676916,
+     "gates_per_sec": 3970.2618245706367,
+     "reps": 3,
+     "series": "QUMO CPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "qumo",
+     "device": "cpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 22,
+     "gates": 545,
+     "depth": 10,
+     "seconds": 0.599544738,
+     "gates_per_sec": 909.0230727702593,
+     "reps": 3,
+     "series": "QUMO CPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "qumo",
+     "device": "cpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 24,
+     "gates": 595,
+     "depth": 10,
+     "seconds": 2.729657327,
+     "gates_per_sec": 217.97607857757305,
+     "reps": 3,
+     "series": "QUMO CPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "qumo",
+     "device": "cpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 26,
+     "gates": 645,
+     "depth": 10,
+     "seconds": 11.403784236,
+     "gates_per_sec": 56.56017218949424,
+     "reps": 3,
+     "series": "QUMO CPU fp64"
+    }
+   ],
+   "commands": [
+    "build/bench_sv 26 layered 16 3"
+   ],
+   "build": {
+    "binary": "build/bench_sv",
+    "built": false
+   },
+   "clamp": null,
+   "duration_s": 46.34,
+   "loadavg_before": [
+    1.22,
+    0.59,
+    0.9
+   ],
+   "loadavg_after": [
+    1.97,
+    0.87,
+    0.98
+   ],
+   "config": {
+    "enabled": true,
+    "families": [
+     "layered"
+    ],
+    "qubits": [
+     16,
+     26
+    ],
+    "reps": 3,
+    "timeout_s": 2400,
+    "quick": {
+     "qubits": [
+      16,
+      20
+     ],
+     "reps": 1,
+     "families": [
+      "layered"
+     ]
+    }
+   }
+  },
+  "sv_gpu": {
+   "status": "ok",
+   "rows": [
+    {
+     "kind": "statevector",
+     "engine": "qumo",
+     "device": "gpu",
+     "precision": "fp32",
+     "family": "layered",
+     "qubits": 16,
+     "gates": 395,
+     "seconds": 0.001332601,
+     "gates_per_sec": 296412.8047329996,
+     "cpu_seconds": 0.065852576,
+     "speedup_vs_qumo_cpu": 49.41657405329877,
+     "expect_seconds": 0.828242378,
+     "sample10k_seconds": 0.002536534,
+     "abs_err_expect": 6.587796708146243e-07,
+     "fidelity": 1.0000001127246465,
+     "method": "gpu:statevector:fp32",
+     "reps": 3,
+     "emulated": false,
+     "series": "QUMO GPU fp32"
+    },
+    {
+     "kind": "statevector",
+     "engine": "qumo",
+     "device": "gpu",
+     "precision": "fp32",
+     "family": "layered",
+     "qubits": 18,
+     "gates": 445,
+     "seconds": 0.001794819,
+     "gates_per_sec": 247935.8642849223,
+     "cpu_seconds": 0.111722757,
+     "speedup_vs_qumo_cpu": 62.247367004695185,
+     "expect_seconds": 0.000212038,
+     "sample10k_seconds": 0.002043467,
+     "abs_err_expect": 1.9952711252102517e-06,
+     "fidelity": 1.0000003129435129,
+     "method": "gpu:statevector:fp32",
+     "reps": 3,
+     "emulated": false,
+     "series": "QUMO GPU fp32"
+    },
+    {
+     "kind": "statevector",
+     "engine": "qumo",
+     "device": "gpu",
+     "precision": "fp32",
+     "family": "layered",
+     "qubits": 20,
+     "gates": 495,
+     "seconds": 0.017548754,
+     "gates_per_sec": 28207.130831055016,
+     "cpu_seconds": 0.154851175,
+     "speedup_vs_qumo_cpu": 8.824055257712315,
+     "expect_seconds": 0.001016758,
+     "sample10k_seconds": 0.002579955,
+     "abs_err_expect": 1.0606882723251942e-06,
+     "fidelity": 1.0000002406127328,
+     "method": "gpu:statevector:fp32",
+     "reps": 3,
+     "emulated": false,
+     "series": "QUMO GPU fp32"
+    },
+    {
+     "kind": "statevector",
+     "engine": "qumo",
+     "device": "gpu",
+     "precision": "fp32",
+     "family": "layered",
+     "qubits": 22,
+     "gates": 545,
+     "seconds": 0.075326446,
+     "gates_per_sec": 7235.17474858697,
+     "cpu_seconds": 0.609514006,
+     "speedup_vs_qumo_cpu": 8.091633660773004,
+     "expect_seconds": 0.0030265,
+     "sample10k_seconds": 0.001806937,
+     "abs_err_expect": 6.480109862039285e-07,
+     "fidelity": 1.0000001376321361,
+     "method": "gpu:statevector:fp32",
+     "reps": 3,
+     "emulated": false,
+     "series": "QUMO GPU fp32"
+    },
+    {
+     "kind": "statevector",
+     "engine": "qumo",
+     "device": "gpu",
+     "precision": "fp32",
+     "family": "layered",
+     "qubits": 24,
+     "gates": 595,
+     "seconds": 0.341476367,
+     "gates_per_sec": 1742.4339061215326,
+     "cpu_seconds": 2.682721522,
+     "speedup_vs_qumo_cpu": 7.85624359767187,
+     "expect_seconds": 0.011988433,
+     "sample10k_seconds": 0.002507732,
+     "abs_err_expect": 1.6717384454523199e-06,
+     "fidelity": 0.9999999672688388,
+     "method": "gpu:statevector:fp32",
+     "reps": 3,
+     "emulated": false,
+     "series": "QUMO GPU fp32"
+    },
+    {
+     "kind": "statevector",
+     "engine": "qumo",
+     "device": "gpu",
+     "precision": "fp32",
+     "family": "layered",
+     "qubits": 26,
+     "gates": 645,
+     "seconds": 1.489861601,
+     "gates_per_sec": 432.9261184844779,
+     "cpu_seconds": 11.568486943,
+     "speedup_vs_qumo_cpu": 7.764806432513726,
+     "expect_seconds": 0.053683021,
+     "sample10k_seconds": 0.004531188,
+     "abs_err_expect": 2.7403855398233645e-06,
+     "fidelity": 0.9999999029648137,
+     "method": "gpu:statevector:fp32",
+     "reps": 3,
+     "emulated": false,
+     "series": "QUMO GPU fp32"
+    },
+    {
+     "kind": "statevector",
+     "engine": "qumo",
+     "device": "gpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 16,
+     "gates": 395,
+     "seconds": 0.002155983,
+     "gates_per_sec": 183211.0921097244,
+     "cpu_seconds": 0.020673191,
+     "speedup_vs_qumo_cpu": 9.58875417848842,
+     "expect_seconds": 0.590498605,
+     "sample10k_seconds": 0.003777381,
+     "abs_err_expect": 1.7763568394002505e-15,
+     "fidelity": 1.0,
+     "method": "gpu:statevector:fp64",
+     "reps": 3,
+     "emulated": false,
+     "series": "QUMO GPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "qumo",
+     "device": "gpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 18,
+     "gates": 445,
+     "seconds": 0.006385345,
+     "gates_per_sec": 69690.83111405883,
+     "cpu_seconds": 0.055269449,
+     "speedup_vs_qumo_cpu": 8.655671541631659,
+     "expect_seconds": 0.000673458,
+     "sample10k_seconds": 0.003518283,
+     "abs_err_expect": 5.329070518200751e-15,
+     "fidelity": 0.9999999999999616,
+     "method": "gpu:statevector:fp64",
+     "reps": 3,
+     "emulated": false,
+     "series": "QUMO GPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "qumo",
+     "device": "gpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 20,
+     "gates": 495,
+     "seconds": 0.036078252,
+     "gates_per_sec": 13720.176908792588,
+     "cpu_seconds": 0.12912024,
+     "speedup_vs_qumo_cpu": 3.578894010718701,
+     "expect_seconds": 0.002405989,
+     "sample10k_seconds": 0.003784159,
+     "abs_err_expect": 1.687538997430238e-14,
+     "fidelity": 1.0000000000000688,
+     "method": "gpu:statevector:fp64",
+     "reps": 3,
+     "emulated": false,
+     "series": "QUMO GPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "qumo",
+     "device": "gpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 22,
+     "gates": 545,
+     "seconds": 0.157301656,
+     "gates_per_sec": 3464.6806261213164,
+     "cpu_seconds": 0.603246378,
+     "speedup_vs_qumo_cpu": 3.83496520850359,
+     "expect_seconds": 0.007300673,
+     "sample10k_seconds": 0.003410958,
+     "abs_err_expect": 3.552713678800501e-15,
+     "fidelity": 0.999999999999972,
+     "method": "gpu:statevector:fp64",
+     "reps": 3,
+     "emulated": false,
+     "series": "QUMO GPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "qumo",
+     "device": "gpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 24,
+     "gates": 595,
+     "seconds": 0.685254717,
+     "gates_per_sec": 868.2902652678858,
+     "cpu_seconds": 2.860789982,
+     "speedup_vs_qumo_cpu": 4.174783348481497,
+     "expect_seconds": 0.028266264,
+     "sample10k_seconds": 0.004523389,
+     "abs_err_expect": 1.865174681370263e-14,
+     "fidelity": 0.9999999999999774,
+     "method": "gpu:statevector:fp64",
+     "reps": 3,
+     "emulated": false,
+     "series": "QUMO GPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "qumo",
+     "device": "gpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 26,
+     "gates": 645,
+     "seconds": 2.973535021,
+     "gates_per_sec": 216.9135374040715,
+     "cpu_seconds": 11.38751348,
+     "speedup_vs_qumo_cpu": 3.829621443695114,
+     "expect_seconds": 0.137170148,
+     "sample10k_seconds": 0.007947931,
+     "abs_err_expect": 1.936228954946273e-13,
+     "fidelity": 1.0000000000010285,
+     "method": "gpu:statevector:fp64",
+     "reps": 3,
+     "emulated": false,
+     "series": "QUMO GPU fp64"
+    },
+    {
+     "kind": "qec_frames",
+     "engine": "qumo",
+     "device": "gpu",
+     "precision": "fp32",
+     "code": "surface_z",
+     "d": 3,
+     "rounds": 3,
+     "shots": 1000000,
+     "cpu_s": 0.020709118,
+     "gpu_s": 0.005319801,
+     "speedup": 3.892836968901656,
+     "cpu_shots_per_s": 48287908.7366251,
+     "gpu_shots_per_s": 187976956.28088343,
+     "cpu_events": 295365,
+     "gpu_events": 293330,
+     "method": "gpu:pauli_frame",
+     "series": "QUMO Pauli frames GPU vs CPU"
+    },
+    {
+     "kind": "qec_frames",
+     "engine": "qumo",
+     "device": "gpu",
+     "precision": "fp32",
+     "code": "surface_z",
+     "d": 5,
+     "rounds": 5,
+     "shots": 1000000,
+     "cpu_s": 0.072585176,
+     "gpu_s": 0.030377072,
+     "speedup": 2.3894724284157474,
+     "cpu_shots_per_s": 13776917.755217677,
+     "gpu_shots_per_s": 32919565.124644008,
+     "cpu_events": 1764105,
+     "gpu_events": 1766296,
+     "method": "gpu:pauli_frame",
+     "series": "QUMO Pauli frames GPU vs CPU"
+    },
+    {
+     "kind": "qec_frames",
+     "engine": "qumo",
+     "device": "gpu",
+     "precision": "fp32",
+     "code": "surface_z",
+     "d": 7,
+     "rounds": 7,
+     "shots": 1000000,
+     "cpu_s": 0.214167925,
+     "gpu_s": 0.099285357,
+     "speedup": 2.1570947768259523,
+     "cpu_shots_per_s": 4669233.266372637,
+     "gpu_shots_per_s": 10071978.690674396,
+     "cpu_events": 5336284,
+     "gpu_events": 5340392,
+     "method": "gpu:pauli_frame",
+     "series": "QUMO Pauli frames GPU vs CPU"
+    },
+    {
+     "kind": "qec_frames",
+     "engine": "qumo",
+     "device": "gpu",
+     "precision": "fp64",
+     "code": "surface_z",
+     "d": 3,
+     "rounds": 3,
+     "shots": 1000000,
+     "cpu_s": 0.015021632,
+     "gpu_s": 0.004788344,
+     "speedup": 3.1371246510275785,
+     "cpu_shots_per_s": 66570662.89468414,
+     "gpu_shots_per_s": 208840467.60216057,
+     "cpu_events": 295365,
+     "gpu_events": 293330,
+     "method": "gpu:pauli_frame",
+     "series": "QUMO Pauli frames GPU vs CPU"
+    },
+    {
+     "kind": "qec_frames",
+     "engine": "qumo",
+     "device": "gpu",
+     "precision": "fp64",
+     "code": "surface_z",
+     "d": 5,
+     "rounds": 5,
+     "shots": 1000000,
+     "cpu_s": 0.072037218,
+     "gpu_s": 0.030198549,
+     "speedup": 2.385452956696694,
+     "cpu_shots_per_s": 13881713.199973935,
+     "gpu_shots_per_s": 33114173.79689335,
+     "cpu_events": 1764105,
+     "gpu_events": 1766296,
+     "method": "gpu:pauli_frame",
+     "series": "QUMO Pauli frames GPU vs CPU"
+    },
+    {
+     "kind": "qec_frames",
+     "engine": "qumo",
+     "device": "gpu",
+     "precision": "fp64",
+     "code": "surface_z",
+     "d": 7,
+     "rounds": 7,
+     "shots": 1000000,
+     "cpu_s": 0.20882101,
+     "gpu_s": 0.09811018,
+     "speedup": 2.128433665089596,
+     "cpu_shots_per_s": 4788790.170107883,
+     "gpu_shots_per_s": 10192622.213107752,
+     "cpu_events": 5336284,
+     "gpu_events": 5340392,
+     "method": "gpu:pauli_frame",
+     "series": "QUMO Pauli frames GPU vs CPU"
+    }
+   ],
+   "commands": [
+    "build/gpu/bench_gpu_fp32 26 3",
+    "build/gpu/bench_gpu_fp64 26 3"
+   ],
+   "builds": [
+    {
+     "binary": "build/gpu/bench_gpu_fp32",
+     "built": false
+    },
+    {
+     "binary": "build/gpu/bench_gpu_fp64",
+     "built": false
+    }
+   ],
+   "notes": [
+    {
+     "precision": "fp32",
+     "clamp": {
+      "requested": [
+       16,
+       18,
+       20,
+       22,
+       24,
+       26,
+       28,
+       30
+      ],
+      "used": [
+       16,
+       18,
+       20,
+       22,
+       24,
+       26
+      ],
+      "reason": "28q needs 9.2 GiB > host RAM budget 6.9 GiB",
+      "code": "QM-E966"
+     }
+    },
+    {
+     "precision": "fp32",
+     "device_info": "GPU: Tesla T4 (api=cuda, vendor=nvidia, precision=fp32, fp64=True)"
+    },
+    {
+     "precision": "fp64",
+     "clamp": {
+      "requested": [
+       16,
+       18,
+       20,
+       22,
+       24,
+       26,
+       28
+      ],
+      "used": [
+       16,
+       18,
+       20,
+       22,
+       24,
+       26
+      ],
+      "reason": "28q needs 9.2 GiB > host RAM budget 6.9 GiB",
+      "code": "QM-E966"
+     }
+    },
+    {
+     "precision": "fp64",
+     "device_info": "GPU: Tesla T4 (api=cuda, vendor=nvidia, precision=fp64, fp64=True)"
+    }
+   ],
+   "skipped": [],
+   "failures": [],
+   "duration_s": 188.46,
+   "loadavg_before": [
+    1.97,
+    0.87,
+    0.98
+   ],
+   "loadavg_after": [
+    2.25,
+    1.54,
+    1.23
+   ],
+   "config": {
+    "enabled": true,
+    "precisions": [
+     "fp32",
+     "fp64"
+    ],
+    "qubits_fp32": [
+     16,
+     30
+    ],
+    "qubits_fp64": [
+     16,
+     28
+    ],
+    "reps": 3,
+    "timeout_s": 3600,
+    "build_timeout_s": 2400,
+    "quick": {
+     "qubits_fp32": [
+      16,
+      20
+     ],
+     "qubits_fp64": [
+      16,
+      20
+     ],
+     "reps": 1
+    }
+   }
+  },
+  "baseline_aer": {
+   "status": "ok",
+   "rows": [
+    {
+     "kind": "statevector",
+     "engine": "aer",
+     "device": "cpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 16,
+     "gates": 395,
+     "seconds": 0.05243935300040903,
+     "gates_per_sec": 7532.510936908756,
+     "reps": 3,
+     "times": [
+      0.05243935300040903,
+      0.05216311300000598,
+      0.05260954100003801
+     ],
+     "series": "Aer CPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "aer",
+     "device": "cpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 18,
+     "gates": 445,
+     "seconds": 0.19016547100000025,
+     "gates_per_sec": 2340.0672985475867,
+     "reps": 3,
+     "times": [
+      0.21006649499986452,
+      0.1885264030001963,
+      0.19016547100000025
+     ],
+     "series": "Aer CPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "aer",
+     "device": "cpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 20,
+     "gates": 495,
+     "seconds": 0.809020265000072,
+     "gates_per_sec": 611.8511753224822,
+     "reps": 3,
+     "times": [
+      0.8072529850001047,
+      0.809020265000072,
+      0.8169578420001926
+     ],
+     "series": "Aer CPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "aer",
+     "device": "cpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 22,
+     "gates": 545,
+     "seconds": 4.150934881000012,
+     "gates_per_sec": 131.29572388490536,
+     "reps": 3,
+     "times": [
+      4.528521394000109,
+      4.150934881000012,
+      3.660064463999788
+     ],
+     "series": "Aer CPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "aer",
+     "device": "cpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 24,
+     "gates": 595,
+     "seconds": 16.985228934999668,
+     "gates_per_sec": 35.03043746286789,
+     "reps": 3,
+     "times": [
+      16.985228934999668,
+      18.649908809000408,
+      16.855810455999745
+     ],
+     "series": "Aer CPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "aer",
+     "device": "cpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 26,
+     "gates": 645,
+     "seconds": 74.36242322199996,
+     "gates_per_sec": 8.673735632234994,
+     "reps": 3,
+     "times": [
+      74.02442003000033,
+      75.46074273700015,
+      74.36242322199996
+     ],
+     "series": "Aer CPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "aer",
+     "device": "gpu",
+     "precision": "fp32",
+     "family": "layered",
+     "qubits": 16,
+     "gates": 395,
+     "seconds": 0.027334602000337327,
+     "gates_per_sec": 14450.548795081248,
+     "reps": 3,
+     "times": [
+      0.027334602000337327,
+      0.03469390299960651,
+      0.02531536300011794
+     ],
+     "series": "Aer GPU fp32"
+    },
+    {
+     "kind": "statevector",
+     "engine": "aer",
+     "device": "gpu",
+     "precision": "fp32",
+     "family": "layered",
+     "qubits": 18,
+     "gates": 445,
+     "seconds": 0.036382580999998027,
+     "gates_per_sec": 12231.127857587238,
+     "reps": 3,
+     "times": [
+      0.03627442500010147,
+      0.03641193000021303,
+      0.036382580999998027
+     ],
+     "series": "Aer GPU fp32"
+    },
+    {
+     "kind": "statevector",
+     "engine": "aer",
+     "device": "gpu",
+     "precision": "fp32",
+     "family": "layered",
+     "qubits": 20,
+     "gates": 495,
+     "seconds": 0.0856962329999078,
+     "gates_per_sec": 5776.2165578565455,
+     "reps": 3,
+     "times": [
+      0.08843637500012846,
+      0.0856962329999078,
+      0.0714460770000187
+     ],
+     "series": "Aer GPU fp32"
+    },
+    {
+     "kind": "statevector",
+     "engine": "aer",
+     "device": "gpu",
+     "precision": "fp32",
+     "family": "layered",
+     "qubits": 22,
+     "gates": 545,
+     "seconds": 0.13618835700026466,
+     "gates_per_sec": 4001.8105218711235,
+     "reps": 3,
+     "times": [
+      0.1590135950000331,
+      0.13618835700026466,
+      0.13526960000035615
+     ],
+     "series": "Aer GPU fp32"
+    },
+    {
+     "kind": "statevector",
+     "engine": "aer",
+     "device": "gpu",
+     "precision": "fp32",
+     "family": "layered",
+     "qubits": 24,
+     "gates": 595,
+     "seconds": 0.4995526469997458,
+     "gates_per_sec": 1191.065653587264,
+     "reps": 3,
+     "times": [
+      0.49868259999993825,
+      0.4995526469997458,
+      0.5197167679998529
+     ],
+     "series": "Aer GPU fp32"
+    },
+    {
+     "kind": "statevector",
+     "engine": "aer",
+     "device": "gpu",
+     "precision": "fp32",
+     "family": "layered",
+     "qubits": 26,
+     "gates": 645,
+     "seconds": 2.072973228000137,
+     "gates_per_sec": 311.1472889701773,
+     "reps": 3,
+     "times": [
+      2.08343783600003,
+      2.0720687140001246,
+      2.072973228000137
+     ],
+     "series": "Aer GPU fp32"
+    },
+    {
+     "kind": "statevector",
+     "engine": "aer",
+     "device": "gpu",
+     "precision": "fp32",
+     "family": "layered",
+     "qubits": 28,
+     "gates": 695,
+     "seconds": 8.81544902099995,
+     "gates_per_sec": 78.83886553531055,
+     "reps": 3,
+     "times": [
+      8.81544902099995,
+      8.789954416,
+      8.824593986999844
+     ],
+     "series": "Aer GPU fp32"
+    },
+    {
+     "kind": "statevector",
+     "engine": "aer",
+     "device": "gpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 16,
+     "gates": 395,
+     "seconds": 0.021380986999702145,
+     "gates_per_sec": 18474.357615272984,
+     "reps": 3,
+     "times": [
+      0.021380986999702145,
+      0.021879104000163352,
+      0.020799228000214498
+     ],
+     "series": "Aer GPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "aer",
+     "device": "gpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 18,
+     "gates": 445,
+     "seconds": 0.026887930000157212,
+     "gates_per_sec": 16550.176975222643,
+     "reps": 3,
+     "times": [
+      0.02640740900005767,
+      0.029132150999885198,
+      0.026887930000157212
+     ],
+     "series": "Aer GPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "aer",
+     "device": "gpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 20,
+     "gates": 495,
+     "seconds": 0.047340757999791094,
+     "gates_per_sec": 10456.106342914583,
+     "reps": 3,
+     "times": [
+      0.04592661300011969,
+      0.047340757999791094,
+      0.059215858000243315
+     ],
+     "series": "Aer GPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "aer",
+     "device": "gpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 22,
+     "gates": 545,
+     "seconds": 0.1197716860001492,
+     "gates_per_sec": 4550.324189302312,
+     "reps": 3,
+     "times": [
+      0.1197716860001492,
+      0.1203844299998309,
+      0.11960366000039357
+     ],
+     "series": "Aer GPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "aer",
+     "device": "gpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 24,
+     "gates": 595,
+     "seconds": 0.4376017130002765,
+     "gates_per_sec": 1359.6838913645295,
+     "reps": 3,
+     "times": [
+      0.4363868069999626,
+      0.4376017130002765,
+      0.4394654439997794
+     ],
+     "series": "Aer GPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "aer",
+     "device": "gpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 26,
+     "gates": 645,
+     "seconds": 1.8161247470002309,
+     "gates_per_sec": 355.15181490994684,
+     "reps": 3,
+     "times": [
+      1.8083759629998895,
+      1.8161247470002309,
+      1.841595789999701
+     ],
+     "series": "Aer GPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "aer",
+     "device": "gpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 28,
+     "gates": 695,
+     "seconds": 7.875549208999928,
+     "gates_per_sec": 88.24781377859668,
+     "reps": 3,
+     "times": [
+      7.771977503000016,
+      7.875549208999928,
+      7.967094765999718
+     ],
+     "series": "Aer GPU fp64"
+    }
+   ],
+   "commands": [
+    "bench/.venv/bin/python bench/run_benchmarks.py --worker aer '{\"qubits\": [16, 18, 20, 22, 24, 26], \"reps\": 3, \"depth\": 10, \"precision\": \"fp64\", \"device\": \"cpu\", \"clamp\": null, \"verify_qubits\": 8, \"families\": [\"layered\"]}'",
+    "/content/venvs/aer-gpu/bin/python bench/run_benchmarks.py --worker aer '{\"qubits\": [16, 18, 20, 22, 24, 26, 28], \"reps\": 3, \"depth\": 10, \"precision\": \"fp32\", \"device\": \"gpu\", \"clamp\": {\"requested\": [16, 18, 20, 22, 24, 26, 28, 30], \"used\": [16, 18, 20, 22, 24, 26, 28], \"reason\": \"30q needs 9.6 GiB > host RAM budget 6.9 GiB\", \"code\": \"QM-E966\"}, \"verify_qubits\": 8, \"families\": [\"layered\"]}'",
+    "/content/venvs/aer-gpu/bin/python bench/run_benchmarks.py --worker aer '{\"qubits\": [16, 18, 20, 22, 24, 26, 28], \"reps\": 3, \"depth\": 10, \"precision\": \"fp64\", \"device\": \"gpu\", \"clamp\": null, \"verify_qubits\": 8, \"families\": [\"layered\"]}'"
+   ],
+   "versions": [
+    {
+     "engine": "aer",
+     "versions": {
+      "qiskit-aer": "0.17.2",
+      "qiskit": "2.5.2",
+      "qiskit_aer_module": "0.17.2"
+     },
+     "available_devices": [
+      "CPU"
+     ],
+     "verify": {
+      "qubits": 8,
+      "fidelity": 1.0000000000000058,
+      "order": "little-endian"
+     },
+     "device": "cpu",
+     "precision": "fp64"
+    },
+    {
+     "engine": "aer",
+     "versions": {
+      "qiskit-aer-gpu": "0.15.1",
+      "qiskit": "1.4.6",
+      "qiskit_aer_module": "0.15.1"
+     },
+     "available_devices": [
+      "CPU",
+      "GPU"
+     ],
+     "verify": {
+      "qubits": 8,
+      "fidelity": 1.000000285957361,
+      "order": "little-endian"
+     },
+     "device": "gpu",
+     "precision": "fp32"
+    },
+    {
+     "engine": "aer",
+     "versions": {
+      "qiskit-aer-gpu": "0.15.1",
+      "qiskit": "1.4.6",
+      "qiskit_aer_module": "0.15.1"
+     },
+     "available_devices": [
+      "CPU",
+      "GPU"
+     ],
+     "verify": {
+      "qubits": 8,
+      "fidelity": 1.000000000000007,
+      "order": "little-endian"
+     },
+     "device": "gpu",
+     "precision": "fp64"
+    }
+   ],
+   "skipped": [],
+   "clamps": [
+    {
+     "requested": [
+      16,
+      18,
+      20,
+      22,
+      24,
+      26,
+      28,
+      30
+     ],
+     "used": [
+      16,
+      18,
+      20,
+      22,
+      24,
+      26,
+      28
+     ],
+     "reason": "30q needs 9.6 GiB > host RAM budget 6.9 GiB",
+     "code": "QM-E966"
+    }
+   ],
+   "duration_s": 360.99,
+   "loadavg_before": [
+    2.25,
+    1.54,
+    1.23
+   ],
+   "loadavg_after": [
+    1.62,
+    1.97,
+    1.57
+   ],
+   "config": {
+    "enabled": true,
+    "devices": [
+     "cpu",
+     "gpu"
+    ],
+    "precisions_cpu": [
+     "fp64"
+    ],
+    "precisions_gpu": [
+     "fp32",
+     "fp64"
+    ],
+    "qubits": [
+     16,
+     26
+    ],
+    "qubits_gpu": [
+     16,
+     30
+    ],
+    "qubits_gpu_fp64": [
+     16,
+     28
+    ],
+    "reps": 3,
+    "timeout_s": 3600,
+    "python": null,
+    "gpu_python": null,
+    "quick": {
+     "qubits": [
+      16,
+      20
+     ],
+     "qubits_gpu": [
+      16,
+      20
+     ],
+     "reps": 1
+    }
+   }
+  },
+  "baseline_cudaq": {
+   "status": "ok",
+   "rows": [
+    {
+     "kind": "statevector",
+     "engine": "cudaq",
+     "device": "gpu",
+     "precision": "fp32",
+     "family": "layered",
+     "qubits": 16,
+     "gates": 395,
+     "seconds": 0.0067640389997905,
+     "gates_per_sec": 58397.06128427618,
+     "reps": 3,
+     "times": [
+      0.007724172000052931,
+      0.006548117999955139,
+      0.0067640389997905
+     ],
+     "series": "CUDA-Q GPU fp32"
+    },
+    {
+     "kind": "statevector",
+     "engine": "cudaq",
+     "device": "gpu",
+     "precision": "fp32",
+     "family": "layered",
+     "qubits": 18,
+     "gates": 445,
+     "seconds": 0.008291191999887815,
+     "gates_per_sec": 53671.41419545237,
+     "reps": 3,
+     "times": [
+      0.008637130999886722,
+      0.007992341999852215,
+      0.008291191999887815
+     ],
+     "series": "CUDA-Q GPU fp32"
+    },
+    {
+     "kind": "statevector",
+     "engine": "cudaq",
+     "device": "gpu",
+     "precision": "fp32",
+     "family": "layered",
+     "qubits": 20,
+     "gates": 495,
+     "seconds": 0.00928534500008027,
+     "gates_per_sec": 53309.81239746298,
+     "reps": 3,
+     "times": [
+      0.012391683000259945,
+      0.00928534500008027,
+      0.00836258600020301
+     ],
+     "series": "CUDA-Q GPU fp32"
+    },
+    {
+     "kind": "statevector",
+     "engine": "cudaq",
+     "device": "gpu",
+     "precision": "fp32",
+     "family": "layered",
+     "qubits": 22,
+     "gates": 545,
+     "seconds": 0.01621769099983794,
+     "gates_per_sec": 33605.27710174315,
+     "reps": 3,
+     "times": [
+      0.01330156399990301,
+      0.01621769099983794,
+      0.016548802999750478
+     ],
+     "series": "CUDA-Q GPU fp32"
+    },
+    {
+     "kind": "statevector",
+     "engine": "cudaq",
+     "device": "gpu",
+     "precision": "fp32",
+     "family": "layered",
+     "qubits": 24,
+     "gates": 595,
+     "seconds": 0.03906352900003185,
+     "gates_per_sec": 15231.598763120324,
+     "reps": 3,
+     "times": [
+      0.039526307999949495,
+      0.03902910200031329,
+      0.03906352900003185
+     ],
+     "series": "CUDA-Q GPU fp32"
+    },
+    {
+     "kind": "statevector",
+     "engine": "cudaq",
+     "device": "gpu",
+     "precision": "fp32",
+     "family": "layered",
+     "qubits": 26,
+     "gates": 645,
+     "seconds": 0.1703809050000018,
+     "gates_per_sec": 3785.635485384898,
+     "reps": 3,
+     "times": [
+      0.1703809050000018,
+      0.1689749170000141,
+      0.17112893600005918
+     ],
+     "series": "CUDA-Q GPU fp32"
+    },
+    {
+     "kind": "statevector",
+     "engine": "cudaq",
+     "device": "gpu",
+     "precision": "fp32",
+     "family": "layered",
+     "qubits": 28,
+     "gates": 695,
+     "seconds": 0.785896110000067,
+     "gates_per_sec": 884.3408068274326,
+     "reps": 3,
+     "times": [
+      0.7838398880003297,
+      0.785896110000067,
+      0.7916759009999623
+     ],
+     "series": "CUDA-Q GPU fp32"
+    },
+    {
+     "kind": "statevector",
+     "engine": "cudaq",
+     "device": "gpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 16,
+     "gates": 395,
+     "seconds": 0.0035316799999236537,
+     "gates_per_sec": 111844.78775215731,
+     "reps": 3,
+     "times": [
+      0.003505005000079109,
+      0.0035316799999236537,
+      0.0035424669999883918
+     ],
+     "series": "CUDA-Q GPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "cudaq",
+     "device": "gpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 18,
+     "gates": 445,
+     "seconds": 0.005960302999937994,
+     "gates_per_sec": 74660.6338645249,
+     "reps": 3,
+     "times": [
+      0.005823481999868818,
+      0.005960302999937994,
+      0.005960381000022608
+     ],
+     "series": "CUDA-Q GPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "cudaq",
+     "device": "gpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 20,
+     "gates": 495,
+     "seconds": 0.018758703999992576,
+     "gates_per_sec": 26387.750454412835,
+     "reps": 3,
+     "times": [
+      0.018714100999659422,
+      0.018797887000346236,
+      0.018758703999992576
+     ],
+     "series": "CUDA-Q GPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "cudaq",
+     "device": "gpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 22,
+     "gates": 545,
+     "seconds": 0.07608916099979979,
+     "gates_per_sec": 7162.64961840536,
+     "reps": 3,
+     "times": [
+      0.07660901899998862,
+      0.07562089400016703,
+      0.07608916099979979
+     ],
+     "series": "CUDA-Q GPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "cudaq",
+     "device": "gpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 24,
+     "gates": 595,
+     "seconds": 0.33172974399985833,
+     "gates_per_sec": 1793.6287317071397,
+     "reps": 3,
+     "times": [
+      0.3303051930001857,
+      0.33199744399962583,
+      0.33172974399985833
+     ],
+     "series": "CUDA-Q GPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "cudaq",
+     "device": "gpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 26,
+     "gates": 645,
+     "seconds": 1.4458540320001703,
+     "gates_per_sec": 446.103123638088,
+     "reps": 3,
+     "times": [
+      1.437698963999992,
+      1.4458540320001703,
+      1.4475912400002926
+     ],
+     "series": "CUDA-Q GPU fp64"
+    },
+    {
+     "kind": "statevector",
+     "engine": "cudaq",
+     "device": "gpu",
+     "precision": "fp64",
+     "family": "layered",
+     "qubits": 28,
+     "gates": 695,
+     "seconds": 6.441393435000009,
+     "gates_per_sec": 107.89590901615203,
+     "reps": 3,
+     "times": [
+      6.354656968000199,
+      6.441393435000009,
+      6.524787722999918
+     ],
+     "series": "CUDA-Q GPU fp64"
+    }
+   ],
+   "commands": [
+    "/content/venvs/cudaq/bin/python bench/run_benchmarks.py --worker cudaq '{\"qubits\": [16, 18, 20, 22, 24, 26, 28], \"reps\": 3, \"depth\": 10, \"precision\": \"fp32\", \"device\": \"gpu\", \"clamp\": {\"requested\": [16, 18, 20, 22, 24, 26, 28, 30], \"used\": [16, 18, 20, 22, 24, 26, 28], \"reason\": \"30q needs 9.6 GiB > host RAM budget 6.9 GiB\", \"code\": \"QM-E966\"}, \"verify_qubits\": 8, \"families\": [\"layered\"], \"target\": \"nvidia\"}'",
+    "/content/venvs/cudaq/bin/python bench/run_benchmarks.py --worker cudaq '{\"qubits\": [16, 18, 20, 22, 24, 26, 28], \"reps\": 3, \"depth\": 10, \"precision\": \"fp64\", \"device\": \"gpu\", \"clamp\": null, \"verify_qubits\": 8, \"families\": [\"layered\"], \"target\": \"nvidia\"}'"
+   ],
+   "versions": [
+    {
+     "engine": "cudaq",
+     "versions": {
+      "cuda-quantum-cu13": "0.16.0.post1"
+     },
+     "target": "nvidia",
+     "num_gpus": 1,
+     "verify": {
+      "qubits": 8,
+      "fidelity": 1.0000017346030101,
+      "order": "little-endian"
+     },
+     "kernel_style": "kernel",
+     "device": "gpu",
+     "precision": "fp32"
+    },
+    {
+     "engine": "cudaq",
+     "versions": {
+      "cuda-quantum-cu13": "0.16.0.post1"
+     },
+     "target": "nvidia",
+     "num_gpus": 1,
+     "verify": {
+      "qubits": 8,
+      "fidelity": 1.0000000000000089,
+      "order": "little-endian"
+     },
+     "kernel_style": "kernel",
+     "device": "gpu",
+     "precision": "fp64"
+    }
+   ],
+   "skipped": [],
+   "clamps": [
+    {
+     "requested": [
+      16,
+      18,
+      20,
+      22,
+      24,
+      26,
+      28,
+      30
+     ],
+     "used": [
+      16,
+      18,
+      20,
+      22,
+      24,
+      26,
+      28
+     ],
+     "reason": "30q needs 9.6 GiB > host RAM budget 6.9 GiB",
+     "code": "QM-E966"
+    }
+   ],
+   "duration_s": 39.5,
+   "loadavg_before": [
+    1.62,
+    1.97,
+    1.57
+   ],
+   "loadavg_after": [
+    1.64,
+    1.93,
+    1.57
+   ],
+   "config": {
+    "enabled": true,
+    "precisions": [
+     "fp32",
+     "fp64"
+    ],
+    "qubits_fp32": [
+     16,
+     30
+    ],
+    "qubits_fp64": [
+     16,
+     28
+    ],
+    "reps": 3,
+    "cpu": false,
+    "qubits_cpu": [
+     16,
+     22
+    ],
+    "timeout_s": 3600,
+    "python": null,
+    "quick": {
+     "qubits_fp32": [
+      16,
+      20
+     ],
+     "qubits_fp64": [
+      16,
+      20
+     ],
+     "reps": 1
+    }
+   }
+  },
+  "baseline_lightning": {
+   "status": "skipped",
+   "rows": [],
+   "reason": "QM-E965: lightning: No module named 'pennylane' (interpreter bench/.venv/bin/python). Hint: install the baseline in the interpreter given by the config (see docs/BENCHMARKING_ON_CLOUD_GPUS.md).",
+   "commands": [
+    "bench/.venv/bin/python bench/run_benchmarks.py --worker lightning '{\"qubits\": [16, 18, 20, 22, 24, 26, 28], \"reps\": 3, \"depth\": 10, \"precision\": \"fp32\", \"device\": \"gpu\", \"clamp\": {\"requested\": [16, 18, 20, 22, 24, 26, 28, 30], \"used\": [16, 18, 20, 22, 24, 26, 28], \"reason\": \"30q needs 9.6 GiB > host RAM budget 6.9 GiB\", \"code\": \"QM-E966\"}, \"verify_qubits\": 8, \"families\": [\"layered\"], \"pl_device\": \"lightning.gpu\"}'",
+    "bench/.venv/bin/python bench/run_benchmarks.py --worker lightning '{\"qubits\": [16, 18, 20, 22, 24, 26, 28], \"reps\": 3, \"depth\": 10, \"precision\": \"fp64\", \"device\": \"gpu\", \"clamp\": null, \"verify_qubits\": 8, \"families\": [\"layered\"], \"pl_device\": \"lightning.gpu\"}'"
+   ],
+   "versions": [],
+   "skipped": [
+    {
+     "device": "gpu",
+     "precision": "fp32",
+     "reason": "QM-E965: lightning: No module named 'pennylane' (interpreter bench/.venv/bin/python). Hint: install the baseline in the interpreter given by the config (see docs/BENCHMARKING_ON_CLOUD_GPUS.md)."
+    },
+    {
+     "device": "gpu",
+     "precision": "fp64",
+     "reason": "QM-E965: lightning: No module named 'pennylane' (interpreter bench/.venv/bin/python). Hint: install the baseline in the interpreter given by the config (see docs/BENCHMARKING_ON_CLOUD_GPUS.md)."
+    }
+   ],
+   "clamps": [
+    {
+     "requested": [
+      16,
+      18,
+      20,
+      22,
+      24,
+      26,
+      28,
+      30
+     ],
+     "used": [
+      16,
+      18,
+      20,
+      22,
+      24,
+      26,
+      28
+     ],
+     "reason": "30q needs 9.6 GiB > host RAM budget 6.9 GiB",
+     "code": "QM-E966"
+    }
+   ],
+   "not_applicable": [],
+   "duration_s": 0.38,
+   "loadavg_before": [
+    1.64,
+    1.93,
+    1.57
+   ],
+   "loadavg_after": [
+    1.64,
+    1.93,
+    1.57
+   ],
+   "config": {
+    "enabled": true,
+    "devices": [
+     "lightning.gpu"
+    ],
+    "precisions_cpu": [
+     "fp64"
+    ],
+    "precisions_gpu": [
+     "fp32",
+     "fp64"
+    ],
+    "qubits": [
+     16,
+     24
+    ],
+    "qubits_gpu": [
+     16,
+     30
+    ],
+    "qubits_gpu_fp64": [
+     16,
+     28
+    ],
+    "reps": 3,
+    "timeout_s": 3600,
+    "python": null,
+    "quick": {
+     "qubits": [
+      16,
+      18
+     ],
+     "qubits_gpu": [
+      16,
+      20
+     ],
+     "reps": 1
+    }
+   }
+  },
+  "neutral": {
+   "status": "ok",
+   "rows": [
+    {
+     "kind": "compiler",
+     "engine": "qiskit",
+     "jobs": 90,
+     "n_ok": 90,
+     "n_unsupported": 0,
+     "n_invalid": 0,
+     "n_incorrect": 0,
+     "n_error": 0,
+     "n_timeout": 0,
+     "median_compile_s": 0.009894451000036497,
+     "median_n2q": 6,
+     "mean_esp": 0.9010253108391625
+    },
+    {
+     "kind": "compiler",
+     "engine": "qumo",
+     "jobs": 90,
+     "n_ok": 90,
+     "n_unsupported": 0,
+     "n_invalid": 0,
+     "n_incorrect": 0,
+     "n_error": 0,
+     "n_timeout": 0,
+     "median_compile_s": 0.0008003309999367048,
+     "median_n2q": 6,
+     "mean_esp": 0.9132099114367476
+    },
+    {
+     "kind": "compiler",
+     "engine": "tket",
+     "jobs": 90,
+     "n_ok": 90,
+     "n_unsupported": 0,
+     "n_invalid": 0,
+     "n_incorrect": 0,
+     "n_error": 0,
+     "n_timeout": 0,
+     "median_compile_s": 0.14044314400007352,
+     "median_n2q": 6,
+     "mean_esp": 0.9067572009680139
+    }
+   ],
+   "commands": [
+    "bench/.venv/bin/python bench/neutral/run_neutral.py --circuits bench/neutral/circuits --sdks qumo,qiskit,tket --targets sc_grid,ion_all_to_all,neutral_atom --levels default --max-qubits 6 --filter qb_small__ --timeout 120 --out bench/results/cloud/qumo_bench_colab_t4_tesla-t4_20261012-235508_neutral.jsonl"
+   ],
+   "records_file": "qumo_bench_colab_t4_tesla-t4_20261012-235508_neutral.jsonl",
+   "output_tail": "qb_small__vqe_uccsd_n6             ion_all_to_all               default qumo    ok          n2q=254 esp=0.522 t=0.007s\nqb_small__vqe_uccsd_n6             ion_all_to_all               default qiskit  ok          n2q=783 esp=0.131 t=0.080s\nqb_small__vqe_uccsd_n6             ion_all_to_all               default tket    ok          n2q=743 esp=0.147 t=15.306s\nqb_small__vqe_uccsd_n6             neutral_atom                 default qumo    ok          n2q=323 esp=0.158 t=0.017s\nqb_small__vqe_uccsd_n6             neutral_atom                 default qiskit  ok          n2q=923 esp=0.005 t=0.049s\nqb_small__vqe_uccsd_n6             neutral_atom                 default tket    ok          n2q=848 esp=0.008 t=16.767s\nqb_small__wstate_n3                sc_grid                      default qumo    ok          n2q=8 esp=0.946 t=0.003s\nqb_small__wstate_n3                sc_grid                      default qiskit  ok          n2q=12 esp=0.915 t=0.010s\nqb_small__wstate_n3                sc_grid                      default tket    ok          n2q=12 esp=0.916 t=0.102s\nqb_small__wstate_n3                ion_all_to_all               default qumo    ok          n2q=6 esp=0.989 t=0.001s\nqb_small__wstate_n3                ion_all_to_all               default qiskit  ok          n2q=6 esp=0.989 t=0.007s\nqb_small__wstate_n3                ion_all_to_all               default tket    ok          n2q=6 esp=0.989 t=0.092s\nqb_small__wstate_n3                neutral_atom                 default qumo    ok          n2q=6 esp=0.965 t=0.001s\nqb_small__wstate_n3                neutral_atom                 default qiskit  ok          n2q=6 esp=0.965 t=0.007s\nqb_small__wstate_n3                neutral_atom                 default tket    ok          n2q=6 esp=0.966 t=0.094s",
+   "duration_s": 97.4,
+   "loadavg_before": [
+    1.64,
+    1.93,
+    1.57
+   ],
+   "loadavg_after": [
+    1.51,
+    1.81,
+    1.56
+   ],
+   "config": {
+    "enabled": true,
+    "sdks": [
+     "qumo",
+     "qiskit",
+     "tket"
+    ],
+    "targets": [
+     "sc_grid",
+     "ion_all_to_all",
+     "neutral_atom"
+    ],
+    "levels": [
+     "default"
+    ],
+    "filter": "qb_small__",
+    "max_qubits": 6,
+    "job_timeout_s": 120,
+    "timeout_s": 1800,
+    "python": null,
+    "quick": {
+     "targets": [
+      "sc_grid"
+     ],
+     "max_qubits": 4
+    }
+   }
+  },
+  "tests": {
+   "status": "ok",
+   "rows": [
+    {
+     "kind": "test",
+     "target": "test-gpu",
+     "file": "tests/test_gpu_frame.mojo",
+     "status": "PASS",
+     "detail": null
+    },
+    {
+     "kind": "test",
+     "target": "test-gpu",
+     "file": "tests/test_gpu.mojo",
+     "status": "PASS",
+     "detail": null
+    }
+   ],
+   "commands": [
+    "make MOJO=.venv/bin/mojo test-gpu"
+   ],
+   "summary": {
+    "test-gpu": {
+     "pass": 2,
+     "fail": 0
+    }
+   },
+   "duration_s": 54.61,
+   "loadavg_before": [
+    1.51,
+    1.81,
+    1.56
+   ],
+   "loadavg_after": [
+    1.76,
+    1.82,
+    1.57
+   ],
+   "config": {
+    "enabled": true,
+    "targets": [
+     "test-gpu"
+    ],
+    "timeout_s": 3600,
+    "quick": {
+     "targets": [
+      "test"
+     ],
+     "files": [
+      "tests/test_json.mojo"
+     ]
+    }
+   }
+  }
+ },
+ "started_utc": "2026-10-12T23:55:08+00:00",
+ "finished_utc": "2026-10-13T00:09:02+00:00",
+ "loadavg_end": [
+  1.76,
+  1.82,
+  1.57
+ ]
+}

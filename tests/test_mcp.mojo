@@ -2,15 +2,21 @@
 
 from std.testing import assert_equal, assert_true, assert_false, assert_almost_equal
 from std.math import sqrt
+from std.os import getenv, listdir
+from std.os.path import isdir, exists
+from std.sys.defines import is_defined
 
 from qumo.ai.json import JsonWriter, JsonValue, parse_json, json_quote
 from qumo.ai.mcp import McpServer, handle_request
 from qumo.ai.tools import default_registry
 from qumo.ai.describe import (
-    describe_gates_json, describe_errors_json, describe_capabilities_json,
-    circuit_to_json, circuit_from_json, circuit_summary_json,
+    describe_gates_json, describe_errors_json, describe_errors_markdown, describe_error_json,
+    describe_capabilities_json, circuit_to_json, circuit_from_json, circuit_summary_json,
 )
-from qumo.ai.diagnostics import diagnostic_from_error, parse_error_code, lint, error_catalog
+from qumo.ai.diagnostics import (
+    diagnostic_from_error, parse_error_code, lint, error_catalog, error_ranges, range_index_of,
+    default_hint,
+)
 from qumo.ir.qasm import parse_qasm, to_qasm
 from qumo.ir.circuit import Circuit
 from qumo.sim.runner import evolve
@@ -76,13 +82,34 @@ def test_protocol() raises:
         assert_equal(sch.get("type").as_string(), "object")
         assert_true(sch.get("properties").is_object())
         assert_true(t.get("annotations").get("readOnlyHint").as_bool())
-    var want: List[String] = ["qumo_run_qasm", "qumo_statevector", "qumo_expectation", "qumo_validate_qasm", "qumo_describe", "qumo_circuit_info", "qumo_convert"]
+    var want: List[String] = [
+        "qumo_run_qasm", "qumo_statevector", "qumo_expectation", "qumo_validate_qasm", "qumo_describe",
+        "qumo_circuit_info", "qumo_convert", "qumo_transpile", "qumo_estimate_resources", "qumo_vqe",
+        "qumo_qaoa_maxcut", "qumo_qec_memory", "qumo_qec_dem", "qumo_gpu_info", "qumo_run_device",
+    ]
     for w in want:
         var found = False
         for n in names:
             if n == w:
                 found = True
         assert_true(found, "missing tool " + w)
+    # schema details agents rely on
+    for i in range(len(tools)):
+        var t = tools.at(i)
+        var props = t.get("inputSchema").get("properties")
+        if t.get("name").as_string() == "qumo_qec_memory":
+            var en = props.get("decoder").get("enum").to_json()
+            for d in ["mwpm", "sparse_blossom", "mwpm_dense", "uf", "lookup"]:
+                assert_true(en.find("\"" + String(d) + "\"") >= 0, "decoder enum lacks " + String(d) + ": " + en)
+            assert_equal(props.get("decoder").get("default").as_string(), "mwpm")
+        if t.get("name").as_string() == "qumo_run_device":
+            assert_equal(props.get("device").get("enum").to_json(), "[\"auto\",\"cpu\",\"gpu\"]")
+            var desc = t.get("description").as_string()
+            assert_true(desc.find("QM-W020") >= 0 and desc.find("pauli_frame") >= 0, desc)
+        if t.get("name").as_string() == "qumo_convert":
+            assert_true(props.get("to").get("enum").to_json().find("\"qasm2\"") >= 0)
+        if t.get("name").as_string() == "qumo_describe":
+            assert_equal(props.get("format").get("enum").to_json(), "[\"json\",\"markdown\"]")
     # errors
     var pe = rpc(s, "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"")
     assert_equal(pe.get("error").get("code").as_int(), -32700)
@@ -269,6 +296,18 @@ def test_describe_and_diagnostics() raises:
     assert_true(found_h)
     var e = parse_json(describe_errors_json())
     assert_true(len(e.get("codes")) > 40)
+    assert_equal(e.get("ranges").at(0).get("title").as_string(), "Circuit structure")
+    var e707 = parse_json(describe_error_json("QM-E707"))
+    for d in ["'mwpm'", "'sparse_blossom'", "'mwpm_dense'", "'uf'", "'lookup'", "pymatching"]:
+        assert_true(e707.get("hint").as_string().find(String(d)) >= 0, e707.to_json())
+    assert_true(default_hint("QM-W020").find("QUMO_GPU") >= 0)
+    assert_true(default_hint("QM-E407").byte_length() > 0 and default_hint("QM-E712").byte_length() > 0)
+    var rs = error_ranges()
+    assert_equal(rs[range_index_of("QM-E472", rs)].code, "QM-E47x")
+    assert_equal(rs[range_index_of("QM-E404", rs)].code, "QM-E4xx")
+    assert_equal(rs[range_index_of("QM-E955", rs)].code, "QM-E95x")
+    assert_equal(rs[range_index_of("QM-W020", rs)].code, "QM-W0xx")
+    assert_equal(range_index_of("QM-X001", rs), -1)
     var cap = parse_json(describe_capabilities_json(default_registry().names()))
     assert_equal(cap.get("name").as_string(), "qumo")
     assert_true(len(cap.get("mcp_tools")) >= 7)
@@ -311,10 +350,167 @@ def test_describe_and_diagnostics() raises:
     assert_equal(sm.get("params").at(0).as_string(), "t")
 
 
+def test_convert_qasm2_and_describe_markdown() raises:
+    var s = McpServer()
+    var r = tool(s, 60, "qumo_convert", "{\"qasm\":" + json_quote(BELL) + ",\"to\":\"qasm2\"}")
+    assert_false(r.get("isError").as_bool(), r.to_json())
+    var sc = r.get("structuredContent")
+    assert_equal(sc.get("format").as_string(), "openqasm2")
+    assert_equal(sc.get("qasm").as_string(), "OPENQASM 2.0;\ninclude \"qelib1.inc\";\nqreg q[2];\ncreg c[2];\nh q[0];\ncx q[0],q[1];\nmeasure q[0] -> c[0];\nmeasure q[1] -> c[1];\n")
+    assert_true(r.get("content").at(0).get("text").as_string().startswith("OPENQASM 2.0;"))
+    # gates outside qelib1 come with exact definitions (no undeclared rzx)
+    var r2 = tool(s, 61, "qumo_convert", "{\"qasm\":\"qubit[2] q; ecr q[0], q[1]; rzz(0.5) q[1], q[0];\",\"to\":\"qasm2\"}")
+    var q2 = r2.get("structuredContent").get("qasm").as_string()
+    assert_true(q2.find("gate ecr a,b {") >= 0 and q2.find("gate rzz(theta) a,b {") >= 0, q2)
+    assert_true(q2.find("rzx") < 0, q2)
+    # parameters: bound by 'params', otherwise QM-E102
+    var pq = "OPENQASM 3.0; input float t; qubit[1] q; rx(t) q[0];"
+    var r3 = tool(s, 62, "qumo_convert", "{\"qasm\":" + json_quote(pq) + ",\"to\":\"qasm2\",\"params\":[0.5]}")
+    assert_true(r3.get("structuredContent").get("qasm").as_string().find("rx(0.5) q[0];") >= 0, r3.to_json())
+    var r4 = tool(s, 63, "qumo_convert", "{\"qasm\":" + json_quote(pq) + ",\"to\":\"qasm2\"}")
+    assert_equal(r4.get("structuredContent").get("error").get("code").as_string(), "QM-E102")
+    var r5 = tool(s, 64, "qumo_convert", "{\"qasm\":" + json_quote(pq) + ",\"params\":{\"t\":0.25}}")
+    assert_true(r5.get("structuredContent").get("qasm").as_string().find("rx(0.25) q[0];") >= 0, r5.to_json())
+    # describe errors as markdown = docs/ERRORS.md text
+    var m = tool(s, 65, "qumo_describe", "{\"topic\":\"errors\",\"format\":\"markdown\"}")
+    assert_false(m.get("isError").as_bool(), m.to_json())
+    assert_equal(m.get("structuredContent").get("markdown").as_string(), describe_errors_markdown())
+    assert_true(m.get("content").at(0).get("text").as_string().startswith("# QUMO error and warning codes"))
+    var m2 = tool(s, 66, "qumo_describe", "{\"topic\":\"gates\",\"format\":\"markdown\"}")
+    assert_equal(m2.get("structuredContent").get("error").get("code").as_string(), "QM-E913")
+
+
+def test_exec_tools() raises:
+    """QEC decoders and device-explicit runs through the MCP server."""
+    var s = McpServer()
+    for d in ["mwpm", "sparse_blossom", "mwpm_dense", "uf", "lookup", "pymatching"]:
+        var r = tool(s, 70, "qumo_qec_memory", "{\"code\":\"repetition\",\"distance\":3,\"p\":0.01,\"shots\":2000,\"seed\":5,\"decoder\":\"" + String(d) + "\"}")
+        assert_false(r.get("isError").as_bool(), String(d) + ": " + r.to_json())
+        var sc = r.get("structuredContent")
+        assert_true(sc.get("shots").as_int() >= 2000, r.to_json())
+        assert_true(sc.get("logical_error_rate").as_float() < 0.05, r.to_json())
+    var bad = tool(s, 71, "qumo_qec_memory", "{\"distance\":3,\"shots\":10,\"decoder\":\"blossom5\"}")
+    var err = bad.get("structuredContent").get("error")
+    assert_equal(err.get("code").as_string(), "QM-E707")
+    assert_true(err.get("hint").as_string().find("sparse_blossom") >= 0 and err.get("hint").as_string().find("mwpm_dense") >= 0, err.to_json())
+    # explicit devices
+    var ghz = "OPENQASM 3.0; include \"stdgates.inc\"; qubit[3] q; bit[3] c; h q[0]; cx q[0], q[1]; cx q[1], q[2]; t q[2]; c = measure q;"
+    var rc = tool(s, 72, "qumo_run_device", "{\"qasm\":" + json_quote(ghz) + ",\"shots\":400,\"seed\":9,\"device\":\"cpu\"}")
+    var sc = rc.get("structuredContent")
+    assert_equal(sc.get("device_used").as_string(), "cpu")
+    assert_equal(len(sc.get("warnings")), 0)
+    assert_equal(sc.get("counts").get("000").as_int() + sc.get("counts").get("111").as_int(), 400)
+    comptime if not is_defined["QUMO_GPU"]():
+        var rg = tool(s, 73, "qumo_run_device", "{\"qasm\":" + json_quote(ghz) + ",\"shots\":400,\"seed\":9,\"device\":\"gpu\"}")
+        var sg = rg.get("structuredContent")
+        assert_false(rg.get("isError").as_bool(), rg.to_json())
+        assert_equal(sg.get("device_used").as_string(), "cpu")
+        var w = sg.get("warnings").at(0)
+        assert_equal(w.get("code").as_string(), "QM-W020")
+        assert_true(w.get("message").as_string().find("not compiled") >= 0, w.to_json())
+        assert_true(w.get("hint").as_string().byte_length() > 0)
+        # same seed and same CPU simulator -> identical counts
+        assert_equal(sg.get("counts").to_json(), sc.get("counts").to_json())
+    var rb = tool(s, 74, "qumo_run_device", "{\"qasm\":" + json_quote(ghz) + ",\"device\":\"tpu\"}")
+    assert_equal(rb.get("structuredContent").get("error").get("code").as_string(), "QM-E940")
+    var gi = tool(s, 75, "qumo_gpu_info", "{}")
+    assert_false(gi.get("isError").as_bool(), gi.to_json())
+
+
+# ---------------------------------------------------------------------------
+# docs/ERRORS.md and the error catalogue
+# ---------------------------------------------------------------------------
+def _read(path: String) raises -> String:
+    with open(path, "r") as f:
+        return f.read()
+
+
+def _walk(dir: String, ext: String, mut files: List[String]) raises:
+    if not exists(dir):
+        return
+    for name in listdir(dir):
+        var path = dir + "/" + name
+        if isdir(path):
+            _walk(path, ext, files)
+        elif path.endswith(ext):
+            files.append(path)
+
+
+def _codes_in(text: String) -> List[String]:
+    """Every `QM-[EW]ddd` occurring in `text`."""
+    var out = List[String]()
+    var bs = text.as_bytes()
+    var i = 0
+    while i + 7 <= len(bs):
+        if Int(bs[i]) == ord("Q") and Int(bs[i + 1]) == ord("M") and Int(bs[i + 2]) == ord("-"):
+            var k = Int(bs[i + 3])
+            var digits = True
+            for j in range(4, 7):
+                var c = Int(bs[i + j])
+                if c < ord("0") or c > ord("9"):
+                    digits = False
+            var next_ok = i + 7 == len(bs) or Int(bs[i + 7]) < ord("0") or Int(bs[i + 7]) > ord("9")
+            if (k == ord("E") or k == ord("W")) and digits and next_ok:
+                out.append(String(text[byte=i:i + 7]))
+        i += 1
+    return out^
+
+
+def test_errors_doc_in_sync() raises:
+    """The checked-in docs/ERRORS.md equals the generated text (QUMO_UPDATE_DOCS=1 rewrites it)."""
+    var md = describe_errors_markdown()
+    if getenv("QUMO_UPDATE_DOCS") == "1":
+        with open("docs/ERRORS.md", "w") as f:
+            f.write(md)
+        print("docs/ERRORS.md regenerated from error_catalog()")
+    var cur = _read("docs/ERRORS.md")
+    assert_true(cur == md, "docs/ERRORS.md is stale: regenerate it with QUMO_UPDATE_DOCS=1 .venv/bin/mojo run -I . tests/test_mcp.mojo")
+    var ranges = error_ranges()
+    for e in error_catalog():
+        assert_true(range_index_of(e.code, ranges) >= 0, e.code + " is outside every range")
+        assert_true(md.find("\n### " + e.code + "\n") >= 0, e.code + " has no heading (docs anchor)")
+        assert_true(e.meaning.byte_length() > 0 and e.hint.byte_length() > 0, e.code)
+    assert_true(md.find("rzx") < 0)
+
+
+def test_every_raised_code_is_catalogued() raises:
+    """A code used in qumo/, cli/, python/, the hardware plugins or the
+    benchmark harness must be in error_catalog() (and thus in docs/ERRORS.md)."""
+    var files = List[String]()
+    _walk("qumo", ".mojo", files)
+    _walk("cli", ".mojo", files)
+    _walk("python", ".mojo", files)
+    _walk("plugins/hardware/qumo_hardware", ".py", files)
+    if exists("bench/run_benchmarks.py"):
+        files.append("bench/run_benchmarks.py")
+    assert_true(len(files) > 30, "run the tests from the repository root")
+    var known = List[String]()
+    for e in error_catalog():
+        known.append(e.code)
+    var missing = String()
+    var seen = 0
+    for f in files:
+        for code in _codes_in(_read(f)):
+            seen += 1
+            var ok = False
+            for k in known:
+                if k == code:
+                    ok = True
+                    break
+            if not ok and missing.find(code + " ") < 0:
+                missing += code + " (" + f + ") "
+    assert_true(seen > 100)
+    assert_true(missing.byte_length() == 0, "codes used but missing from error_catalog() in qumo/ai/diagnostics.mojo: " + missing)
+
+
 def main() raises:
     test_protocol()
     test_run_tool()
     test_state_and_expectation_tools()
     test_validate_info_describe_convert()
     test_describe_and_diagnostics()
+    test_convert_qasm2_and_describe_markdown()
+    test_exec_tools()
+    test_errors_doc_in_sync()
+    test_every_raised_code_is_catalogued()
     print("test_mcp OK")

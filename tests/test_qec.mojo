@@ -10,8 +10,8 @@ from qumo.sim.frame import FrameSimulator
 from qumo.qec.codes import NoiseParams, surface_code_memory, repetition_code_memory, generate_code, to_stim
 from qumo.qec.dem import detector_error_model, depolarize1_independent, combine_independent
 from qumo.qec.decoders import (
-    MatchingGraph, UnionFindDecoder, MwpmDecoder, LookupTableDecoder, min_weight_boundary_matching,
-    count_logical_errors,
+    Decoder, MatchingGraph, UnionFindDecoder, MwpmDecoder, LookupTableDecoder, min_weight_boundary_matching,
+    count_logical_errors, UF_SCALE,
 )
 from qumo.qec.experiments import memory_experiment, threshold_sweep
 from qumo.qec.sparse_blossom import SparseBlossomDecoder
@@ -238,7 +238,283 @@ def main() raises:
     var zz: List[Int] = [0, 1]
     assert_true(abs(expectation_z(mit, zz) - 1.0) < 0.02)
 
+    test_uf_buffer_reuse()
     print("test_qec OK")
+
+
+# ---------------------------------------------------------------------------
+# Union-find: allocation-free decoder == allocate-per-shot reference
+# ---------------------------------------------------------------------------
+struct RefUnionFind(Decoder):
+    """Oracle: verbatim copy of `UnionFindDecoder` as of QUMO 1750a81, before the
+    per-shot buffers were reused (it allocates its work lists on every shot and
+    resets touched state eagerly). The optimised decoder must predict exactly
+    the same observable masks."""
+
+    var g: MatchingGraph
+    var elen: List[Int]
+    var parent: List[Int]
+    var csize: List[Int]
+    var odd: List[UInt8]
+    var grounded: List[UInt8]
+    var nxt: List[Int]
+    var defect: List[UInt8]
+    var growth: List[Int]
+    var grown: List[UInt8]
+    var rate: List[Int]
+    var etouched: List[UInt8]
+    var touched_v: List[Int]
+    var touched_e: List[Int]
+    var lid: List[Int]
+    var seen: List[Int]
+    var stamp: Int
+    var failures: Int
+
+    def __init__(out self, var graph: MatchingGraph):
+        var nn = graph.num_nodes()
+        var ne = graph.num_edges()
+        self.elen = List[Int](capacity=ne)
+        for i in range(ne):
+            self.elen.append(max(1, Int(graph.ew[i] * UF_SCALE + 0.5)))
+        self.g = graph^
+        self.parent = List[Int](length=nn, fill=-1)
+        self.csize = List[Int](length=nn, fill=0)
+        self.odd = List[UInt8](length=nn, fill=0)
+        self.grounded = List[UInt8](length=nn, fill=0)
+        self.nxt = List[Int](length=nn, fill=-1)
+        self.defect = List[UInt8](length=nn, fill=0)
+        self.growth = List[Int](length=max(1, ne), fill=0)
+        self.grown = List[UInt8](length=max(1, ne), fill=0)
+        self.rate = List[Int](length=max(1, ne), fill=0)
+        self.etouched = List[UInt8](length=max(1, ne), fill=0)
+        self.touched_v = List[Int]()
+        self.touched_e = List[Int]()
+        self.lid = List[Int](length=nn, fill=-1)
+        self.seen = List[Int](length=nn, fill=0)
+        self.stamp = 0
+        self.failures = 0
+
+    def name(self) -> String:
+        return "union_find"
+
+    def _make(mut self, v: Int):
+        if self.parent[v] < 0:
+            self.parent[v] = v
+            self.csize[v] = 1
+            self.odd[v] = 0
+            self.grounded[v] = 1 if v == self.g.boundary else 0
+            self.nxt[v] = v
+            self.touched_v.append(v)
+
+    def _find(mut self, v: Int) -> Int:
+        var r = v
+        while self.parent[r] != r:
+            r = self.parent[r]
+        var c = v
+        while self.parent[c] != r:
+            var nx = self.parent[c]
+            self.parent[c] = r
+            c = nx
+        return r
+
+    def _union(mut self, a: Int, b: Int):
+        var ra = self._find(a)
+        var rb = self._find(b)
+        if ra == rb:
+            return
+        if self.csize[ra] < self.csize[rb]:
+            var t = ra
+            ra = rb
+            rb = t
+        self.parent[rb] = ra
+        self.csize[ra] += self.csize[rb]
+        self.odd[ra] ^= self.odd[rb]
+        self.grounded[ra] |= self.grounded[rb]
+        var t2 = self.nxt[ra]
+        self.nxt[ra] = self.nxt[rb]
+        self.nxt[rb] = t2
+
+    def _touch_edge(mut self, e: Int):
+        if self.etouched[e] == 0:
+            self.etouched[e] = 1
+            self.touched_e.append(e)
+
+    def _cleanup(mut self):
+        for v in self.touched_v:
+            self.parent[v] = -1
+            self.defect[v] = 0
+            self.lid[v] = -1
+        for e in self.touched_e:
+            self.growth[e] = 0
+            self.grown[e] = 0
+            self.rate[e] = 0
+            self.etouched[e] = 0
+        self.touched_v.clear()
+        self.touched_e.clear()
+
+    def decode(mut self, fired: List[Int]) -> UInt64:
+        if len(fired) == 0:
+            return 0
+        for d in fired:
+            self._make(d)
+            self.defect[d] = 1
+            self.odd[d] = 1
+        var cand = fired.copy()
+        var roots = List[Int]()
+        var bedges = List[Int]()
+        var newly = List[Int]()
+        while True:
+            # active clusters: odd parity and not touching the boundary
+            self.stamp += 1
+            roots.clear()
+            for v in cand:
+                var r = self._find(v)
+                if self.seen[r] != self.stamp:
+                    self.seen[r] = self.stamp
+                    if self.odd[r] != 0 and self.grounded[r] == 0:
+                        roots.append(r)
+            if len(roots) == 0:
+                break
+            bedges.clear()
+            for r in roots:
+                var v = r
+                while True:
+                    for a in range(self.g.adj_off[v], self.g.adj_off[v + 1]):
+                        var e = self.g.adj_edge[a]
+                        if self.grown[e] == 0:
+                            if self.rate[e] == 0:
+                                bedges.append(e)
+                            self.rate[e] += 1
+                    v = self.nxt[v]
+                    if v == r:
+                        break
+            if len(bedges) == 0:
+                self.failures += 1  # isolated odd cluster: cannot be neutralised
+                break
+            var delta = -1
+            for e in bedges:
+                var rem = self.elen[e] - self.growth[e]
+                var steps = (rem + self.rate[e] - 1) // self.rate[e]
+                if delta < 0 or steps < delta:
+                    delta = steps
+            newly.clear()
+            for e in bedges:
+                self._touch_edge(e)
+                self.growth[e] += delta * self.rate[e]
+                self.rate[e] = 0
+                if self.growth[e] >= self.elen[e]:
+                    self.grown[e] = 1
+                    newly.append(e)
+            for e in newly:
+                var u = self.g.eu[e]
+                var w = self.g.ev[e]
+                self._make(u)
+                self._make(w)
+                self._union(u, w)
+            cand = roots.copy()
+        var obs = self._peel()
+        self._cleanup()
+        return obs
+
+    def _peel(mut self) -> UInt64:
+        """Spanning forest of the grown subgraph, then leaf-to-root peeling."""
+        var nv = len(self.touched_v)
+        for i in range(nv):
+            self.lid[self.touched_v[i]] = i
+        var deg = List[Int](length=nv + 1, fill=0)
+        var gl = List[Int]()
+        for e in self.touched_e:
+            if self.grown[e] != 0:
+                gl.append(e)
+                deg[self.lid[self.g.eu[e]]] += 1
+                deg[self.lid[self.g.ev[e]]] += 1
+        var off = List[Int](length=nv + 1, fill=0)
+        for i in range(nv):
+            off[i + 1] = off[i] + deg[i]
+        var fillp = off.copy()
+        var ladj = List[Int](length=max(1, off[nv]), fill=0)
+        for e in gl:
+            var a = self.lid[self.g.eu[e]]
+            var b = self.lid[self.g.ev[e]]
+            ladj[fillp[a]] = e
+            fillp[a] += 1
+            ladj[fillp[b]] = e
+            fillp[b] += 1
+        var pe = List[Int](length=nv, fill=-2)  # -2 unvisited, -1 root
+        var order = List[Int](capacity=nv)
+        var bl = self.lid[self.g.boundary] if self.parent[self.g.boundary] >= 0 else -1
+        var starts = List[Int]()
+        if bl >= 0:
+            starts.append(bl)
+        for i in range(nv):
+            starts.append(i)
+        for s in starts:
+            if pe[s] != -2:
+                continue
+            pe[s] = -1
+            var head = len(order)
+            order.append(s)
+            while head < len(order):
+                var x = order[head]
+                head += 1
+                var vx = self.touched_v[x]
+                for a in range(off[x], off[x + 1]):
+                    var e = ladj[a]
+                    var y = self.lid[self.g.other(e, vx)]
+                    if pe[y] == -2:
+                        pe[y] = e
+                        order.append(y)
+        var obs: UInt64 = 0
+        var i = len(order) - 1
+        while i >= 0:
+            var x = order[i]
+            i -= 1
+            var vx = self.touched_v[x]
+            if self.defect[vx] != 0 and pe[x] >= 0:
+                var e = pe[x]
+                obs ^= self.g.eobs[e]
+                self.defect[vx] = 0
+                var u = self.g.other(e, vx)
+                self.defect[u] ^= 1
+        return obs
+
+
+def test_uf_buffer_reuse() raises:
+    """Thousands of syndromes (surface code d = 3, 5, 7): the buffer-reusing
+    UnionFindDecoder predicts exactly what the allocate-per-shot reference
+    does, shot by shot, and the result does not depend on the order in which
+    one decoder instance sees the shots (no state leaks between shots)."""
+    var ds: List[Int] = [3, 5, 7]
+    var total = 0
+    for di in range(len(ds)):
+        var d = ds[di]
+        var p = 0.006 if d < 7 else 0.004
+        var shots = 2000 if d < 7 else 1000
+        var cc = generate_code("surface_z", d, d, NoiseParams.uniform(p))
+        var g = MatchingGraph(detector_error_model(cc.circuit))
+        var dsm = FrameSimulator(cc.circuit).sample_detectors(shots, 40 + UInt64(d))
+        var syn = List[List[Int]]()
+        for s in range(shots):
+            syn.append(dsm.fired(s))
+        var uf = UnionFindDecoder(g.copy())
+        var oracle = RefUnionFind(g.copy())
+        var fwd = List[UInt64](length=shots, fill=0)
+        var nonzero = 0
+        for s in range(shots):
+            fwd[s] = uf.decode(syn[s])
+            assert_equal(fwd[s], oracle.decode(syn[s]), "UF differs from the reference at d=" + String(d) + " shot " + String(s))
+            if fwd[s] != 0:
+                nonzero += 1
+        assert_equal(uf.failures, oracle.failures)
+        var back = UnionFindDecoder(g.copy())
+        var s2 = shots - 1
+        while s2 >= 0:
+            assert_equal(back.decode(syn[s2]), fwd[s2], "UF result depends on shot order (d=" + String(d) + ")")
+            s2 -= 1
+        assert_true(nonzero > 0, "test needs syndromes that flip the observable")
+        total += shots
+        print("UF buffer reuse d=" + String(d), "shots=" + String(shots), "nonzero predictions=" + String(nonzero), "identical to the reference")
+    assert_true(total >= 5000)
 
 
 def _with_readout(c: Circuit, m: NoiseModel) raises -> Circuit:

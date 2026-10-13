@@ -20,6 +20,8 @@ def print_plan(plan: dict) -> None:
     print(f"layout       : {c['initial_layout']} -> {c['final_layout']}")
     print(f"shots        : {plan['shots']}")
     print(f"cost         : {plan['cost_summary']}")
+    for note in plan.get("notes", []):
+        print(f"note         : {note}")
 
 
 def print_counts(counts: dict, limit: int = 8) -> None:
@@ -43,6 +45,27 @@ def confirm(plan: dict, assume_yes: bool) -> bool:
 def fail(exc: HardwareError) -> int:
     print(f"error: {exc}", file=sys.stderr)
     return 1
+
+
+def submit_and_report(**run_kwargs) -> int:
+    """runner.run(confirm=True, wait=True) for a remote backend, with honest reporting:
+    exit 1 if the job ended in ERROR/CANCELLED, mock results flagged, and the job id
+    printed if the wait is interrupted (the job keeps running at the provider)."""
+    try:
+        out = runner.run(confirm=True, wait=True, on_submitted=lambda job: print(f"submitted job {job.job_id}"),
+                         **run_kwargs)
+    except KeyboardInterrupt as exc:
+        job_id = getattr(exc, "qumo_job_id", None)
+        if job_id:
+            print(f"\ninterrupted: job {job_id} keeps running; fetch it later with "
+                  f"`python -m qumo_hardware result {job_id} --wait`")
+        return 130
+    print(f"job {out['job_id']}: {out['status']}")
+    if out.get("warning"):
+        print(f"warning: {out['warning']}")
+    if out.get("counts"):
+        print_counts(out["counts"])
+    return 1 if out["status"] in ("ERROR", "CANCELLED") else 0
 
 
 def dump(obj) -> None:

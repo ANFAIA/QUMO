@@ -13,7 +13,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from _common import HardwareError, confirm, fail, print_counts, print_plan, runner
+from _common import HardwareError, confirm, fail, print_counts, print_plan, runner, submit_and_report
 
 BELL = """OPENQASM 3.0;
 include "stdgates.inc";
@@ -32,6 +32,8 @@ def main() -> int:
     ap.add_argument("--submit", action="store_true", help="really submit to a remote backend (asks first)")
     ap.add_argument("--yes", action="store_true", help="skip the interactive question (use with care)")
     ap.add_argument("--fractional", action="store_true", help="use Heron fractional gates (rzz, rx)")
+    ap.add_argument("--max-cost", type=float, default=None,
+                    help="refuse above this many QPU seconds; also sent to IBM as max_execution_time")
     args = ap.parse_args()
 
     from qumo_hardware.ibm import IBMProvider
@@ -52,11 +54,8 @@ def main() -> int:
         if not confirm(plan, args.yes):
             print("not submitted")
             return 3
-        out = runner.run(BELL, provider, args.backend, shots=args.shots, confirm=True, wait=True, timeout=3600)
-        print(f"job {out['job_id']}: {out['status']}")
-        if out.get("counts"):
-            print_counts(out["counts"])
-        return 0
+        return submit_and_report(source=BELL, provider=provider, backend=args.backend, shots=args.shots,
+                                 max_cost=args.max_cost, timeout=3600)
     except HardwareError as exc:
         return fail(exc)
 

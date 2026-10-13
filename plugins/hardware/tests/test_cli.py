@@ -8,9 +8,9 @@ import subprocess
 import sys
 
 import pytest
-from conftest import BELL, ROOT, ghz, needs_ibm, needs_pytket, x_on
+from conftest import BELL, ROOT, ghz, needs_ibm, needs_pytket, needs_qnexus, x_on
 
-from qumo_hardware.cli import EXIT_CONFIRM, EXIT_ERR, EXIT_OK, EXIT_USAGE, main
+from qumo_hardware.cli import EXIT_CONFIRM, EXIT_ERR, EXIT_INTERRUPTED, EXIT_OK, EXIT_USAGE, main
 
 
 @pytest.fixture
@@ -139,3 +139,46 @@ def test_module_entry_point():
     r = subprocess.run([sys.executable, "-m", "qumo_hardware", "errors", "--json"], capture_output=True, text=True,
                        env=env, timeout=120)
     assert r.returncode == 0 and "QM-E957" in r.stdout
+
+
+@needs_qnexus
+@pytest.mark.parametrize("final", ["ERROR", "CANCELLED"])
+def test_run_wait_exits_nonzero_when_job_fails(capsys, qasm, nexus, final):
+    nexus(status=final)
+    code, out, err = run_cli(capsys, "run", qasm(BELL), "-p", "quantinuum", "-b", "H2-1", "--shots", "10",
+                             "--yes", "--json", "--timeout", "5")
+    assert code == EXIT_ERR
+    d = json.loads(out)
+    assert d["submitted"] and d["job_id"] == "nexus-job-123" and d["status"] == final
+    assert final in d["warning"] and "result nexus-job-123" in d["next"]
+
+
+@needs_qnexus
+def test_ctrl_c_while_waiting_prints_job_id(capsys, qasm, nexus):
+    nexus(status=KeyboardInterrupt)
+    code, out, err = run_cli(capsys, "run", qasm(BELL), "-p", "quantinuum", "-b", "H2-1", "--shots", "10", "--yes")
+    assert code == EXIT_INTERRUPTED
+    assert "submitted job nexus-job-123" in err
+    assert "interrupted: job nexus-job-123" in err and "result nexus-job-123 --wait" in err
+    from qumo_hardware import jobs
+
+    assert jobs.load("nexus-job-123").job_id == "nexus-job-123"  # saved before waiting
+
+
+@needs_ibm
+def test_fractional_note_and_fake_fractional_listed(capsys, qasm):
+    code, out, err = run_cli(capsys, "estimate", qasm(BELL), "-p", "ibm", "-b", "fake_torino", "--fractional")
+    assert code == EXIT_OK, err
+    assert "note" in out and "--fractional ignored" in out
+    code, out, _ = run_cli(capsys, "backends", "--provider", "ibm", "--json")
+    rows = {b["name"]: b for b in json.loads(out)["backends"]}
+    assert "fake_fractional" in rows and "--fractional" in rows["fake_fractional"]["notes"]
+
+
+@needs_ibm
+def test_no_fake_nighthawk_warning_on_ibm_commands():
+    env = dict(os.environ, PYTHONPATH=str(ROOT))
+    r = subprocess.run([sys.executable, "-m", "qumo_hardware", "target", "-p", "ibm", "-b", "fake_torino", "--json"],
+                       capture_output=True, text=True, env=env, timeout=300)
+    assert r.returncode == 0, r.stderr
+    assert "nighthawk" not in r.stderr and "UserWarning" not in r.stderr

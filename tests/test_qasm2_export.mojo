@@ -161,11 +161,14 @@ def test_definitions_exact_per_gate() raises:
                         c.x(q)
                 c.h(0)
                 c.rz(0.25, n - 1)  # non-trivial phases on the input
+                # operands (0, 1, 2) or reversed roles (n-1, 0, 1)
                 var q0 = n - 1 if rev == 1 else 0
-                var q1 = (0 if rev == 1 else 1) if a > 1 else -1
-                var q2 = 1 if a > 2 else -1
-                if a > 2 and rev == 1:
-                    q2 = n - 2
+                var q1 = -1
+                var q2 = -1
+                if a > 1:
+                    q1 = 0 if rev == 1 else 1
+                if a > 2:
+                    q2 = 1 if rev == 1 else 2
                 c.add(k, q0, q1, q2, angles[0], angles[1], angles[2])
                 var text = to_qasm2(c)
                 var defined = check_contract(text)

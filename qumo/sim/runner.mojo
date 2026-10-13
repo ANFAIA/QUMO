@@ -5,6 +5,8 @@ Execution strategy is chosen automatically (and reported, for agents):
     sample all shots from the final distribution - O(gates * 2^n + shots).
   * dynamic circuits (mid-circuit measurement, reset, feed-forward) or noisy
     circuits: per-shot quantum trajectories with independent RNG streams.
+Both report a clbit written by several MEASUREs as the LAST one in program
+order (Qiskit/Aer semantics; static path: `terminal_measure_map`).
 """
 
 from std.math import cos, sin, atan2
@@ -330,13 +332,22 @@ def execute_plan(mut sv: StateVector, plan: List[KOp]) raises:
 #     pass exchanges the global bits of S with local bits that are not needed
 #     soon (Belady: farthest next use). Otherwise the op runs as one global
 #     pass.
+#   * In-vector bits 0..2 (LANE_MASK) are expensive to move: every pair that
+#     involves one costs an extra vectorized full-state SWAP pass in
+#     `apply_swap_layer`, now and usually again in the final restore. Victims
+#     are therefore taken among bits >= 3 first. When S fills the block (no
+#     spare local bit >= 3 is left) a lane bit would have to go; the
+#     selection is then redone with bits 0..2 pinned local and that one is
+#     used if it loses at most as many ops as lane victims it avoids (and
+#     still meets the gain threshold). This is a cost trade-off, not a
+#     guarantee: lane pairs remain possible (ReorderStats.vector_pairs).
 #   * At the end the permutation is undone with <= 2 swap layers (any
 #     permutation is a product of two involutions), so the StateVector seen
 #     by every caller is in canonical little-endian order (qubit k = bit k):
 #     amplitudes, probabilities, sampling, expectation, measurement and reset
 #     are unaffected. A layer is one in-place pass, plus one vectorized SWAP
-#     pass per pair that involves an in-vector bit 0..2 (only SWAP gates on
-#     qubits 0..2 cause those: swap-in victims are chosen among bits >= 3).
+#     pass per pair that involves an in-vector bit 0..2 (from SWAP-gate
+#     relabels of qubits on bits 0..2, or from lane victims of swap-ins).
 #   * Memory: no scratch buffers; the plan bookkeeping is O(len(plan)).
 #   * `execute_plan_reordered_stats` reports what was done (`ReorderStats`).
 #     See docs/SIMULATION.md for the design, numbers and limitations.
@@ -553,9 +564,11 @@ struct _Selection(ImplicitlyCopyable):
 
 
 def _select_local(plan: List[KOp], wires: List[Int], need: List[Int], done: List[Bool],
-                  head: Int, qm: QubitMap, nb: Int, allw: Int) -> _Selection:
+                  head: Int, qm: QubitMap, nb: Int, allw: Int, pinned: Int) -> _Selection:
     """Greedy lookahead: the set of <= nb physical bits that lets the longest
-    dependency-respecting stream of upcoming ops run inside blocks."""
+    dependency-respecting stream of upcoming ops run inside blocks. Bits of
+    `pinned` (local bits that must stay local, e.g. LANE_MASK) count against
+    the nb slots whether or not an op needs them."""
     var local = (1 << nb) - 1
     var smask = 0
     var blocked = 0
@@ -592,7 +605,7 @@ def _select_local(plan: List[KOp], wires: List[Int], need: List[Int], done: List
         if np == 0:
             continue
         var u = smask | np
-        if Int(pop_count(u)) <= nb:
+        if Int(pop_count(u | pinned)) <= nb:
             smask = u
             if (np & ~local) != 0:
                 gain += 1
@@ -601,8 +614,21 @@ def _select_local(plan: List[KOp], wires: List[Int], need: List[Int], done: List
     return _Selection(smask, gain)
 
 
+comptime LANE_MASK = (1 << LOGW) - 1  # physical in-vector bits 0..2
+
+
+def _lane_victims(smask: Int, nb: Int) -> Int:
+    """In-vector bits a swap-in to `smask` must evict: the incoming bits
+    beyond the free local bits >= LOGW."""
+    var local = (1 << nb) - 1
+    var ins = Int(pop_count(smask & ~local))
+    var free = Int(pop_count(local & ~smask & ~LANE_MASK))
+    return max(0, ins - free)
+
+
 def _swap_in(mut sv: StateVector, mut qm: QubitMap, smask: Int, plan: List[KOp],
-             need: List[Int], done: List[Bool], head: Int, nb: Int) raises:
+             need: List[Int], done: List[Bool], head: Int, nb: Int,
+             mut stats: ReorderStats) raises:
     """One index-bit swap pass making every bit of `smask` local; evicts the
     local bits outside `smask` whose next use is farthest away."""
     var local = (1 << nb) - 1
@@ -653,6 +679,8 @@ def _swap_in(mut sv: StateVector, mut qm: QubitMap, smask: Int, plan: List[KOp],
                 best = p
         taken |= 1 << best
         outs.append(best)
+        if best < LOGW:
+            stats.vector_pairs += 1
     sort(outs)
     sv.apply_swap_layer(ins, outs)
     for i in range(len(ins)):
@@ -704,6 +732,7 @@ struct ReorderStats(Copyable, Writable):
     var restore_layers: Int  # swap-layer passes of the final restore (0..2)
     var restore_pairs: Int  # bit pairs exchanged by the final restore
     var restore_min_bit: Int  # lowest physical bit moved by the restore (-1: none)
+    var vector_pairs: Int  # swapped bit pairs with an in-vector bit 0..2 (swap-in + restore)
 
     def __init__(out self, nb: Int):
         self.block_bits = nb
@@ -716,13 +745,15 @@ struct ReorderStats(Copyable, Writable):
         self.restore_layers = 0
         self.restore_pairs = 0
         self.restore_min_bit = -1
+        self.vector_pairs = 0
 
     def write_to(self, mut w: Some[Writer]):
         w.write("ReorderStats(nb=", self.block_bits, ", block_passes=", self.block_passes,
                 ", block_ops=", self.block_ops, ", global_ops=", self.global_ops,
                 ", swap_layers=", self.swap_layers, ", swapped_bits=", self.swapped_bits,
                 ", relabels=", self.relabels, ", restore_layers=", self.restore_layers,
-                ", restore_pairs=", self.restore_pairs, ", restore_min_bit=", self.restore_min_bit, ")")
+                ", restore_pairs=", self.restore_pairs, ", restore_min_bit=", self.restore_min_bit,
+                ", vector_pairs=", self.vector_pairs, ")")
 
 
 def _restore_identity(mut sv: StateVector, mut qm: QubitMap, mut stats: ReorderStats) raises:
@@ -755,10 +786,14 @@ def _restore_identity(mut sv: StateVector, mut qm: QubitMap, mut stats: ReorderS
             if i < j:
                 a1.append(cyc[i])
                 b1.append(cyc[j])
+                if min(cyc[i], cyc[j]) < LOGW:
+                    stats.vector_pairs += 1
             var j2 = (m + 1 - i) % m
             if i < j2:
                 a2.append(cyc[i])
                 b2.append(cyc[j2])
+                if min(cyc[i], cyc[j2]) < LOGW:
+                    stats.vector_pairs += 1
     if len(a1) > 0:
         sv.apply_swap_layer(a1, b1)
         for i in range(len(a1)):
@@ -818,11 +853,20 @@ def execute_plan_reordered_stats(mut sv: StateVector, plan: List[KOp], nb: Int) 
             done[head] = True
             continue
         var head_local = (qm.phys_mask(need[head]) & ~local) == 0
-        var sel = _select_local(plan, wires, need, done, head, qm, nb, allw)
+        var sel = _select_local(plan, wires, need, done, head, qm, nb, allw, 0)
         var thr = SWAP_GAIN if stats.swap_layers > 0 else SWAP_GAIN_FIRST
+        if nb >= 2 * LOGW:
+            # a full S would evict in-vector bits (an extra full-state pass
+            # each): retry with bits 0..2 pinned, keep it if it loses <= as
+            # many ops as lane victims it avoids
+            var lv = _lane_victims(sel.mask, nb)
+            if lv > 0:
+                var alt = _select_local(plan, wires, need, done, head, qm, nb, allw, LANE_MASK)
+                if alt.gain + lv >= sel.gain and (alt.gain >= thr or sel.gain < thr):
+                    sel = alt
         if sel.gain >= thr:
             stats.swapped_bits += Int(pop_count(sel.mask & ~local))
-            _swap_in(sv, qm, sel.mask, plan, need, done, head, nb)
+            _swap_in(sv, qm, sel.mask, plan, need, done, head, nb, stats)
             stats.swap_layers += 1
         elif not head_local:
             apply_kop(sv, _phys(op, qm))
@@ -910,6 +954,63 @@ def _apply_noise(mut sv: StateVector, g: Instruction, mut rng: Rng, params: List
             _apply_pauli(sv, r >> 2, g.q1)
 
 
+struct TerminalMeasureMap(Copyable, Movable):
+    """Packs one sampled basis index into a classical register, for circuits
+    whose measurements are all terminal (static sampling, CPU and GPU).
+
+    Semantics are last-write-wins, identical to the per-shot trajectory path,
+    the stabilizer/Pauli-frame samplers and Qiskit-Aer: when several MEASUREs
+    write the same clbit, only the LAST one in program order decides its
+    value (an earlier 1 must not survive a later 0). The map therefore keeps
+    exactly one source qubit per clbit, and packing is a plain OR of disjoint
+    bits. Build it with `terminal_measure_map(circuit)`."""
+
+    var qubits: List[Int]  # source amplitude-index bit, one entry per clbit
+    var clbits: List[Int]  # destination clbit (ascending, each at most once)
+    var mask: Int  # >= 0: every entry is qubit k -> clbit k, creg = outcome & mask
+
+    def __init__(out self, var qubits: List[Int], var clbits: List[Int]):
+        self.qubits = qubits^
+        self.clbits = clbits^
+        var m = 0
+        for j in range(len(self.qubits)):
+            if self.qubits[j] != self.clbits[j]:
+                m = -1
+                break
+            m |= 1 << self.clbits[j]
+        self.mask = m
+
+    def pack(self, outcome: Int) -> Int:
+        """Classical register (bit c = clbit c) for basis index `outcome`."""
+        if self.mask >= 0:
+            return outcome & self.mask
+        var creg = 0
+        for j in range(len(self.qubits)):
+            creg |= ((outcome >> self.qubits[j]) & 1) << self.clbits[j]
+        return creg
+
+
+def terminal_measure_map(circuit: Circuit) -> TerminalMeasureMap:
+    """clbit <- qubit map of a circuit's terminal measurements, LAST MEASURE
+    per clbit wins. Only meaningful when `not circuit.is_dynamic()` (every
+    MEASURE is terminal, so all of them read the same final state)."""
+    var width = circuit.num_clbits
+    for g in circuit.ops:
+        if g.kind == Op.MEASURE and g.clbit >= width:
+            width = g.clbit + 1
+    var last_q = List[Int](length=max(width, 1), fill=-1)
+    for g in circuit.ops:
+        if g.kind == Op.MEASURE and g.clbit >= 0:
+            last_q[g.clbit] = g.q0
+    var qs = List[Int]()
+    var cs = List[Int]()
+    for c in range(width):
+        if last_q[c] >= 0:
+            qs.append(last_q[c])
+            cs.append(c)
+    return TerminalMeasureMap(qs^, cs^)
+
+
 def sample(circuit: Circuit, shots: Int, seed: UInt64 = 1234,
            params: List[Float64] = List[Float64]()) raises -> SampleResult:
     """Sample measurement outcomes. Picks static sampling or trajectories."""
@@ -926,20 +1027,11 @@ def sample(circuit: Circuit, shots: Int, seed: UInt64 = 1234,
         var res = SampleResult(circuit.num_clbits, shots, "statevector:static")
         var sv = StateVector(circuit.num_qubits)
         evolve_into(sv, circuit, params)
-        # terminal measurement map qubit -> clbit (last write wins)
-        var qs = List[Int]()
-        var cs = List[Int]()
-        for g in circuit.ops:
-            if g.kind == Op.MEASURE:
-                qs.append(g.q0)
-                cs.append(g.clbit)
+        # clbit <- qubit, last MEASURE into a clbit wins (as in the loop below)
+        var mm = terminal_measure_map(circuit)
         var outs = sv.sample(shots, rng)
         for o in outs:
-            var creg = 0
-            for j in range(len(qs)):
-                if (o >> qs[j]) & 1 == 1:
-                    creg |= 1 << cs[j]
-            res.record(creg)
+            res.record(mm.pack(o))
         return res^
     # trajectories
     var res = SampleResult(circuit.num_clbits, shots, "statevector:trajectories")

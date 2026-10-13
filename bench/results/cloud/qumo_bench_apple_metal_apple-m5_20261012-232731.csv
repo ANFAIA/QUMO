@@ -1,0 +1,28 @@
+suite,kind,series,engine,device,precision,family,qubits,gates,seconds,gates_per_sec,reps,depth,cpu_seconds,speedup_vs_qumo_cpu,expect_seconds,sample10k_seconds,abs_err_expect,fidelity,method,emulated,code,d,rounds,shots,cpu_s,gpu_s,speedup,cpu_shots_per_s,gpu_shots_per_s,cpu_events,gpu_events
+sv_cpu,statevector,QUMO CPU fp64,qumo,cpu,fp64,layered,16,395,0.006353,62175.350228238625,3,10,,,,,,,,,,,,,,,,,,,
+sv_cpu,statevector,QUMO CPU fp64,qumo,cpu,fp64,layered,18,445,0.014656,30362.991266375546,3,10,,,,,,,,,,,,,,,,,,,
+sv_cpu,statevector,QUMO CPU fp64,qumo,cpu,fp64,layered,20,495,0.032934,15030.060120240481,3,10,,,,,,,,,,,,,,,,,,,
+sv_cpu,statevector,QUMO CPU fp64,qumo,cpu,fp64,layered,22,545,0.170576,3195.056748897852,3,10,,,,,,,,,,,,,,,,,,,
+sv_cpu,statevector,QUMO CPU fp64,qumo,cpu,fp64,layered,24,595,0.705146,843.7968874530948,3,10,,,,,,,,,,,,,,,,,,,
+sv_cpu,statevector,QUMO CPU fp64,qumo,cpu,fp64,layered,26,645,3.107887,207.53650309679858,3,10,,,,,,,,,,,,,,,,,,,
+sv_gpu,statevector,QUMO GPU fp32,qumo,gpu,fp32,layered,16,395,0.003547,111361.71412461235,3,,0.012771,3.60050747110234,0.02814,0.02787,1.115329798295761e-06,0.9999999269438608,gpu:statevector:fp32,False,,,,,,,,,,,
+sv_gpu,statevector,QUMO GPU fp32,qumo,gpu,fp32,layered,18,445,0.008314,53524.176088525375,3,,0.012177,1.4646379600673562,0.00157,0.003353,3.745046335268398e-07,0.9999999805672897,gpu:statevector:fp32,False,,,,,,,,,,,
+sv_gpu,statevector,QUMO GPU fp32,qumo,gpu,fp32,layered,20,495,0.007894,62705.85254623765,3,,0.032199,4.0789206992652645,0.001128,0.00288,1.4169433191213443e-06,1.0000000571653265,gpu:statevector:fp32,False,,,,,,,,,,,
+sv_gpu,statevector,QUMO GPU fp32,qumo,gpu,fp32,layered,22,545,0.032192,16929.671968190854,3,,0.168008,5.218936381709741,0.003613,0.002659,4.303263771987531e-07,1.0000000924645012,gpu:statevector:fp32,False,,,,,,,,,,,
+sv_gpu,statevector,QUMO GPU fp32,qumo,gpu,fp32,layered,24,595,0.148234,4013.923931081938,3,,0.722073,4.871169907038871,0.009787,0.006078,1.961433457431383e-06,1.0000002758243631,gpu:statevector:fp32,False,,,,,,,,,,,
+sv_gpu,statevector,QUMO GPU fp32,qumo,gpu,fp32,layered,26,645,0.648272,994.9527358886394,3,,3.271473,5.046451180985759,0.02558,0.013701,5.007052561012415e-06,1.0000004637920978,gpu:statevector:fp32,False,,,,,,,,,,,
+sv_gpu,qec_frames,QUMO Pauli frames GPU vs CPU,qumo,gpu,fp32,,,,,,,,,,,,,,gpu:pauli_frame,,surface_z,3,3,1000000,0.004969,0.009035,0.549972329828445,201247735.9629704,110680686.22025457,295365,293330
+sv_gpu,qec_frames,QUMO Pauli frames GPU vs CPU,qumo,gpu,fp32,,,,,,,,,,,,,,gpu:pauli_frame,,surface_z,5,5,1000000,0.023645,0.045402,0.5207920355931457,42292239.37407486,22025461.43341703,1764105,1766296
+sv_gpu,qec_frames,QUMO Pauli frames GPU vs CPU,qumo,gpu,fp32,,,,,,,,,,,,,,gpu:pauli_frame,,surface_z,7,7,1000000,0.065508,0.12046,0.5438153743981404,15265311.107040362,8301510.874979246,5336284,5340392
+baseline_aer,statevector,Aer CPU fp64,aer,cpu,fp64,layered,16,395,0.014170708134770393,27874.400929251806,3,,,,,,,,,,,,,,,,,,,,
+baseline_aer,statevector,Aer CPU fp64,aer,cpu,fp64,layered,18,445,0.03573979204520583,12451.1077019457,3,,,,,,,,,,,,,,,,,,,,
+baseline_aer,statevector,Aer CPU fp64,aer,cpu,fp64,layered,20,495,0.13513316703028977,3663.0533486205277,3,,,,,,,,,,,,,,,,,,,,
+baseline_aer,statevector,Aer CPU fp64,aer,cpu,fp64,layered,22,545,0.5432672500610352,1003.1894982419245,3,,,,,,,,,,,,,,,,,,,,
+baseline_aer,statevector,Aer CPU fp64,aer,cpu,fp64,layered,24,595,2.350144458003342,253.17592626008434,3,,,,,,,,,,,,,,,,,,,,
+baseline_aer,statevector,Aer CPU fp64,aer,cpu,fp64,layered,26,645,8.918648332823068,72.32037590564295,3,,,,,,,,,,,,,,,,,,,,
+baseline_aer,statevector,Aer CPU fp32,aer,cpu,fp32,layered,16,395,0.013288875110447407,29724.111086683337,3,,,,,,,,,,,,,,,,,,,,
+baseline_aer,statevector,Aer CPU fp32,aer,cpu,fp32,layered,18,445,0.03416987485252321,13023.167392933541,3,,,,,,,,,,,,,,,,,,,,
+baseline_aer,statevector,Aer CPU fp32,aer,cpu,fp32,layered,20,495,0.11639137496240437,4252.892451523063,3,,,,,,,,,,,,,,,,,,,,
+baseline_aer,statevector,Aer CPU fp32,aer,cpu,fp32,layered,22,545,0.4784899160731584,1138.9999698900083,3,,,,,,,,,,,,,,,,,,,,
+baseline_aer,statevector,Aer CPU fp32,aer,cpu,fp32,layered,24,595,2.087831333046779,284.98470665813534,3,,,,,,,,,,,,,,,,,,,,
+baseline_aer,statevector,Aer CPU fp32,aer,cpu,fp32,layered,26,645,7.8082673330791295,82.60475371629589,3,,,,,,,,,,,,,,,,,,,,

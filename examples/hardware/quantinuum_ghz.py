@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from _common import HardwareError, confirm, fail, print_counts, print_plan, runner
+from _common import HardwareError, confirm, fail, print_counts, print_plan, runner, submit_and_report
 
 
 def ghz(n: int) -> str:
@@ -59,12 +59,8 @@ def main() -> int:
         if not confirm(plan, args.yes):
             print("not submitted")
             return 3
-        out = runner.run(src, provider, args.backend, shots=args.shots, confirm=True, max_cost=args.max_cost,
-                         wait=True, timeout=3600)
-        print(f"job {out['job_id']}: {out['status']}")
-        if out.get("counts"):
-            print_counts(out["counts"])
-        return 0
+        return submit_and_report(source=src, provider=provider, backend=args.backend, shots=args.shots,
+                                 max_cost=args.max_cost, timeout=3600)
     except HardwareError as exc:
         return fail(exc)
 

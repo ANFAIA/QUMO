@@ -22,7 +22,7 @@ from typing import Any
 
 from .base import DONE, BackendInfo, CostEstimate, JobHandle, TargetSpec, new_local_job_id
 from .compile import CompiledCircuit, compress_qasm, expand_basis, load_qumo_py
-from .errors import E_LIMIT, E_UNKNOWN_BACKEND, HardwareError
+from .errors import E_LIMIT, E_UNKNOWN_BACKEND, HINT_LOCAL_QUBITS, HardwareError
 
 SIM_MAX_QUBITS = 26
 
@@ -100,8 +100,12 @@ def parse_sim_backend(name: str) -> TargetSpec:
 class LocalEmulatorProvider:
     name = "local"
 
-    def __init__(self, seed: int | None = None, **_: Any):
+    def __init__(self, seed: int | None = None, use_fractional_gates: bool = False, **_: Any):
         self.seed = seed
+        self.use_fractional_gates = use_fractional_gates  # forwarded to IBM fake backends
+
+    def public_options(self) -> dict:
+        return {"use_fractional_gates": self.use_fractional_gates} if self.use_fractional_gates else {}
 
     def is_local(self, backend: str) -> bool:
         return True
@@ -110,7 +114,7 @@ class LocalEmulatorProvider:
         if backend.startswith("fake_"):
             from .ibm import IBMProvider
 
-            return IBMProvider()
+            return IBMProvider(use_fractional_gates=self.use_fractional_gates)
         if backend in ("H2-1LE", "selene") or backend.endswith("LE"):
             from .quantinuum import QuantinuumProvider
 
@@ -142,7 +146,8 @@ class LocalEmulatorProvider:
             return d.prepare(compiled, backend)
         text, kept = compress_qasm(compiled)
         if len(kept) > SIM_MAX_QUBITS:
-            raise HardwareError(E_LIMIT, f"{len(kept)} active qubits exceed the local simulator limit {SIM_MAX_QUBITS}")
+            raise HardwareError(E_LIMIT, f"{len(kept)} active qubits exceed the local simulator limit {SIM_MAX_QUBITS}",
+                                HINT_LOCAL_QUBITS)
         return text, {"active_qubits": kept}
 
     def validate(self, payload, backend: str) -> dict:

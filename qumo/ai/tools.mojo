@@ -32,6 +32,7 @@ from qumo.ir.circuit import Circuit
 from qumo.ir.gates import Op
 from qumo.ir.pauli import PauliSum, parse_pauli_sum
 from qumo.ir.qasm import parse_qasm_with_warnings, to_qasm
+from qumo.ir.qasm2 import to_qasm2
 from qumo.sim.runner import sample, evolve, bitstring
 from qumo.exec.dispatch import sample_auto, choose_method
 from qumo.ai.json import JsonWriter, JsonValue, JsonKind, parse_json, json_quote
@@ -40,7 +41,7 @@ from qumo.ai.diagnostics import (
 )
 from qumo.ai.describe import (
     QUMO_VERSION, describe_gates_json, describe_gate_json, describe_errors_json,
-    describe_error_json, describe_capabilities_json, write_circuit_json,
+    describe_errors_markdown, describe_error_json, describe_capabilities_json, write_circuit_json,
     write_circuit_summary, circuit_from_json,
 )
 
@@ -239,7 +240,9 @@ def _ms(t0: Int, t1: Int) -> Float64:
     return Float64(t1 - t0) / 1e6
 
 
-def _write_warnings(mut w: JsonWriter, warnings: List[String]):
+def write_warnings(mut w: JsonWriter, warnings: List[String]):
+    """`"warnings": [Diagnostic...]` from `QM-Wxxx: ... Hint: ...` texts (shared
+    by every tool, so warnings always have the same JSON shape)."""
     w.key("warnings")
     w.begin_array()
     for s in warnings:
@@ -294,7 +297,7 @@ def _run_qasm(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
     w.kv_bool("auto_measured", auto)
     if auto:
         warnings.append("QM-W004: circuit had no measurements; all qubits were measured into c[0..n-1]. Hint: add 'c = measure q;' to control readout.")
-    _write_warnings(w, warnings)
+    write_warnings(w, warnings)
     w.key("timing_ms")
     w.begin_object()
     w.kv_float("parse", _ms(t0, t1))
@@ -345,7 +348,7 @@ def _statevector(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
     w.kv_float("norm", sqrt(norm))
     w.kv_string("bit_order", "bitstring leftmost character = highest qubit q[n-1]; index bit k = qubit k")
     w.kv_bool("measurements_ignored", has_meas)
-    _write_warnings(w, warnings)
+    write_warnings(w, warnings)
     w.end_object()
     return tool_ok(w.finish())
 
@@ -390,7 +393,7 @@ def _expectation(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
     w.kv_int("num_qubits", c.num_qubits)
     w.kv_string("method", "statevector:exact")
     w.kv_bool("measurements_ignored", c.num_measurements > 0)
-    _write_warnings(w, warnings)
+    write_warnings(w, warnings)
     w.end_object()
     return tool_ok(w.finish())
 
@@ -410,7 +413,7 @@ def _validate(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
         w.begin_array()
         d.write_json(w)
         w.end_array()
-        _write_warnings(w, warnings)
+        write_warnings(w, warnings)
         w.end_object()
         return ToolResult(w.finish(), "INVALID\n" + String(d), False)
     var diags = lint(c)
@@ -442,6 +445,20 @@ def _validate(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
 def _describe(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
     var topic = args.get_string("topic", "capabilities")
     var name = args.get_string("name", "")
+    var fmt = args.get_string("format", "json")
+    if fmt != "json" and fmt != "markdown":
+        raise Error("QM-E913: unknown format '" + fmt + "'. Hint: format is 'json' (default) or 'markdown' (topic 'errors' only).")
+    if fmt == "markdown":
+        if topic != "errors" or name.byte_length() > 0:
+            raise Error("QM-E913: format 'markdown' is only available for topic 'errors' without a name. Hint: use format 'json' for other topics.")
+        var md = describe_errors_markdown()
+        var w = JsonWriter()
+        w.begin_object()
+        w.kv_string("topic", "errors")
+        w.kv_string("format", "markdown")
+        w.kv_string("markdown", md)
+        w.end_object()
+        return ToolResult(w.finish(), md, False)
     if topic == "gates":
         if name.byte_length() > 0:
             return tool_ok(describe_gate_json(name))
@@ -477,7 +494,7 @@ def _circuit_info(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
         for d in lint(c):
             d.write_json(w)
         w.end_array()
-    _write_warnings(w, warnings)
+    write_warnings(w, warnings)
     w.end_object()
     return tool_ok(w.finish())
 
@@ -486,23 +503,33 @@ def _convert(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
     var warnings = List[String]()
     var c = arg_circuit(args, warnings)
     var to = args.get_string("to", "qasm3")
+    var p = args.get("params")
+    if p.is_defined() and not p.is_null():
+        c = c.bind(arg_params(args, c))
     var w = JsonWriter()
     w.begin_object()
+    if to == "qasm2" or to == "openqasm2":
+        var text2 = to_qasm2(c)
+        w.kv_string("format", "openqasm2")
+        w.kv_string("qasm", text2)
+        write_warnings(w, warnings)
+        w.end_object()
+        return ToolResult(w.finish(), text2, False)
     if to == "qasm3" or to == "qasm" or to == "openqasm3":
         var text = to_qasm(c)
         w.kv_string("format", "openqasm3")
         w.kv_string("qasm", text)
-        _write_warnings(w, warnings)
+        write_warnings(w, warnings)
         w.end_object()
         return ToolResult(w.finish(), text, False)
     if to == "json":
         w.kv_string("format", "qumo.circuit.v1")
         w.key("circuit")
         write_circuit_json(c, w)
-        _write_warnings(w, warnings)
+        write_warnings(w, warnings)
         w.end_object()
         return tool_ok(w.finish())
-    raise Error("QM-E913: unknown target format '" + to + "'. Hint: 'to' is 'qasm3' or 'json'.")
+    raise Error("QM-E913: unknown target format '" + to + "'. Hint: 'to' is 'qasm3', 'qasm2' or 'json'.")
 
 
 def register_core_tools(mut reg: ToolRegistry):
@@ -532,8 +559,8 @@ def register_core_tools(mut reg: ToolRegistry):
     )
     reg.add(
         "qumo_describe", "Describe QUMO",
-        "Machine-readable self-description: topic 'gates' (every gate: arity, params, Clifford/diagonal flags, QASM syntax, matrix), 'gate' + name, 'errors' (error-code catalog with fix hints), 'error' + name (one code), or 'capabilities' (simulators, QASM subset, conventions, tools).",
-        "{\"type\":\"object\",\"properties\":{\"topic\":{\"type\":\"string\",\"enum\":[\"gates\",\"gate\",\"errors\",\"error\",\"capabilities\"],\"default\":\"capabilities\"},\"name\":{\"type\":\"string\",\"description\":\"Gate name/alias or error code for topic gate/error\"}},\"additionalProperties\":false}",
+        "Machine-readable self-description: topic 'gates' (every gate: arity, params, Clifford/diagonal flags, QASM syntax, matrix), 'gate' + name, 'errors' (error-code catalog with fix hints; format 'markdown' returns docs/ERRORS.md), 'error' + name (one code), or 'capabilities' (simulators, QASM subset, conventions, tools).",
+        "{\"type\":\"object\",\"properties\":{\"topic\":{\"type\":\"string\",\"enum\":[\"gates\",\"gate\",\"errors\",\"error\",\"capabilities\"],\"default\":\"capabilities\"},\"name\":{\"type\":\"string\",\"description\":\"Gate name/alias or error code for topic gate/error\"},\"format\":{\"type\":\"string\",\"enum\":[\"json\",\"markdown\"],\"default\":\"json\",\"description\":\"'markdown' (topic 'errors' only): the generated docs/ERRORS.md text\"}},\"additionalProperties\":false}",
         _describe,
     )
     reg.add(
@@ -544,7 +571,7 @@ def register_core_tools(mut reg: ToolRegistry):
     )
     reg.add(
         "qumo_convert", "Convert circuit",
-        "Convert OpenQASM 2/3 (or circuit JSON) to canonical OpenQASM 3 (to='qasm3', round-trip exact, readable pi fractions) or to QUMO circuit JSON (to='json').",
-        "{\"type\":\"object\",\"properties\":{" + _QASM_PROP + "," + _CIRCUIT_PROP + ",\"to\":{\"type\":\"string\",\"enum\":[\"qasm3\",\"json\"],\"default\":\"qasm3\"}},\"additionalProperties\":false}",
+        "Convert OpenQASM 2/3 (or circuit JSON) to canonical OpenQASM 3 (to='qasm3', round-trip exact, readable pi fractions), to portable OpenQASM 2 (to='qasm2': qelib1.inc plus exact gate definitions, loads in qiskit.qasm2 strict and legacy modes, pytket and Cirq; needs bound parameters, pass 'params' to bind) or to QUMO circuit JSON (to='json'). 'params' binds 'input float' parameters before converting.",
+        "{\"type\":\"object\",\"properties\":{" + _QASM_PROP + "," + _CIRCUIT_PROP + ",\"to\":{\"type\":\"string\",\"enum\":[\"qasm3\",\"qasm2\",\"json\"],\"default\":\"qasm3\"}," + _PARAMS_PROP + "},\"additionalProperties\":false}",
         _convert,
     )

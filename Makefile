@@ -37,13 +37,13 @@ bench-neutral: py  ## hardware-neutral compiler benchmark (QUMO, Qiskit, TKET, C
 # Default targets never compile GPU code. The *-gpu targets build with
 # -D QUMO_GPU for the host's accelerator: CUDA (NVIDIA) / ROCm (AMD) drivers on
 # Linux, or Xcode + `xcodebuild -downloadComponent MetalToolchain` on macOS.
-GPU_TARGETS ?= sm_90 gfx942 metal:4
+GPU_TARGETS ?= sm_75 sm_80 sm_90 gfx942 metal:4
 GPU_CHECK_SRCS := tests/test_gpu.mojo tests/test_gpu_frame.mojo bench/bench_gpu.mojo
 GPU_TESTS := $(wildcard tests/test_gpu*.mojo)
 
-.PHONY: gpu-check test-gpu cli-gpu py-gpu bench-gpu
+.PHONY: gpu-check test-gpu test-gpu-regbits cli-gpu py-gpu bench-gpu
 
-gpu-check:  ## cross-compile every GPU kernel for NVIDIA sm_90, AMD gfx942, Apple metal:4 (no GPU needed)
+gpu-check:  ## cross-compile every GPU kernel for NVIDIA sm_75 (T4) / sm_80 / sm_90, AMD gfx942, Apple metal:4 (no GPU needed)
 	@fail=0; for a in $(GPU_TARGETS); do \
 		d=build/gpucheck/$$(echo $$a | tr ':' '_'); rm -rf $$d; mkdir -p $$d; \
 		for f in $(GPU_CHECK_SRCS); do \
@@ -56,10 +56,29 @@ gpu-check:  ## cross-compile every GPU kernel for NVIDIA sm_90, AMD gfx942, Appl
 		done; \
 	done; exit $$fail
 
-test-gpu:  ## GPU test suites on the real device (+ emulation suites)
+# The device suites must run: a machine whose GPU is not usable fails
+# test-gpu instead of passing on the emulation suites alone
+# (QUMO_GPU_REQUIRE_DEVICE=0 to allow the skip).
+QUMO_GPU_REQUIRE_DEVICE ?= 1
+
+test-gpu:  ## GPU test suites on the real device (+ emulation suites, both register-blocking widths)
 	@fail=0; for t in $(GPU_TESTS); do \
-		out=$$($(MOJO) run -I . -D QUMO_GPU $$t 2>&1 | grep -v Crashpad | tail -1); \
+		out=$$(QUMO_GPU_REQUIRE_DEVICE=$(QUMO_GPU_REQUIRE_DEVICE) $(MOJO) run -I . -D QUMO_GPU $$t 2>&1 | grep -v Crashpad | tail -1); \
 		case "$$out" in *OK*) echo "PASS $$t";; *) echo "FAIL $$t: $$out"; fail=1;; esac; \
+	done; $(MAKE) --no-print-directory test-gpu-regbits || fail=1; \
+	if [ "$$(uname -s)" = Darwin ]; then \
+		out=$$(QUMO_GPU_REQUIRE_DEVICE=$(QUMO_GPU_REQUIRE_DEVICE) $(MOJO) run -I . -D QUMO_GPU -D QUMO_GPU_TILE_SMEM_DYNAMIC=1 tests/test_gpu.mojo 2>&1 | grep -v Crashpad | tail -1); \
+		case "$$out" in *OK*) echo "PASS tests/test_gpu.mojo (device, dynamic shared memory as on NVIDIA / AMD)";; \
+		*) echo "FAIL tests/test_gpu.mojo (device, QUMO_GPU_TILE_SMEM_DYNAMIC=1): $$out"; fail=1;; esac; \
+	fi; exit $$fail
+
+# The default register-blocking width is per target (QUMO_GPU_REG_BITS: 4 on
+# Apple, 3 elsewhere): run the emulated engine with both, on every machine.
+test-gpu-regbits:  ## tests/test_gpu.mojo in emulation with 8 and 16 amplitudes per thread
+	@fail=0; for rb in 3 4; do \
+		out=$$($(MOJO) run -I . -D QUMO_GPU_REG_BITS=$$rb tests/test_gpu.mojo 2>&1 | grep -v Crashpad | tail -1); \
+		case "$$out" in *OK*) echo "PASS tests/test_gpu.mojo (emulation, QUMO_GPU_REG_BITS=$$rb)";; \
+		*) echo "FAIL tests/test_gpu.mojo (emulation, QUMO_GPU_REG_BITS=$$rb): $$out"; fail=1;; esac; \
 	done; exit $$fail
 
 cli-gpu:  ## CLI + MCP server with GPU dispatch (build/gpu/qumo)
@@ -70,9 +89,12 @@ py-gpu:  ## CPython extension with GPU dispatch (build/gpu/qumo_py.so)
 	@mkdir -p build/gpu
 	$(MOJO) build -I . -D QUMO_GPU --emit shared-lib -o build/gpu/qumo_py.so python/qumo_py.mojo
 
-bench-gpu:  ## GPU vs CPU state-vector throughput (layered circuit of bench_sv)
+# BENCH_GPU_ARGS: "nmax reps [families nmin cpu_max | crossover nmin | frames shots]" (bench/bench_gpu.mojo)
+BENCH_GPU_ARGS ?= 26
+
+bench-gpu:  ## GPU vs CPU benchmarks (state-vector families, dispatch crossover, QEC Pauli frames)
 	@mkdir -p build/gpu
-	$(MOJO) build -I . -D QUMO_GPU -o build/gpu/bench_gpu bench/bench_gpu.mojo && ./build/gpu/bench_gpu 26
+	$(MOJO) build -I . -D QUMO_GPU -o build/gpu/bench_gpu bench/bench_gpu.mojo && ./build/gpu/bench_gpu $(BENCH_GPU_ARGS)
 
 clean:
 	rm -rf build

@@ -442,6 +442,12 @@ struct GpuFrameSampler(Movable):
             var drecs = ctx.enqueue_create_buffer[DType.uint64](M * cw)
             var ddets = ctx.enqueue_create_buffer[DType.uint64](Dp * cw)
             var dobs = ctx.enqueue_create_buffer[DType.uint64](Kp * cw)
+            # The kernel writes every record / detector row it later reads, but
+            # zero the scratch anyway: no uninitialised device memory can ever
+            # reach the host copies (padding rows of D = 0 / K = 0 included).
+            drecs.enqueue_fill(0)
+            ddets.enqueue_fill(0)
+            dobs.enqueue_fill(0)
             var word0 = 0
             while word0 < total:
                 var nw = min(cw, total - word0)

@@ -24,7 +24,7 @@ from qumo.ir.circuit import Circuit, Instruction
 from qumo.ir.param import Param
 from qumo.ir.qasm import builtin_gate_table, format_param
 from qumo.ai.json import JsonWriter, JsonValue, JsonKind
-from qumo.ai.diagnostics import error_catalog, error_ranges
+from qumo.ai.diagnostics import error_catalog, error_ranges, range_index_of
 
 comptime QUMO_VERSION = "0.1.0"
 
@@ -228,14 +228,15 @@ def describe_errors_json() -> String:
     var w = JsonWriter()
     w.begin_object()
     w.kv_string("schema", "qumo.errors.v1")
-    w.kv_string("format", "QM-Exxx: <message> (line L, col C). Hint: <fix>  followed by an optional source snippet; QM-Wxxx are lint findings")
+    w.kv_string("format", "QM-Exxx: <message> (line L, col C). Hint: <fix>  followed by an optional source snippet; QM-Wxxx are warnings (lint, execution notes, parser)")
     w.key("ranges")
     w.begin_array()
     for r in error_ranges():
         w.begin_object()
         w.kv_string("range", r.code)
         w.kv_string("category", r.category)
-        w.kv_string("owner", r.meaning)
+        w.kv_string("title", r.title)
+        w.kv_string("owner", r.owner)
         w.end_object()
     w.end_array()
     w.key("codes")
@@ -251,6 +252,58 @@ def describe_errors_json() -> String:
     w.end_array()
     w.end_object()
     return w.finish()
+
+
+def describe_errors_markdown() -> String:
+    """docs/ERRORS.md, generated from `error_ranges()` + `error_catalog()`.
+
+    tests/test_mcp.mojo compares it with the checked-in file and rewrites the
+    file when QUMO_UPDATE_DOCS=1. Every code gets a `### QM-Exxx` heading, so
+    `Diagnostic.docs` links (`docs/ERRORS.md#qm-e510`) resolve."""
+    var ranges = error_ranges()
+    var cat = error_catalog()
+    var s = String("# QUMO error and warning codes\n\n")
+    s += "<!-- GENERATED FILE, do not edit by hand. Source of truth: error_catalog() and\n"
+    s += "     error_ranges() in qumo/ai/diagnostics.mojo. Regenerate with\n"
+    s += "     QUMO_UPDATE_DOCS=1 .venv/bin/mojo run -I . tests/test_mcp.mojo\n"
+    s += "     (or build/qumo tool qumo_describe '{\"topic\":\"errors\",\"format\":\"markdown\"}').\n"
+    s += "     tests/test_mcp.mojo fails when this file is stale. -->\n\n"
+    s += "Every failure in QUMO is reported with a **stable code**. Codes never change\n"
+    s += "meaning; message wording may improve. Agents should branch on the code,\n"
+    s += "show the message, and apply the hint.\n\n"
+    s += "```\nQM-E510: unknown gate 'cnto' (line 6, col 1). Hint: did you mean 'cnot'?\n 6 | cnto q[0], q[1];\n   | ^~~~\n```\n\n"
+    s += "* **Text form** (any `Error` raised by QUMO): `QM-Exxx: <message> [(line L, col C)]. [Hint: <fix>]`,\n"
+    s += "  optionally followed by a source snippet with a caret.\n"
+    s += "* **Structured form** (CLI `--json`, MCP `structuredContent.error`, `qumo_validate_qasm`):\n"
+    s += "  `qumo.ai.diagnostics.diagnostic_from_error(text)` ->\n"
+    s += "  `{\"code\", \"severity\", \"message\", \"hint\", \"line\", \"col\", \"snippet\", \"instruction\", \"docs\"}`\n"
+    s += "  (`line`/`col`/`snippet` only for source errors, `instruction` only for lint findings).\n"
+    s += "* Errors without a QUMO code (e.g. from the Mojo standard library) map to `QM-E999`.\n"
+    s += "* `QM-Wxxx` are warnings: lint findings from `qumo.ai.diagnostics.lint()`, execution notes\n"
+    s += "  in tool results (e.g. QM-W020, GPU fallback) and OpenQASM parser warnings. Severity is\n"
+    s += "  `warning` or `info` (QM-W014 is reported with severity `error`).\n"
+    s += "* QM-E95x (hardware plugins) and QM-E96x (benchmark harness) are raised by the Python tools\n"
+    s += "  of this repository, with the same text form and JSON shape.\n\n"
+    s += "Machine-readable catalog: `qumo describe errors --json`, or the MCP tool\n"
+    s += "`qumo_describe {\"topic\": \"errors\"}` (single code: `{\"topic\": \"error\", \"name\": \"QM-E510\"}`).\n\n"
+    s += "## Code ranges\n\n| Range | Category | Owner |\n|---|---|---|\n"
+    for r in ranges:
+        s += "| `" + r.code + "` | " + r.category + " | " + r.owner + " |\n"
+    s += "\nA code belongs to the narrowest range that contains it (QM-E472 is in QM-E47x, not QM-E4xx).\n\n"
+    s += "Adding a code: raise `Error(\"QM-Exxx: <message>. Hint: <fix>.\")` from your module\n"
+    s += "(inside your range), add one `_e(c, ...)` line to `error_catalog()` in\n"
+    s += "`qumo/ai/diagnostics.mojo`, then regenerate this file (command in the header comment).\n"
+    s += "`make test` fails while a raised code is missing from the catalogue or this file is stale.\n"
+    for ri in range(len(ranges)):
+        var r = ranges[ri].copy()
+        s += "\n## " + r.code + " — " + r.title + "\n"
+        if r.note.byte_length() > 0:
+            s += "\n" + r.note + "\n"
+        for e in cat:
+            if range_index_of(e.code, ranges) != ri:
+                continue
+            s += "\n### " + e.code + "\n\n**" + e.meaning + "**  \nFix: " + e.hint + "\n"
+    return s^
 
 
 def describe_error_json(code: String) raises -> String:
@@ -301,7 +354,7 @@ def describe_capabilities_json(tools: List[String], commands: List[String] = Lis
     w.key("qasm")
     w.begin_object()
     w.kv_string_list("input", ["OpenQASM 2.0", "OpenQASM 3.0"])
-    w.kv_string("output", "OpenQASM 3.0 (stdgates.inc + exact gate definitions for non-standard natives)")
+    w.kv_string("output", "OpenQASM 3.0 (stdgates.inc + exact gate definitions for non-standard natives); OpenQASM 2.0 with qumo_convert to='qasm2' (original qelib1.inc + exact definitions; bound parameters; loads in Qiskit strict/legacy, pytket, Cirq)")
     w.kv_string_list("supported", [
         "qubit[n]/qreg, bit[n]/creg (multiple registers are flattened)",
         "all QUMO gates and aliases (cnot, toffoli, u1/u2/u3, cu1/cphase, cu, cu3, csx, U, CX, phase, id)",
@@ -324,7 +377,7 @@ def describe_capabilities_json(tools: List[String], commands: List[String] = Lis
     for r in error_ranges():
         w.begin_object()
         w.kv_string("range", r.code)
-        w.kv_string("owner", r.meaning)
+        w.kv_string("owner", r.owner)
         w.end_object()
     w.end_array()
     w.kv_string_list("mcp_tools", tools)

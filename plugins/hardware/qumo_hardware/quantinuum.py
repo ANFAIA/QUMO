@@ -243,7 +243,8 @@ def check_register_layout(circ, layout: list[tuple[str, int]]) -> None:
     have = sorted((r.name, r.size) for r in circ.c_registers)
     want = sorted((str(nm), int(w)) for nm, w in layout)
     if have != want:
-        raise HardwareError(E_INVALID_PAYLOAD, f"payload classical registers {have} do not match the expected layout {want}",
+        raise HardwareError(E_INVALID_PAYLOAD,
+                            f"payload classical registers {have} do not match the expected layout {want}",
                             "build the payload with QuantinuumProvider.prepare (or runner.plan)")
 
 

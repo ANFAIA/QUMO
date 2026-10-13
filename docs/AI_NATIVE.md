@@ -8,10 +8,12 @@ other QUMO modules plug their features into it.
 | Piece | File | What it gives an agent |
 |---|---|---|
 | OpenQASM 2/3 parser + emitter | `qumo/ir/qasm.mojo` | A circuit format models already write fluently, with exact round trips |
+| OpenQASM 2 emitter | `qumo/ir/qasm2.mojo` | Portable `qelib1.inc` output that every SDK parser loads (Qiskit strict and legacy, pytket, Cirq) |
 | JSON | `qumo/ai/json.mojo` | Streaming writer and arena parser, deterministic output, error positions |
 | Diagnostics | `qumo/ai/diagnostics.mojo` | Stable codes, line/col, snippet, fix hint, lint warnings |
 | Self-description | `qumo/ai/describe.mojo` | Gate set, error catalog, capabilities and circuit JSON, generated from the implementation |
-| Tool registry | `qumo/ai/tools.mojo` | One implementation per operation, shared by MCP and CLI |
+| Tool registry | `qumo/ai/tools.mojo`, `qumo/ai/registry.mojo` | One implementation per operation, shared by MCP and CLI; `full_registry()` adds the module tools |
+| Module tools | `qumo/exec/tools.mojo` | Compile, resources, VQE, QAOA, QEC experiments (all decoders), GPU status, device-explicit runs |
 | MCP server | `qumo/ai/mcp.mojo` | JSON-RPC 2.0 over stdio (MCP 2025-06-18) |
 | CLI | `cli/main.mojo` -> `build/qumo` | `qumo <command> [--json]`, plus generic `qumo tool <name> '<json>'` |
 
@@ -47,6 +49,29 @@ other QUMO modules plug their features into it.
   with exact `gate` definitions. The tests check each definition against the
   native unitary to 1e-12. When QUMO reads such a definition back, it treats it
   as a declaration and uses the exact native opcode.
+* **OpenQASM 2 for interoperability.** `qumo.ir.qasm2.to_qasm2` (MCP
+  `qumo_convert` with `to: "qasm2"`, CLI `qumo convert --to qasm2`) writes
+  `qelib1.inc` output for tools that only read OpenQASM 2. Without a
+  definition it uses only the gates of the *original* `qelib1.inc` (the gate
+  set `qiskit.qasm2.loads` accepts in strict mode). Every other QUMO gate
+  (`sx sxdg swap cswap crx cry rxx ryy rzz iswap iswapdg ecr ccz`) gets a
+  `gate` definition before its first use, and the body calls only `qelib1`
+  gates. Bodies are exact, global phase included, so a parser that inlines
+  them (Qiskit strict, pytket) and a parser that substitutes its own class for
+  a known name (Qiskit `LEGACY_CUSTOM_INSTRUCTIONS`) get the same unitary.
+  Standard names are kept, so gate counts by name still work downstream.
+  Parameters must be bound (QM-E102). A single-bit condition on a multi-bit
+  register cannot be written in OpenQASM 2 (QM-E552). The global phase, noise
+  and QEC annotations become comments. Cross-check, run on all 34 unitary gate
+  kinds x 3 operand layouts, 6 random 60-gate circuits and one angle-format
+  circuit (109 circuits): every circuit loads in `qiskit.qasm2` strict and
+  legacy modes, in pytket and in Cirq, and gives exactly QUMO's unitary,
+  global phase included. The only exceptions are 7 circuits that use `u3`
+  in Cirq, which differ by a global phase only, because Cirq defines
+  `u3` up to phase. Before this fix, 31 of the 109 failed to load in strict
+  Qiskit, and 8 failed everywhere, because `ecr` was defined through the
+  undeclared `rzx`. `tests/test_qasm2_export.mojo` checks the same contract in
+  Mojo.
 * **QUMO extensions stay out of other tools' way.** Noise channels, QEC
   detectors and observables, ticks and original parameter names travel in
   `#pragma qumo ...` lines. Other OpenQASM tools ignore these lines; QUMO reads
@@ -127,9 +152,18 @@ QM-E510: unknown gate 'cnto' (line 6, col 1). Hint: did you mean 'cnot'?
 * **The code is the API.** Codes never change meaning, so an agent can branch
   on `QM-E5xx` (fix the QASM), `QM-E101` (pass parameters), `QM-E930` (the
   circuit is too large) and so on. Ranges: E0 circuit, E1 parameters,
-  E2 functors, E3 Pauli, E4 simulation and execution, E5 QASM, E6 compiler,
-  E7 stabilizer and QEC, E8 algorithms, E9 interface (JSON, MCP, CLI),
-  W0 lint. See [ERRORS.md](ERRORS.md).
+  E2 functors, E3 Pauli, E4 simulation and execution (E47x GPU), E5 OpenQASM
+  parsing and export, E6 compiler, E7 stabilizer and QEC, E8 algorithms,
+  E9 interface (JSON, MCP, CLI, device selection; E95x hardware plugins and
+  E96x benchmark harness, both Python), W0 warnings (lint, execution notes
+  such as QM-W020 GPU fallback, parser warnings). See [ERRORS.md](ERRORS.md).
+* **One catalogue, generated docs.** `error_catalog()` in
+  `qumo/ai/diagnostics.mojo` is the single source of truth. `docs/ERRORS.md`
+  is generated from it (`describe_errors_markdown()`), and
+  `tests/test_mcp.mojo` fails when the file is stale. It also fails when a code
+  that appears anywhere in `qumo/`, `cli/`, `python/`,
+  `plugins/hardware/qumo_hardware/` or `bench/run_benchmarks.py` is missing
+  from the catalogue.
 * **Every error includes a hint for the fix.** Unknown names get suggestions by
   edit distance (`hx` -> `'cx', 'h' or 'rx'`; `thetta` -> `'theta'`). Arity
   errors print the gate signature (`usage: cx q[0], q[1]; (control first, then
@@ -158,7 +192,9 @@ cannot drift from the implementation:
   self-inverse and symmetric flags, inverse, aliases, whether it appears in
   `stdgates.inc`, QASM syntax, description, and the matrix of each fixed 1- or
   2-qubit gate (with the stated little-endian convention).
-* **errors**: the full code catalog, including codes from other modules.
+* **errors**: the full code catalog, including codes from other modules and
+  from the Python hardware plugins and benchmark harness. `format: "markdown"`
+  returns the generated text of `docs/ERRORS.md`.
 * **capabilities**: conventions (qubit order, bitstring order, angle
   convention, seeding), simulator methods and memory model, the supported and
   unsupported QASM subset, error ranges, and the live list of MCP tools.
@@ -209,12 +245,64 @@ tool (with `data` `{code: "QM-E912", available: [...]}`).
 | `qumo_statevector` | `qasm`, `params`, `max_amplitudes`=64, `threshold`, `max_qubits`=24 | `amplitudes[{index, bitstring, re, im, probability}]`, `num_nonzero`, `truncated`, `norm` |
 | `qumo_expectation` | `qasm`, `observable` (string or array), `params` | `expectation`, `results[]` |
 | `qumo_validate_qasm` | `qasm` | `valid`, `errors[]`, `warnings[]` (lint), `summary` |
-| `qumo_describe` | `topic`: gates \| gate \| errors \| error \| capabilities, `name` | self-description JSON |
+| `qumo_describe` | `topic`: gates \| gate \| errors \| error \| capabilities, `name`, `format`: json \| markdown | self-description JSON (`markdown`, topic `errors` only: the text of docs/ERRORS.md) |
 | `qumo_circuit_info` | `qasm`, `include_instructions`, `include_qasm`, `include_lint` | `summary`, `lint`, and optionally `circuit` and `qasm` |
-| `qumo_convert` | `qasm` \| `circuit`, `to`: qasm3 \| json | canonical QASM 3 (also returned as plain text content) or circuit JSON |
+| `qumo_convert` | `qasm` \| `circuit`, `to`: qasm3 \| qasm2 \| json, `params` | canonical QASM 3, portable QASM 2 (both also returned as plain text content) or circuit JSON |
 
 `params` binds `input float` parameters. Pass either an array in declaration
 order or an object such as `{"theta": 0.1}`.
+
+Module tools (`qumo/exec/tools.mojo`, registered by `full_registry()`):
+
+| Tool | Arguments | Result |
+|---|---|---|
+| `qumo_transpile` | `qasm` \| `circuit`, `target` (e.g. `grid:4x4/sc_cz`, `heavy_hex:5/rz,sx,x,ecr`, `trapped_ion:11`, `neutral_atom:4x4`) or `edges` + `basis`, `level` 0-3, `pipeline`, `seed` | compiled QASM 3, per-pass report, layouts, swaps, estimated fidelity |
+| `qumo_estimate_resources` | `qasm`, `profile`: superconducting \| trapped_ion \| neutral_atom, `physical_error`, `error_budget` | logical, NISQ and fault-tolerant estimates |
+| `qumo_vqe`, `qumo_qaoa_maxcut` | Pauli-sum `hamiltonian` / edge-list `graph`, optimizer options, `seed` | energy or cut, parameters, convergence |
+| `qumo_qec_memory` | `code`: surface_z \| surface_x \| repetition, `distance`, `rounds`, `p`, `shots`, `decoder`, `seed`, `max_errors` | logical error rate, std error, Wilson interval, per-round rate, timing |
+| `qumo_qec_dem` | `code`, `distance`, `rounds`, `p`, `include_stim` | detector error model in Stim DEM text |
+| `qumo_gpu_info` | none | whether the build has GPU support (`-D QUMO_GPU`), device name, API (CUDA, ROCm/HIP, Metal), precision, auto-dispatch threshold |
+| `qumo_run_device` | as `qumo_run_qasm`, plus `device`: auto \| cpu \| gpu | `counts`, `method`, `device_used`, `warnings` |
+
+Decoders of `qumo_qec_memory` (QM-E707 lists them for an unknown name):
+`mwpm` (the default; exact minimum-weight perfect matching by sparse
+blossom, the algorithm of PyMatching 2; aliases `matching`, `pymatching`),
+`sparse_blossom` (the same decoder), `mwpm_dense` (exact MWPM by all-pairs
+shortest paths plus a dense blossom; small codes and reference), `uf`
+(union-find; fast, slightly lower threshold) and `lookup` (lookup table;
+tiny codes with at most 64 detectors). See [QEC.md](QEC.md).
+
+`qumo_run_device` selects the simulator as follows (`qumo.exec.dispatch.sample_on`):
+
+* `auto` uses the same dispatch as `qumo_run_qasm`. Noisy Clifford circuits
+  without feed-forward go to CPU Pauli frames. Other wide, noisy or dynamic
+  Clifford circuits go to the stabilizer tableau. Static non-Clifford circuits
+  with at least 20 qubits go to the GPU state vector, when the build has GPU
+  support and a usable device (any GPU failure falls back to the CPU).
+  Everything else runs on the CPU state vector.
+* `cpu` makes the same choice among CPU simulators only.
+* `gpu` sends Clifford circuits without parameters or classical feed-forward
+  to GPU Pauli frames (`gpu:pauli_frame`); noise, mid-circuit measurement and
+  reset are allowed. Other static, noiseless circuits go to the GPU state
+  vector (`gpu:statevector:fp32` on Apple, fp64 on NVIDIA and AMD). Three cases
+  run on the CPU, as with `cpu`, and add warning **QM-W020** with the reason:
+  dynamic or noisy non-Clifford circuits, builds without `-D QUMO_GPU`, and
+  machines without a usable device. The GPU path is the same code for every
+  vendor (MAX kernels for CUDA, ROCm and Metal). See [GPU.md](GPU.md).
+
+Warnings in every tool result have the `Diagnostic` shape
+(`{code, severity, message, hint, docs}`).
+
+### Hardware plugins (Python)
+
+Running on quantum hardware is outside the Mojo core and the MCP server.
+`plugins/hardware` (Python package `qumo_hardware`) compiles with QUMO
+(`build/qumo_py.so`), translates the result 1:1 into the provider SDK, and
+submits it after explicit confirmation. The providers are IBM Quantum (Qiskit
+Runtime), Quantinuum (pytket and qnexus) and a `local` emulator. Its errors
+use the same text and JSON shape, in range QM-E950..QM-E959 (listed in
+[ERRORS.md](ERRORS.md)). Submitting to a billable backend without
+confirmation is QM-E957. See [HARDWARE_PLUGINS.md](HARDWARE_PLUGINS.md).
 
 ### Client configuration
 
@@ -258,7 +346,7 @@ qumo expect <file|-> "0.5*Z0 Z1 - X0" [more...] [--params JSON]
 qumo validate <file|->                 # exit 1 when invalid
 qumo info <file|-> [--qasm] [--instructions]
 qumo describe [gates|gate <name>|errors|error <code>|capabilities]
-qumo convert <file|-> [--to qasm3|json] [-o out]
+qumo convert <file|-> [--to qasm3|qasm2|json] [-o out]
 qumo tool list | qumo tool <name> '<json-args>'|-
 qumo mcp | version | help [command]
 ```
@@ -306,10 +394,12 @@ def register_compiler_tools(mut reg: ToolRegistry):
             _transpile)
 ```
 
-Then add one line to `default_registry()` in `qumo/ai/tools.mojo`:
+Then add one line to `full_registry()` in `qumo/ai/registry.mojo` (module
+tools live there, so that `qumo.ai.tools` needs no imports from higher-level
+modules):
 
 ```mojo
-    register_compiler_tools(reg)   # placeholders for compiler/qec/algorithms are already there
+    register_compiler_tools(reg)   # like register_exec_tools(reg)
 ```
 
 The rules for tool handlers:
@@ -339,8 +429,15 @@ qumo tool qumo_transpile '{"qasm": "...", "target": "grid:3x3"}' --pretty
 ```
 
 **New error codes:** add an `_e(c, "QM-E6xx", ...)` line to `error_catalog()`
-in `qumo/ai/diagnostics.mojo`, then regenerate `docs/ERRORS.md` from
-`qumo describe errors --json`.
+in `qumo/ai/diagnostics.mojo`, then regenerate `docs/ERRORS.md`:
+
+```bash
+QUMO_UPDATE_DOCS=1 .venv/bin/mojo run -I . tests/test_mcp.mojo
+# or: build/qumo tool qumo_describe '{"topic":"errors","format":"markdown"}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["markdown"], end="")' > docs/ERRORS.md
+```
+
+`make test` fails while a raised code is missing from the catalogue or the
+file is stale.
 
 ---
 
@@ -355,8 +452,12 @@ in `qumo/ai/diagnostics.mojo`, then regenerate `docs/ERRORS.md` from
   `ctrl @ U` with symbolic angles raise QM-E202, located at the QASM line.
 * Parameters are affine in a single input (by design: binding is
   allocation-free).
-* Only QASM 3 is emitted. There is no QASM 2 export yet.
-* Tools run the dense state-vector simulator, with Clifford circuits
-  recommended for `qumo.sim.stabilizer` in the summary. Stabilizer, QEC,
-  compiler and algorithm tools are expected to come from their modules
-  through the registry hook described above.
+* OpenQASM 2 export needs bound parameters and cannot express single-bit
+  conditions on multi-bit registers, a global phase (written as a comment) or
+  noise. OpenQASM 3 export comments out a register condition that does not
+  cover every clbit (QM-E552 note in the output).
+* Sampling tools dispatch automatically (Pauli frames, stabilizer tableau,
+  CPU or GPU state vector). `qumo_statevector` and `qumo_expectation` always
+  use the dense CPU state vector.
+* Hardware execution is a Python plugin, not an MCP tool, because it needs
+  provider credentials and explicit confirmation of billable jobs.
