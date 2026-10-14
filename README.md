@@ -46,6 +46,8 @@ Caveat: QUMO's compiler was tuned during the project on part of these benchmarks
 ## Install, build, test
 
 ```bash
+git clone https://github.com/ANFAIA/QUMO.git
+cd QUMO          # every make target runs from the repository root
 make setup        # .venv with Mojo 1.1 + MAX runtime (uv pip install mojo max-mojo-libs max-core)
 make test         # every Mojo test suite (tests/test_*.mojo); prints PASS/FAIL per suite
 make cli          # build/qumo     — CLI + MCP server
