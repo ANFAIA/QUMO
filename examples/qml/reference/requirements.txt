@@ -1,0 +1,13 @@
+# Reference environment for examples/qml/reference/pennylane_reference.py.
+# NOT a QUMO dependency: install into a separate venv, never bench/.venv.
+#   uv venv /tmp/qumo-qml-ref --python 3.12
+#   uv pip install --python /tmp/qumo-qml-ref/bin/python -r examples/qml/reference/requirements.txt
+pennylane==0.45.1
+pennylane-lightning==0.45.0
+scikit-learn==1.9.1
+numpy==2.5.4
+scipy==1.18.1
+jax==0.9.2
+jaxlib==0.9.2
+optax==0.2.8
+torch==2.14.1

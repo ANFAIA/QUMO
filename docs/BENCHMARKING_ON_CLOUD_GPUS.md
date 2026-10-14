@@ -78,7 +78,8 @@ encodes this table in `gpu_supported()` and stores the verdict for every detecte
   GPU acceleration is Linux-only; macOS arm64 builds (e.g. `cuda-quantum-cu13 0.16.0`) simulate on the CPU. The
   `nvidia` target uses cuStateVec; `cudaq.set_target("nvidia", option="fp64")` selects double precision, `fp32` single.
   The target's own default is fp32 (`runtime/cudaq/platform/default/nvidia.yml` L21-32 at tag 0.16.0, where `fp32` is
-  marked `default: true`); the runner always passes the option, so both precisions run with it set explicitly.
+  marked `default: true`); the runner always passes the option explicitly: `fp32` by default, `fp64` too with
+  `--fp64` (see [Precision](#precision-fp32-by-default-fp64-on-request)).
   `qpp-cpu` is the CPU target. In 0.16 the `nvidia` target hands the gate queue to cuStateVec Ex ("SVUpdater"),
   which fuses gates and applies each fused matrix in one pass over the state; the fusion widths are chosen by the
   library unless `CUDAQ_FUSION_MAX_QUBITS` / `CUDAQ_FUSION_DIAGONAL_GATE_MAX_QUBITS` are set (0 = gate by gate)
@@ -123,11 +124,11 @@ encodes this table in `gpu_supported()` and stores the verdict for every detecte
 |---|---|---|
 | `gpu_check` | `make gpu-check` for the host GPU's architecture (plus any listed targets) | PASS/FAIL per target x file, kernel count |
 | `sv_cpu` | `build/bench_sv` (QUMO CPU, fp64): `layered`, optionally `qft` and `random` | seconds, gates/s per width |
-| `sv_gpu` | `build/gpu/bench_gpu_fp32` / `_fp64` (`-D QUMO_GPU [-D QUMO_GPU_FP32]`) | GPU seconds (+ per-repetition times), launches (state sweeps) per evolve, gates per launch, effective GB/s, CPU seconds, speed-up, expectation and 10k-shot sampling time, fidelity vs CPU (up to `cpu_max` qubits); plus the QEC Pauli-frame table (surface code d = 3, 5, 7; 1M shots). Optional labelled `variants` (extra `-D` defines in their own binary, or environment variables) |
-| `sv_gpu_probe` | `bench_gpu <n> <reps> probe` once (it measures fp32 and, where the device has it, fp64 itself; widths n-2 and n), only when the checkout has the mode; otherwise a recorded skip | one row of kind `gpu_probe` per `PROBE,<dtype>,<n>,<metric>,<value>,<unit>` line: device facts (multiprocessors, shared memory, warp width, compute capability; `n/a` where the API has none, e.g. on Metal), empty-sweep time, per-op-kind cost slopes, transpose cost, 32 / 64 / 128 B chunked-stream bandwidth, kernel registers / spills / occupancy, and evolve / (runs x sweep) of the three families |
-| `baseline_aer` | Qiskit Aer statevector: CPU fp64 (same families as `sv_cpu`) and fp32 (`layered`, the like-for-like reference of the fp32 GPU series), GPU fp32 and fp64 (`layered`); optional labelled `variants` (other `AerSimulator` options) | seconds per width, Aer's own `time_taken`, the fusion Aer reports it applied |
-| `baseline_cudaq` | CUDA-Q `nvidia` target fp32 and fp64 (optional `qpp-cpu`); optional labelled `variants` (`CUDAQ_*` environment, e.g. no fusion) | seconds per width, `CUDAQ_*` fusion settings, compile-time gate count |
-| `baseline_lightning` | PennyLane `lightning.qubit` / `.gpu` / `.amdgpu` | seconds per width |
+| `sv_gpu` | `build/gpu/bench_gpu_fp32` (`-D QUMO_GPU`: fp32 is QUMO's default) and, with `--fp64`, `_fp64` (`-D QUMO_GPU -D QUMO_GPU_FP64`); a checkout from before 2026-10-13 gets its own flags (`-D QUMO_GPU_FP32` for fp32, none for fp64), read from `qumo/gpu/device.mojo` | GPU seconds (+ per-repetition times), launches (state sweeps) per evolve, gates per launch, effective GB/s, CPU seconds, speed-up, expectation and 10k-shot sampling time, fidelity vs CPU (up to `cpu_max` qubits); plus the QEC Pauli-frame table (surface code d = 3, 5, 7; 1M shots). Optional labelled `variants` (extra `-D` defines in their own binary, or environment variables) |
+| `sv_gpu_probe` | `bench_gpu <n> <reps> probe fp32[,fp64]` once (one binary measures the run's GPU precisions; fp64 never on Apple; an older `bench_gpu` takes no list and measures fp32 and, where the device has it, fp64; widths n-2 and n), only when the checkout has the mode; otherwise a recorded skip | one row of kind `gpu_probe` per `PROBE,<dtype>,<n>,<metric>,<value>,<unit>` line: device facts (multiprocessors, shared memory, warp width, compute capability; `n/a` where the API has none, e.g. on Metal), empty-sweep time, per-op-kind cost slopes, transpose cost, 32 / 64 / 128 B chunked-stream bandwidth, kernel registers / spills / occupancy, and evolve / (runs x sweep) of the three families |
+| `baseline_aer` | Qiskit Aer statevector: CPU fp64 (same families as `sv_cpu`) and fp32 (`layered`, the like-for-like reference of the fp32 GPU series), GPU in the run's GPU precisions (fp32; + fp64 with `--fp64`; `layered`); optional labelled `variants` (other `AerSimulator` options) | seconds per width, Aer's own `time_taken`, the fusion Aer reports it applied |
+| `baseline_cudaq` | CUDA-Q `nvidia` target in the run's GPU precisions (`option="fp32"`; + `"fp64"` with `--fp64`; optional `qpp-cpu`); optional labelled `variants` (`CUDAQ_*` environment, e.g. no fusion) | seconds per width, `CUDAQ_*` fusion settings, compile-time gate count |
+| `baseline_lightning` | PennyLane `lightning.qubit` (fp64) / `.gpu` / `.amdgpu` (the run's GPU precisions) | seconds per width |
 | `neutral` | a small subset of the hardware-neutral compiler benchmark (`bench/neutral`): QUMO, Qiskit, TKET on superconducting, trapped-ion and neutral-atom targets | per SDK: status counts, median compile time, 2q gates, ESP |
 | `qec` | `bench/bench_qec.py --part A` with few shots (QUMO vs Stim + PyMatching) | the markdown tables, parsed |
 | `tests` | `make test` / `make test-gpu`, or a list of test files | PASS/FAIL per file |
@@ -214,12 +215,12 @@ result instead of hidden. The rules below are those of the harness of 2026-10-13
   (`CUDAQ_FUSION_MAX_QUBITS` = 2 ... 6 at 24 and 26 qubits) and, with `colab_l4` and `colab_a100`, a QUMO GPU
   fp32 build with 16 amplitudes per thread (`-D QUMO_GPU_REG_BITS=4`). A variant can only narrow the width grid
   (`"qubits": [lo, hi]`); `--quick` drops variants.
-* **Precision fairness:** compare fp32 with fp32 and fp64 with fp64. QUMO CPU is fp64; Aer CPU runs fp64 and fp32 in
-  every GPU preset, so both GPU precisions have a same-precision CPU reference. The report divides each series by a
-  reference of its own precision (`--reference "Aer CPU {precision}"`, the default); a series without one gets a
-  note, never a mixed-precision ratio. Default precisions differ: CUDA-Q's `nvidia` target defaults to fp32, QUMO
-  defaults to fp64 on NVIDIA and AMD and fp32 on Apple; the runner sets the precision explicitly for every engine.
-  Apple GPUs only have fp32 (fp64 is recorded as *not applicable*).
+* **Precision fairness:** compare fp32 with fp32 and fp64 with fp64 only (details in
+  [Precision](#precision-fp32-by-default-fp64-on-request)). Every GPU engine runs in fp32 by default, CUDA-Q's
+  default and QUMO's; fp64 is one switch. QUMO CPU is fp64; Aer CPU runs fp64 and fp32 in every GPU preset, so both
+  GPU precisions have a same-precision CPU reference. The report divides each series by a reference of its own
+  precision (`--reference "Aer CPU {precision}"`, the default); a series without one gets a note, never a
+  mixed-precision ratio. Apple GPUs only have fp32 (fp64 is recorded as *not applicable*, QM-E472).
 * **Memory:** a width runs only if its state fits into `memory_fraction` (60 %) of GPU memory and, where the engine
   needs it, of free host RAM (8 B/amplitude fp32, 16 B fp64; QUMO's CPU reference about 37 B/amplitude). Every
   clamp is recorded (`clamp`, code `QM-E966`).
@@ -231,6 +232,28 @@ result instead of hidden. The rules below are those of the harness of 2026-10-13
   / unsupported GPU or precision, QM-E968 benchmark binary or worker crash, QM-E969 test or check FAIL. Baselines
   or precisions that cannot exist on the hardware (CUDA-Q on AMD, fp64 on Apple) are listed as `not_applicable`,
   not as failures. The JSON is rewritten after every suite, so an interrupted session keeps what finished.
+
+### Precision: fp32 by default, fp64 on request
+
+* **Default: fp32 for every GPU engine** (QUMO GPU, CUDA-Q, Aer GPU, Lightning GPU and the QUMO probe). This is
+  CUDA-Q's default (`nvidia` target) and, since 2026-10-13, QUMO's on every GPU ([GPU.md](GPU.md#precision-policy)),
+  so the default run compares the engines as users get them. On GPUs with slow fp64 units (T4, L4, A10, RTX:
+  1/32-1/64 of the fp32 rate) fp64 multiplies every engine's GPU time (CUDA-Q on the T4 at 26 qubits: 0.170 s fp32,
+  1.45 s fp64), so there the fp64 series take most of a GPU suite's time.
+* **fp64 is one switch** that applies to every GPU engine at once: `run_benchmarks.py --fp64` (= `--gpu-precisions
+  fp32,fp64`; `--gpu-precisions fp64` runs fp64 only), the preset key `"gpu_precisions": ["fp32", "fp64"]`,
+  `INCLUDE_FP64` in both notebooks, `run_on_any_gpu.sh --fp64`. The command line wins over the preset; a suite-level
+  precision list of an older config is still honoured unless the command line sets the precisions. The fp64 widths
+  are the presets' `qubits_fp64` / `qubits_gpu_fp64` ranges.
+* **CPU references do not change:** QUMO CPU fp64, Aer CPU fp64 + fp32 (`precisions_cpu`: the fp32 CPU series is the
+  like-for-like reference of the fp32 GPU series), Lightning CPU fp64.
+* **Recorded:** the document's `precision_policy` (`gpu_precisions`, `source`: `default`, `config`, `cli`), each GPU
+  suite's `gpu_precisions` (requested list and source), and in every row `precision` (what ran: QUMO GPU from the
+  `method` column `gpu:statevector:fp32|fp64`, CUDA-Q from `get_target().get_precision()`, Aer from its
+  `precision` option, Lightning from the device's `c_dtype`) and `precision_requested`. A QUMO GPU row whose
+  precision differs from the request is flagged (`QM-E967`); binaries carry a build stamp
+  (`build/gpu/<binary>.build.json`) so a binary built with other flags is rebuilt.
+* **Compare fp32 with fp32 only** (and fp64 with fp64). On Apple GPUs fp64 is *not applicable* (QM-E472).
 
 ### Reading the results
 
@@ -307,6 +330,8 @@ the T4 timings mostly fair from 22 qubits up, but:
 
 ## 3. Presets (`bench/configs/`)
 
+Every preset sets `"gpu_precisions": ["fp32"]`; the fp64 widths below apply with `--fp64`.
+
 | Preset | Hardware | QUMO GPU widths (fp32 / fp64) | Baselines (GPU widths fp32 / fp64) |
 |---|---|---|---|
 | `colab_t4` | T4 16 GB (15 usable), free tier | 16-30 / 16-28 (CPU check up to 26) | Aer CPU (fp64 + fp32) + GPU, CUDA-Q, Lightning GPU (30 / 28); probe on; diagnostic variants: CUDA-Q no fusion + fusion widths 2-6, Aer GPU fusion<=2q + cuStateVec, QUMO GPU REG_BITS=4 (fp32) |
@@ -336,7 +361,7 @@ same 16-20 qubit widths.
 
 ```bash
 # anywhere (clone, install, build, run; auto-detects NVIDIA / AMD / Apple / CPU)
-bash examples/colab/run_on_any_gpu.sh                    # or --quick, --config <preset>, --suites ...
+bash examples/colab/run_on_any_gpu.sh                    # or --quick, --fp64, --config <preset>, --suites ...
 
 # step by step in a checkout
 make setup                                               # Mojo + MAX in .venv
@@ -344,7 +369,8 @@ uv venv bench/.venv --python 3.12
 uv pip install --python bench/.venv/bin/python qiskit qiskit-aer pytket pytket-qiskit stim pymatching numpy matplotlib psutil
 bench/.venv/bin/python bench/run_benchmarks.py --list    # suites, presets, detected GPU, auto preset
 bench/.venv/bin/python bench/run_benchmarks.py --config auto --build-only
-bench/.venv/bin/python bench/run_benchmarks.py --config auto --label "my machine"
+bench/.venv/bin/python bench/run_benchmarks.py --config auto --label "my machine"     # GPU engines in fp32
+bench/.venv/bin/python bench/run_benchmarks.py --config auto --fp64                     # ... and in fp64
 QUMO_CUDAQ_PYTHON=/path/venv-cudaq/bin/python \
   bench/.venv/bin/python bench/run_benchmarks.py --config colab_a100 --suites sv_gpu,baseline_cudaq
 
@@ -361,16 +387,17 @@ runner at another Mojo compiler. `--no-build` never compiles; missing binaries a
 ### Result files
 
 `bench/results/cloud/qumo_bench_<preset>_<gpu>_<timestamp>.json` (schema `qumo-bench/1`): `environment`, `config`
-(name, path, full content, `quick`), and per suite: `status`, `reason`, `rows`, `commands` (exact,
+(name, path, full content, `quick`), `precision_policy` (GPU precisions of the run and their source), and per suite
+(GPU suites also `gpu_precisions`): `status`, `reason`, `rows`, `commands` (exact,
 repository-relative), `build(s)`, `clamp(s)`, `skipped`, `not_applicable`, `versions` (baseline versions and
 verification), `duration_s`, `loadavg_before/after`, `machine_state_before/after`, `variant_problems`, and for
 `sv_gpu` `engine_settings` (the `bench_gpu` features found, QUMO's compile-time GPU knobs with their defaults, the
 defines and environment of every build). The environment adds `sources` (engine and harness hashes) and
-`machine_state`; the document adds `checks` (cross-engine consistency). Rows carry `timed_region`, `fusion`,
-`times`, `variant`, and for QUMO GPU `launches`, `transposes`, `gates_per_launch`, `bytes_model`, `effective_gbs`,
+`machine_state`; the document adds `checks` (cross-engine consistency). Rows carry `precision` (what ran),
+`precision_requested`, `timed_region`, `fusion`, `times`, `variant`, and for QUMO GPU `launches`, `transposes`, `gates_per_launch`, `bytes_model`, `effective_gbs`,
 `seconds_incl_alloc` and `extra` (any column a newer `bench_gpu` prints that the runner does not know). The CSV next
-to it holds all rows (columns `suite, kind, series, engine, device, precision, family, qubits, gates, seconds,
-gates_per_sec, reps, ...`; dictionaries as JSON). The `neutral` suite also writes `<stem>_neutral.jsonl` with every
+to it holds all rows (columns `suite, kind, series, engine, device, precision, precision_requested, family, qubits,
+gates, seconds, gates_per_sec, reps, ...`; dictionaries as JSON). The `neutral` suite also writes `<stem>_neutral.jsonl` with every
 compilation record.
 
 ## 5. Status and limitations (October 2026)
@@ -409,8 +436,8 @@ compilation record.
   files, and `nbformat` validation of both notebooks. The CUDA-Q variants, NVIDIA clock recording, Aer GPU variants,
   the probe on NVIDIA and `count_gpu_kernels.py` with a real `nsys` have not run yet: the next Colab run is their
   first test.
-* `bench_gpu` always sweeps from 16 qubits, and it runs the Pauli-frame table in each of its two builds (fp32 and
-  fp64) and in every build variant; the runner keeps only the default build's frames rows.
+* `bench_gpu` always sweeps from 16 qubits, and it runs the Pauli-frame table in each of its builds (fp32, and fp64
+  with `--fp64`) and in every build variant; the runner keeps only the default build's frames rows.
 * QUMO CPU has a process warm-up (one dropped smaller width), not a per-width one: `bench_sv.mojo` would need its own
   untimed `evolve` per width for that. Each repetition allocates its own state, so the remaining first-repetition
   effect is small, and the upper median of 3 discards a single slow repetition.

@@ -129,7 +129,7 @@ make cli-gpu py-gpu   # CLI / Python extension with GPU dispatch (build/gpu/)
 
 Gates run as *tile runs*: a whole run of gates is applied to each 2^k-amplitude tile in shared memory and registers, so the 26-qubit, 645-gate layered circuit takes 14–17 passes over the state (gate-by-gate fusion engines such as CUDA-Q/cuStateVec need an estimated 43–48). Consecutive diagonal gates are fused into phase tables, and tile size, block size and resident low qubits come from a per-device profile. How CUDA-Q works and what QUMO took from it: [docs/GPU.md](docs/GPU.md).
 
-Precision: fp32 on Apple GPUs (Metal has no fp64), fp64 by default or fp32 on NVIDIA/AMD (CUDA-Q defaults to fp32). On macOS, kernels need the Metal compiler:
+Precision: fp32 by default on every GPU, like CUDA-Q. fp64 (NVIDIA/AMD; Metal has no fp64) is selectable at build time (`-D QUMO_GPU_FP64`), per process (`QUMO_GPU_PRECISION=fp64`) or per call (`precision="fp64"` in Python, MCP and the CLI). On macOS, kernels need the Metal compiler:
 
 ```bash
 xcode-select -s /Applications/Xcode.app/Contents/Developer   # with sudo; Xcode from the App Store
@@ -137,6 +137,14 @@ xcodebuild -runFirstLaunch                                    # with sudo
 xcodebuild -downloadComponent MetalToolchain
 xcrun metal --version                                         # must print a version
 ```
+
+## Examples
+
+Every example cites its original source and checks its own results (`CHECK ...: PASS` lines); `make examples` runs the fast tier ([examples/README.md](examples/README.md)).
+
+- [examples/frameworks](examples/frameworks/README.md): signature tutorials of Qiskit, Braket, Q#, TKET, CUDA-Q, Cirq and Qibo re-implemented on QUMO.
+- [examples/qml](examples/qml/): PennyLane-style quantum machine learning (embeddings, variational classifier, data re-uploading, quantum kernels + SVM, kernel alignment, quantum natural gradient, barren plateaus, Fourier expressivity, QCBM, QCNN) checked against PennyLane reference numbers; library in [docs/QML.md](docs/QML.md).
+- [examples/heterogeneous](examples/heterogeneous/README.md): an LLM (OpenRouter, a local model via Ollama / LM Studio / llama.cpp / vLLM, or offline rules) selects the algorithm for a problem; QUMO builds it, trains on the GPU, refines on the CPU and samples on a QPU (a vendor-neutral noisy emulator by default; real IBM / Quantinuum only with `--allow-remote --submit --yes --max-cost`).
 
 ## Cloud GPU benchmarks (Colab, AMD)
 
@@ -179,7 +187,7 @@ The benchmark venv needs `qiskit qiskit-aer qiskit-ibm-runtime pytket pytket-qis
 
 - [docs/ANALYSIS.md](docs/ANALYSIS.md) — deep analysis of the 8 frameworks and the synthesis
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — architecture and design decisions
-- Modules: [COMPILER](docs/COMPILER.md) · [SIMULATION](docs/SIMULATION.md) · [GPU](docs/GPU.md) · [QEC](docs/QEC.md) · [ALGORITHMS](docs/ALGORITHMS.md) · [AI_NATIVE](docs/AI_NATIVE.md) · [HARDWARE_PLUGINS](docs/HARDWARE_PLUGINS.md) · [ERRORS](docs/ERRORS.md)
+- Modules: [COMPILER](docs/COMPILER.md) · [SIMULATION](docs/SIMULATION.md) · [GPU](docs/GPU.md) · [QEC](docs/QEC.md) · [ALGORITHMS](docs/ALGORITHMS.md) · [QML](docs/QML.md) · [AI_NATIVE](docs/AI_NATIVE.md) · [HARDWARE_PLUGINS](docs/HARDWARE_PLUGINS.md) · [ERRORS](docs/ERRORS.md)
 - [docs/MOJO_GUIDE.md](docs/MOJO_GUIDE.md) — the exact Mojo 1.1 dialect QUMO uses
 - Benchmarking: [bias audit of Benchpress](docs/BENCHPRESS_BIAS_REPORT.md) · [QUMO on Benchpress](docs/BENCHPRESS_RESULTS.md) · [neutral benchmark](docs/NEUTRAL_BENCHMARK_REPORT.md) · [cloud GPUs](docs/BENCHMARKING_ON_CLOUD_GPUS.md)
 - [llms.txt](llms.txt) — compact index for LLM agents

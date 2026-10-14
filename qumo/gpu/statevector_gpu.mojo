@@ -4,7 +4,10 @@ What it is
   * Owns the amplitudes as two device buffers (split re/im, like the CPU
     `StateVector`) plus the `DeviceContext` (one in-order stream). Precision
     is the comptime parameter `dtype` (float32 / float64; see
-    `qumo.gpu.device` for the policy: fp32 on Apple, fp64 default elsewhere).
+    `qumo.gpu.device` for the policy: fp32 by default on every GPU, as in
+    CUDA-Q; fp64 on request where the hardware has it). The circuit-level
+    `*_gpu_runtime` entry points select it at run time ("auto" | "fp32" |
+    "fp64").
   * Gates run as register-blocked *tile runs* (`qumo.gpu.tiles`,
     `kernels.gk_tile`): the CPU runner's fused plan (`build_plan`: runs of 1q
     gates merged per wire, as in qsim / Aer) is packed into runs of gates
@@ -42,7 +45,8 @@ only with `-D QUMO_GPU`; otherwise it raises QM-E470.
 
 Error codes: QM-E470 not compiled, QM-E471 dynamic/noisy circuit on the GPU
 sampler, QM-E472 fp64 on Apple, QM-E473 zero-norm state, QM-E474 circuit wider
-than the GPU state, QM-E475 unsupported plan op.
+than the GPU state, QM-E475 unsupported plan op, QM-E941 unknown precision
+selector.
 """
 
 from std.math import cos, sin, ceildiv
@@ -69,8 +73,8 @@ from qumo.gpu.emulate import (
     emu_threads, emu_tile, emu_expect, emu_segsum, emu_sample, stride_blocks,
 )
 from qumo.gpu.device import (
-    GPU_COMPILED, GPU_DEFAULT_DTYPE, GpuProfile, TileKernelLimits, device_kernels_enabled, precision_name,
-    gpu_not_compiled_error, gpu_fp64_error,
+    GPU_COMPILED, GPU_DEFAULT_DTYPE, GPU_FP64_RUNTIME, GpuProfile, TileKernelLimits, device_kernels_enabled,
+    precision_name, gpu_not_compiled_error, gpu_fp64_error, resolve_gpu_precision,
 )
 
 
@@ -954,3 +958,42 @@ def sample_gpu[dt: DType = GPU_DEFAULT_DTYPE](circuit: Circuit, shots: Int, seed
     for o in outs:
         res.record(mm.pack(o))
     return res^
+
+
+# ---------------------------------------------------------------------------
+# Precision chosen at run time ("auto" | "fp32" | "fp64", qumo.gpu.device)
+# ---------------------------------------------------------------------------
+# The fp64 path is instantiated only where the target has fp64 (GPU builds for
+# NVIDIA / AMD) or in builds without GPU support (host emulator only): a Metal
+# build contains no double-precision kernel, and a request for fp64 raises QM-E472.
+def sample_gpu_runtime(circuit: Circuit, shots: Int, seed: UInt64 = 1234,
+                       params: List[Float64] = List[Float64](), precision: String = "auto",
+                       emulate: Bool = False) raises -> SampleResult:
+    """sample_gpu in the precision `precision` selects at run time
+    (`resolve_gpu_precision`: "auto" = QUMO_GPU_PRECISION or the build
+    default). SampleResult.method names the precision that ran
+    ('gpu:statevector:fp32' / 'gpu:statevector:fp64'). QM-E941 for an
+    unknown selector, QM-E472 for fp64 on an Apple GPU."""
+    var p = resolve_gpu_precision(precision)
+    if p == "fp64":
+        comptime if GPU_FP64_RUNTIME or not GPU_COMPILED:
+            return sample_gpu[DType.float64](circuit, shots, seed, params, emulate)
+        else:
+            raise gpu_fp64_error()
+    return sample_gpu[DType.float32](circuit, shots, seed, params, emulate)
+
+
+def expectation_gpu_runtime(circuit: Circuit, observable: PauliSum, params: List[Float64] = List[Float64](),
+                            precision: String = "auto", emulate: Bool = False) raises -> Tuple[Float64, String]:
+    """<observable> of the final state of `circuit` on the GPU in the precision
+    `precision` selects at run time -> (value, method), method =
+    'gpu:statevector:fp32|fp64' ('gpu-emulator:...' when emulated)."""
+    var p = resolve_gpu_precision(precision)
+    if p == "fp64":
+        comptime if GPU_FP64_RUNTIME or not GPU_COMPILED:
+            var sv = evolve_gpu[DType.float64](circuit, params, emulate)
+            return (sv.expectation(observable), sv.method_name())
+        else:
+            raise gpu_fp64_error()
+    var sv = evolve_gpu[DType.float32](circuit, params, emulate)
+    return (sv.expectation(observable), sv.method_name())

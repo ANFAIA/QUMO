@@ -7,6 +7,13 @@
     ./build/gpu/bench_gpu 9 3 frames 1000000    # Pauli frames, d = 3..9, shots
     ./build/gpu/bench_gpu --stim 5 0.001        # the frames circuit in Stim syntax (for Stim timings)
     ./build/gpu/bench_gpu 26 3 probe            # engine cost model on this device (n = 24, 26)
+    ./build/gpu/bench_gpu 26 3 probe fp32,fp64  # ... in both precisions (fp64: NVIDIA / AMD)
+
+Precision: the state-vector modes run in the build default (GPU_DEFAULT_DTYPE):
+fp32 on every GPU (as CUDA-Q), fp64 when built with -D QUMO_GPU_FP64 on a GPU
+that has it (`bench/run_benchmarks.py` builds bench_gpu_fp32 = -D QUMO_GPU and
+bench_gpu_fp64 = -D QUMO_GPU -D QUMO_GPU_FP64). The `method` column names the
+precision that ran.
 
 Every comparison is interleaved A/B (CPU run, then GPU run, per repetition)
 and reports medians (upper median for even counts), so slow drifts of a
@@ -38,8 +45,10 @@ cost per op kind (slope between short and long single-segment runs), the cost
 of one register-set transpose, the bandwidth of tile-shaped streaming with 32,
 64 and 128 B contiguous chunks, and evolve time / runs / transposes / ops of
 the three families with the ratio evolve / (runs x sweep). One line per
-number: `PROBE,<dtype>,<n>,<metric>,<value>,<unit>`; fp32, plus fp64 where
-the device has it.
+number: `PROBE,<dtype>,<n>,<metric>,<value>,<unit>`. Precisions: the optional
+argument after `probe` ("fp32", "fp64" or "fp32,fp64"; default: the build
+default precision); fp64 on a GPU without it prints one
+`PROBE,fp64,0,precision,n/a,QM-E472 ...` line instead.
 
 Default mode also prints `gpu_alloc_s`: GpuStateVector.on_context(ctx, n)
 (allocation of the two state buffers on the existing context) + evolve +
@@ -65,7 +74,10 @@ from qumo.gpu.frame_gpu import GpuFrameSampler
 from qumo.gpu.statevector_gpu import (
     GpuStateVector, sample_gpu, tile_func_attribute, tile_kernel_attr, tile_kernel_occupancy,
 )
-from qumo.gpu.device import gpu_info, gpu_available, GPU_DEFAULT_DTYPE, GPU_FP64_SUPPORTED, precision_name
+from qumo.gpu.device import (
+    gpu_info, gpu_available, GPU_DEFAULT_DTYPE, GPU_FP64_SUPPORTED, precision_name, parse_gpu_precision,
+    gpu_fp64_error,
+)
 from qumo.gpu.kernels import GPtr, tile_bits, DIAG_MAX_WIDTH, REG_BITS, tile_smem_typical
 from qumo.gpu.tiles import TileProgram, kop_targets
 from qumo.sim.runner import KOp, K
@@ -627,11 +639,30 @@ def main() raises:
                 bench_crossover(n, reps)
             return
         if mode == "probe":
+            # precisions: args[4] = "fp32" | "fp64" | "fp32,fp64" (default: the build default)
+            var want32 = GPU_DEFAULT_DTYPE == DType.float32
+            var want64 = GPU_DEFAULT_DTYPE == DType.float64
+            if len(args) > 4:
+                want32 = False
+                want64 = False
+                for part in String(args[4]).split(","):
+                    var p = parse_gpu_precision(String(part))
+                    if p == "auto":
+                        p = precision_name[GPU_DEFAULT_DTYPE]()
+                    if p == "fp32":
+                        want32 = True
+                    else:
+                        want64 = True
             probe_device()
+            comptime if not GPU_FP64_SUPPORTED:
+                if want64:
+                    pline("fp64", 0, "precision", "n/a", short_err(gpu_fp64_error()))
             for n in range(max(nmax - 2, 16), nmax + 1, 2):
-                probe_engine[DType.float32](n, reps, n == max(nmax - 2, 16))
+                if want32:
+                    probe_engine[DType.float32](n, reps, n == max(nmax - 2, 16))
                 comptime if GPU_FP64_SUPPORTED:
-                    probe_engine[DType.float64](n, reps, n == max(nmax - 2, 16))
+                    if want64:
+                        probe_engine[DType.float64](n, reps, n == max(nmax - 2, 16))
             return
         if mode == "frames":
             var shots = Int(String(args[4])) if len(args) > 4 else 1000000

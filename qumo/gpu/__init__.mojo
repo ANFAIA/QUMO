@@ -1,7 +1,8 @@
 """qumo.gpu: vendor-neutral GPU back ends (NVIDIA, AMD, Apple) on MAX.
 
   * `statevector_gpu.GpuStateVector[dtype]`: the state-vector simulator on a
-    GPU (fp32 on Apple, fp64 default on NVIDIA/AMD), executing the CPU
+    GPU (fp32 by default on every GPU, as in CUDA-Q; fp64 on request on
+    NVIDIA/AMD: `-D QUMO_GPU_FP64` or the run-time selector), executing the CPU
     runner's fused plan as register-blocked tile runs (`tiles`: the host
     scheduler; `kernels.gk_tile`: one launch per run of many gates).
   * `frame_gpu.GpuFrameSampler`: QEC Pauli-frame sampling, one thread per

@@ -17,7 +17,15 @@ Clifford circuits without feed-forward (noisy or not) -> GPU Pauli frames
 everything else runs on the CPU and the returned note says exactly why
 (no GPU build / device, > 62 classical bits, Clifford feed-forward, dynamic or
 noisy non-Clifford). The returned `SampleResult.method` records which path
-ran ("gpu:statevector:fp32", "gpu:pauli_frame", ...).
+ran ("gpu:statevector:fp32", "gpu:statevector:fp64", "gpu:pauli_frame", ...).
+
+GPU precision (`precision` argument of `sample_on` / `sample_auto`): "auto"
+(default: QUMO_GPU_PRECISION when set, else the build default, fp32 on every
+GPU), "fp32" or "fp64" (`qumo.gpu.device.resolve_gpu_precision`). It applies
+to GPU state-vector runs only: the CPU simulators are fp64, the stabilizer and
+Pauli-frame samplers exact. An unknown selector raises QM-E941. With
+`device="gpu"`, "fp64" on an Apple GPU raises QM-E472 (Metal has no double
+precision); automatic dispatch instead keeps such a circuit on the CPU (fp64).
 """
 
 from std.sys.defines import is_defined
@@ -27,8 +35,11 @@ from qumo.ir.gates import Op
 from qumo.sim.runner import sample, SampleResult
 from qumo.sim.stabilizer import sample_stabilizer
 from qumo.sim.frame import FrameSimulator, MeasurementSamples
-from qumo.gpu.device import GPU_MIN_QUBITS, gpu_available
-from qumo.gpu.statevector_gpu import sample_gpu
+from qumo.gpu.device import (
+    GPU_MIN_QUBITS, gpu_available, parse_gpu_precision, resolve_gpu_precision, gpu_precision_available,
+    check_gpu_precision,
+)
+from qumo.gpu.statevector_gpu import sample_gpu_runtime
 from qumo.gpu.frame_gpu import GpuFrameSampler
 
 comptime STABILIZER_MIN_QUBITS = 16
@@ -139,9 +150,25 @@ def counts_from_measurements(c: Circuit, ms: MeasurementSamples, shots: Int, met
     return res^
 
 
+def _auto_gpu_precision(precision: String) -> String:
+    """The precision automatic dispatch may run a GPU state vector in, or ""
+    when it must stay on the CPU: the selected precision is not available on
+    this GPU (fp64 on Apple), or QUMO_GPU_PRECISION is invalid (explicit GPU
+    requests raise QM-E941 for it; qumo_gpu_info reports it)."""
+    try:
+        var p = resolve_gpu_precision(precision)
+        return p if gpu_precision_available(p) else String("")
+    except:
+        return ""
+
+
 def sample_auto(c: Circuit, shots: Int, seed: UInt64 = 1234,
-                params: List[Float64] = List[Float64]()) raises -> SampleResult:
-    """Sample with the method `choose_method` selects."""
+                params: List[Float64] = List[Float64](), precision: String = "auto") raises -> SampleResult:
+    """Sample with the method `choose_method` selects. `precision` ("auto" |
+    "fp32" | "fp64") is the precision of a GPU state-vector run; the GPU is
+    used only when that precision is available there (fp64 on an Apple GPU
+    stays on the fp64 CPU simulator). QM-E941 for an unknown selector."""
+    _ = parse_gpu_precision(precision)
     if len(params) == 0:
         var m = choose_method(c, shots)
         if m == "frame":
@@ -150,17 +177,21 @@ def sample_auto(c: Circuit, shots: Int, seed: UInt64 = 1234,
             return sample_stabilizer(c, shots, seed)
         comptime if is_defined["QUMO_GPU"]():
             if m == "gpu":
-                try:
-                    return sample_gpu(c, shots, seed, params)
-                except:
-                    pass  # e.g. device out of memory: the CPU state vector decides
+                var p = _auto_gpu_precision(precision)
+                if p.byte_length() > 0:
+                    try:
+                        return sample_gpu_runtime(c, shots, seed, params, p)
+                    except:
+                        pass  # e.g. device out of memory: the CPU state vector decides
     else:
         comptime if is_defined["QUMO_GPU"]():
             if _gpu_ready(c):
-                try:
-                    return sample_gpu(c, shots, seed, params)
-                except:
-                    pass
+                var p = _auto_gpu_precision(precision)
+                if p.byte_length() > 0:
+                    try:
+                        return sample_gpu_runtime(c, shots, seed, params, p)
+                    except:
+                        pass
     return sample(c, shots, seed, params)
 
 
@@ -175,19 +206,27 @@ def _sample_cpu(c: Circuit, shots: Int, seed: UInt64, params: List[Float64]) rai
 
 
 def sample_on(c: Circuit, shots: Int, seed: UInt64, params: List[Float64],
-              device: String, mut note: String) raises -> SampleResult:
+              device: String, mut note: String, precision: String = "auto") raises -> SampleResult:
     """Sample on an explicit device: 'auto' (= sample_auto), 'cpu' (never the
     GPU) or 'gpu' (routed by `gpu_sample_route`: Clifford circuits without
     feed-forward -> GPU Pauli frames, other static noiseless circuits -> GPU
-    state vector). When the GPU cannot run it (not compiled, no usable device,
-    or the route is "cpu") the call runs on the CPU and `note` says why."""
+    state vector in `precision`). When the GPU cannot run it (not compiled,
+    no usable device, or the route is "cpu") the call runs on the CPU and
+    `note` says why.
+
+    `precision`: "auto" (QUMO_GPU_PRECISION when set, else the build
+    default: fp32) | "fp32" | "fp64", for GPU state-vector runs (CPU
+    simulators are fp64, Pauli frames exact). QM-E941 for an unknown value
+    (argument or environment variable); QM-E472 when the GPU state vector
+    would run in fp64 on an Apple GPU."""
     note = ""
+    if device != "auto" and device != "cpu" and device != "gpu":
+        raise Error("QM-E940: unknown device '" + device + "'. Hint: use 'auto', 'cpu' or 'gpu'.")
+    _ = parse_gpu_precision(precision)
     if device == "auto":
-        return sample_auto(c, shots, seed, params)
+        return sample_auto(c, shots, seed, params, precision)
     if device == "cpu":
         return _sample_cpu(c, shots, seed, params)
-    if device != "gpu":
-        raise Error("QM-E940: unknown device '" + device + "'. Hint: use 'auto', 'cpu' or 'gpu'.")
     comptime if is_defined["QUMO_GPU"]():
         var ok: Bool
         try:
@@ -201,7 +240,9 @@ def sample_on(c: Circuit, shots: Int, seed: UInt64, params: List[Float64],
             if route[0] == "frames":
                 return sample_frame_gpu(c, shots, seed)
             if route[0] == "statevector":
-                return sample_gpu(c, shots, seed, params)
+                var p = resolve_gpu_precision(precision)
+                check_gpu_precision(p)
+                return sample_gpu_runtime(c, shots, seed, params, p)
             note = route[1]
     else:
         note = "GPU support not compiled (build with -D QUMO_GPU): ran on the CPU"

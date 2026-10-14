@@ -104,6 +104,8 @@ def test_protocol() raises:
             assert_equal(props.get("decoder").get("default").as_string(), "mwpm")
         if t.get("name").as_string() == "qumo_run_device":
             assert_equal(props.get("device").get("enum").to_json(), "[\"auto\",\"cpu\",\"gpu\"]")
+            assert_equal(props.get("precision").get("enum").to_json(), "[\"auto\",\"fp32\",\"fp64\"]")
+            assert_equal(props.get("precision").get("default").as_string(), "auto")
             var desc = t.get("description").as_string()
             assert_true(desc.find("QM-W020") >= 0 and desc.find("pauli_frame") >= 0, desc)
         if t.get("name").as_string() == "qumo_convert":
@@ -415,6 +417,21 @@ def test_exec_tools() raises:
     assert_equal(rb.get("structuredContent").get("error").get("code").as_string(), "QM-E940")
     var gi = tool(s, 75, "qumo_gpu_info", "{}")
     assert_false(gi.get("isError").as_bool(), gi.to_json())
+    var gsc = gi.get("structuredContent")
+    for k in ["precision", "precision_build_default", "precision_env", "precisions", "precision_note", "fp64_supported"]:
+        assert_true(gsc.get(String(k)).is_defined(), "qumo_gpu_info lacks " + String(k) + ": " + gi.to_json())
+    # GPU precision: explicit selector on the CPU -> fp64 + QM-W021; unknown selector -> QM-E941
+    var rp = tool(s, 76, "qumo_run_device", "{\"qasm\":" + json_quote(ghz) + ",\"shots\":400,\"seed\":9,\"device\":\"cpu\",\"precision\":\"fp32\"}")
+    var sp = rp.get("structuredContent")
+    assert_false(rp.get("isError").as_bool(), rp.to_json())
+    assert_equal(sp.get("precision").as_string(), "fp32")
+    assert_equal(sp.get("precision_used").as_string(), "fp64")
+    assert_equal(sp.get("warnings").at(0).get("code").as_string(), "QM-W021")
+    assert_equal(sp.get("counts").to_json(), sc.get("counts").to_json())  # same CPU simulator, same seed
+    assert_equal(sc.get("precision").as_string(), "auto")
+    assert_equal(sc.get("precision_used").as_string(), "fp64")
+    var rq = tool(s, 77, "qumo_run_device", "{\"qasm\":" + json_quote(ghz) + ",\"device\":\"gpu\",\"precision\":\"fp16\"}")
+    assert_equal(rq.get("structuredContent").get("error").get("code").as_string(), "QM-E941")
 
 
 # ---------------------------------------------------------------------------

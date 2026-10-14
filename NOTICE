@@ -11,3 +11,14 @@ Third-party material redistributed in this repository keeps its own license:
 - bench/neutral/circuits/feynman__*: normalised circuits from the Feynman
   benchmark suite (Matthew Amy); license in
   bench/neutral/circuits/LICENSES/Feynman-LICENSE.md.
+- examples/qml/data/iris.csv and iris_classes1and2_scaled.txt: derived from
+  the UCI Iris data set (R. A. Fisher, 1936; UCI Machine Learning Repository),
+  licensed CC BY 4.0, via scikit-learn's bundled copy.
+- examples/qml/data/digits01.csv: digits 0 and 1 of the UCI Optical
+  Recognition of Handwritten Digits data set (E. Alpaydin, C. Kaynak, 1998;
+  UCI Machine Learning Repository), licensed CC BY 4.0, via scikit-learn's
+  bundled copy.
+- examples/qml/data/parity_*.txt and iris_classes1and2_scaled.txt follow the
+  file layout of PennyLane's tutorial_variational_classifier data
+  (PennyLaneAI/qml, Apache-2.0). The examples in examples/qml re-implement
+  PennyLane demos (Apache-2.0) and cite each one in their headers.

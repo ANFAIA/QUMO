@@ -1,0 +1,19 @@
+{
+ "schema": "qumo.hetero_problem.v1",
+ "name": "maxcut_16_3reg",
+ "kind": "maxcut",
+ "title": "MaxCut on a random 3-regular graph with 16 nodes",
+ "description": "Partition the nodes into two sets so that as many edges as possible cross the partition. Graph: networkx random_regular_graph(3, 16, seed=7), connected, 24 edges; brute-force max cut 21.",
+ "goal": "Find a high-quality cut and estimate how well a noisy QPU reproduces it.",
+ "data": {
+  "graph": "0-6 0-9 0-11 1-2 1-3 1-7 2-6 2-13 3-4 3-12 4-9 4-15 5-7 5-11 5-15 6-13 7-14 8-10 8-12 8-13 9-11 10-12 10-14 14-15"
+ },
+ "checks": {
+  "ideal_ratio_source": "3-regular graphs: p=1 guarantees 0.6924 (Farhi, Goldstone, Gutmann 2014); p=2 guarantees 0.7559 without short cycles (Wurtz & Love, PRA 103, 042612, 2021); deeper plans use the p=2 value (deeper optimal QAOA is never worse)",
+  "graph_family": "3-regular",
+  "ideal_ratio_min_by_depth": {
+   "1": 0.6924,
+   "2": 0.7559
+  }
+ }
+}

@@ -1,6 +1,6 @@
 from qumo.ir.circuit import Circuit
 from qumo.ir.pauli import parse_pauli_sum
-from qumo.exec.orchestrator import Workflow, Device
+from qumo.exec.orchestrator import Workflow, Device, job_precision
 from qumo.exec.resources import estimate_resources, estimate_hardware, estimate_fault_tolerant, HardwareProfile
 from std.testing import assert_equal, assert_true, assert_almost_equal
 
@@ -49,4 +49,31 @@ def main() raises:
     tc.t(0)
     print(estimate_hardware(ghz(10), HardwareProfile.superconducting()))
     print(estimate_fault_tolerant(tc))
+    # GPU precision: per device and per job ("auto" = the device's); unknown selectors fail in plan
+    var gdev = Device.gpu("gpu0", 30, "fp64")
+    assert_equal(gdev.precision, "fp64")
+    assert_true(String(gdev).find("precision=fp64") >= 0, String(gdev))
+    assert_equal(Device.gpu().precision, "auto")
+    assert_equal(Device.cpu().precision, "auto")
+    var wf2 = Workflow()
+    var j0 = wf2.add_sample("auto", t, 100)
+    var j1 = wf2.add_sample("fp32", t, 100, precision="fp32")
+    assert_equal(job_precision(wf2.jobs[j0], gdev.precision), "fp64")
+    assert_equal(job_precision(wf2.jobs[j1], gdev.precision), "fp32")
+    var bad = List[Device]()
+    bad.append(Device.gpu("gpu0", 30, "fp128"))
+    var raised = False
+    try:
+        _ = wf2.plan(bad)
+    except e:
+        raised = String(e).startswith("QM-E941")
+    assert_true(raised, "QM-E941 expected for an unknown device precision")
+    var wf3 = Workflow()
+    _ = wf3.add_sample("bad", t, 10, precision="half")
+    raised = False
+    try:
+        _ = wf3.plan(pool)
+    except e:
+        raised = String(e).startswith("QM-E941")
+    assert_true(raised, "QM-E941 expected for an unknown job precision")
     print("test_orchestrator OK")

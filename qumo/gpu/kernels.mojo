@@ -47,8 +47,8 @@ Design (ideas from qsim, cuStateVec and Qiskit-Aer-GPU, re-derived for MAX):
     unit-tested on any machine, with or without a GPU (MAX's
     `DeviceContext(api="cpu")` does not execute `enqueue_function` kernels).
   * Precision is the comptime DType `dt`: float32 on Apple GPUs (Metal has no
-    fp64), float32 or float64 on NVIDIA / AMD (default policy in
-    qumo.gpu.device).
+    fp64), float32 or float64 on NVIDIA / AMD (policy in qumo.gpu.device:
+    float32 by default on every GPU, float64 on request).
   * Reductions (Pauli-term expectation values, norms, sampling CDF segments)
     use the classic shared-memory tree (CUDA "reduction #3"): per-thread
     grid-stride partial -> TPB-wide tree in shared memory -> one partial per

@@ -3,7 +3,7 @@ MOJO ?= .venv/bin/mojo
 PY ?= bench/.venv/bin/python
 TESTS := $(wildcard tests/test_*.mojo)
 
-.PHONY: all setup test cli py bench-sv bench-neutral benchpress clean
+.PHONY: all setup test cli py bench-sv bench-neutral benchpress clean examples examples-all examples-gpu test-py
 
 all: cli py
 
@@ -39,16 +39,19 @@ bench-neutral: py  ## hardware-neutral compiler benchmark (QUMO, Qiskit, TKET, C
 # Linux, or Xcode + `xcodebuild -downloadComponent MetalToolchain` on macOS.
 GPU_TARGETS ?= sm_75 sm_80 sm_90 gfx942 metal:4
 GPU_CHECK_SRCS := tests/test_gpu.mojo tests/test_gpu_frame.mojo bench/bench_gpu.mojo
+# extra -D flags for gpu-check, e.g. GPU_CHECK_DEFINES="-D QUMO_GPU_FP64" (fp64 as the build default;
+# accepted and ignored on metal:4). GPU precision: fp32 by default on every GPU (docs/GPU.md).
+GPU_CHECK_DEFINES ?=
 GPU_TESTS := $(wildcard tests/test_gpu*.mojo)
 
 .PHONY: gpu-check test-gpu test-gpu-regbits cli-gpu py-gpu bench-gpu
 
-gpu-check:  ## cross-compile every GPU kernel for NVIDIA sm_75 (T4) / sm_80 / sm_90, AMD gfx942, Apple metal:4 (no GPU needed)
+gpu-check:  ## cross-compile every GPU kernel for NVIDIA sm_75 (T4) / sm_80 / sm_90, AMD gfx942, Apple metal:4 (no GPU needed; GPU_CHECK_DEFINES adds -D flags)
 	@fail=0; for a in $(GPU_TARGETS); do \
 		d=build/gpucheck/$$(echo $$a | tr ':' '_'); rm -rf $$d; mkdir -p $$d; \
 		for f in $(GPU_CHECK_SRCS); do \
 			b=$$(basename $$f .mojo); \
-			if $(MOJO) build -I . -D QUMO_GPU --emit asm --target-accelerator=$$a -o $$d/$$b.s $$f > $$d/$$b.log 2>&1; then \
+			if $(MOJO) build -I . -D QUMO_GPU $(GPU_CHECK_DEFINES) --emit asm --target-accelerator=$$a -o $$d/$$b.s $$f > $$d/$$b.log 2>&1; then \
 				k=$$(ls $$d | grep "^$${b}_" | grep -c "_gk_"); \
 				if [ $$k -gt 0 ]; then echo "PASS $$a $$f ($$k kernels)"; \
 				else echo "FAIL $$a $$f: no kernels emitted (gating broken?)"; fail=1; fi; \
@@ -95,6 +98,19 @@ BENCH_GPU_ARGS ?= 26
 bench-gpu:  ## GPU vs CPU benchmarks (state-vector families, dispatch crossover, QEC Pauli frames)
 	@mkdir -p build/gpu
 	$(MOJO) build -I . -D QUMO_GPU -o build/gpu/bench_gpu bench/bench_gpu.mojo && ./build/gpu/bench_gpu $(BENCH_GPU_ARGS)
+
+# ---------------------------------------------------------------- examples (examples/README.md)
+examples:  ## fast-tier examples, verified by their CHECK lines
+	$(PY) examples/run_examples.py --tier fast
+
+examples-all:  ## every example tier
+	$(PY) examples/run_examples.py --tier all
+
+examples-gpu: cli-gpu py-gpu  ## fast tier with GPU builds
+	$(PY) examples/run_examples.py --tier fast --gpu
+
+test-py:  ## Python tests: examples runner, heterogeneous example, hardware plugins
+	PYTHONPATH=build:plugins/hardware $(PY) -m pytest -q examples/heterogeneous examples/test_run_examples.py plugins/hardware/tests
 
 clean:
 	rm -rf build

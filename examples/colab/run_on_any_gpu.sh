@@ -4,6 +4,7 @@
 #   curl -fsSLO https://raw.githubusercontent.com/ANFAIA/QUMO/main/examples/colab/run_on_any_gpu.sh
 #   bash run_on_any_gpu.sh                       # auto: NVIDIA / AMD / Apple / CPU only
 #   bash run_on_any_gpu.sh --quick               # smoke test (minutes)
+#   bash run_on_any_gpu.sh --fp64                # GPU engines in fp32 AND fp64 (default: fp32 only)
 #   bash run_on_any_gpu.sh --config colab_a100 --suites sv_gpu,baseline_cudaq --label "lambda A100"
 #   bash run_on_any_gpu.sh --ref 0dc37a7 --dir ~/src/QUMO --no-baselines
 #   bash run_on_any_gpu.sh --mojo-version "" --max-version ""   # latest Mojo/MAX instead of the pinned ones
@@ -12,6 +13,8 @@
 #   --config NAME|PATH   preset from bench/configs/ or a JSON path (default: auto, picked from the GPU)
 #   --quick              tiny sizes (16-20 qubits), 1 repetition
 #   --suites a,b,...     run (and build) only these suites (default: the preset's enabled suites)
+#   --fp64               also run every GPU engine in fp64 (QUMO GPU, CUDA-Q, Aer GPU, Lightning GPU);
+#                        default fp32 only, CUDA-Q's default and QUMO's. CPU references are unchanged.
 #   --label TEXT         free text stored in the result (no personal data)
 #   --ref REF            branch, tag or commit to clone (default: main)
 #   --repo URL           repository to clone (default: https://github.com/ANFAIA/QUMO)
@@ -24,7 +27,7 @@
 # detection: nvidia-smi -> NVIDIA, rocminfo / amd-smi / rocm-smi -> AMD,
 # macOS arm64 -> Apple (Metal), otherwise CPU only. Vendor-specific baselines go
 # into their own virtual environments under $QUMO_VENVS (default <dir>/build/baseline-venvs):
-#   NVIDIA: CUDA-Q (cuda-quantum-cu12/13), qiskit-aer-gpu (Qiskit < 2)
+#   NVIDIA: CUDA-Q (cuda-quantum-cu12/13), qiskit-aer-gpu-cu11 (latest Aer + Qiskit; fallback qiskit-aer-gpu 0.15.1)
 #   AMD:    PennyLane lightning.amdgpu (+ lightning.qubit)
 #   Apple:  PennyLane lightning.qubit (CPU reference)
 # Results: bench/results/cloud/*.json + .csv (see examples/colab/README.md).
@@ -35,6 +38,7 @@ REF="main"
 DIR=""
 CONFIG="auto"
 QUICK=""
+FP64=""
 SUITES=""
 LABEL=""
 BASELINES=1
@@ -51,6 +55,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --config) CONFIG="$2"; shift 2 ;;
     --quick) QUICK="--quick"; shift ;;
+    --fp64) FP64="--fp64"; shift ;;
     --suites) SUITES="$2"; shift 2 ;;
     --label) LABEL="$2"; shift 2 ;;
     --ref) REF="$2"; shift 2 ;;
@@ -146,7 +151,7 @@ if [ ! -x .venv/bin/mojo ]; then
 fi
 .venv/bin/mojo --version 2>&1 | grep -v Crashpad || true
 if [ ! -x bench/.venv/bin/python ]; then uv venv -q bench/.venv --python 3.12; fi
-uv pip install -q --python bench/.venv/bin/python qiskit qiskit-aer pytket pytket-qiskit stim pymatching numpy matplotlib psutil
+uv pip install -q -U --python bench/.venv/bin/python qiskit qiskit-aer pytket pytket-qiskit stim pymatching numpy matplotlib psutil
 
 # ---------------------------------------------------------------- vendor baselines (own venvs)
 VENVS="${QUMO_VENVS:-$DIR/build/baseline-venvs}"
@@ -156,7 +161,7 @@ mkvenv() {  # name env_var packages...   (never fatal: a missing baseline is a r
   if [ ! -x "$py" ] && ! uv venv -q "$VENVS/$name" --python 3.12; then
     echo "NOTE: could not create $VENVS/$name (the suite will record a skip)"; return 0
   fi
-  if uv pip install -q --python "$py" "$@"; then export "$var=$py"; echo "$var=$py";
+  if uv pip install -q -U --python "$py" "$@"; then export "$var=$py"; echo "$var=$py";
   else echo "NOTE: could not install $* (the suite will record a skip)"; fi
 }
 if [ "$BASELINES" = 1 ]; then
@@ -165,7 +170,10 @@ if [ "$BASELINES" = 1 ]; then
     nvidia)
       if [ "${CUDA_MAJOR:-12}" -ge 13 ]; then mkvenv cudaq QUMO_CUDAQ_PYTHON cuda-quantum-cu13 numpy;
       else mkvenv cudaq QUMO_CUDAQ_PYTHON cuda-quantum-cu12 numpy; fi
-      if [ "$(uname -m)" = "x86_64" ]; then mkvenv aer-gpu QUMO_AER_GPU_PYTHON 'qiskit>=1.1,<2' qiskit-aer-gpu numpy; fi
+      if [ "$(uname -m)" = "x86_64" ]; then  # latest Aer + Qiskit; fallback: last CUDA-12 wheel (Qiskit < 2)
+        mkvenv aer-gpu QUMO_AER_GPU_PYTHON qiskit qiskit-aer-gpu-cu11 numpy
+        [ -n "${QUMO_AER_GPU_PYTHON:-}" ] || mkvenv aer-gpu-legacy QUMO_AER_GPU_PYTHON 'qiskit>=1.1,<2' qiskit-aer-gpu numpy
+      fi
       mkvenv lightning QUMO_LIGHTNING_PYTHON pennylane pennylane-lightning pennylane-lightning-gpu numpy ;;
     amd)
       mkvenv lightning QUMO_LIGHTNING_PYTHON pennylane pennylane-lightning pennylane-lightning-amdgpu numpy ;;
@@ -177,6 +185,10 @@ fi
 # ---------------------------------------------------------------- build + run
 SEL=(--config "$CONFIG")
 [ -n "$SUITES" ] && SEL+=(--suites "$SUITES")
+if [ -n "$FP64" ]; then
+  if grep -q -- '"--fp64"' bench/run_benchmarks.py; then SEL+=("$FP64");
+  else echo "NOTE: this QUMO version's runner has no --fp64 switch: it runs the precisions its preset lists"; fi
+fi
 ARGS=("${SEL[@]}" --out "$OUT")
 [ -n "$QUICK" ] && ARGS+=("$QUICK")
 [ -n "$LABEL" ] && ARGS+=(--label "$LABEL")

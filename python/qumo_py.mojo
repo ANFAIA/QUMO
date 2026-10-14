@@ -276,14 +276,29 @@ def py_sample(circ: PythonObject, shots: PythonObject, seed: PythonObject) raise
     return d
 
 
-def py_sample_device(circ: PythonObject, shots: PythonObject, seed: PythonObject, device: PythonObject) raises -> PythonObject:
-    """Sample on an explicit device ('auto' | 'cpu' | 'gpu') -> (counts, method, note).
+def py_sample_device(circ: PythonObject, shots: PythonObject, seed: PythonObject, device: PythonObject,
+                     var **kwargs: PythonObject) raises -> PythonObject:
+    """Sample on an explicit device -> (counts, method, note).
 
-    'gpu' falls back to the CPU when the build lacks -D QUMO_GPU or no device
-    is usable; `note` then says why.
+    Python: sample_device(circ, shots, seed, device, precision="auto").
+
+    device: 'auto' | 'cpu' | 'gpu'. 'gpu' falls back to the CPU when the build
+    lacks -D QUMO_GPU or no device is usable; `note` then says why.
+    precision (keyword only): 'auto' (QUMO_GPU_PRECISION when set, else the
+    build default: fp32 on every GPU) | 'fp32' | 'fp64', for GPU state-vector
+    runs; `method` names the precision that ran ('gpu:statevector:fp64').
+    Errors: QM-E940 unknown device, QM-E941 unknown precision, QM-E472 fp64
+    on an Apple GPU.
     """
+    var precision = String("auto")
+    for kv in kwargs.items():
+        if kv.key == "precision":
+            precision = String(py=kv.value)
+        else:
+            raise Error("QM-E913: sample_device() got an unexpected keyword argument '" + kv.key + "'. Hint: the only keyword argument is precision='auto'|'fp32'|'fp64'.")
     var note = String()
-    var r = sample_on(PyCircuit._get(circ)[].c, Int(py=shots), UInt64(Int(py=seed)), List[Float64](), String(py=device), note)
+    var r = sample_on(PyCircuit._get(circ)[].c, Int(py=shots), UInt64(Int(py=seed)), List[Float64](), String(py=device), note,
+                      precision)
     var d = Python.dict()
     for kv in r.counts.items():
         d[kv.key] = kv.value
@@ -291,7 +306,9 @@ def py_sample_device(circ: PythonObject, shots: PythonObject, seed: PythonObject
 
 
 def py_gpu_info() raises -> PythonObject:
-    """GPU status: compiled (-D QUMO_GPU), available, name, api, vendor, precision."""
+    """GPU status: compiled (-D QUMO_GPU), available, name, api, vendor,
+    precision (what 'auto' runs), precision_build_default, precision_env
+    (QUMO_GPU_PRECISION), precisions (selectable), precision_note."""
     var g = query_gpu()
     var d = Python.dict()
     d["compiled"] = g.compiled
@@ -300,6 +317,13 @@ def py_gpu_info() raises -> PythonObject:
     d["api"] = g.api
     d["vendor"] = g.vendor
     d["precision"] = g.precision
+    d["precision_build_default"] = g.precision_build_default
+    d["precision_env"] = g.precision_env
+    var ps = Python.list()
+    for p in g.precisions:
+        ps.append(p)
+    d["precisions"] = ps
+    d["precision_note"] = g.precision_note
     d["fp64_supported"] = g.fp64_supported
     d["min_qubits_auto"] = g.min_qubits_auto
     d["error"] = g.error

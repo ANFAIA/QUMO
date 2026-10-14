@@ -1,0 +1,24 @@
+{
+ "schema": "qumo.hetero_problem.v1",
+ "name": "h2_molecule",
+ "kind": "molecule",
+ "title": "Ground-state energy of H2 (STO-3G, 0.735 A)",
+ "description": "Jordan-Wigner qubit Hamiltonian of molecular hydrogen in the STO-3G basis at the equilibrium bond length (4 spin orbitals, 2 electrons; q0 g-up, q1 g-down, q2 u-up, q3 u-down). Same Hamiltonian as qumo.algorithms.hamiltonians.h2_sto3g(4).",
+ "goal": "Reach chemical accuracy (1.6 mHa) on the ideal simulator and report the noisy QPU estimate.",
+ "data": {
+  "molecule": "H2",
+  "basis": "STO-3G",
+  "bond_length_angstrom": 0.735,
+  "num_qubits": 4,
+  "num_electrons": 2,
+  "hamiltonian": "-0.09057898608834669 + 0.17218393261915532 * Z0 + 0.17218393261915532 * Z1 + -0.22575349222402485 * Z2 + -0.22575349222402485 * Z3 + 0.16892753870087904 * Z0 Z1 + 0.17464343068300525 * Z2 Z3 + 0.1209126326177663 * Z0 Z2 + 0.1209126326177663 * Z1 Z3 + 0.1661454325638242 * Z0 Z3 + 0.1661454325638242 * Z1 Z2 + -0.04523279994605789 * X0 X1 Y2 Y3 + 0.04523279994605789 * X0 Y1 Y2 X3 + 0.04523279994605789 * Y0 X1 X2 Y3 + -0.04523279994605789 * Y0 Y1 X2 X3"
+ },
+ "reference": {
+  "ground_energy": -1.1373060357533993,
+  "hartree_fock_energy": -1.1169989967540035,
+  "source": "exact diagonalisation (qumo ground_energy); FCI"
+ },
+ "checks": {
+  "energy_error_max": 0.0016
+ }
+}

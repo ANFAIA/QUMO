@@ -28,6 +28,8 @@ preset from [`bench/configs/`](../../bench/configs/).
    preset (`colab_t4`, `colab_l4`, `colab_a100`, `colab_h100`, `colab_g4`, `nvidia_generic` for any other
    NVIDIA GPU). Override it in the form, tick `QUICK` for a smoke test (16-20 qubits for every engine,
    one repetition), or set `SUITES` to run and build only some suites (e.g. `sv_gpu,baseline_cudaq`).
+   Every GPU engine runs in **fp32** (CUDA-Q's default and QUMO's); tick `INCLUDE_FP64` to add the fp64
+   series of every GPU engine.
 4. Step 6 shows the tables and plots; step 7 downloads a zip with the JSON, CSV, report and plots
    (tick `SAVE_TO_DRIVE` to also copy them to `MyDrive/QUMO_benchmarks`).
 
@@ -38,23 +40,25 @@ from elsewhere (an AMD or Apple run, your laptop).
 
 ### Expected duration and cost (estimates)
 
-| Runtime | Full preset | `QUICK` | Approx. cost |
-|---|---|---|---|
-| T4 (free tier) | 70-120 min (with the diagnostic variants; `SUITES` can skip them) | ~15-20 min | free (session limits apply) or 1.19 units/h |
-| L4 | 35-60 min | ~15 min | 1.71 units/h (~$0.17/h) |
-| A100 40 / 80 GB | 35-60 min | ~12 min | 5.40 / 7.52 units/h (~$0.54-0.75/h) |
-| G4 (RTX PRO 6000) | 40-70 min | ~12 min | 8.71 units/h (~$0.87/h) |
-| H100 | 40-70 min | ~12 min | not measured |
+| Runtime | Full preset (fp32) | `INCLUDE_FP64` adds | `QUICK` | Approx. cost |
+|---|---|---|---|---|
+| T4 (free tier) | 55-100 min (with the diagnostic variants; `SUITES` can skip them) | ~15-25 min (fp64 at 1/32 rate) | ~12-15 min | free (session limits apply) or 1.19 units/h |
+| L4 | 30-50 min | ~10-15 min (1/64 rate) | ~12 min | 1.71 units/h (~$0.17/h) |
+| A100 40 / 80 GB | 30-50 min | ~5-10 min | ~10 min | 5.40 / 7.52 units/h (~$0.54-0.75/h) |
+| G4 (RTX PRO 6000) | 35-60 min | ~10-15 min (1/64 rate) | ~10 min | 8.71 units/h (~$0.87/h) |
+| H100 | 35-60 min | ~5-10 min | ~10 min | not measured |
 
 About 10-15 minutes of every run is the one-off download of Mojo/MAX (~1 GB) and the builds; most of
-the rest is CPU work (the QUMO CPU and Aer CPU fp64 + fp32 references, each with one warm-up per width;
+the rest is CPU work (the QUMO CPU and Aer CPU fp64 + fp32 references, each with one warm-up per width,
+which `INCLUDE_FP64` does not change;
 `bench_gpu` checks against the CPU up to `sv_gpu.cpu_max` qubits). The NVIDIA presets add labelled diagnostic
 series (CUDA-Q without fusion and, on the T4, with fusion widths 2-6; Aer GPU with narrower fusion and with
 cuStateVec; a second QUMO GPU build with 16 amplitudes per thread) and the QUMO GPU cost probe; on the T4 they
 add roughly 25-40 minutes (estimate). The Colab notebook installs all three NVIDIA baselines by default (CUDA-Q,
 `qiskit-aer-gpu`, PennyLane `lightning.gpu`); untick one in step 3 to save install time. The
-durations are estimates from the presets' sizes, not yet measured on Colab; the result JSON records the
-real `duration_s` of each suite. Unit rates: March 2026 measurements, 100 units ~ US$10
+durations are estimates from the presets' sizes, not yet measured on Colab (the fp32-only default drops one
+`bench_gpu` build and the fp64 series of every GPU engine, including the diagnostic variants); the result
+JSON records the real `duration_s` of each suite. Unit rates: March 2026 measurements, 100 units ~ US$10
 (see the doc's sources).
 
 ## AMD GPUs (ROCm, no Colab)
@@ -70,8 +74,8 @@ Colab has no AMD GPUs. Use any Jupyter on a ROCm machine:
   Instinct machine: `pip install jupyterlab && jupyter lab`, same notebook.
 * Headless instead: `bash examples/colab/run_on_any_gpu.sh`.
 
-The `amd_mi300x` preset runs QUMO CPU/GPU (fp32 and fp64; MI300X has full-rate fp64), Aer CPU and
-PennyLane Lightning CPU + `lightning.amdgpu` (the AMD-native GPU baseline; its prebuilt wheels target
+The `amd_mi300x` preset runs QUMO CPU/GPU (GPU in fp32; `INCLUDE_FP64 = True` adds fp64, which MI300X runs at
+full rate), Aer CPU and PennyLane Lightning CPU + `lightning.amdgpu` (the AMD-native GPU baseline; its prebuilt wheels target
 MI300-series GPUs with ROCm >= 7.0, elsewhere the suite records a skip). CUDA-Q and Aer GPU are CUDA-only
 and are recorded as *not applicable*. Other AMD GPUs get `amd_generic`. Expect ~30-60 min on one MI300X
 (estimate).
@@ -82,6 +86,7 @@ and are recorded as *not applicable*. Other AMD GPUs get `amd_generic`. Expect ~
 curl -fsSLO https://raw.githubusercontent.com/ANFAIA/QUMO/main/examples/colab/run_on_any_gpu.sh
 bash run_on_any_gpu.sh                    # clone -> install -> build -> run (auto preset)
 bash run_on_any_gpu.sh --quick            # smoke test
+bash run_on_any_gpu.sh --fp64             # GPU engines in fp32 and fp64 (default: fp32 only)
 bash run_on_any_gpu.sh --config colab_a100 --suites sv_gpu,baseline_cudaq --label "A100 PCIe, lab server"
 # from inside a checkout it uses that checkout: bash examples/colab/run_on_any_gpu.sh --quick
 ```
@@ -119,8 +124,9 @@ table. It applies these rules:
 * Widths of 20 qubits and fewer are marked with a dagger: fixed per-call overhead dominates there.
 * fp64 on GPUs with slow fp64 units (T4, L4, RTX, consumer AMD) is flagged: it measures fp64 arithmetic,
   not memory bandwidth, and does not carry over to A100 / H100 / MI300.
-* fp32 with fp32, fp64 with fp64; runs whose load average stayed below the core count, with no GPU
-  throttling and (on a Mac) Low Power Mode off are the ones to trust.
+* fp32 with fp32, fp64 with fp64 (rows record `precision`, what ran, and `precision_requested`); runs whose
+  load average stayed below the core count, with no GPU throttling and (on a Mac) Low Power Mode off are the ones
+  to trust. GPU engines run in fp32 unless the run asked for fp64 (`INCLUDE_FP64`, `--fp64`).
 
 ## Share results
 

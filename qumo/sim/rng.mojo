@@ -5,7 +5,7 @@ bit-identical results on every run so agents can diff, cache and verify.
 `split(k)` derives independent streams for parallel workers.
 """
 
-from std.math import log, log1p
+from std.math import log, log1p, sqrt, cos, pi
 
 
 struct Rng(Copyable):
@@ -54,6 +54,24 @@ struct Rng(Copyable):
     @always_inline
     def below(mut self, n: Int) -> Int:
         return Int(self.next_u64() % UInt64(n))
+
+    def normal(mut self) -> Float64:
+        """Standard normal N(0, 1) by Box-Muller from two uniform() draws.
+
+        No spare value is cached: every call consumes exactly two uniforms, so
+        a stream (and every `split()` child) stays reproducible however the
+        calls are interleaved.
+        """
+        var u1 = 1.0 - self.uniform()  # (0, 1]: log(u1) is finite
+        var u2 = self.uniform()
+        return sqrt(-2.0 * log(u1)) * cos(2.0 * pi * u2)
+
+    def normal_list(mut self, n: Int, scale: Float64 = 1.0) -> List[Float64]:
+        """`n` independent N(0, scale^2) draws (e.g. PennyLane-style 0.01 * randn init)."""
+        var out = List[Float64](capacity=max(n, 0))
+        for _ in range(n):
+            out.append(scale * self.normal())
+        return out^
 
     def split(self, stream: Int) -> Rng:
         """Independent child stream (for parallel workers / per-shot seeds)."""

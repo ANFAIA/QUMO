@@ -28,8 +28,12 @@ framework), selected by `Grad.*`:
 `ExpectationEngine` owns the reusable buffers (two state vectors, a prepared
 `PauliOperator`, a scratch circuit for shifts) so optimisation loops do no
 per-iteration allocation; the free functions are one-shot conveniences.
-`batch_expectation` / `batch_gradient` evaluate many parameter sets (the
-PUB-style primitive), parallel over sets when the state is small.
+`set_initial_state` makes the engine start from an arbitrary state instead of
+|0...0> (amplitude-embedded data, QML), for values and all three gradient
+methods. `batch_expectation` / `batch_value_and_gradient` / `batch_gradient`
+evaluate many parameter sets (the PUB-style primitive, the dataset loop of
+QML training), parallel over sets with one engine per worker when the state
+is small.
 
 Error codes: QM-E804 (parameter vector length), QM-E805 (circuit not
 differentiable: mid-circuit measurement, reset, noise, classical control),
@@ -51,7 +55,7 @@ from qumo.ir.pauli import PauliSum
 from qumo.sim.statevector import StateVector, PAR_MIN_ITEMS
 from qumo.sim.runner import evolve_into, apply_instruction
 from qumo.algorithms.hamiltonians import PauliOperator, check_fits
-from qumo.algorithms.linalg import sv_dot
+from qumo.algorithms.linalg import sv_dot, sv_assign
 
 
 struct Grad:
@@ -197,6 +201,8 @@ struct ExpectationEngine(Movable):
     var fd_step: Float64
     var nfev: Int
     var ngrad: Int
+    var init_state: StateVector  # used instead of |0...0> when has_init_state
+    var has_init_state: Bool
 
     def __init__(out self, circuit: Circuit, h: PauliSum, fd_step: Float64 = 1e-6) raises:
         circuit.validate()
@@ -210,15 +216,40 @@ struct ExpectationEngine(Movable):
         self.fd_step = fd_step
         self.nfev = 0
         self.ngrad = 0
+        self.init_state = StateVector(0)
+        self.has_init_state = False
+
+    def set_initial_state(mut self, sv: StateVector) raises:
+        """Start every evaluation from `sv` instead of |0...0> (copied; e.g. an
+        amplitude-embedded data point). Gradients are w.r.t. the circuit
+        parameters only; `sv` is treated as a constant."""
+        if sv.num_qubits != self.circuit.num_qubits:
+            raise Error("QM-E804: initial state has " + String(sv.num_qubits) + " qubits, the circuit has " + String(self.circuit.num_qubits) + ". Hint: build the state on exactly the circuit's register (amplitude_state(a, circuit.num_qubits)).")
+        if self.has_init_state:
+            sv_assign(self.init_state, sv)
+        else:
+            self.init_state = sv.copy()
+            self.has_init_state = True
+
+    def clear_initial_state(mut self):
+        """Back to the default initial state |0...0>."""
+        self.has_init_state = False
+        self.init_state = StateVector(0)
+
+    def _reset_psi(mut self):
+        if self.has_init_state:
+            sv_assign(self.psi, self.init_state)
+        else:
+            self.psi.reset_to_zero()
 
     def _check(self, params: List[Float64]) raises:
         if len(params) != self.num_params:
             raise Error("QM-E804: expected " + String(self.num_params) + " parameter values " + self.circuit.param_names_str() + ", got " + String(len(params)) + ".")
 
     def prepare(mut self, params: List[Float64]) raises:
-        """psi <- U(params)|0> (reuses the buffer)."""
+        """psi <- U(params)|psi_0> (|0...0> unless set_initial_state; reuses the buffer)."""
         self._check(params)
-        self.psi.reset_to_zero()
+        self._reset_psi()
         evolve_into(self.psi, self.circuit, params)
         self.nfev += 1
 
@@ -227,7 +258,7 @@ struct ExpectationEngine(Movable):
         return self.op.expectation(self.psi)
 
     def _eval_work(mut self, params: List[Float64]) raises -> Float64:
-        self.psi.reset_to_zero()
+        self._reset_psi()
         evolve_into(self.psi, self.work, params)
         self.nfev += 1
         return self.op.expectation(self.psi)
@@ -460,10 +491,85 @@ def batch_expectation(circuit: Circuit, h: PauliSum, param_sets: List[List[Float
     return out^
 
 
-def batch_gradient(circuit: Circuit, h: PauliSum, param_sets: List[List[Float64]], method: Int = Grad.ADJOINT) raises -> List[List[Float64]]:
-    """Gradients for every parameter set (sequential, one reused engine)."""
+comptime BATCH_GRAD_PAR_MAX_QUBITS = 14
+
+
+def batch_value_and_gradient(circuit: Circuit, h: PauliSum, param_sets: List[List[Float64]],
+                             method: Int = Grad.ADJOINT,
+                             initial_states: List[StateVector] = List[StateVector]()) raises -> Tuple[List[Float64], List[List[Float64]]]:
+    """(values, grads): E(theta_b) and dE/dtheta at every parameter set b.
+
+    `initial_states` is empty (every set starts from |0...0>) or holds one
+    state per set (e.g. amplitude-embedded data points; see
+    ExpectationEngine.set_initial_state). States of <= 14 qubits run the sets
+    in parallel, one ExpectationEngine per worker over a contiguous slice of
+    sets; larger states run sequentially through one engine (the kernels are
+    then multi-threaded). Results equal the sequential per-set
+    value_and_gradient bit for bit.
+    """
+    var nb = len(param_sets)
+    var np_ = circuit.num_params()
+    var has_init = len(initial_states) > 0
+    if has_init and len(initial_states) != nb:
+        raise Error("QM-E804: batch_value_and_gradient() got " + String(len(initial_states)) + " initial states for " + String(nb) + " parameter sets. Hint: pass none or one per set.")
+    if method != Grad.ADJOINT and method != Grad.PARAM_SHIFT and method != Grad.FINITE_DIFF:
+        raise Error("QM-E806: unknown gradient method id " + String(method) + ". Hint: use Grad.ADJOINT, Grad.PARAM_SHIFT or Grad.FINITE_DIFF.")
     var eng = ExpectationEngine(circuit, h)
-    var out = List[List[Float64]](capacity=len(param_sets))
-    for b in range(len(param_sets)):
-        out.append(eng.gradient(param_sets[b], method))
-    return out^
+    for b in range(nb):
+        eng._check(param_sets[b])
+        if has_init and initial_states[b].num_qubits != circuit.num_qubits:
+            raise Error("QM-E804: initial state " + String(b) + " has " + String(initial_states[b].num_qubits) + " qubits, the circuit has " + String(circuit.num_qubits) + ".")
+    var values = List[Float64](length=nb, fill=0.0)
+    var flat = List[Float64](length=nb * np_, fill=0.0)
+    var nw = min(nb, parallelism_level())
+    if circuit.num_qubits > BATCH_GRAD_PAR_MAX_QUBITS or nw < 2:
+        var g = List[Float64](length=np_, fill=0.0)
+        for b in range(nb):
+            if has_init:
+                eng.set_initial_state(initial_states[b])
+            values[b] = eng.value_and_gradient(param_sets[b], g, method)
+            for k in range(np_):
+                flat[b * np_ + k] = g[k]
+    else:
+        var per = (nb + nw - 1) // nw
+        nw = (nb + per - 1) // per
+        var vp = values.unsafe_ptr().as_unsafe_any_origin()
+        var gp = flat.unsafe_ptr().as_unsafe_any_origin()
+        var failed = List[Int](length=nw, fill=0)
+        var fp = failed.unsafe_ptr().as_unsafe_any_origin()
+
+        def task(w: Int) {imm circuit, imm h, imm param_sets, imm initial_states, imm has_init, imm per, imm nb, imm np_, imm method, imm vp, imm gp, imm fp}:
+            var lo = w * per
+            var hi = min(lo + per, nb)
+            try:
+                var e = ExpectationEngine(circuit, h)
+                var g = List[Float64](length=np_, fill=0.0)
+                for b in range(lo, hi):
+                    if has_init:
+                        e.set_initial_state(initial_states[b])
+                    vp[unsafe_offset=b] = e.value_and_gradient(param_sets[b], g, method)
+                    for k in range(np_):
+                        gp[unsafe_offset=b * np_ + k] = g[k]
+            except:
+                fp[unsafe_offset=w] = 1
+
+        parallelize(task, nw)
+        _ = len(values)
+        _ = len(flat)
+        for w in range(nw):
+            if failed[w] != 0:
+                raise Error("QM-E804: batch_value_and_gradient() failed on parameter sets " + String(w * per) + ".." + String(min((w + 1) * per, nb) - 1) + ".")
+    var grads = List[List[Float64]](capacity=nb)
+    for b in range(nb):
+        var g = List[Float64](capacity=np_)
+        for k in range(np_):
+            g.append(flat[b * np_ + k])
+        grads.append(g^)
+    return (values^, grads^)
+
+
+def batch_gradient(circuit: Circuit, h: PauliSum, param_sets: List[List[Float64]], method: Int = Grad.ADJOINT) raises -> List[List[Float64]]:
+    """Gradients for every parameter set (parallel over sets for <= 14 qubits;
+    the gradient part of batch_value_and_gradient)."""
+    var r = batch_value_and_gradient(circuit, h, param_sets, method)
+    return r[1].copy()

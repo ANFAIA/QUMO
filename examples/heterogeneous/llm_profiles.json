@@ -1,0 +1,76 @@
+{
+  "schema": "qumo.llm_profiles.v1",
+  "comment": "Model providers for examples/heterogeneous/ai_gpu_qpu.py. Every provider speaks the OpenAI-compatible chat-completions API. Keys are read ONLY from the environment variable named in api_key_env and are never written anywhere. Model ids checked on openrouter.ai on 2026-10-13; see https://openrouter.ai/models for the current list.",
+  "default": "openrouter",
+  "default_local": "ollama",
+  "profiles": {
+    "openrouter": {
+      "provider": "openrouter",
+      "base_url": "https://openrouter.ai/api/v1",
+      "model": "anthropic/claude-opus-5.5",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "headers": {"X-Title": "QUMO heterogeneous example"},
+      "header_env": {"HTTP-Referer": "OPENROUTER_HTTP_REFERER", "X-Title": "OPENROUTER_X_TITLE"},
+      "structured": "auto",
+      "timeout": 120,
+      "max_retries": 2,
+      "max_tokens": 2000,
+      "alternatives": [
+        "anthropic/claude-opus-5.5",
+        "anthropic/claude-sonnet-5.5",
+        "anthropic/claude-haiku-5.5",
+        "openai/gpt-6.1-sol",
+        "google/gemini-3.8-flash",
+        "qwen/qwen3.8-max-prime",
+        "deepseek/deepseek-v4-pro",
+        "mistralai/mistral-large-4-0"
+      ]
+    },
+    "ollama": {
+      "provider": "local",
+      "base_url": "http://localhost:11434/v1",
+      "model": "qwen3:8b",
+      "api_key_env": "",
+      "structured": "auto",
+      "timeout": 300,
+      "max_retries": 1,
+      "max_tokens": 2000
+    },
+    "lmstudio": {
+      "provider": "local",
+      "base_url": "http://localhost:1234/v1",
+      "model": "auto",
+      "api_key_env": "",
+      "structured": "auto",
+      "timeout": 300,
+      "max_retries": 1,
+      "max_tokens": 2000
+    },
+    "llamacpp": {
+      "provider": "local",
+      "base_url": "http://localhost:8080/v1",
+      "model": "auto",
+      "api_key_env": "",
+      "structured": "auto",
+      "timeout": 300,
+      "max_retries": 1,
+      "max_tokens": 2000
+    },
+    "vllm": {
+      "provider": "local",
+      "base_url": "http://localhost:8000/v1",
+      "model": "auto",
+      "api_key_env": "LOCAL_LLM_API_KEY",
+      "structured": "auto",
+      "timeout": 300,
+      "max_retries": 1,
+      "max_tokens": 2000
+    },
+    "rules": {
+      "provider": "rules",
+      "base_url": "",
+      "model": "offline-rules",
+      "api_key_env": ""
+    }
+  }
+}

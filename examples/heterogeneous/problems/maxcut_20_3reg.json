@@ -1,0 +1,19 @@
+{
+ "schema": "qumo.hetero_problem.v1",
+ "name": "maxcut_20_3reg",
+ "kind": "maxcut",
+ "title": "MaxCut on a random 3-regular graph with 20 nodes (large: NVIDIA GPU threshold)",
+ "description": "networkx random_regular_graph(3, 20, seed=7), connected, 30 edges; brute-force max cut 26. 20 qubits is the GPU dispatch threshold on NVIDIA/AMD (16 on Apple).",
+ "goal": "Show where the GPU pays off.",
+ "data": {
+  "graph": "0-9 0-10 0-19 1-5 1-17 1-19 2-5 2-7 2-8 3-4 3-6 3-8 4-11 4-15 5-12 6-7 6-18 7-14 8-9 9-16 10-13 10-16 11-18 11-19 12-13 12-14 13-18 14-15 15-17 16-17"
+ },
+ "checks": {
+  "ideal_ratio_source": "3-regular graphs: p=1 guarantees 0.6924 (Farhi, Goldstone, Gutmann 2014); p=2 guarantees 0.7559 without short cycles (Wurtz & Love, PRA 103, 042612, 2021); deeper plans use the p=2 value (deeper optimal QAOA is never worse)",
+  "graph_family": "3-regular",
+  "ideal_ratio_min_by_depth": {
+   "1": 0.6924,
+   "2": 0.7559
+  }
+ }
+}

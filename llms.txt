@@ -9,16 +9,16 @@ Conventions an agent must know:
 - Symbolic angles: declare `input float theta;` and use any expression affine in one input (`2*theta + pi/2`). Bind values with `params` as an array in declaration order or an object `{"theta": 0.1}`.
 - Observables are Pauli sums such as `"0.5*Z0 Z1 - 1.2*X0 + 0.3"` or dense labels like `"ZZI"` (leftmost character = highest qubit).
 - Results are deterministic: every random process takes a `seed` (default 1234).
-- Errors look like `QM-Exxx: message (line L, col C). Hint: fix`. Codes are stable. Branch on the code and apply the hint. Warnings (`QM-Wxxx`) in tool results have the same JSON shape; QM-W020 means a requested GPU run fell back to the CPU.
+- Errors look like `QM-Exxx: message (line L, col C). Hint: fix`. Codes are stable. Branch on the code and apply the hint. Warnings (`QM-Wxxx`) in tool results have the same JSON shape; QM-W020 means a requested GPU run fell back to the CPU; QM-W021 means a requested GPU precision did not apply (CPU simulators are fp64).
 - QUMO-only operations (noise, detectors, observables) use `#pragma qumo ...` lines.
 
 ## Agent interfaces
 
 - [AI-native interface design](docs/AI_NATIVE.md): OpenQASM subset, diagnostics, MCP tools, CLI, determinism, and how to register new tools and commands
 - [Error and warning codes](docs/ERRORS.md): every QM-Exxx and QM-Wxxx code with its meaning and fix (generated from `error_catalog()`; includes the Python hardware-plugin range QM-E95x and benchmark-harness range QM-E96x)
-- MCP server: run `build/qumo mcp` (MCP 2025-06-18, stdio). Tools: `qumo_run_qasm` (counts), `qumo_statevector`, `qumo_expectation`, `qumo_validate_qasm` (diagnostics and lint), `qumo_circuit_info` (depth, gate counts, T-count, flags), `qumo_convert` (canonical QASM 3, portable QASM 2 with `to: "qasm2"`, or circuit JSON), `qumo_describe` (gates, errors, capabilities; `format: "markdown"` for the error catalogue), `qumo_transpile` (vendor-neutral compile: target spec like `grid:4x4/sc_cz`, `trapped_ion:11`, or edges + basis), `qumo_estimate_resources` (logical, NISQ per modality, fault-tolerant), `qumo_vqe`, `qumo_qaoa_maxcut`, `qumo_qec_memory` (surface/repetition code logical error rate; decoders `mwpm` = sparse blossom (default), `sparse_blossom`, `mwpm_dense`, `uf`, `lookup`), `qumo_qec_dem` (Stim-format detector error model), `qumo_gpu_info` (is GPU support compiled in, which device), `qumo_run_device` (sample with `device` `auto`, `cpu` or `gpu`; falls back to the CPU with warning QM-W020)
+- MCP server: run `build/qumo mcp` (MCP 2025-06-18, stdio). Tools: `qumo_run_qasm` (counts), `qumo_statevector`, `qumo_expectation`, `qumo_validate_qasm` (diagnostics and lint), `qumo_circuit_info` (depth, gate counts, T-count, flags), `qumo_convert` (canonical QASM 3, portable QASM 2 with `to: "qasm2"`, or circuit JSON), `qumo_describe` (gates, errors, capabilities; `format: "markdown"` for the error catalogue), `qumo_transpile` (vendor-neutral compile: target spec like `grid:4x4/sc_cz`, `trapped_ion:11`, or edges + basis), `qumo_estimate_resources` (logical, NISQ per modality, fault-tolerant), `qumo_vqe`, `qumo_qaoa_maxcut`, `qumo_qec_memory` (surface/repetition code logical error rate; decoders `mwpm` = sparse blossom (default), `sparse_blossom`, `mwpm_dense`, `uf`, `lookup`), `qumo_qec_dem` (Stim-format detector error model), `qumo_gpu_info` (is GPU support compiled in, which device, GPU precision and fp64 support), `qumo_run_device` (sample with `device` `auto`, `cpu` or `gpu` and `precision` `auto`, `fp32` or `fp64`; GPU state vectors run fp32 by default on every GPU, like CUDA-Q; `auto` = `QUMO_GPU_PRECISION` or the build default; fp64 on an Apple GPU is QM-E472; falls back to the CPU with warning QM-W020)
 - Client config: `{"mcpServers":{"qumo":{"command":"/abs/path/QUMO/build/qumo","args":["mcp"]}}}`, or `claude mcp add qumo -- /abs/path/QUMO/build/qumo mcp`
-- CLI: `qumo run|statevector|expect|validate|info|describe|convert|tool|mcp|version|help`. Add `--json` for machine output. Exit codes: 0 ok, 1 failed, 2 usage. Build with `make cli` (CPU only) or `make cli-gpu` (`-D QUMO_GPU`, for NVIDIA CUDA, AMD ROCm or Apple Metal).
+- CLI: `qumo run|statevector|expect|validate|info|describe|convert|tool|mcp|version|help`. Add `--json` for machine output. Exit codes: 0 ok, 1 failed, 2 usage. Build with `make cli` (CPU only) or `make cli-gpu` (`-D QUMO_GPU`, for NVIDIA CUDA, AMD ROCm or Apple Metal). `qumo run x.qasm --device gpu --precision fp64` picks the device and the GPU precision.
 - Hardware: `plugins/hardware` (Python package `qumo_hardware`) compiles with QUMO and submits to IBM Quantum or Quantinuum only after explicit confirmation (`--yes`); a `local` provider runs offline. See [Hardware plugins](docs/HARDWARE_PLUGINS.md).
 - Self-description: `qumo describe gates|errors|capabilities --json` (generated from the implementation)
 
@@ -29,8 +29,8 @@ Conventions an agent must know:
 - `qumo.ir.qasm`: `parse_qasm(text) -> Circuit`, `parse_qasm_with_warnings(text, warnings)`, `load_qasm(path)`, `to_qasm(circuit) -> String` (OpenQASM 3)
 - `qumo.ir.qasm2`: `to_qasm2(circuit) -> String`, portable OpenQASM 2 (original `qelib1.inc` plus exact gate definitions; loads in Qiskit strict and legacy modes, pytket and Cirq)
 - `qumo.ir.pauli`: `parse_pauli_sum(text) -> PauliSum`
-- `qumo.exec.dispatch`: `sample_auto(circuit, shots, seed)` picks Pauli-frame / tableau / CPU or GPU state vector automatically (reported in `.method`); `sample_on(circuit, shots, seed, params, device, note)` with device `auto`, `cpu` or `gpu`
-- `qumo.gpu`: `query_gpu()`, `GpuStateVector`, `GpuFrameSampler` (build with `-D QUMO_GPU`; see [GPU](docs/GPU.md))
+- `qumo.exec.dispatch`: `sample_auto(circuit, shots, seed)` picks Pauli-frame / tableau / CPU or GPU state vector automatically (reported in `.method`); `sample_on(circuit, shots, seed, params, device, note, precision="auto")` with device `auto`, `cpu` or `gpu` and GPU precision `auto`, `fp32` or `fp64`
+- `qumo.gpu`: `query_gpu()`, `GpuStateVector` (fp32 by default on every GPU; fp64 on NVIDIA / AMD on request: `-D QUMO_GPU_FP64`, `QUMO_GPU_PRECISION=fp64` or `precision` arguments), `GpuFrameSampler` (build with `-D QUMO_GPU`; see [GPU](docs/GPU.md))
 - `qumo.sim.runner`: `sample(circuit, shots, seed, params) -> SampleResult` (`.counts`, `.method`), `evolve(circuit, params) -> StateVector`, `expectation(circuit, H, params)`
 - `qumo.sim.stabilizer`: `sample_stabilizer(circuit, shots, seed)` for Clifford circuits. `qumo.sim.frame` provides Pauli-frame batch sampling.
 - `qumo.compiler.pass_manager`: `transpile(circuit, parse_target("grid:4x4"), level) -> CompileResult` (`.circuit`), `compile_spec(circuit, target, "pipeline text")`
@@ -52,7 +52,7 @@ Conventions an agent must know:
 ## Optional
 
 - [Mojo 1.1 contributor guide](docs/MOJO_GUIDE.md): the exact Mojo dialect QUMO uses
-- [GPU acceleration](docs/GPU.md): vendor-neutral MAX kernels, dispatch rules, error codes QM-E470..QM-E475
+- [GPU acceleration](docs/GPU.md): vendor-neutral MAX kernels, precision policy, dispatch rules, error codes QM-E470..QM-E475
 - [QEC](docs/QEC.md): codes, detector error models, decoders, benchmarks against Stim and PyMatching
 - [Benchmarking on cloud GPUs](docs/BENCHMARKING_ON_CLOUD_GPUS.md): `bench/run_benchmarks.py` and the Google Colab notebooks in `examples/colab/`
 - [Algorithms](docs/ALGORITHMS.md): the `qumo.algorithms` reference

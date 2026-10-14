@@ -47,8 +47,10 @@ Integration (all GPU calls gated, see below):
   [Dispatch threshold](#dispatch-threshold)), when the build has GPU support
   and a device is usable. `sample_auto` runs them on the GPU and falls back
   to the CPU on any GPU error.
-  `sample_on(c, shots, seed, params, device, note)` takes
-  `device = "auto" | "cpu" | "gpu"`. With `"gpu"` the circuit is routed by
+  `sample_on(c, shots, seed, params, device, note, precision="auto")` takes
+  `device = "auto" | "cpu" | "gpu"` and the GPU precision selector
+  `"auto" | "fp32" | "fp64"` ([Precision policy](#precision-policy)). With
+  `"gpu"` the circuit is routed by
   `gpu_sample_route`: Clifford circuits without feed-forward go to GPU Pauli
   frames, other static noiseless circuits to the GPU state vector. Anything
   else runs on the CPU and `note` says exactly why: no GPU build, no usable
@@ -56,15 +58,21 @@ Integration (all GPU calls gated, see below):
   (CPU stabilizer simulator), or a dynamic / noisy non-Clifford circuit.
   `SampleResult.method` reports what ran: `gpu:statevector:fp32`,
   `gpu:statevector:fp64`, `gpu:pauli_frame` (or `gpu-emulator:*`).
-* `qumo/exec/orchestrator.mojo`: jobs that HEFT places on a `Device.gpu(...)`
-  run on the GPU when one is available (estimate jobs on the GPU state
-  vector, sample jobs routed by `gpu_sample_route`). Otherwise they run on
+* `qumo/exec/orchestrator.mojo`: jobs that HEFT places on a
+  `Device.gpu(name, max_qubits, precision="auto")` run on the GPU when one is
+  available (estimate jobs on the GPU state vector, sample jobs routed by
+  `gpu_sample_route`), in the device's precision unless the job sets its own
+  (`add_sample / add_estimate(..., precision=...)`). Otherwise they run on
   the CPU and `JobResult.backend` ends with `(gpu fallback: <reason>)`.
 * MCP / CLI tools (`qumo/exec/tools.mojo`): `qumo_gpu_info` and
-  `qumo_run_device` (`qumo_run_qasm` plus `"device": "auto"|"cpu"|"gpu"`,
-  warning `QM-W020` with the reason on fallback).
+  `qumo_run_device` (`qumo_run_qasm` plus `"device": "auto"|"cpu"|"gpu"` and
+  `"precision": "auto"|"fp32"|"fp64"`, warning `QM-W020` with the reason on
+  fallback, `QM-W021` when a requested precision did not apply; the result
+  has `precision_used`). CLI: `qumo run x.qasm --device gpu --precision fp64`
+  (`--device` / `--precision` route through `qumo_run_device`).
 * Python (`python/qumo_py.mojo`): `gpu_info() -> dict` and
-  `sample_device(circ, shots, seed, device) -> (counts, method, note)`.
+  `sample_device(circ, shots, seed, device, precision="auto") -> (counts,
+  method, note)` (`precision` is keyword-only).
 
 ## Compile-time gating
 
@@ -105,9 +113,12 @@ Compile-time knobs (`-D NAME=value`, defaults in brackets):
 amplitudes per thread) [4 Apple / 3 other], `QUMO_GPU_TILE_SMEM_DYNAMIC`
 [0 Apple / 1 other], `QUMO_GPU_TILE_LAUNCH_BOUND` (max threads per block
 the tile kernel is compiled for; 0 = none) [256 AMD / 0 other],
-`QUMO_GPU_TILE_LOG2_BYTES` [14], `QUMO_GPU_LOG_TPB` [8], `QUMO_GPU_FP32`
-(fp32 default on NVIDIA/AMD). Runtime knobs
-(environment variables, no rebuild): see [Device profile](#device-profile-gpuprofile).
+`QUMO_GPU_TILE_LOG2_BYTES` [14], `QUMO_GPU_LOG_TPB` [8], `QUMO_GPU_FP64`
+(fp64 as the build default on NVIDIA / AMD; accepted and ignored on Apple;
+[Precision policy](#precision-policy)), `QUMO_GPU_FP32` (the old fp32 opt-in:
+accepted, no effect, fp32 is the default). Runtime knobs (environment
+variables, no rebuild): `QUMO_GPU_PRECISION` (fp32 / fp64: what precision
+"auto" runs) and the tuning knobs in [Device profile](#device-profile-gpuprofile).
 
 ## Enabling the GPU
 
@@ -122,27 +133,65 @@ Compiler failed to compile metallib". Check a build with `qumo tool
 qumo_gpu_info '{}'` (CLI built with `make cli-gpu`) or
 `qumo_py.gpu_info()`.
 
-## Vendor and precision matrix
+## Precision policy
+
+**fp32 by default on every GPU (NVIDIA, AMD, Apple); fp64 on request where
+the hardware has it.** This is CUDA-Q's choice: its `nvidia` target runs fp32
+on every GPU unless fp64 is asked for (`option="fp64"`;
+`runtime/cudaq/platform/default/nvidia.yml` L21-32 at tag 0.16.0). The
+reasons:
+
+* fp32 is the fast path on every GPU and halves the memory (28 qubits = 2 GiB
+  in fp32, 4 GiB in fp64). On consumer and inference GPUs fp64 runs at a
+  fraction of the fp32 rate: 1/32 on the T4 (`sm_75`), 1/64 on the L4
+  (`sm_89`), RTX 30/40/50 and RTX PRO 6000 (`sm_86` / `sm_89` / `sm_120`), and
+  on AMD RDNA (gfx10-12) (`GpuProfile.weak_fp64()`). The CUDA-Q T4 numbers
+  show it: layered circuit at 26 qubits 0.17 s in fp32, 1.45 s in fp64
+  ([below](#comparison-with-cuda-q)).
+* The same default as CUDA-Q makes a default-vs-default comparison an fp32
+  one, and on Apple GPUs (no fp64 at all) nothing changes.
+* fp32 is accurate enough for the benchmark circuits: on the M5 the fidelity
+  F with the fp64 CPU state is |1 - F| <= 6e-7 up to 26 qubits, max
+  amplitude error < 2e-5 for 200-gate random circuits, expectation values
+  within 1e-4 at 24 qubits. Data-center GPUs with full-rate fp64 (A100,
+  H100, MI300X) run fp64 at 1/2 of the fp32 rate: ask for it when 1e-12
+  agreement with the CPU simulator matters.
 
 | Vendor (target) | State vector | Pauli frames | Default precision | fp64 | Run on hardware |
 |---|---|---|---|---|---|
-| Apple (`metal:4`) | fp32 kernels | yes | **fp32** | **no** (Metal has no double) | **yes: M5, all tests + benchmarks** |
-| NVIDIA (`sm_75`, `sm_80`, `sm_90`, ...) | fp32 + fp64 kernels | yes | fp64 | yes | no (cross-compiled only; the T4 numbers in `bench/results/cloud/` are the previous engine) |
-| AMD (`gfx942`, ...) | fp32 + fp64 kernels | yes | fp64 | yes | no (cross-compiled only) |
+| Apple (`metal:4`) | fp32 kernels | yes | **fp32** | **no** (Metal has no double): `precision: "fp64"` raises `QM-E472` | **yes: M5, all tests + benchmarks** |
+| NVIDIA (`sm_75`, `sm_80`, `sm_90`, ...) | fp32 + fp64 kernels | yes | **fp32** | yes, on request (1/32-1/64 rate on T4 / L4 / RTX; 1/2 on A100 / H100) | no (cross-compiled only; the T4 numbers in `bench/results/cloud/` are the previous engine) |
+| AMD (`gfx942`, ...) | fp32 + fp64 kernels | yes | **fp32** | yes, on request (full rate on MI300X; 1/32-1/64 on RDNA) | no (cross-compiled only) |
 
-`GpuStateVector[dtype = GPU_DEFAULT_DTYPE]` takes precision as a comptime
-parameter:
+How to select fp64 (or fp32), from the widest scope to the narrowest:
 
-* Apple: always float32. Asking for `GpuStateVector[DType.float64]` on Apple
-  raises `QM-E472`.
-* NVIDIA/AMD: float64 by default (matches the CPU simulator to ~1e-12).
-  `-D QUMO_GPU_FP32` makes float32 the default (twice the qubits per GiB).
-  `GpuStateVector[DType.float32]` can always be requested explicitly. This
-  is **not** CUDA-Q's default: CUDA-Q's `nvidia` target uses fp32 on every
-  GPU unless fp64 is asked for (`runtime/cudaq/platform/default/nvidia.yml`
-  L21-32 at tag 0.16.0). On GPUs with weak fp64 (T4, L4, RTX: 1/32 or 1/64
-  of the fp32 rate) QUMO's default is the slower precision; changing it is
-  a user decision, not made here.
+| Scope | fp64 | Notes |
+|---|---|---|
+| Build | `-D QUMO_GPU -D QUMO_GPU_FP64` | Makes fp64 the build default (`GPU_DEFAULT_DTYPE`, `bench_gpu`'s precision). Ignored on Apple: fp32 stays, `qumo_gpu_info`'s `precision_note` and the profile JSON say why. `-D QUMO_GPU_FP32` is accepted (no effect). |
+| Process | `QUMO_GPU_PRECISION=fp64` | What `"auto"` resolves to, without rebuilding. Invalid values raise `QM-E941` for explicit GPU requests; automatic dispatch then stays on the CPU. |
+| Call | `precision: "fp64"` | `sample_on(..., precision=)`, `sample_auto(..., precision=)`, `Device.gpu(precision=)` / per job, MCP `qumo_run_device`, `qumo run --precision`, `qumo_py.sample_device(..., precision=)`. `"auto"` = the two rows above. |
+| Code | `GpuStateVector[DType.float64]`, `sample_gpu_runtime(..., "fp64")` | `GpuStateVector[dtype = GPU_DEFAULT_DTYPE]` takes the precision as a comptime parameter; the `*_gpu_runtime` entry points select it at run time. |
+
+* The precision applies to GPU state vectors only. CPU simulators are fp64;
+  the stabilizer tableau and the Pauli-frame samplers (CPU and GPU) use no
+  floating point, so `device: "gpu"` with a Clifford circuit runs GPU Pauli
+  frames whatever the precision. `qumo_run_device` reports
+  `precision_used` (`fp32` / `fp64` / `exact`) and warns `QM-W021` when a
+  requested precision did not apply.
+* `fp64` on an Apple GPU: explicit requests (`device: "gpu"`, orchestrator
+  GPU devices) fail with `QM-E472`; automatic dispatch (`device: "auto"`)
+  keeps such a circuit on the CPU, which is fp64.
+* `SampleResult.method` / `JobResult.backend` name what ran:
+  `gpu:statevector:fp32` or `gpu:statevector:fp64`. `qumo_gpu_info` reports
+  `precision` (what `"auto"` runs now), `precision_build_default`,
+  `precision_env`, `precisions` (selectable on this target) and
+  `precision_note`.
+* Both precisions are compiled into every NVIDIA / AMD GPU build
+  (`GPU_FP64_RUNTIME`): run-time selection needs `GpuStateVector[float32]`
+  and `[float64]`. The fp64 path is instantiated only under
+  `comptime if GPU_FP64_SUPPORTED`, so Metal builds contain no
+  double-precision code. Build cost: see [Build cost of run-time
+  precision](#build-cost-of-run-time-precision).
 * Host-side combination is always fp64: `to_host()` converts to fp64, and
   reduction partials and sampling CDFs over segments are summed in fp64.
 * fp32 accuracy on the M5 (measured, current engine): fidelity F with the
@@ -154,6 +203,42 @@ parameter:
   accurate as multiplying gate by gate in fp32.
 * The Pauli-frame kernel uses no floating point at all, so it is identical
   on every vendor.
+
+### Build cost of run-time precision
+
+Run-time selection compiles both precisions into every NVIDIA / AMD GPU
+build; before 2026-10-13 a default NVIDIA / AMD build compiled fp64 only, and
+Metal builds compile fp32 only either way. Measured on the M5 (2026-10-13,
+machine shared with other jobs, load average 8-45, so single numbers of the
+same build moved by up to 3.6x): `mojo build -D QUMO_GPU` of `cli/main.mojo` (= `make cli-gpu`) and
+`python/qumo_py.mojo` (= `make py-gpu`), cross-compiled for `sm_75` (T4), for
+three trees: *before* (commit 4f51c52: fp64 only), *fp32 only* (this tree with
+`GPU_FP64_RUNTIME = False`) and *after* (this tree: fp32 + fp64). Cold = an
+empty Mojo cache (`XDG_CACHE_HOME` pointed at a fresh directory: a fresh
+machine or Colab), 4 interleaved rounds (the last one in reverse order);
+warm = the populated cache, 1 round.
+
+| `sm_75` build | before (fp64) | fp32 only | after (fp32 + fp64) |
+|---|---|---|---|
+| CLI, cold, wall s: min / median | 61.8 / 159 | 62.3 / 94 | 57.5 / 79 |
+| CLI, cold, CPU s (user + sys), 2 rounds | 83.0, 156.7 | 80.3, 73.0 | 85.9, 89.8 |
+| CLI, warm, wall s | 45.1 | 41.9 | 42.8 |
+| CLI binary, bytes | 3 050 232 | 3 052 136 | 3 593 144 (+18%) |
+| Python extension, cold, wall s: min / median | 51.8 / 88 | 46.0 / 98 | 44.9 / 52 |
+| Python extension, cold, CPU s, 2 rounds | 60.3, 97.2 | 54.7, 99.3 | 68.5, 63.6 |
+| Python extension, warm, wall s | 27.6 | 34.3 | 27.2 |
+| Python extension, bytes | 2 270 784 | 2 293 136 | 2 817 632 (+24%) |
+
+Metal (`make cli-gpu` / `make py-gpu` on the M5, cold, one round): CLI 77.9 s
+-> 77.6 s (CPU 89.1 -> 93.5 s), Python 48.5 -> 36.5 s (CPU 57.9 -> 49.5 s);
+binaries +0.6% / +1.0% (no fp64 code on Metal). The fp64 instantiation costs
+at most ~10-20% of CPU time against an fp32-only build (lowest CPU times: CLI
+73.0 -> 85.9 s, Python 54.7 -> 63.6 s), inside the run-to-run noise in wall
+time, and nowhere near doubling it, so it is **not** gated behind
+`-D QUMO_GPU_FP64`: every NVIDIA / AMD GPU build can switch precision at run
+time. The price is binary size (+0.5 MB per binary for `sm_75`). Not
+measured: `gfx942` and other NVIDIA targets (`make gpu-check` compiles both
+precisions for them).
 
 Memory: `2^n * 8 B` (fp32) or `2^n * 16 B` (fp64); 28 qubits in fp32 = 2 GiB.
 The hard cap is the CPU simulator's 32 qubits (`check_statevector_size`).
@@ -193,8 +278,8 @@ the layered circuit (377 plan ops) is 14 runs (17 with low = 5), the QFT
 (364 plan ops) 7, the random-pairs circuit (390 ops) 15 (16); at 24 qubits
 12, 6 and 14. The sweep count depends on the precision and tile size
 (host counts, 8 amplitudes per thread as on NVIDIA / AMD, layered at 26
-qubits): fp32 k = 11 17 (low 5) / 14 (low 4); **fp64 k = 10 (the NVIDIA /
-AMD default precision) 20**, 24 for the random circuit; k = 11 in fp64 17;
+qubits): fp32 k = 11 17 (low 5) / 14 (low 4); fp64 k = 10 20, 24 for the
+random circuit; k = 11 in fp64 17;
 k = 12 12; k = 13 11.
 
 **Register blocking inside a tile.** Each thread keeps 2^REG_BITS
@@ -429,7 +514,12 @@ the real device in `-D QUMO_GPU` builds:
   across barriers are per-thread host arrays. `GpuStateVector.emulator(n)` and
   `GpuFrameSampler(c, emulate=True)` exercise all host logic (scheduling,
   tables, launch geometry, reductions, sampling, chunking).
-* `tests/test_gpu.mojo` (emulation fp64 + fp32, then device fp32 on the M5):
+* `tests/test_gpu.mojo` (emulation fp64 + fp32, then device fp32 on the M5;
+  fp32 + fp64 on NVIDIA / AMD devices): the precision policy (fp32 build
+  default; `"auto"` / `"fp32"` / `"fp64"` and `QM-E941`; the
+  `QUMO_GPU_PRECISION` override; `QM-E472` for fp64 on Apple from
+  `sample_on`, the orchestrator and `qumo_run_device`; the run-time entry
+  points in emulation in both precisions);
   every gate on operands including qubits 0 and n-1 and on 1-3 qubit states;
   random circuits over every opcode family up to 21 qubits (each also checks
   launches = tile runs, that the device's runs / transposes / ops equal the
@@ -709,8 +799,8 @@ sources at [github.com/NVIDIA/cuda-quantum, tag 0.16.0](https://github.com/NVIDI
 QUMO's engine is built the other way round: a *tile run* applies a whole
 run of gates (many fused 1q gates, CXs, diagonals) to a 2^k-amplitude tile
 in shared memory and registers, so one sweep carries ~25-50 plan ops; the
-layered circuit at 26 qubits is 14-17 sweeps in fp32 at k = 11 (low 4 / 5),
-20 in fp64 at k = 10 (the NVIDIA / AMD default), 11-12 with larger tiles,
+layered circuit at 26 qubits is 14-17 sweeps in fp32 at k = 11 (low 4 / 5;
+fp32 is the default on every GPU), 20 in fp64 at k = 10, 11-12 with larger tiles,
 instead of ~43-48. The cost has moved inside the tile (on the M5, evolve is
 2.3-3.5x the sweep floor at 24 qubits and 2.0-3.0x at 26: probe above),
 which is what round 2 attacked. Adopted from CUDA-Q /
@@ -754,9 +844,10 @@ Nothing in rounds 2-3 has run on NVIDIA or AMD. On the next Colab run
    stream bandwidth (the price of a smaller `low`); `gk_tile` registers,
    spill bytes, `MAX_THREADS_PER_BLOCK` and blocks per SM, and the profile's
    `tile_kernel_*` fields.
-3. `sv_gpu` fp32 and fp64 against CUDA-Q (default and the labelled
-   no-fusion variant) and Aer. Model only, for the layered circuit at 26
-   qubits on the T4:
+3. `sv_gpu` fp32 against CUDA-Q (default and the labelled no-fusion
+   variant) and Aer, all in fp32 by default; fp64 with `--fp64`
+   (`INCLUDE_FP64` in the notebooks). Model only, for the layered circuit at
+   26 qubits on the T4:
    * fp32: memory floor 17 sweeps x ~3.95 ms (1.07 GB at ~272 GB/s) = 67 ms.
      The in-tile work is unknown on NVIDIA; on the M5 it is ~280 ms at 26
      qubits (evolve 423 ms - 14 x 10.0 ms). Matching CUDA-Q's 0.17 s needs
@@ -789,12 +880,14 @@ Nothing in rounds 2-3 has run on NVIDIA or AMD. On the next Colab run
 |---|---|
 | QM-E470 | GPU support not compiled into this build (rebuild with `-D QUMO_GPU`) |
 | QM-E471 | Dynamic or noisy circuit given to the GPU state-vector sampler |
-| QM-E472 | float64 requested on an Apple GPU |
+| QM-E472 | float64 requested on an Apple GPU (`precision: "fp64"`, `QUMO_GPU_PRECISION=fp64` or `GpuStateVector[DType.float64]`) |
 | QM-E473 | Sampling a zero-norm state |
 | QM-E474 | Circuit, host state or basis index out of range for the GPU state |
 | QM-E475 | Plan op without a GPU kernel |
 | QM-E940 | Unknown device name (`auto`, `cpu`, `gpu`) |
+| QM-E941 | Unknown GPU precision (`auto`, `fp32`, `fp64`; argument or `QUMO_GPU_PRECISION`) |
 | QM-W020 | `device: "gpu"` requested but the run fell back to the CPU (reason given) |
+| QM-W021 | A requested precision did not apply (CPU state vectors are fp64, stabilizer / Pauli frames exact) |
 
 ## Ideas adopted, and from where
 
@@ -808,8 +901,9 @@ Nothing in rounds 2-3 has run on NVIDIA or AMD. On the next Colab run
 * **CUDA-Q / cuStateVec Ex**: diagonal-gate fusion (phase tables), gate
   classification by matrix structure, per-device fusion / tuning
   parameters ([Comparison with CUDA-Q](#comparison-with-cuda-q)); precision
-  as a target property (QUMO's default differs: fp64 on NVIDIA / AMD, CUDA-Q
-  fp32); heterogeneous `mqpu`-style device pools (the orchestrator);
+  as a target property with fp32 as the default on every GPU and fp64 on
+  request ([Precision policy](#precision-policy)); heterogeneous
+  `mqpu`-style device pools (the orchestrator);
   explicit fallback reporting.
 * **HyQuas / Atlas** (shared-memory state-vector kernels): a small
   always-resident low-qubit block (QUMO's runtime `low`); controls and

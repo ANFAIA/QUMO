@@ -256,7 +256,7 @@ def error_ranges() -> List[ErrorRange]:
     _r(r, "QM-E3xx", "pauli", "Pauli observables", "Pauli strings / observables (qumo.ir.pauli)", 300, 399)
     _r(r, "QM-E4xx", "simulation", "Simulation and execution", "CPU state-vector simulation, sampling and execution (qumo.sim, qumo.exec)", 400, 499)
     _r(r, "QM-E47x", "gpu", "GPU acceleration", "GPU state vector and GPU Pauli frames (qumo.gpu; builds made with -D QUMO_GPU)", 470, 479,
-       "See [GPU.md](GPU.md). Only GPU entry points raise these codes. The MCP tool `qumo_run_device` and `qumo.exec.dispatch.sample_on(..., \"gpu\")` never fail because the GPU is missing: they run on the CPU and report warning QM-W020.")
+       "See [GPU.md](GPU.md). Only GPU entry points raise these codes. The MCP tool `qumo_run_device` and `qumo.exec.dispatch.sample_on(..., \"gpu\")` never fail because the GPU is missing: they run on the CPU and report warning QM-W020. They do fail with QM-E472 when precision 'fp64' is requested on an Apple GPU, which has no fp64.")
     _r(r, "QM-E5xx", "qasm", "OpenQASM", "OpenQASM 2/3 parsing and export (qumo.ir.qasm, qumo.ir.qasm2)", 500, 599)
     _r(r, "QM-E6xx", "compiler", "Compiler", "Compiler passes, pass pipelines and targets (qumo.compiler)", 600, 699)
     _r(r, "QM-E7xx", "stabilizer", "Stabilizer simulation and QEC", "Stabilizer / Pauli-frame simulation and QEC (qumo.sim.stabilizer, qumo.sim.frame, qumo.qec)", 700, 799,
@@ -320,7 +320,7 @@ def error_catalog() -> List[ErrorInfo]:
     # gpu
     _e(c, "QM-E470", "gpu", "GPU support is not compiled into this build.", "Rebuild with -D QUMO_GPU (make cli-gpu / py-gpu / test-gpu); on macOS install Xcode and run 'xcodebuild -downloadComponent MetalToolchain' first.")
     _e(c, "QM-E471", "gpu", "Dynamic or noisy circuit given to the GPU state-vector sampler (it runs static circuits: terminal measurements, no noise).", "Use qumo.exec.dispatch.sample_auto or sample_on, which fall back to CPU trajectories.")
-    _e(c, "QM-E472", "gpu", "float64 requested on an Apple GPU (Metal has no double precision).", "Use GpuStateVector[DType.float32], the default on Apple.")
+    _e(c, "QM-E472", "gpu", "float64 requested on an Apple GPU (Metal has no double precision): precision 'fp64' (argument or QUMO_GPU_PRECISION) or GpuStateVector[DType.float64].", "Use precision 'fp32' or 'auto' (GpuStateVector[DType.float32], the default on every GPU), or the CPU simulators, which run in fp64.")
     _e(c, "QM-E473", "gpu", "Sampling a GPU state with zero norm.", "Check the circuit and the initial state.")
     _e(c, "QM-E474", "gpu", "Circuit or host state is wider than the allocated GPU state.", "Allocate GpuStateVector(circuit.num_qubits).")
     _e(c, "QM-E475", "gpu", "The GPU executor has no kernel for an operation of the execution plan.", "Run this circuit on the CPU state vector (qumo.sim.runner).")
@@ -390,6 +390,11 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E809", "algorithms", "Invalid graph specification.", "Edges are 'i-j' pairs of distinct non-negative nodes.")
     _e(c, "QM-E810", "algorithms", "Invalid QPE options.", "1 <= n_eval <= 16 and a unitary on >= 1 qubit.")
     _e(c, "QM-E820", "algorithms", "Invalid multi-controlled gate construction.", "Check control/target/ancilla counts.")
+    _e(c, "QM-E830", "algorithms", "Invalid QML template, embedding or observable arguments (qumo.algorithms.qml): wrong weight/feature count, bad wires, unknown rotation, zero-norm or oversized amplitude vector, diagonal observable above 12 qubits.", "Check the shapes in docs/QML.md (weights L*n*3 for strongly entangling layers, 4^n-1 for ArbitraryUnitary, 15/3 for QCNN conv/pool).")
+    _e(c, "QM-E831", "algorithms", "Shape mismatch in a QML kernel, dataset or training helper (qumo.algorithms.qkernels, datasets, qml_train).", "Kernel matrices are row-major N x M lists; X rows must share one width; predictions and labels must have equal length.")
+    _e(c, "QM-E832", "algorithms", "metric_tensor()/QNG does not support the circuit: a trainable parameter in an unsupported gate (U, ...) or shared by several gates (e.g. QAOA gamma).", "Use one parameter per rx/ry/rz/p/cp/rxx/ryy/rzz/crx/cry/crz gate, or restrict with wrt=[...].")
+    _e(c, "QM-E833", "algorithms", "Invalid optimizer state or settings (StepOptimizer, QNGOptimizer): the parameter or gradient length changed between steps, or a setting is out of range.", "Call reset() before optimising a vector of another length; check lr, momentum and beta values.")
+    _e(c, "QM-E834", "algorithms", "Dataset file missing or malformed (load_csv, load_json_matrix).", "Run from the repository root (examples ship their data under examples/*/data); every CSV row needs the same number of numeric columns.")
     # interface (JSON / MCP / CLI / device selection)
     _e(c, "QM-E900", "interface", "Malformed JSON.", "Fix the JSON at the reported line/col (double-quoted keys, no trailing commas).")
     _e(c, "QM-E901", "interface", "Invalid JSON-RPC request.", "Send {\"jsonrpc\":\"2.0\",\"id\":1,\"method\":...,\"params\":{...}}.")
@@ -402,6 +407,7 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E921", "interface", "Invalid command-line usage.", "Run 'qumo help'.")
     _e(c, "QM-E930", "interface", "Circuit too large for dense state-vector output.", "Use sampling, fewer qubits, or raise max_qubits explicitly.")
     _e(c, "QM-E940", "interface", "Unknown simulator device name (qumo.exec.dispatch.sample_on, qumo_run_device).", "Use 'auto', 'cpu' or 'gpu'.")
+    _e(c, "QM-E941", "interface", "Unknown GPU precision selector: the 'precision' argument (sample_on, qumo_run_device, Device.gpu, qumo_py.sample_device, qumo run --precision) or the QUMO_GPU_PRECISION environment variable.", "Use 'auto' (QUMO_GPU_PRECISION when set, else the build default: fp32), 'fp32' or 'fp64'; QUMO_GPU_PRECISION accepts 'fp32' or 'fp64'.")
     # hardware plugins (Python; mirrors plugins/hardware/qumo_hardware/errors.py CATALOG)
     _e(c, "QM-E950", "hardware", "The QUMO Python extension (build/qumo_py.so) could not be loaded.", "Run `make py` at the repository root, or set QUMO_PY_PATH to the directory containing qumo_py.so.")
     _e(c, "QM-E951", "hardware", "A provider SDK needed for this operation is not installed.", "Install the extra: pip install 'qumo-hardware[ibm]' or 'qumo-hardware[quantinuum]'.")
@@ -440,6 +446,7 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-W012", "lint", "Very deep circuit.", "Consider optimization passes before simulation.")
     _e(c, "QM-W014", "lint", "Noise probability outside [0, 1].", "Probabilities must lie in [0, 1].")
     _e(c, "QM-W020", "execution", "Device 'gpu' was requested but the run fell back to the CPU; the warning gives the reason (GPU support not compiled, no usable device, or a dynamic/noisy non-Clifford circuit).", "Check qumo_gpu_info; use a build made with -D QUMO_GPU (make cli-gpu / py-gpu) on a supported GPU, or request device 'auto' / 'cpu'.")
+    _e(c, "QM-W021", "execution", "A GPU precision ('fp32' / 'fp64') was requested but the simulator that ran has no such choice: CPU state vectors run in fp64, the stabilizer and Pauli-frame samplers are exact.", "Use device 'gpu' for a GPU state vector in the requested precision, or precision 'auto'.")
     _e(c, "QM-W050", "qasm", "OpenQASM gate definition shadows a native gate with a different signature.", "Rename the gate.")
     _e(c, "QM-W051", "qasm", "OpenQASM delay is ignored.", "Model idle noise with '#pragma qumo depolarize1(p) q[i];'.")
     return c^

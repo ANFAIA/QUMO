@@ -10,16 +10,36 @@ Compile-time gating (the only way QUMO touches a GPU toolchain):
     Building on a Mac needs Xcode + `xcodebuild -downloadComponent
     MetalToolchain` (the Metal compiler produces the metallib at build time).
 
-Precision policy:
-  * Apple GPUs (Metal) have no float64 -> float32, always.
-  * NVIDIA / AMD -> float64 by default (closer to the CPU simulator, ~1e-12);
-    `-D QUMO_GPU_FP32` makes float32 the default for speed / memory (2x the
-    qubits per GiB). `GpuStateVector[DType.float32]` is always selectable.
-    This is NOT CUDA-Q's choice: CUDA-Q's `nvidia` target defaults to fp32 on
-    every GPU, fp64 being an option (runtime/cudaq/platform/default/
-    nvidia.yml L21-32 at tag 0.16.0). On GPUs with weak fp64 (T4, L4, RTX:
-    1/32 or 1/64 of the fp32 rate) QUMO's default is therefore the slower
-    precision; whether to switch defaults there is a user decision.
+Precision policy (the same as CUDA-Q's `nvidia` target: fp32 unless fp64 is
+asked for, runtime/cudaq/platform/default/nvidia.yml L21-32 at tag 0.16.0):
+  * Default: float32 on EVERY GPU (NVIDIA, AMD, Apple). Half the memory of
+    fp64 (2x the qubits per GiB) and the fast path on every GPU; on GPUs with
+    weak fp64 (T4, L4, A10, RTX: 1/32-1/64 of the fp32 rate) fp64 is many
+    times slower. Measured fp32 accuracy (M5): |1 - F| <= 6e-7 against the
+    fp64 CPU state up to 26 qubits.
+  * fp64 on request where the hardware has it (NVIDIA, AMD; not Apple: Metal
+    has no double):
+      - build time: `-D QUMO_GPU_FP64` makes fp64 the build default
+        (GPU_DEFAULT_DTYPE). On Apple the define is accepted and ignored
+        (fp32 stays; `gpu_precision_note()` / qumo_gpu_info say why), so the
+        same build line works on every vendor. `-D QUMO_GPU_FP32` (the old
+        opt-in) is accepted as a no-op alias; with both, QUMO_GPU_FP64 wins.
+      - run time: the selector "auto" | "fp32" | "fp64" of
+        `qumo.exec.dispatch.sample_on`, `Device.gpu(precision=...)`, the MCP
+        tool `qumo_run_device`, `qumo_py.sample_device(..., precision=...)`
+        and `qumo run --precision`. "auto" = the environment variable
+        QUMO_GPU_PRECISION (fp32 | fp64) when set, else the build default
+        (`resolve_gpu_precision`). An unknown value raises QM-E941; "fp64" on
+        an Apple GPU raises QM-E472 (`gpu_fp64_error`).
+  * Both precisions are compiled into every NVIDIA / AMD GPU build
+    (GPU_FP64_RUNTIME; the fp64 path is instantiated only where
+    GPU_FP64_SUPPORTED, so Metal builds contain no double-precision code).
+    Measured cost (docs/GPU.md, "Build cost of run-time precision"; sm_75,
+    M5): at most ~10-20% more compile CPU time than an fp32-only build and
+    +18% / +24% binary size (CLI / Python extension), so it is not gated
+    behind a define.
+  * Host-side combination is fp64 in both precisions (reductions, sampling
+    CDF over segments, `to_host`).
 
 Per-device tuning of the tile engine (`GpuProfile`): see the struct below.
 """
@@ -38,8 +58,19 @@ from qumo.ai.json import JsonWriter
 
 comptime GPU_COMPILED = is_defined["QUMO_GPU"]()
 comptime GPU_IS_APPLE = has_apple_gpu_accelerator()
+# The target GPU has float64 (Metal has no double precision).
 comptime GPU_FP64_SUPPORTED = not has_apple_gpu_accelerator()
-comptime GPU_DEFAULT_DTYPE = DType.float32 if (has_apple_gpu_accelerator() or is_defined["QUMO_GPU_FP32"]()) else DType.float64
+# -D QUMO_GPU_FP64: fp64 as the build default where the target has it (ignored
+# on Apple). -D QUMO_GPU_FP32 is the old opt-in for fp32, now the default:
+# accepted, no effect.
+comptime GPU_FP64_DEFINED = is_defined["QUMO_GPU_FP64"]()
+comptime GPU_DEFAULT_DTYPE = DType.float64 if (GPU_FP64_DEFINED and GPU_FP64_SUPPORTED) else DType.float32
+# float64 GPU state vectors can be selected at run time in this build: every
+# GPU build for a target with fp64 (measured build cost of instantiating both
+# precisions: module docstring and docs/GPU.md).
+comptime GPU_FP64_RUNTIME = GPU_COMPILED and GPU_FP64_SUPPORTED
+# Environment variable that overrides the build default for precision "auto".
+comptime GPU_PRECISION_ENV = "QUMO_GPU_PRECISION"
 
 # Automatic dispatch sends static non-Clifford circuits with at least this many
 # qubits to the GPU. Device-specific, from `bench_gpu N R crossover` (end to
@@ -426,6 +457,10 @@ struct GpuProfile(Copyable, Writable):
         w.kv_bool("split_1q_fp32", self.split_1q_fp32)
         w.kv_bool("split_1q_fp64", self.split_1q_fp64)
         w.kv_bool("weak_fp64", self.weak_fp64())
+        # precision policy (docs/GPU.md): build default, and why (Apple: no fp64)
+        w.kv_string("precision_build_default", gpu_build_precision())
+        w.kv_bool("fp64_supported", GPU_FP64_SUPPORTED)
+        w.kv_string("precision_note", gpu_precision_note())
         w.kv_string("source", self.source)
         w.end_object()
         return w.finish()
@@ -481,7 +516,93 @@ def gpu_not_compiled_error() -> Error:
 
 
 def gpu_fp64_error() -> Error:
-    return Error("QM-E472: float64 is not supported on Apple GPUs (Metal has no double precision). Hint: use GpuStateVector[DType.float32] (the default on Apple).")
+    return Error("QM-E472: float64 is not supported on Apple GPUs (Metal has no double precision). Hint: use precision 'fp32' or 'auto' (GpuStateVector[DType.float32], the default on every GPU), or the CPU simulators, which run in fp64.")
+
+
+def gpu_precision_error(value: String, source: String) -> Error:
+    """QM-E941: `value` (from `source`: "precision" argument or the
+    QUMO_GPU_PRECISION environment variable) is not a GPU precision."""
+    if source == GPU_PRECISION_ENV:
+        return Error("QM-E941: environment variable " + GPU_PRECISION_ENV + "='" + value + "' is not a GPU precision. Hint: unset it, or set it to 'fp32' or 'fp64' (it overrides the build default for precision 'auto').")
+    return Error("QM-E941: unknown GPU precision '" + value + "'. Hint: use 'auto' (build default, or " + GPU_PRECISION_ENV + " when set), 'fp32' or 'fp64'.")
+
+
+def parse_gpu_precision(value: String, source: String = "precision") raises -> String:
+    """Validate a precision selector: 'auto' | 'fp32' | 'fp64' (surrounding
+    spaces and case ignored; '' = 'auto'). Raises QM-E941 otherwise."""
+    var v = String(value.strip()).lower()
+    if v.byte_length() == 0 or v == "auto":
+        return "auto"
+    if v == "fp32" or v == "fp64":
+        return v
+    raise gpu_precision_error(value, source)
+
+
+def gpu_build_precision() -> String:
+    """The build default ('fp32' unless -D QUMO_GPU_FP64 on a GPU with fp64)."""
+    return precision_name[GPU_DEFAULT_DTYPE]()
+
+
+def resolve_gpu_precision(selector: String) raises -> String:
+    """'auto' | 'fp32' | 'fp64' -> the precision a GPU state vector runs in
+    ('fp32' or 'fp64'). 'auto' = QUMO_GPU_PRECISION when set (validated:
+    QM-E941), else the build default. Does not check that the target has
+    fp64 (see gpu_precision_available / check_gpu_precision)."""
+    var p = parse_gpu_precision(selector)
+    if p != "auto":
+        return p
+    var e = parse_gpu_precision(getenv(GPU_PRECISION_ENV), GPU_PRECISION_ENV)
+    return gpu_build_precision() if e == "auto" else e
+
+
+def gpu_precision_available(precision: String) -> Bool:
+    """Can a GPU state vector of this precision ('fp32' / 'fp64') run on the
+    target of this build? fp32 always; fp64 in GPU builds for NVIDIA / AMD."""
+    if precision == "fp32":
+        return True
+    return precision == "fp64" and GPU_FP64_RUNTIME
+
+
+def check_gpu_precision(precision: String) raises:
+    """Raise QM-E472 when `precision` is 'fp64' and the target GPU has no fp64."""
+    if precision == "fp64" and not GPU_FP64_SUPPORTED:
+        raise gpu_fp64_error()
+
+
+def gpu_precisions() -> List[String]:
+    """Precisions a GPU state vector can be selected in (this build's target)."""
+    var out: List[String] = ["fp32"]
+    comptime if GPU_FP64_SUPPORTED:
+        out.append("fp64")
+    return out^
+
+
+def gpu_precision_note() -> String:
+    """One sentence on the precision policy of this build and environment,
+    for qumo_gpu_info / GpuProfile JSON (why fp32 on Apple, what overrides)."""
+    var s: String
+    comptime if not GPU_FP64_SUPPORTED:
+        s = "Apple GPUs (Metal) have no fp64: GPU state vectors run in fp32 (precision 'fp64' raises QM-E472; the CPU simulators run in fp64)"
+        comptime if GPU_FP64_DEFINED:
+            s += "; -D QUMO_GPU_FP64 is ignored on this target"
+    else:
+        comptime if GPU_FP64_DEFINED:
+            s = "build default fp64 (-D QUMO_GPU_FP64); precision 'fp32' selects fp32"
+        else:
+            s = "fp32 by default on every GPU, like CUDA-Q's nvidia target; precision 'fp64' (or -D QUMO_GPU_FP64 at build time) selects fp64"
+    var env = getenv(GPU_PRECISION_ENV)
+    if env.byte_length() > 0:
+        try:
+            var e = parse_gpu_precision(env, GPU_PRECISION_ENV)
+            if e == "auto":
+                s += "; " + GPU_PRECISION_ENV + "=auto: build default"
+            else:
+                s += "; " + GPU_PRECISION_ENV + "=" + e + " overrides the build default for precision 'auto'"
+                if e == "fp64" and not GPU_FP64_SUPPORTED:
+                    s += " (not available on this GPU: QM-E472)"
+        except err:
+            s += "; " + String(err)
+    return s
 
 
 def gpu_available() raises -> Bool:
@@ -505,7 +626,11 @@ struct GpuInfo(Copyable, Writable):
     var name: String
     var api: String
     var vendor: String
-    var precision: String  # default precision of GpuStateVector
+    var precision: String  # what precision "auto" runs now (build default, or QUMO_GPU_PRECISION)
+    var precision_build_default: String  # GPU_DEFAULT_DTYPE ("fp32" unless -D QUMO_GPU_FP64 on NVIDIA / AMD)
+    var precision_env: String  # value of QUMO_GPU_PRECISION ("" = unset)
+    var precisions: List[String]  # selectable at run time on this target
+    var precision_note: String  # why (Apple: no fp64; overrides in effect; invalid environment value)
     var fp64_supported: Bool
     var min_qubits_auto: Int
     var error: String
@@ -517,7 +642,16 @@ struct GpuInfo(Copyable, Writable):
         self.name = ""
         self.api = ""
         self.vendor = gpu_vendor()
-        self.precision = precision_name[GPU_DEFAULT_DTYPE]()
+        self.precision_build_default = gpu_build_precision()
+        self.precision_env = getenv(GPU_PRECISION_ENV)
+        try:
+            self.precision = resolve_gpu_precision("auto")
+        except:
+            self.precision = self.precision_build_default  # invalid QUMO_GPU_PRECISION: see precision_note
+        if self.precision == "fp64" and not GPU_FP64_SUPPORTED:
+            self.precision = "fp32"  # what 'auto' can run here; an explicit fp64 request raises QM-E472
+        self.precisions = gpu_precisions()
+        self.precision_note = gpu_precision_note()
         self.fp64_supported = GPU_FP64_SUPPORTED
         self.min_qubits_auto = GPU_MIN_QUBITS
         self.error = ""
@@ -532,6 +666,10 @@ struct GpuInfo(Copyable, Writable):
         w.kv_string("api", self.api)
         w.kv_string("vendor", self.vendor)
         w.kv_string("precision", self.precision)
+        w.kv_string("precision_build_default", self.precision_build_default)
+        w.kv_string("precision_env", self.precision_env)
+        w.kv_string_list("precisions", self.precisions)
+        w.kv_string("precision_note", self.precision_note)
         w.kv_bool("fp64_supported", self.fp64_supported)
         w.kv_int("min_qubits_auto", self.min_qubits_auto)
         w.kv_string("error", self.error)

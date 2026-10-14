@@ -1,6 +1,8 @@
 from qumo.ir.circuit import Circuit
-from qumo.exec.dispatch import sample_auto, choose_method
+from qumo.exec.dispatch import sample_auto, choose_method, sample_on
 from qumo.sim.runner import sample
+from qumo.gpu.device import gpu_compiled, GPU_PRECISION_ENV
+from std.os import setenv, unsetenv
 from std.testing import assert_equal, assert_true
 
 
@@ -36,4 +38,35 @@ def main() raises:
     nc.t(0)
     nc.measure_all()
     assert_equal(choose_method(nc, 100), "statevector")
+    # GPU precision selector: validated on every device (QM-E941); CPU runs ignore it (fp64)
+    var note = String()
+    for p in ["auto", "fp32", "fp64", "FP64"]:
+        var rp = sample_on(nc, 200, 5, List[Float64](), "cpu", note, String(p))
+        assert_equal(rp.method, "statevector:static")
+        assert_equal(rp.counts.get("00", 0) + rp.counts.get("01", 0), 200)
+    var raised = False
+    try:
+        _ = sample_on(nc, 10, 5, List[Float64](), "auto", note, "fp16")
+    except e:
+        raised = String(e).startswith("QM-E941")
+    assert_true(raised, "QM-E941 expected for an unknown precision")
+    raised = False
+    try:
+        _ = sample_auto(nc, 10, 5, List[Float64](), "single")
+    except e:
+        raised = String(e).startswith("QM-E941")
+    assert_true(raised, "QM-E941 expected from sample_auto")
+    raised = False
+    try:  # an unknown device is reported before the precision
+        _ = sample_on(nc, 10, 5, List[Float64](), "tpu", note, "fp16")
+    except e:
+        raised = String(e).startswith("QM-E940")
+    assert_true(raised, "QM-E940 expected")
+    if not gpu_compiled():
+        # explicit GPU request without GPU support: CPU fallback with a note, whatever the precision
+        _ = setenv(GPU_PRECISION_ENV, "fp64")
+        var rg = sample_on(nc, 100, 5, List[Float64](), "gpu", note, "fp64")
+        assert_equal(rg.method, "statevector:static")
+        assert_true(note.find("not compiled") >= 0, note)
+        _ = unsetenv(GPU_PRECISION_ENV)
     print("test_dispatch OK")

@@ -1,0 +1,13 @@
+{
+ "schema": "qumo.hetero_problem.v1",
+ "name": "grover_5",
+ "kind": "search",
+ "title": "Grover search for one marked 5-bit string",
+ "description": "Find the marked item among 32 with amplitude amplification. Keys are Qiskit-style bitstrings (leftmost character = highest qubit).",
+ "goal": "Maximise the probability of measuring the marked item.",
+ "data": {
+  "marked": [
+   "10110"
+  ]
+ }
+}

@@ -222,7 +222,7 @@ def speedup_markdown(docs, reference=DEFAULT_REFERENCE, family="layered"):
             for s in others:
                 lines.append(f"| {s} | " + " | ".join(
                     f"{ref[q] / t[s][q]:.2f}" if q in t[s] and t[s][q] else "-" for q in qs) + " |")
-            if prec == "fp64" and weak_fp64(d):
+            if prec == "fp64" and weak_fp64(d) and any(" GPU " in f" {x} " for x in others):
                 g = (d.get("environment", {}).get("gpus") or [{}])[0]
                 lines += ["", f"_fp64 on {g.get('name') or 'this GPU'} ({g.get('arch')}): its fp64 units run at 1/32 "
                               "(or less) of the fp32 rate, so every engine's fp64 GPU time here is limited by fp64 "
@@ -410,7 +410,9 @@ def fairness_markdown(docs, family="layered"):
                    "its CPU reference, and no record of GPU clocks or Low Power Mode. Re-run with the current "
                    "harness before comparing these rows with newer runs.")
     for d in docs:
-        if weak_fp64(d):
+        # only runs that have fp64 GPU rows (GPU engines run fp32 unless the run asked for fp64: --fp64)
+        if weak_fp64(d) and any(r.get("device") == "gpu" and r.get("precision") == "fp64"
+                                for r in statevector_rows(d, family)):
             g = (d.get("environment", {}).get("gpus") or [{}])[0]
             out.append(f"**{run_label(d)}**: fp64 on {g.get('name')} ({g.get('arch')}) runs at 1/32 of fp32 or "
                        "less; its fp64 GPU rows measure fp64 arithmetic throughput, not memory bandwidth, and do "

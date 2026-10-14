@@ -299,6 +299,52 @@ the syntax checker). Set `QUMO_QUANTINUUM_USD_PER_HQC` to get a USD figure
 | `qumo-sim:ibm:<fake>` / `qumo-sim:quantinuum:<device>` | exact provider TargetSpec, ideal QUMO simulation |
 | `fake_<ibm>` | IBM snapshot + Aer noise via the IBM plugin's Sampler path |
 | `H2-1LE`, `selene` | Quantinuum local emulators via the Quantinuum plugin |
+| any `qumo-sim...` name + `+noise:<modality>` (`superconducting`, `trapped_ion`, `neutral_atom`, `custom(p1,p2,pm)`) | QUMO compile for the target, then a vendor-neutral depolarizing + readout noise model, sampled locally (free) |
+
+### Vendor-neutral noisy emulator (`+noise:<modality>`)
+
+A noise model named after a hardware *modality*, not a vendor, so examples can
+show "what a noisy QPU does to this circuit" without picking a company:
+
+```bash
+python -m qumo_hardware run examples/ghz.qasm -p local -b 'qumo-sim:grid:4x4/sc_cz+noise:superconducting' --shots 2000
+python -m qumo_hardware run examples/ghz.qasm -p local -b 'qumo-sim:all:16/ion_zz+noise:trapped_ion'
+python -m qumo_hardware run examples/ghz.qasm -p local -b 'qumo-sim+noise:custom(1e-4,1e-3,2e-2)'
+```
+
+| Modality | 1q gate error | 2q gate error | readout error |
+|---|---|---|---|
+| `superconducting` | 2.5e-4 | 3e-3 | 1e-2 |
+| `trapped_ion` | 3e-5 | 1e-3 | 3e-3 |
+| `neutral_atom` | 5e-4 | 5e-3 | 1e-2 |
+| `custom(p1,p2,pm)` | p1 | p2 | pm (each in [0, 0.75]) |
+
+The rates are QUMO's `HardwareProfile` presets (qumo/exec/resources.mojo), so
+the emulator and `qumo_estimate_resources` agree on what a modality means.
+After QUMO compiles the circuit for the target topology and basis, the plugin
+inserts `#pragma qumo depolarize1(p1)` after every 1-qubit gate,
+`depolarize2(p2)` after every 2-qubit gate (`depolarize1(p2)` per qubit for
+wider gates) and `x_error(pm)` before every measurement
+(`inject_noise`, plugins/hardware/qumo_hardware/local.py).
+
+Sampling (`sample_noisy`) is exact in distribution and seeded: each shot draws
+its Pauli error pattern; shots without gate errors share one static
+simulation and every distinct error pattern is simulated once with explicit
+Pauli gates; readout flips are applied classically. Circuits that are dynamic
+after compilation (mid-circuit measurement followed by more gates on the same
+qubit, conditions, resets) fall back to QUMO's per-shot trajectories, which
+are slower (a routed 16-qubit QAOA p=2 on `grid:4x4` with 2000 shots takes
+about 2 minutes on an M5 CPU). `QUMO_HW_NOISE_WORKERS=N` opts into process
+parallelism for the pattern route.
+
+The result carries `noisy: true`, `noise_model` and `noise_sampling` (method,
+error-free shots, distinct patterns); the cost estimate stays "free, local".
+This is a depolarizing approximation, not a device calibration: use
+`ibm:fake_<backend>` (calibration snapshot + Aer) or `quantinuum:H2-1LE` for
+vendor-specific noise. Tests: plugins/hardware/tests/test_local_noise.py
+(Bell fidelity drop within 3 sigma of the analytic value, determinism per
+seed, noise-free unchanged, unknown modality refused, plan says local and
+free).
 
 ## 7. Safety model
 

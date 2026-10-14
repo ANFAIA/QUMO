@@ -1,0 +1,19 @@
+{
+ "schema": "qumo.hetero_problem.v1",
+ "name": "maxcut_8_ring",
+ "kind": "maxcut",
+ "title": "MaxCut on the 8-node ring (small, fast)",
+ "description": "Even cycle C8: the optimal cut (alternating partition) cuts all 8 edges.",
+ "goal": "Quick end-to-end demonstration of the GPU/CPU/QPU split.",
+ "data": {
+  "graph": "0-1 1-2 2-3 3-4 4-5 5-6 6-7 7-0"
+ },
+ "checks": {
+  "ideal_ratio_source": "depth-p QAOA on rings longer than 2p+1 reaches (2p+1)/(2p+2): 3/4 at p=1, 5/6 at p=2 (Farhi, Goldstone, Gutmann 2014); the bound follows the depth the selector picked, deeper plans use the p=2 value",
+  "graph_family": "ring",
+  "ideal_ratio_min_by_depth": {
+   "1": 0.75,
+   "2": 0.8333
+  }
+ }
+}

@@ -9,6 +9,16 @@
     python bench/run_benchmarks.py --select-config auto            # detect the GPU, print its preset
     python bench/run_benchmarks.py --select-config "NVIDIA L4"     # print the preset for a GPU name
     python bench/run_benchmarks.py --select-config "" --gpu-vendor amd --gpu-arch gfx942 --gpu-memory-gib 192
+    python bench/run_benchmarks.py --config colab_t4 --fp64                # GPU suites in fp32 AND fp64
+    python bench/run_benchmarks.py --config colab_t4 --gpu-precisions fp64 # GPU suites in fp64 only
+
+GPU precision: every GPU engine (QUMO GPU, CUDA-Q, Aer GPU, Lightning GPU, the
+QUMO probe) runs in fp32 by default, CUDA-Q's default and QUMO's. fp64 is one
+switch: `--fp64` (= `--gpu-precisions fp32,fp64`) or the preset key
+`"gpu_precisions": ["fp32", "fp64"]`. CPU references keep their own precisions
+(QUMO CPU fp64; Aer CPU fp64 + fp32, so fp32 GPU series have an fp32 CPU
+reference; Lightning CPU fp64). Rows record `precision` (what ran) and
+`precision_requested`; compare fp32 with fp32 and fp64 with fp64 only.
 
 A run executes the suites enabled in a JSON config (bench/configs/*.json) one
 after the other and writes ONE result JSON (environment metadata, per-suite
@@ -20,9 +30,10 @@ Suites (each optional; failures and timeouts are recorded, never fatal):
     gpu_check          make gpu-check for the host GPU arch (+ any listed targets)
     sv_cpu             QUMO CPU state vector, build/bench_sv (layered / qft / random)
     sv_gpu             QUMO GPU state vector + QEC Pauli frames, build/gpu/bench_gpu_{fp32,fp64}
+                       (fp32: -D QUMO_GPU; fp64: -D QUMO_GPU -D QUMO_GPU_FP64; older checkouts: their flags)
     sv_gpu_probe       QUMO GPU engine cost probe (bench_gpu <n> <reps> probe), when the checkout has it
-    baseline_aer       Qiskit Aer statevector, CPU and (qiskit-aer-gpu) GPU, fp32 / fp64
-    baseline_cudaq     NVIDIA CUDA-Q, target nvidia (fp32 / fp64), optional qpp-cpu
+    baseline_aer       Qiskit Aer statevector, CPU (fp64 + fp32) and (qiskit-aer-gpu) GPU
+    baseline_cudaq     NVIDIA CUDA-Q, target nvidia (option fp32 / fp64), optional qpp-cpu
     baseline_lightning PennyLane Lightning: lightning.qubit / .gpu (NVIDIA) / .amdgpu (AMD) / .kokkos
     neutral            small subset of the hardware-neutral compiler benchmark (bench/neutral)
     qec                small subset of bench/bench_qec.py (QUMO vs Stim + PyMatching)
@@ -798,6 +809,7 @@ class Ctx:
         self.gpus = env["gpus"]
         self.gpu = self.gpus[0] if self.gpus else None
         self.vendor = self.gpu["vendor"] if self.gpu else "none"
+        self.precision_policy = gpu_precision_policy(args, cfg)
 
     def log(self, msg):
         print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
@@ -859,11 +871,30 @@ def needs_build(binary, sources):
     return False
 
 
+def _build_stamp(out):
+    """Sidecar recording the -D flags / extra arguments a binary was built with."""
+    return out + ".build.json"
+
+
+def stamp_matches(out, defines, extra):
+    """True / False when the binary's build stamp matches / differs; None without a stamp (a binary
+    built by an older runner or by hand: trusted as before, and its rows' `precision` is checked)."""
+    try:
+        with open(_build_stamp(out)) as fh:
+            st = json.load(fh)
+    except FileNotFoundError:
+        return None
+    except ValueError:
+        return False
+    return st.get("defines") == list(defines) and st.get("extra") == list(extra)
+
+
 def mojo_build(ctx, out, src, defines=(), timeout=1800, extra=()):
-    """Build `src` into `out` unless up to date. -> (ok, info dict)."""
+    """Build `src` into `out` unless up to date (sources older than the binary and the same -D flags
+    as its build stamp). -> (ok, info dict)."""
     srcs = [os.path.join(ROOT, src), os.path.join(ROOT, "qumo")]
-    if not needs_build(out, srcs):
-        return True, {"binary": os.path.relpath(out, ROOT), "built": False}
+    if not needs_build(out, srcs) and stamp_matches(out, defines, extra) is not False:
+        return True, {"binary": os.path.relpath(out, ROOT), "built": False, "defines": list(defines)}
     if not ctx.build:  # a missing binary is a skip (recorded), not a failure
         return False, {"skip": True,
                        "error": err(E_TOOL, f"{os.path.relpath(out, ROOT)} missing or older than its sources "
@@ -884,6 +915,12 @@ def mojo_build(ctx, out, src, defines=(), timeout=1800, extra=()):
         info["error"] = err(E_BUILD, f"`{info['command']}` exited with {r['rc']}")
         info["output_tail"] = tail(r["stdout"] + "\n" + r["stderr"], 25)
         return False, info
+    try:
+        with open(_build_stamp(out), "w") as fh:
+            json.dump({"defines": list(defines), "extra": list(extra), "source": src}, fh)
+    except OSError:
+        pass
+    info["defines"] = list(defines)
     return True, info
 
 
@@ -902,6 +939,75 @@ def label_for(engine, device, precision, extra=""):
     names = {"qumo": "QUMO", "aer": "Aer", "cudaq": "CUDA-Q", "lightning": "Lightning"}
     s = f"{names.get(engine, engine)} {device.upper()} {precision}"
     return s + (f" ({extra})" if extra else "")
+
+
+# GPU precision policy of the benchmark: fp32 for every GPU engine unless fp64 is asked for
+# (CUDA-Q's `nvidia` target defaults to fp32 on every GPU; QUMO does too). One switch adds fp64:
+# --fp64 / --gpu-precisions on the command line, or the preset's top-level "gpu_precisions".
+GPU_PRECISIONS_DEFAULT = ["fp32"]
+PRECISIONS = ("fp32", "fp64")
+
+
+def parse_precisions(value, what):
+    """'fp32,fp64' or ['fp32', 'fp64'] -> validated, de-duplicated list (QM-E960 otherwise)."""
+    items = value.split(",") if isinstance(value, str) else list(value or [])
+    out = []
+    for x in items:
+        x = str(x).strip().lower()
+        if not x:
+            continue
+        if x not in PRECISIONS:
+            raise BenchError(err(E_CONFIG, f"{what}: unknown precision {x!r}", "use fp32 and/or fp64, e.g. fp32,fp64"))
+        if x not in out:
+            out.append(x)
+    if not out:
+        raise BenchError(err(E_CONFIG, f"{what}: no precision given", "use fp32 and/or fp64, e.g. fp32,fp64"))
+    return sorted(out, key=PRECISIONS.index)  # fp32 first: one run order whatever the spelling
+
+
+def gpu_precision_policy(args, cfg):
+    """{"gpu_precisions": [...], "source": "cli" | "config" | "default"}: the GPU precisions of the run."""
+    if getattr(args, "gpu_precisions", None):
+        precs = parse_precisions(args.gpu_precisions, "--gpu-precisions")
+        if getattr(args, "fp64", False) and "fp64" not in precs:
+            precs.append("fp64")
+        return {"gpu_precisions": precs, "source": "cli"}
+    if getattr(args, "fp64", False):
+        return {"gpu_precisions": ["fp32", "fp64"], "source": "cli (--fp64)"}
+    if cfg.get("gpu_precisions") is not None:
+        return {"gpu_precisions": parse_precisions(cfg["gpu_precisions"], "config key gpu_precisions"),
+                "source": "config"}
+    return {"gpu_precisions": list(GPU_PRECISIONS_DEFAULT), "source": "default"}
+
+
+def suite_gpu_precisions(ctx, s, key):
+    """GPU precisions one suite runs -> (list, source). The run's switch (--fp64 / --gpu-precisions)
+    wins; then a suite-level list under `key` (older configs; the shipped presets have none);
+    then the config's gpu_precisions; default ["fp32"]."""
+    pol = ctx.precision_policy
+    if pol["source"].startswith("cli") or s.get(key) is None:
+        return list(pol["gpu_precisions"]), pol["source"]
+    if s[key] == []:  # an older config's way of switching the GPU series off
+        return [], f"suite key {key} (empty)"
+    return parse_precisions(s[key], f"suite key {key}"), f"suite key {key}"
+
+
+def qumo_precision_defines(prec, root=None):
+    """-D flags that make `prec` the build default of a QUMO GPU binary in this checkout, and the policy.
+
+    Current QUMO (qumo/gpu/device.mojo knows QUMO_GPU_FP64): fp32 is the default on every GPU, so
+    fp32 = no flag and fp64 = QUMO_GPU_FP64. Older checkouts (before 2026-10-13: fp64 default on
+    NVIDIA / AMD, QUMO_GPU_FP32 opt-in): fp32 = QUMO_GPU_FP32, fp64 = no flag."""
+    src = _read(os.path.join(root or ROOT, "qumo", "gpu", "device.mojo")) or ""
+    if 'is_defined["QUMO_GPU_FP64"]' in src:
+        return (["QUMO_GPU_FP64"] if prec == "fp64" else []), "fp32-default (QUMO_GPU_FP64 opt-in)"
+    return (["QUMO_GPU_FP32"] if prec == "fp32" else []), "legacy fp64-default (QUMO_GPU_FP32 opt-in)"
+
+
+def precision_of(method, fallback=None):
+    """'gpu:statevector:fp32' -> 'fp32' (the precision a QUMO row actually ran in)."""
+    tail_ = str(method or "").rsplit(":", 1)[-1]
+    return tail_ if tail_ in PRECISIONS else fallback
 
 
 # What each engine's `seconds` contains. Every row carries its string, so a report
@@ -1037,7 +1143,8 @@ def suite_sv_cpu(ctx, s):
         for row in (t or {"rows": []})["rows"]:
             if not isinstance(row.get("qubits"), int) or row["qubits"] < grid[0]:
                 continue  # the warm-up width
-            rows.append({"kind": "statevector", "engine": "qumo", "device": "cpu", "precision": "fp64", "family": fam,
+            rows.append({"kind": "statevector", "engine": "qumo", "device": "cpu", "precision": "fp64",
+                         "precision_requested": "fp64", "family": fam,
                          "qubits": row.get("qubits"), "gates": row.get("gates"), "depth": row.get("depth"),
                          "seconds": row.get("seconds"), "gates_per_sec": row.get("gates_per_sec"), "reps": reps,
                          "fusion": FUSION["qumo_cpu"],
@@ -1065,6 +1172,9 @@ def bench_gpu_features(src_path=None):
     m = re.search(r"def bench_width\[[^\]]*\]\(([^)]*)\)", src)
     return {"cpu_max": bool(m and "cpu_max" in m.group(1)),
             "probe": bool(re.search(r'mode\s*==\s*"probe"', src)),
+            # `bench_gpu N R probe fp32,fp64`: the probe measures only the listed precisions
+            # (older versions: fp32 + fp64 wherever the device has it, no argument)
+            "probe_precisions": "parse_gpu_precision" in src,
             "probe_file": os.path.exists(os.path.join(ROOT, PROBE_GPU_SRC))}
 
 
@@ -1157,11 +1267,20 @@ def _gpu_variants(s, prec):
 
 
 def _bench_gpu_binary(ctx, s, prec, label, extra_defines, src=BENCH_GPU_SRC, stem="bench_gpu"):
+    """build/gpu/<stem>_<prec>[_<variant>]: a QUMO GPU binary whose build default is `prec`
+    (qumo_precision_defines: fp32 = -D QUMO_GPU, fp64 = -D QUMO_GPU -D QUMO_GPU_FP64)."""
     name = f"{stem}_{prec}" + (f"_{_variant_slug(label)}" if label and extra_defines else "")
     exe = os.path.join(ROOT, "build", "gpu", name)
-    defines = ["QUMO_GPU"] + (["QUMO_GPU_FP32"] if prec == "fp32" else []) + list(extra_defines)
+    pdefs, policy = qumo_precision_defines(prec)
+    defines = ["QUMO_GPU"] + pdefs + list(extra_defines)
     ok, binfo = mojo_build(ctx, exe, src, defines, timeout=s.get("build_timeout_s", 2400))
-    return ok, exe, defines, dict(binfo, precision=prec, variant=label)
+    return ok, exe, defines, dict(binfo, precision=prec, variant=label, precision_policy=policy)
+
+
+def _apple_fp64():
+    """Not-applicable entry for fp64 on an Apple GPU (not a skip, not a failure)."""
+    return {"precision": "fp64", "reason": "not applicable: Apple GPUs have no fp64 (Metal has no double "
+                                           "precision; QUMO raises QM-E472 for precision 'fp64' there)"}
 
 
 def suite_sv_gpu(ctx, s):
@@ -1176,9 +1295,12 @@ def suite_sv_gpu(ctx, s):
     knobs = qumo_gpu_knobs()
     rows, frames, cmds, builds, notes, skipped, failures, n_a, var_problems = [], [], [], [], [], [], [], [], []
     settings = {}
-    for prec in s.get("precisions", ["fp32", "fp64"]):
+    precs, psource = suite_gpu_precisions(ctx, s, "precisions")
+    if not precs:
+        return result("skipped", reason=f"no GPU precision selected ({psource})")
+    for prec in precs:
         if prec == "fp64" and ctx.vendor == "apple":  # the hardware has no fp64: not a skip, not a failure
-            n_a.append({"precision": prec, "reason": "Apple GPUs have no fp64 (Metal; QM-E472)"})
+            n_a.append(_apple_fp64())
             continue
         bpa = 8 if prec == "fp32" else 16
         plo, phi = s.get(f"qubits_{prec}", [lo, hi])
@@ -1242,6 +1364,12 @@ def suite_sv_gpu(ctx, s):
                 x = _qumo_gpu_row(row, prec, grid, reps, label, env, defines)
                 if x:
                     rows.append(x)
+                    if x["precision"] != prec:  # e.g. a binary built with other flags than the policy says
+                        notes.append({"precision": prec, "variant": label, "qubits": x["qubits"],
+                                      "problem": err(E_GPU, f"requested {prec} but bench_gpu ran {x['precision']} "
+                                                            f"(method {x.get('method')})",
+                                                     "delete build/gpu/bench_gpu_* and rerun (the build flags of "
+                                                     "this checkout are recorded under builds)")})
             if not label:  # the frames table is the same in every variant: keep the default build's
                 for row in (fr or {"rows": []})["rows"]:
                     frames.append({"kind": "qec_frames", "engine": "qumo", "device": "gpu", "precision": prec, **row,
@@ -1267,8 +1395,10 @@ def suite_sv_gpu(ctx, s):
         reason = "not applicable: " + "; ".join(x["reason"] for x in n_a)
     return result(status, rows + frames, reason, commands=cmds, builds=builds, notes=notes, skipped=skipped,
                   failures=failures, not_applicable=n_a, variant_problems=var_problems,
+                  gpu_precisions={"requested": precs, "source": psource},
                   engine_settings={"bench_gpu_features": feats, "compile_time_knobs": knobs, "builds": settings,
-                                   "fusion": FUSION["qumo_gpu"]})
+                                   "fusion": FUSION["qumo_gpu"],
+                                   "precision_policy": qumo_precision_defines("fp32")[1]})
 
 
 def _qumo_gpu_row(row, prec, grid, reps, label, env, defines):
@@ -1277,7 +1407,7 @@ def _qumo_gpu_row(row, prec, grid, reps, label, env, defines):
     if not isinstance(n, int) or n < grid[0] or n > grid[-1]:
         return None
     method = str(row.get("method", ""))
-    got = method.rsplit(":", 1)[-1] if ":" in method else prec
+    got = precision_of(method, prec)
     neg = lambda v: None if isinstance(v, (int, float)) and v < 0 else v  # noqa: E731  (-1 = not measured)
     launches = _first(row, GPU_ROW_ALIASES["launches"])
     launches = launches if isinstance(launches, int) and launches > 0 else None
@@ -1286,7 +1416,8 @@ def _qumo_gpu_row(row, prec, grid, reps, label, env, defines):
     gates = row.get("gates")
     alias_keys = {k for names in GPU_ROW_ALIASES.values() for k in names}
     extra = {k: v for k, v in row.items() if k not in GPU_ROW_BASE and k not in alias_keys}
-    out = {"kind": "statevector", "engine": "qumo", "device": "gpu", "precision": got, "family": "layered",
+    out = {"kind": "statevector", "engine": "qumo", "device": "gpu", "precision": got, "precision_requested": prec,
+           "family": "layered",
            "qubits": n, "gates": gates, "seconds": seconds,
            "gates_per_sec": row.get("gpu_gates_per_s"), "cpu_seconds": neg(row.get("cpu_s")),
            "speedup_vs_qumo_cpu": neg(row.get("speedup")), "expect_seconds": row.get("gpu_expect_s"),
@@ -1348,8 +1479,17 @@ def suite_sv_gpu_probe(ctx, s):
                                                     f"{BENCH_GPU_SRC}, no {PROBE_GPU_SRC})",
                                             "update QUMO; the probe is step 0 of the GPU engine plan"))
     reps = int(s.get("reps", 3))
+    precs, psource = suite_gpu_precisions(ctx, s, "precisions")
+    n_a = [_apple_fp64()] if ctx.vendor == "apple" and "fp64" in precs else []
+    precs = [p for p in precs if not (p == "fp64" and ctx.vendor == "apple")]
+    if not precs:
+        return result("skipped", reason="; ".join(x["reason"] for x in n_a), not_applicable=n_a,
+                      gpu_precisions={"requested": [], "source": psource})
     prec = _probe_build_precision(ctx, s)
-    bpa = 8 if ctx.vendor == "apple" else 16  # the probe also runs fp64 where the device has it
+    # the probe measures the listed precisions itself (one binary); older bench_gpu versions take no
+    # list and measure fp32 + fp64 wherever the device has it
+    pargs = [",".join(precs)] if feats["probe"] and feats["probe_precisions"] else []
+    bpa = 16 if ("fp64" in precs or not pargs) and ctx.vendor != "apple" else 8
     plo, phi = s.get("qubits") or [24, 26]
     grid, clamp = fit_qubits(qubit_grid(plo, phi), [("GPU memory", ctx.gpu_budget(), bpa * 1.25)])
     if not grid:
@@ -1361,7 +1501,7 @@ def suite_sv_gpu_probe(ctx, s):
         if not ok:
             (var_problems if label else problems).append(binfo.get("error"))
             continue
-        args = [exe, str(grid[-1]), str(reps), *mode, *map(str, s.get("args", []))]
+        args = [exe, str(grid[-1]), str(reps), *mode, *pargs, *map(str, s.get("args", []))]
         ctx.log(f"sv_gpu_probe{' [' + label + ']' if label else ''}: up to {grid[-1]} q, reps={reps}")
         r = run_cmd(args, timeout=s.get("timeout_s", 1800), env=dict(os.environ, **env) if env else None)
         cmds.append(" ".join(f"{k}={v}" for k, v in env.items()) + (" " if env else "")
@@ -1385,14 +1525,19 @@ def suite_sv_gpu_probe(ctx, s):
     primary = [x for x in rows if not x.get("variant")]
     status = "ok" if primary and not problems else ("partial" if primary else "failed")
     return result(status, rows, "; ".join(dict.fromkeys(problems)) or None, commands=cmds, builds=builds,
-                  notes=notes, clamp=clamp, variant_problems=var_problems,
+                  notes=notes, clamp=clamp, variant_problems=var_problems, not_applicable=n_a,
+                  gpu_precisions={"requested": precs, "source": psource,
+                                  "passed_to_probe": pargs[0] if pargs else "none (older bench_gpu: fp32 + fp64 "
+                                                                            "where the device has it)"},
                   engine_settings={"compile_time_knobs": qumo_gpu_knobs(), "binary_precision": prec})
 
 
 def _probe_build_precision(ctx, s):
-    """The one bench_gpu build the probe runs (it measures both precisions itself): the fp32 build
-    when listed (Apple has only that one, and sv_gpu builds it anyway), else the first listed."""
-    precs = [p for p in s.get("precisions", ["fp32", "fp64"]) if not (p == "fp64" and ctx.vendor == "apple")]
+    """The one bench_gpu build the probe runs (it measures the requested precisions itself): the fp32
+    build when fp32 is requested (Apple has only that one, and sv_gpu builds it anyway), else the
+    first requested."""
+    precs, _ = suite_gpu_precisions(ctx, s, "precisions")
+    precs = [p for p in precs if not (p == "fp64" and ctx.vendor == "apple")]
     return "fp32" if "fp32" in precs or not precs else precs[0]
 
 
@@ -1493,8 +1638,12 @@ def _grid_params(ctx, s, key, device, prec, reps_default=3, host_bpa_gpu=None):
 
 def suite_baseline_aer(ctx, s):
     combos = []
+    gprecs, psource = suite_gpu_precisions(ctx, s, "precisions_gpu")
     for device in s.get("devices", ["cpu"]):
-        for prec in s.get(f"precisions_{device}", s.get("precisions", ["fp64"])):
+        # GPU: the run's GPU precisions (fp32 by default); CPU: its own list (fp64 + fp32: the fp32 CPU
+        # series is the like-for-like reference of the fp32 GPU series)
+        cprecs = s.get("precisions_cpu", s.get("precisions", ["fp64"]))
+        for prec in (gprecs if device == "gpu" else cprecs):
             py = ctx.python_for(s, "gpu_python" if device == "gpu" else "python",
                                 "QUMO_AER_GPU_PYTHON" if device == "gpu" else None)
             if device == "gpu" and ctx.vendor not in ("nvidia",):
@@ -1521,13 +1670,16 @@ def suite_baseline_aer(ctx, s):
     if "gpu" in s.get("devices", []) and ctx.vendor != "nvidia":
         # not a failure: the device does not exist on this hardware
         res["not_applicable"] = [{"device": "gpu", "reason": f"qiskit-aer-gpu wheels are CUDA-only (host GPU: {VENDOR_NAMES.get(ctx.vendor, ctx.vendor)})"}]
+    if "gpu" in s.get("devices", []):
+        res["gpu_precisions"] = {"requested": gprecs, "source": psource}
     return res
 
 
 def suite_baseline_cudaq(ctx, s):
     combos = []
     py = ctx.python_for(s, "python", "QUMO_CUDAQ_PYTHON")
-    for prec in s.get("precisions", ["fp32", "fp64"]):
+    gprecs, psource = suite_gpu_precisions(ctx, s, "precisions")
+    for prec in gprecs:  # cudaq.set_target("nvidia", option=prec); CUDA-Q's own default is fp32
         if ctx.vendor != "nvidia":
             break
         # get_state leaves the state on the GPU (moved, not copied): no state-sized host buffer,
@@ -1554,13 +1706,17 @@ def suite_baseline_cudaq(ctx, s):
         why = f"CUDA-Q GPU targets need an NVIDIA GPU (host GPU: {VENDOR_NAMES.get(ctx.vendor, ctx.vendor)})"
         if ctx.vendor == "nvidia":  # NVIDIA present but nothing fits: a real problem
             return result("skipped", reason=err(E_MEMORY, "no CUDA-Q width fits the memory budget"))
-        return result("skipped", reason="not applicable: " + why, not_applicable=[{"device": "gpu", "reason": why}])
-    return _baseline_suite(ctx, s, "cudaq", combos)
+        return result("skipped", reason="not applicable: " + why, not_applicable=[{"device": "gpu", "reason": why}],
+                      gpu_precisions={"requested": gprecs, "source": psource})
+    res = _baseline_suite(ctx, s, "cudaq", combos)
+    res["gpu_precisions"] = {"requested": gprecs, "source": psource}
+    return res
 
 
 def suite_baseline_lightning(ctx, s):
     combos = []
     py = ctx.python_for(s, "python", "QUMO_LIGHTNING_PYTHON")
+    gprecs, psource = suite_gpu_precisions(ctx, s, "precisions_gpu")
     vendor_dev = {"lightning.gpu": "nvidia", "lightning.amdgpu": "amd"}
     n_a = []
     for dev in s.get("devices", ["lightning.qubit"]):
@@ -1570,7 +1726,7 @@ def suite_baseline_lightning(ctx, s):
                                                  f"(host GPU: {VENDOR_NAMES.get(ctx.vendor, ctx.vendor)})"})
             continue
         kind = "cpu" if dev == "lightning.qubit" else "gpu"
-        for prec in s.get(f"precisions_{kind}", s.get("precisions", ["fp64"])):
+        for prec in (gprecs if kind == "gpu" else s.get("precisions_cpu", s.get("precisions", ["fp64"]))):
             p = _grid_params(ctx, s, "qubits_gpu" if kind == "gpu" else "qubits", kind, prec)
             p["pl_device"] = dev
             if p["qubits"]:
@@ -1578,6 +1734,8 @@ def suite_baseline_lightning(ctx, s):
     res = _baseline_suite(ctx, s, "lightning", combos) if combos else result(
         "skipped", reason=err(E_BASELINE, "; ".join(x["reason"] for x in n_a) or "no Lightning device selected"))
     res["not_applicable"] = n_a
+    if any(d != "lightning.qubit" for d in s.get("devices", ["lightning.qubit"])):
+        res["gpu_precisions"] = {"requested": gprecs, "source": psource}
     return res
 
 
@@ -1700,6 +1858,51 @@ SUITES = {  # execution order
 # Run inside the baseline's own interpreter: only stdlib at import time, the
 # SDK is imported inside the worker function.
 
+# Packages whose version matters for a fair comparison: the latest release is
+# expected (the notebooks and run_on_any_gpu.sh install with `-U`).
+FRESHNESS_PACKAGES = {
+    "main": ["qiskit", "qiskit-aer", "pytket", "pytket-qiskit", "cirq-core", "stim", "pymatching"],
+    "QUMO_AER_GPU_PYTHON": ["qiskit", "qiskit-aer-gpu-cu11", "qiskit-aer-gpu"],
+    "QUMO_CUDAQ_PYTHON": ["cuda-quantum-cu12", "cuda-quantum-cu13"],
+    "QUMO_LIGHTNING_PYTHON": ["pennylane", "pennylane-lightning", "pennylane-lightning-gpu"],
+}
+
+
+def _pypi_latest(dist, timeout=5.0):
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"https://pypi.org/pypi/{dist}/json", timeout=timeout) as r:
+            return json.load(r)["info"]["version"]
+    except Exception:  # offline / blocked: freshness is then "unknown"
+        return None
+
+
+def package_freshness():
+    """Installed vs latest PyPI version of every baseline package, per interpreter.
+
+    Recorded in the result JSON (`environment.package_freshness`); a stale
+    package is printed as a warning so an outdated baseline is never silent."""
+    out = {}
+    for venv, dists in FRESHNESS_PACKAGES.items():
+        py = sys.executable if venv == "main" else os.environ.get(venv)
+        if not py or not os.path.exists(py):
+            continue
+        code = ("import json,importlib.metadata as m\nv={}\nfor d in %r:\n    try: v[d]=m.version(d)\n"
+                "    except Exception: pass\nprint(json.dumps(v))" % (dists,))
+        try:
+            installed = json.loads(subprocess.run([py, "-c", code], capture_output=True, text=True,
+                                                  timeout=60).stdout.strip() or "{}")
+        except Exception:
+            continue
+        rows = {}
+        for d, v in installed.items():
+            latest = _pypi_latest(d)
+            rows[d] = {"installed": v, "latest": latest,
+                       "stale": (latest is not None and v != latest)}
+        out[venv] = rows
+    return out
+
+
 def emit(**kw):
     print(WORKER_TAG + json.dumps(kw, default=str), flush=True)
 
@@ -1810,6 +2013,8 @@ def worker_aer(p):
     opts = dict(p.get("aer_options") or {})
     sim = AerSimulator(method="statevector", device=dev, precision="double" if p["precision"] == "fp64" else "single",
                        **opts)
+    # what Aer will actually run (its option, read back), next to what was requested
+    actual = {"single": "fp32", "double": "fp64"}.get(str(getattr(sim.options, "precision", "")), p["precision"])
     variant = p.get("variant") or ""
     layered = _aer_family_builder("layered")
     vq = p["verify_qubits"]
@@ -1850,7 +2055,8 @@ def worker_aer(p):
                 internal.append(float(res.results[0].time_taken))
             t = median(times)
             emit(type="row", row={"kind": "statevector", "engine": "aer", "device": p["device"],
-                                  "precision": p["precision"], "family": family, "qubits": n, "gates": gates,
+                                  "precision": actual, "precision_requested": p["precision"],
+                                  "family": family, "qubits": n, "gates": gates,
                                   "seconds": t, "gates_per_sec": gates / t, "reps": p["reps"], "times": times,
                                   "aer_internal_seconds": median(internal), "aer_internal_times": internal,
                                   "aer_fusion": fusion_info(res), "aer_options": opts, "variant": variant or None,
@@ -1860,7 +2066,7 @@ def worker_aer(p):
                                                             or k == "cuStateVec_enable"} or "Aer defaults",
                                              "reported": fusion_info(res)},
                                   "timed_region": TIMED_REGION["aer"],
-                                  "series": label_for("aer", p["device"], p["precision"], variant)})
+                                  "series": label_for("aer", p["device"], actual, variant)})
     emit(type="done")
 
 
@@ -1878,8 +2084,16 @@ def worker_cudaq(p):
         emit(type="done")
         return
     variant = p.get("variant") or ""
+    actual = p["precision"]  # the target's precision as CUDA-Q reports it (fp32 is the nvidia target's default)
+    try:
+        rep = str(cudaq.get_target().get_precision()).lower()
+        actual = "fp64" if "fp64" in rep or "double" in rep else ("fp32" if "fp32" in rep or "single" in rep else actual)
+    except Exception:  # older CUDA-Q without get_precision: keep the requested option
+        pass
+    if target != "nvidia":
+        actual = "fp64"  # qpp-cpu is double precision
     emit(type="meta", engine="cudaq", versions=_dist_versions("cudaq", "cuda-quantum-cu12", "cuda-quantum-cu13"),
-         cudaq_version=getattr(cudaq, "__version__", None), target=target,
+         cudaq_version=getattr(cudaq, "__version__", None), target=target, precision_actual=actual,
          num_gpus=(cudaq.num_available_gpus() if hasattr(cudaq, "num_available_gpus") else None),
          # CUDAQ_FUSION_* etc. decide how many gates one state sweep applies: record them (unset = cuStateVecEx auto)
          cudaq_env={k: v for k, v in os.environ.items() if k.startswith("CUDAQ_")})
@@ -1985,12 +2199,13 @@ def worker_cudaq(p):
             times.append(time.perf_counter() - t0)
             del s1  # frees into the CUDA mem pool, outside the timed region
         t = median(times)
-        emit(type="row", row={"kind": "statevector", "engine": "cudaq", "device": dev, "precision": p["precision"],
+        emit(type="row", row={"kind": "statevector", "engine": "cudaq", "device": dev, "precision": actual,
+                              "precision_requested": p["precision"],
                               "family": "layered", "qubits": n, "gates": gates_of(n), "seconds": t,
                               "gates_per_sec": gates_of(n) / t, "reps": p["reps"], "times": times,
                               "variant": variant or None, "timed_region": TIMED_REGION["cudaq"],
                               "fusion": cudaq_fusion(dict(os.environ)),
-                              "series": label_for("cudaq", dev, p["precision"],
+                              "series": label_for("cudaq", dev, actual,
                                                   ", ".join(x for x in (target if dev == "cpu" else "", variant) if x))})
     # after the timed rows: the resource counter may switch simulators internally
     emit(type="meta", compiled_gate_count={"qubits": vq, "layered_ops": gates_of(vq), "cudaq": gate_count(args_of(vq))})
@@ -2038,7 +2253,13 @@ def worker_lightning(p):
         emit(type="done")
         return
     fid, order = state_fidelity(reference_state(vq, depth), st)
-    emit(type="meta", verify={"qubits": vq, "fidelity": fid, "order": order})
+    # the device's complex dtype as Lightning reports it (complex64 = fp32, complex128 = fp64)
+    try:
+        cdt = str(np.dtype(getattr(qml.device(dev_name, wires=vq, c_dtype=dtype), "c_dtype", dtype)))
+    except Exception:
+        cdt = str(np.dtype(dtype))
+    actual = {"complex64": "fp32", "complex128": "fp64"}.get(cdt, p["precision"])
+    emit(type="meta", verify={"qubits": vq, "fidelity": fid, "order": order}, precision_actual=actual)
     gates_of = lambda n: len(layered_ops(n, depth))  # noqa: E731
     kind = "cpu" if dev_name in ("lightning.qubit",) else "gpu"
     for n in p["qubits"]:
@@ -2050,11 +2271,12 @@ def worker_lightning(p):
             circ()
             times.append(time.perf_counter() - t0)
         t = median(times)
-        emit(type="row", row={"kind": "statevector", "engine": "lightning", "device": kind, "precision": p["precision"],
+        emit(type="row", row={"kind": "statevector", "engine": "lightning", "device": kind, "precision": actual,
+                              "precision_requested": p["precision"],
                               "family": "layered", "qubits": n, "gates": gates_of(n), "seconds": t,
                               "gates_per_sec": gates_of(n) / t, "reps": p["reps"], "times": times,
                               "timed_region": TIMED_REGION["lightning"], "fusion": FUSION["lightning"],
-                              "series": label_for("lightning", kind, p["precision"], dev_name)})
+                              "series": label_for("lightning", kind, actual, dev_name)})
     emit(type="done")
 
 
@@ -2076,8 +2298,8 @@ def worker_main(name, params_json):
 
 # ----------------------------------------------------------------------------- output
 
-ROW_FIRST = ["suite", "kind", "series", "engine", "device", "precision", "family", "qubits", "gates", "seconds",
-             "gates_per_sec", "reps"]
+ROW_FIRST = ["suite", "kind", "series", "engine", "device", "precision", "precision_requested", "family", "qubits",
+             "gates", "seconds", "gates_per_sec", "reps"]
 
 
 def scrub(text, out_dir=None):
@@ -2160,6 +2382,9 @@ def print_summary(doc):
     print("\n=== QUMO benchmark summary ===")
     print(f"config: {doc['config']['name']}   gpu: {', '.join(g.get('name') or '?' for g in doc['environment']['gpus']) or 'none'}"
           f"   load avg start/end: {doc['environment'].get('loadavg_start')} / {doc.get('loadavg_end')}")
+    pol = doc.get("precision_policy") or {}
+    if pol:
+        print(f"GPU precisions: {', '.join(pol.get('gpu_precisions', []))} ({pol.get('source')})")
     for name, s in doc["suites"].items():
         reason = (" - " + s["reason"][:160]) if s.get("reason") else ""
         print(f"  {name:20s} {s['status']:8s} {len(s.get('rows', [])):4d} rows {s.get('duration_s', 0):8.1f} s{reason}")
@@ -2234,10 +2459,11 @@ def build_only(ctx, suites):
             continue
         src, stem = ((PROBE_GPU_SRC, "probe_gpu") if name == "sv_gpu_probe" and not feats["probe"]
                      else (BENCH_GPU_SRC, "bench_gpu"))
-        precs = [_probe_build_precision(ctx, s)] if name == "sv_gpu_probe" else s.get("precisions", ["fp32"])
+        precs = ([_probe_build_precision(ctx, s)] if name == "sv_gpu_probe"
+                 else suite_gpu_precisions(ctx, s, "precisions")[0])
         for prec in precs:
             if prec == "fp64" and ctx.vendor == "apple":
-                print(f"SKIP {stem}_fp64: Apple GPUs have no fp64 (QM-E472)")
+                print(f"SKIP {stem}_fp64: " + _apple_fp64()["reason"])
                 continue
             for label, extra_defines, _env in _gpu_variants(s, prec):
                 ok, _exe, _defs, info = _bench_gpu_binary(ctx, s, prec, label, extra_defines, src, stem)
@@ -2256,6 +2482,11 @@ def main(argv=None):
                     help="result .json path, or a directory (auto-named file)")
     ap.add_argument("--suites", default="", help="comma list; overrides the config's enabled suites")
     ap.add_argument("--quick", action="store_true", help="small sizes, 1 repetition (smoke run)")
+    ap.add_argument("--fp64", action="store_true",
+                    help="GPU suites also in fp64 (= --gpu-precisions fp32,fp64); default fp32 only, like CUDA-Q")
+    ap.add_argument("--gpu-precisions", default=None, metavar="LIST",
+                    help="GPU precisions for every GPU engine, e.g. fp32 | fp64 | fp32,fp64 (overrides the preset's "
+                         "gpu_precisions; default fp32)")
     ap.add_argument("--list", action="store_true", help="list suites, configs, detected GPUs and exit")
     ap.add_argument("--select-config", metavar="GPU_NAME",
                     help="print the preset `--config auto` would pick for this GPU name and exit "
@@ -2294,6 +2525,12 @@ def main(argv=None):
     if a.list:
         list_everything(env)
         return 0
+    env["package_freshness"] = package_freshness()
+    for venv, rows in env["package_freshness"].items():
+        for d, r in rows.items():
+            if r["stale"]:
+                print(f"WARNING: {d} {r['installed']} is not the latest release ({r['latest']}) in {venv}; "
+                      f"upgrade with `uv pip install -U {d}` for a current baseline")
     try:
         cfg_path = resolve_config_path(a.config, env["gpus"])
         cfg = load_config(cfg_path)
@@ -2305,6 +2542,7 @@ def main(argv=None):
             if bad:
                 raise BenchError(err(E_CONFIG, f"unknown suite(s) {bad}; known: {list(SUITES)}"))
             enabled = [k for k in SUITES if k in req]
+        gpu_precision_policy(a, cfg)  # QM-E960 for an unknown precision before anything runs
     except BenchError as e:
         print(str(e), file=sys.stderr)
         return 2
@@ -2319,8 +2557,14 @@ def main(argv=None):
 
     doc = {"schema": SCHEMA, "label": a.label, "config": {"name": cfg_name, "path": os.path.relpath(cfg_path, ROOT),
                                                           "quick": a.quick, "content": cfg},
+           "precision_policy": dict(ctx.precision_policy,
+                                    note="GPU engines run in the listed precisions (fp32 by default, CUDA-Q's and "
+                                         "QUMO's default); CPU references keep their own (QUMO CPU fp64, Aer CPU "
+                                         "fp64 + fp32). Compare fp32 with fp32 and fp64 with fp64 only."),
            "environment": env, "suites": {}, "started_utc": now_iso()}
     ctx.log(f"config {cfg_name} ({os.path.relpath(cfg_path, ROOT)}); suites: {', '.join(enabled) or 'none'}")
+    ctx.log(f"GPU precisions: {', '.join(ctx.precision_policy['gpu_precisions'])} "
+            f"({ctx.precision_policy['source']}; --fp64 adds fp64)")
     ctx.log(f"GPU: {', '.join((g.get('name') or '?') + ' [' + g['vendor'] + ']' for g in env['gpus']) or 'none'}; "
             f"load avg {env['loadavg_start']}; output {out}")
     for name in enabled:

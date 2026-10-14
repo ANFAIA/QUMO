@@ -25,6 +25,14 @@ Otherwise they run on the CPU and `JobResult.backend` ends with
 "(gpu fallback: <reason>)" (no GPU build, no usable device, > 62 classical
 bits, Clifford feed-forward, or a dynamic / noisy non-Clifford circuit). GPU
 jobs of a wave run one after another (they share the device).
+
+GPU precision: `Device.gpu(..., precision="auto" | "fp32" | "fp64")`, and per
+job `add_sample / add_estimate(..., precision=...)` (a job's "fp32" / "fp64"
+overrides its device's). "auto" = QUMO_GPU_PRECISION when set, else the build
+default (fp32 on every GPU). `JobResult.backend` names what ran
+("gpu:statevector:fp32" / "...:fp64"). `plan` rejects an unknown selector
+(QM-E941); a job that would run fp64 on an Apple GPU fails with QM-E472 in
+`JobResult.error` (Metal has no double precision).
 """
 
 from std.time import perf_counter_ns
@@ -35,8 +43,8 @@ from qumo.ir.circuit import Circuit
 from qumo.ir.pauli import PauliSum
 from qumo.sim.runner import sample, expectation, SampleResult
 from qumo.exec.dispatch import sample_auto, gpu_sample_route, sample_frame_gpu
-from qumo.gpu.device import gpu_available
-from qumo.gpu.statevector_gpu import sample_gpu, evolve_gpu
+from qumo.gpu.device import gpu_available, parse_gpu_precision, resolve_gpu_precision, check_gpu_precision
+from qumo.gpu.statevector_gpu import sample_gpu_runtime, expectation_gpu_runtime
 
 comptime INF = 1e300
 
@@ -55,7 +63,6 @@ def device_kind_name(k: Int) -> String:
     return "qpu"
 
 
-@fieldwise_init
 struct Device(Copyable, Writable):
     var name: String
     var kind: Int
@@ -66,14 +73,31 @@ struct Device(Copyable, Writable):
     var cost_per_task: Float64
     var cost_per_shot: Float64
     var clifford_only: Bool
+    var precision: String  # GPU devices: "auto" | "fp32" | "fp64" (qumo.gpu.device); ignored elsewhere
+
+    def __init__(out self, name: String, kind: Int, max_qubits: Int, amp_ops_per_s: Float64, overhead_s: Float64,
+                 shot_time_s: Float64, cost_per_task: Float64, cost_per_shot: Float64, clifford_only: Bool,
+                 precision: String = "auto"):
+        self.name = name
+        self.kind = kind
+        self.max_qubits = max_qubits
+        self.amp_ops_per_s = amp_ops_per_s
+        self.overhead_s = overhead_s
+        self.shot_time_s = shot_time_s
+        self.cost_per_task = cost_per_task
+        self.cost_per_shot = cost_per_shot
+        self.clifford_only = clifford_only
+        self.precision = precision
 
     @staticmethod
     def cpu(name: String = "cpu0", max_qubits: Int = 30) -> Device:
         return Device(name, DeviceKind.CPU_SV, max_qubits, 2.5e9, 1e-5, 0.0, 0.0, 0.0, False)
 
     @staticmethod
-    def gpu(name: String = "gpu0", max_qubits: Int = 33) -> Device:
-        return Device(name, DeviceKind.GPU_SV, max_qubits, 6e10, 2e-3, 0.0, 0.0, 0.0, False)
+    def gpu(name: String = "gpu0", max_qubits: Int = 33, precision: String = "auto") -> Device:
+        """A GPU state-vector device; `precision` = "auto" (QUMO_GPU_PRECISION
+        or the build default, fp32) | "fp32" | "fp64"."""
+        return Device(name, DeviceKind.GPU_SV, max_qubits, 6e10, 2e-3, 0.0, 0.0, 0.0, False, precision)
 
     @staticmethod
     def stabilizer(name: String = "tableau0") -> Device:
@@ -85,7 +109,10 @@ struct Device(Copyable, Writable):
         return Device(name, DeviceKind.QPU, max_qubits, 0.0, queue_s, shot_time_s, cost_per_task, cost_per_shot, False)
 
     def write_to(self, mut w: Some[Writer]):
-        w.write(self.name, "<", device_kind_name(self.kind), ", max_qubits=", self.max_qubits, ">")
+        w.write(self.name, "<", device_kind_name(self.kind), ", max_qubits=", self.max_qubits)
+        if self.kind == DeviceKind.GPU_SV:
+            w.write(", precision=", self.precision)
+        w.write(">")
 
 
 struct JobKind:
@@ -102,9 +129,10 @@ struct Job(Copyable):
     var shots: Int
     var deps: List[Int]
     var seed: UInt64
+    var precision: String  # "auto" = the device's precision; "fp32" / "fp64" override it on a GPU
 
     def __init__(out self, name: String, kind: Int, circuit: Circuit, observable: PauliSum,
-                 params: List[Float64], shots: Int, deps: List[Int], seed: UInt64):
+                 params: List[Float64], shots: Int, deps: List[Int], seed: UInt64, precision: String = "auto"):
         self.name = name
         self.kind = kind
         self.circuit = circuit.copy()
@@ -113,6 +141,7 @@ struct Job(Copyable):
         self.shots = shots
         self.deps = deps.copy()
         self.seed = seed
+        self.precision = precision
 
 
 struct JobResult(Copyable):
@@ -145,11 +174,21 @@ def _run_job_cpu(job: Job, mut r: JobResult) raises:
         r.backend = "statevector:exact"
 
 
-def _run_job_gpu(job: Job, mut r: JobResult) raises:
+def job_precision(job: Job, dev_precision: String) -> String:
+    """The GPU precision selector of a job on a device: the job's own unless
+    it is "auto", else the device's."""
+    var j = String(job.precision.strip()).lower()
+    if j.byte_length() > 0 and j != "auto":
+        return job.precision
+    return dev_precision
+
+
+def _run_job_gpu(job: Job, mut r: JobResult, precision: String = "auto") raises:
     """A job HEFT placed on a GPU device: estimate jobs on the GPU state
     vector; sample jobs routed by `gpu_sample_route` (GPU Pauli frames or GPU
-    state vector). Otherwise the CPU runs it and the reason is appended to
-    `backend` as "(gpu fallback: <reason>)"."""
+    state vector), in `precision` ("auto" | "fp32" | "fp64"; QM-E472 for
+    fp64 on an Apple GPU). Otherwise the CPU runs it and the reason is
+    appended to `backend` as "(gpu fallback: <reason>)"."""
     var reason: String
     comptime if is_defined["QUMO_GPU"]():
         var ok: Bool
@@ -160,9 +199,11 @@ def _run_job_gpu(job: Job, mut r: JobResult) raises:
         if not ok:
             reason = "no usable GPU device"
         elif job.kind == JobKind.ESTIMATE:
-            var sv = evolve_gpu(job.circuit, job.params)
-            r.expectation = sv.expectation(job.observable)
-            r.backend = sv.method_name()
+            var p = resolve_gpu_precision(precision)
+            check_gpu_precision(p)
+            var ev = expectation_gpu_runtime(job.circuit, job.observable, job.params, p)
+            r.expectation = ev[0]
+            r.backend = ev[1]
             return
         else:
             var route = gpu_sample_route(job.circuit, job.params)
@@ -171,7 +212,9 @@ def _run_job_gpu(job: Job, mut r: JobResult) raises:
                 r.backend = r.samples.method
                 return
             if route[0] == "statevector":
-                r.samples = sample_gpu(job.circuit, job.shots, job.seed, job.params)
+                var p = resolve_gpu_precision(precision)
+                check_gpu_precision(p)
+                r.samples = sample_gpu_runtime(job.circuit, job.shots, job.seed, job.params, p)
                 r.backend = r.samples.method
                 return
             reason = route[1]
@@ -241,14 +284,16 @@ struct Workflow(Movable):
 
     def add_sample(mut self, name: String, circuit: Circuit, shots: Int,
                    params: List[Float64] = List[Float64](), deps: List[Int] = List[Int](),
-                   seed: UInt64 = 1234) -> Int:
-        self.jobs.append(Job(name, JobKind.SAMPLE, circuit, PauliSum(), params, shots, deps, seed))
+                   seed: UInt64 = 1234, precision: String = "auto") -> Int:
+        """`precision` ("auto" | "fp32" | "fp64"): GPU precision of this job
+        when it runs on a GPU state vector ("auto" = the device's)."""
+        self.jobs.append(Job(name, JobKind.SAMPLE, circuit, PauliSum(), params, shots, deps, seed, precision))
         return len(self.jobs) - 1
 
     def add_estimate(mut self, name: String, circuit: Circuit, observable: PauliSum,
                      params: List[Float64] = List[Float64](), deps: List[Int] = List[Int](),
-                     seed: UInt64 = 1234) -> Int:
-        self.jobs.append(Job(name, JobKind.ESTIMATE, circuit, observable, params, 0, deps, seed))
+                     seed: UInt64 = 1234, precision: String = "auto") -> Int:
+        self.jobs.append(Job(name, JobKind.ESTIMATE, circuit, observable, params, 0, deps, seed, precision))
         return len(self.jobs) - 1
 
     def plan(self, devices: List[Device], cost_weight: Float64 = 0.0) raises -> Schedule:
@@ -257,6 +302,11 @@ struct Workflow(Movable):
         var nd = len(devices)
         if nd == 0:
             raise Error("QM-E460: no devices in the pool. Hint: add Device.cpu() at least.")
+        for d in range(nd):  # unknown GPU precision selectors fail before anything runs (QM-E941)
+            if devices[d].kind == DeviceKind.GPU_SV:
+                _ = parse_gpu_precision(devices[d].precision)
+        for i in range(n):
+            _ = parse_gpu_precision(self.jobs[i].precision)
         var w = List[List[Float64]]()
         var avg = List[Float64](length=n, fill=0.0)
         for i in range(n):
@@ -351,13 +401,16 @@ struct Workflow(Movable):
         var dev_names = List[String]()
         var dev_is_qpu = List[Bool]()
         var dev_is_gpu = List[Bool]()
+        var job_prec = List[String]()  # GPU precision selector per job (job's, else its device's)
         for j in range(n):
             dev_names.append(devices[sch.device_of[j]].name)
             dev_is_qpu.append(devices[sch.device_of[j]].kind == DeviceKind.QPU)
             dev_is_gpu.append(devices[sch.device_of[j]].kind == DeviceKind.GPU_SV)
+            job_prec.append(job_precision(self.jobs[j], devices[sch.device_of[j]].precision))
         var np_ = dev_names.unsafe_ptr().as_unsafe_any_origin()
         var qp = dev_is_qpu.unsafe_ptr().as_unsafe_any_origin()
         var gp = dev_is_gpu.unsafe_ptr().as_unsafe_any_origin()
+        var pp = job_prec.unsafe_ptr().as_unsafe_any_origin()
         while remaining > 0:
             var wave = List[Int]()
             var small = True
@@ -374,7 +427,7 @@ struct Workflow(Movable):
                         small = False  # GPU jobs share one device: run them in order
             var wp = wave.unsafe_ptr().as_unsafe_any_origin()
 
-            def exec_one(k: Int) {imm wp, imm rp, imm jp, imm np_, imm qp, imm gp}:
+            def exec_one(k: Int) {imm wp, imm rp, imm jp, imm np_, imm qp, imm gp, imm pp}:
                 var j = wp[unsafe_offset=k]
                 ref job = jp[unsafe_offset=j]
                 var r = JobResult()
@@ -383,7 +436,7 @@ struct Workflow(Movable):
                 var t0 = perf_counter_ns()
                 try:
                     if gp[unsafe_offset=j]:
-                        _run_job_gpu(job, r)
+                        _run_job_gpu(job, r, pp[unsafe_offset=j])
                     else:
                         _run_job_cpu(job, r)
                     r.ok = True
@@ -405,4 +458,5 @@ struct Workflow(Movable):
         _ = len(dev_names)
         _ = len(dev_is_qpu)
         _ = len(dev_is_gpu)
+        _ = len(job_prec)
         return results^

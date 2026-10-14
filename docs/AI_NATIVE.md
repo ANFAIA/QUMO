@@ -261,8 +261,8 @@ Module tools (`qumo/exec/tools.mojo`, registered by `full_registry()`):
 | `qumo_vqe`, `qumo_qaoa_maxcut` | Pauli-sum `hamiltonian` / edge-list `graph`, optimizer options, `seed` | energy or cut, parameters, convergence |
 | `qumo_qec_memory` | `code`: surface_z \| surface_x \| repetition, `distance`, `rounds`, `p`, `shots`, `decoder`, `seed`, `max_errors` | logical error rate, std error, Wilson interval, per-round rate, timing |
 | `qumo_qec_dem` | `code`, `distance`, `rounds`, `p`, `include_stim` | detector error model in Stim DEM text |
-| `qumo_gpu_info` | none | whether the build has GPU support (`-D QUMO_GPU`), device name, API (CUDA, ROCm/HIP, Metal), precision, auto-dispatch threshold |
-| `qumo_run_device` | as `qumo_run_qasm`, plus `device`: auto \| cpu \| gpu | `counts`, `method`, `device_used`, `warnings` |
+| `qumo_gpu_info` | none | whether the build has GPU support (`-D QUMO_GPU`), device name, API (CUDA, ROCm/HIP, Metal), `precision` (what `auto` runs: fp32 by default on every GPU), `precision_build_default`, `precision_env` (`QUMO_GPU_PRECISION`), `precisions` (selectable), `precision_note`, `fp64_supported`, auto-dispatch threshold, device profile |
+| `qumo_run_device` | as `qumo_run_qasm`, plus `device`: auto \| cpu \| gpu and `precision`: auto \| fp32 \| fp64 | `counts`, `method`, `device_used`, `precision`, `precision_used`, `warnings` |
 
 Decoders of `qumo_qec_memory` (QM-E707 lists them for an unknown name):
 `mwpm` (the default; exact minimum-weight perfect matching by sparse
@@ -284,11 +284,29 @@ tiny codes with at most 64 detectors). See [QEC.md](QEC.md).
 * `gpu` sends Clifford circuits without parameters or classical feed-forward
   to GPU Pauli frames (`gpu:pauli_frame`); noise, mid-circuit measurement and
   reset are allowed. Other static, noiseless circuits go to the GPU state
-  vector (`gpu:statevector:fp32` on Apple, fp64 on NVIDIA and AMD). Three cases
-  run on the CPU, as with `cpu`, and add warning **QM-W020** with the reason:
-  dynamic or noisy non-Clifford circuits, builds without `-D QUMO_GPU`, and
-  machines without a usable device. The GPU path is the same code for every
-  vendor (MAX kernels for CUDA, ROCm and Metal). See [GPU.md](GPU.md).
+  vector in `precision` (`gpu:statevector:fp32` or `gpu:statevector:fp64`).
+  Three cases run on the CPU, as with `cpu`, and add warning **QM-W020** with
+  the reason: dynamic or noisy non-Clifford circuits, builds without
+  `-D QUMO_GPU`, and machines without a usable device. The GPU path is the
+  same code for every vendor (MAX kernels for CUDA, ROCm and Metal). See
+  [GPU.md](GPU.md).
+
+`precision` selects the GPU state vector's floating-point precision:
+
+* `auto` (default): the environment variable `QUMO_GPU_PRECISION` (`fp32` or
+  `fp64`) when it is set, else the build default, which is **fp32 on every
+  GPU** (as CUDA-Q's `nvidia` target; `-D QUMO_GPU_FP64` makes it fp64 on
+  NVIDIA and AMD).
+* `fp32` or `fp64`. Apple GPUs have no fp64: `device: "gpu"` with `fp64`
+  fails with **QM-E472**; with `device: "auto"` such a circuit stays on the
+  CPU, which is fp64. An unknown value fails with **QM-E941**.
+* It applies to GPU state vectors only: CPU state vectors are fp64, the
+  stabilizer tableau and Pauli frames are exact. The result's
+  `precision_used` says what ran (`fp32`, `fp64` or `exact`), and warning
+  **QM-W021** flags a requested precision that did not apply.
+
+The CLI exposes the same choice: `qumo run x.qasm --device gpu --precision
+fp64` (needs a build made with `make cli-gpu`).
 
 Warnings in every tool result have the `Diagnostic` shape
 (`{code, severity, message, hint, docs}`).

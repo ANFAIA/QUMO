@@ -10,6 +10,10 @@
     "host_ram_gib": "varies (High-RAM: more)"
   },
   "memory_fraction": 0.6,
+  "gpu_precisions": [
+    "fp32"
+  ],
+  "gpu_precisions_note": "GPU engines (QUMO GPU, CUDA-Q, Aer GPU, Lightning GPU, QUMO probe) run in these precisions; fp32 by default, CUDA-Q's and QUMO's default. Add fp64 with run_benchmarks.py --fp64 or [\"fp32\", \"fp64\"] here. CPU references keep their own precisions (precisions_cpu).",
   "suites": {
     "gpu_check": {
       "enabled": true,
@@ -44,10 +48,6 @@
     },
     "sv_gpu": {
       "enabled": true,
-      "precisions": [
-        "fp32",
-        "fp64"
-      ],
       "qubits_fp32": [
         16,
         30
@@ -86,10 +86,6 @@
     },
     "sv_gpu_probe": {
       "enabled": true,
-      "precisions": [
-        "fp32",
-        "fp64"
-      ],
       "qubits": [
         24,
         26
@@ -115,10 +111,6 @@
       "precisions_cpu": [
         "fp64",
         "fp32"
-      ],
-      "precisions_gpu": [
-        "fp32",
-        "fp64"
       ],
       "families_cpu": [
         "layered",
@@ -184,10 +176,6 @@
     },
     "baseline_cudaq": {
       "enabled": true,
-      "precisions": [
-        "fp32",
-        "fp64"
-      ],
       "qubits_fp32": [
         16,
         30
@@ -236,10 +224,6 @@
         "lightning.gpu"
       ],
       "precisions_cpu": [
-        "fp64"
-      ],
-      "precisions_gpu": [
-        "fp32",
         "fp64"
       ],
       "qubits": [

@@ -18,7 +18,7 @@ from qumo.ai.tools import (
     write_warnings,
 )
 from qumo.exec.dispatch import sample_on
-from qumo.gpu.device import query_gpu, GPU_MIN_QUBITS
+from qumo.gpu.device import query_gpu, GPU_MIN_QUBITS, parse_gpu_precision
 from qumo.compiler.target import Target, parse_target
 from qumo.compiler.pass_manager import transpile, compile_spec
 from qumo.exec.resources import (
@@ -201,6 +201,18 @@ def _gpu_info_tool(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
     return tool_ok(query_gpu().to_json())
 
 
+def precision_of_method(method: String) -> String:
+    """Floating-point precision of the simulator a SampleResult.method names:
+    'fp32' / 'fp64' for state vectors (GPU: the method's suffix; the CPU state
+    vector is fp64), 'exact' for the stabilizer tableau and Pauli frames (no
+    floating-point amplitudes)."""
+    if method.find(":statevector:fp32") >= 0:
+        return "fp32"
+    if method.find(":statevector:fp64") >= 0 or method.startswith("statevector"):
+        return "fp64"
+    return "exact"
+
+
 def _run_device_tool(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
     var t0 = perf_counter_ns()
     var warnings = List[String]()
@@ -208,6 +220,7 @@ def _run_device_tool(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
     var shots = arg_int(args, "shots", 1024, 1, 10000000)
     var seed = arg_int(args, "seed", 1234, 0, 9223372036854775807)
     var device = args.get_string("device", "auto")
+    var precision = parse_gpu_precision(args.get_string("precision", "auto"))  # QM-E941
     var max_q = arg_int(args, "max_qubits", 30, 1, 40)
     if c.num_qubits > max_q and not (c.num_params() == 0 and c.is_clifford()):
         raise Error("QM-E930: circuit has " + String(c.num_qubits) + " qubits; dense state-vector simulation is limited to max_qubits=" + String(max_q) + ". Hint: raise 'max_qubits' if the device has the memory (8*2^n bytes in fp32, 16*2^n in fp64).")
@@ -217,10 +230,13 @@ def _run_device_tool(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
         c.measure_all()
         auto = True
     var note = String()
-    var r = sample_on(c, shots, UInt64(seed), params, device, note)
+    var r = sample_on(c, shots, UInt64(seed), params, device, note, precision)
     var t1 = perf_counter_ns()
     if note.byte_length() > 0:
         warnings.append("QM-W020: device 'gpu' requested but " + note + ". Hint: check qumo_gpu_info; GPU runs need a build made with -D QUMO_GPU (make cli-gpu) and a supported GPU.")
+    var used = precision_of_method(r.method)
+    if precision != "auto" and used != precision:
+        warnings.append("QM-W021: precision '" + precision + "' applies to GPU state-vector runs; this run used " + r.method + " (" + used + "). Hint: CPU state vectors are fp64, stabilizer / Pauli-frame samplers exact; use device 'gpu' for a GPU state vector in " + precision + ".")
     if auto:
         warnings.append("QM-W004: circuit had no measurements; all qubits were measured into c[0..n-1]. Hint: add 'c = measure q;' to control readout.")
     var w = JsonWriter()
@@ -235,6 +251,8 @@ def _run_device_tool(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
     w.kv_string("device", device)
     w.kv_string("device_used", "gpu" if r.method.startswith("gpu") else "cpu")
     w.kv_string("method", r.method)
+    w.kv_string("precision", precision)
+    w.kv_string("precision_used", used)
     w.kv_int("num_qubits", c.num_qubits)
     w.kv_string("most_frequent", r.most_frequent())
     w.kv_string("bit_order", "leftmost character = highest classical bit c[n-1]")
@@ -286,13 +304,13 @@ def register_exec_tools(mut reg: ToolRegistry):
     )
     reg.add(
         "qumo_gpu_info", "GPU status",
-        "Report whether this QUMO build has GPU support (-D QUMO_GPU) and a usable device: name, API (cuda/hip/metal), vendor, default precision (fp32 on Apple, fp64 on NVIDIA/AMD), fp64 support and the qubit threshold above which automatic dispatch uses the GPU. Call it before qumo_run_device with device 'gpu'.",
+        "Report whether this QUMO build has GPU support (-D QUMO_GPU) and a usable device: name, API (cuda/hip/metal), vendor, GPU precision ('precision': what precision 'auto' runs, fp32 on every GPU by default like CUDA-Q; 'precision_build_default'; 'precision_env': the QUMO_GPU_PRECISION override; 'precisions': selectable at run time, fp64 only on NVIDIA/AMD; 'precision_note': why), fp64 support, the qubit threshold above which automatic dispatch uses the GPU and the device's tuning profile. Call it before qumo_run_device with device 'gpu'.",
         "{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}",
         _gpu_info_tool,
     )
     reg.add(
         "qumo_run_device", "Run circuit on a device",
-        "Like qumo_run_qasm but with an explicit simulator device (vendor-neutral: NVIDIA CUDA, AMD ROCm or Apple Metal through MAX). 'auto' (default) = qumo_run_qasm's dispatch: noisy Clifford circuits without feed-forward -> CPU Pauli frames, other wide/noisy/dynamic Clifford circuits -> stabilizer tableau, static non-Clifford circuits with >= " + String(GPU_MIN_QUBITS) + " qubits -> GPU state vector when this build has GPU support (-D QUMO_GPU) and a usable device (CPU on any GPU failure), everything else -> CPU state vector. 'cpu' = the same choice restricted to CPU simulators. 'gpu' = Clifford circuits without parameters or classical feed-forward (noise, mid-circuit measurement and reset allowed) -> GPU Pauli frames ('gpu:pauli_frame'); other static, noiseless circuits -> GPU state vector ('gpu:statevector:fp32' on Apple, fp64 on NVIDIA/AMD); dynamic or noisy non-Clifford circuits, builds without -D QUMO_GPU, or no usable device -> run on the CPU as with 'cpu' plus warning QM-W020 giving the reason. Returns counts, 'method' (the simulator that ran), 'device_used' and structured 'warnings'.",
-        "{\"type\":\"object\",\"properties\":{" + _CIRC + ",\"shots\":{\"type\":\"integer\",\"minimum\":1,\"default\":1024},\"seed\":{\"type\":\"integer\",\"minimum\":0,\"default\":1234},\"params\":{\"description\":\"Values for 'input float' parameters: array in declaration order or object name->value\"},\"device\":{\"type\":\"string\",\"enum\":[\"auto\",\"cpu\",\"gpu\"],\"default\":\"auto\"},\"max_qubits\":{\"type\":\"integer\",\"default\":30}},\"additionalProperties\":false}",
+        "Like qumo_run_qasm but with an explicit simulator device (vendor-neutral: NVIDIA CUDA, AMD ROCm or Apple Metal through MAX). 'auto' (default) = qumo_run_qasm's dispatch: noisy Clifford circuits without feed-forward -> CPU Pauli frames, other wide/noisy/dynamic Clifford circuits -> stabilizer tableau, static non-Clifford circuits with >= " + String(GPU_MIN_QUBITS) + " qubits -> GPU state vector when this build has GPU support (-D QUMO_GPU) and a usable device (CPU on any GPU failure), everything else -> CPU state vector. 'cpu' = the same choice restricted to CPU simulators. 'gpu' = Clifford circuits without parameters or classical feed-forward (noise, mid-circuit measurement and reset allowed) -> GPU Pauli frames ('gpu:pauli_frame'); other static, noiseless circuits -> GPU state vector in 'precision' ('gpu:statevector:fp32' or 'gpu:statevector:fp64'); dynamic or noisy non-Clifford circuits, builds without -D QUMO_GPU, or no usable device -> run on the CPU as with 'cpu' plus warning QM-W020 giving the reason. 'precision' (GPU state vector only): 'auto' (default: QUMO_GPU_PRECISION when set, else the build default, fp32 on every GPU as in CUDA-Q), 'fp32', or 'fp64' (NVIDIA/AMD; error QM-E472 on Apple GPUs, which have no fp64); CPU simulators are fp64 (warning QM-W021 when a requested precision did not apply). Returns counts, 'method' (the simulator that ran), 'device_used', 'precision_used' and structured 'warnings'.",
+        "{\"type\":\"object\",\"properties\":{" + _CIRC + ",\"shots\":{\"type\":\"integer\",\"minimum\":1,\"default\":1024},\"seed\":{\"type\":\"integer\",\"minimum\":0,\"default\":1234},\"params\":{\"description\":\"Values for 'input float' parameters: array in declaration order or object name->value\"},\"device\":{\"type\":\"string\",\"enum\":[\"auto\",\"cpu\",\"gpu\"],\"default\":\"auto\"},\"precision\":{\"type\":\"string\",\"enum\":[\"auto\",\"fp32\",\"fp64\"],\"default\":\"auto\",\"description\":\"GPU state-vector precision: auto = QUMO_GPU_PRECISION or the build default (fp32)\"},\"max_qubits\":{\"type\":\"integer\",\"default\":30}},\"additionalProperties\":false}",
         _run_device_tool,
     )

@@ -190,7 +190,7 @@ Fix: Add jobs in dependency order; a job may only depend on earlier jobs.
 
 ## QM-E47x — GPU acceleration
 
-See [GPU.md](GPU.md). Only GPU entry points raise these codes. The MCP tool `qumo_run_device` and `qumo.exec.dispatch.sample_on(..., "gpu")` never fail because the GPU is missing: they run on the CPU and report warning QM-W020.
+See [GPU.md](GPU.md). Only GPU entry points raise these codes. The MCP tool `qumo_run_device` and `qumo.exec.dispatch.sample_on(..., "gpu")` never fail because the GPU is missing: they run on the CPU and report warning QM-W020. They do fail with QM-E472 when precision 'fp64' is requested on an Apple GPU, which has no fp64.
 
 ### QM-E470
 
@@ -204,8 +204,8 @@ Fix: Use qumo.exec.dispatch.sample_auto or sample_on, which fall back to CPU tra
 
 ### QM-E472
 
-**float64 requested on an Apple GPU (Metal has no double precision).**  
-Fix: Use GpuStateVector[DType.float32], the default on Apple.
+**float64 requested on an Apple GPU (Metal has no double precision): precision 'fp64' (argument or QUMO_GPU_PRECISION) or GpuStateVector[DType.float64].**  
+Fix: Use precision 'fp32' or 'auto' (GpuStateVector[DType.float32], the default on every GPU), or the CPU simulators, which run in fp64.
 
 ### QM-E473
 
@@ -542,6 +542,31 @@ Fix: 1 <= n_eval <= 16 and a unitary on >= 1 qubit.
 **Invalid multi-controlled gate construction.**  
 Fix: Check control/target/ancilla counts.
 
+### QM-E830
+
+**Invalid QML template, embedding or observable arguments (qumo.algorithms.qml): wrong weight/feature count, bad wires, unknown rotation, zero-norm or oversized amplitude vector, diagonal observable above 12 qubits.**  
+Fix: Check the shapes in docs/QML.md (weights L*n*3 for strongly entangling layers, 4^n-1 for ArbitraryUnitary, 15/3 for QCNN conv/pool).
+
+### QM-E831
+
+**Shape mismatch in a QML kernel, dataset or training helper (qumo.algorithms.qkernels, datasets, qml_train).**  
+Fix: Kernel matrices are row-major N x M lists; X rows must share one width; predictions and labels must have equal length.
+
+### QM-E832
+
+**metric_tensor()/QNG does not support the circuit: a trainable parameter in an unsupported gate (U, ...) or shared by several gates (e.g. QAOA gamma).**  
+Fix: Use one parameter per rx/ry/rz/p/cp/rxx/ryy/rzz/crx/cry/crz gate, or restrict with wrt=[...].
+
+### QM-E833
+
+**Invalid optimizer state or settings (StepOptimizer, QNGOptimizer): the parameter or gradient length changed between steps, or a setting is out of range.**  
+Fix: Call reset() before optimising a vector of another length; check lr, momentum and beta values.
+
+### QM-E834
+
+**Dataset file missing or malformed (load_csv, load_json_matrix).**  
+Fix: Run from the repository root (examples ship their data under examples/*/data); every CSV row needs the same number of numeric columns.
+
 ## QM-E9xx — Interface
 
 ### QM-E900
@@ -598,6 +623,11 @@ Fix: Use sampling, fewer qubits, or raise max_qubits explicitly.
 
 **Unknown simulator device name (qumo.exec.dispatch.sample_on, qumo_run_device).**  
 Fix: Use 'auto', 'cpu' or 'gpu'.
+
+### QM-E941
+
+**Unknown GPU precision selector: the 'precision' argument (sample_on, qumo_run_device, Device.gpu, qumo_py.sample_device, qumo run --precision) or the QUMO_GPU_PRECISION environment variable.**  
+Fix: Use 'auto' (QUMO_GPU_PRECISION when set, else the build default: fp32), 'fp32' or 'fp64'; QUMO_GPU_PRECISION accepts 'fp32' or 'fp64'.
 
 ### QM-E999
 
@@ -783,6 +813,11 @@ Fix: Probabilities must lie in [0, 1].
 
 **Device 'gpu' was requested but the run fell back to the CPU; the warning gives the reason (GPU support not compiled, no usable device, or a dynamic/noisy non-Clifford circuit).**  
 Fix: Check qumo_gpu_info; use a build made with -D QUMO_GPU (make cli-gpu / py-gpu) on a supported GPU, or request device 'auto' / 'cpu'.
+
+### QM-W021
+
+**A GPU precision ('fp32' / 'fp64') was requested but the simulator that ran has no such choice: CPU state vectors run in fp64, the stabilizer and Pauli-frame samplers are exact.**  
+Fix: Use device 'gpu' for a GPU state vector in the requested precision, or precision 'auto'.
 
 ### QM-W050
 

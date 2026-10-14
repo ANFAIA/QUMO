@@ -22,7 +22,7 @@ vendor (fp64 kernels everywhere except Apple).
 from std.math import cos, sin, sqrt
 from std.sys.info import size_of
 from std.sys.defines import is_defined
-from std.os import getenv
+from std.os import getenv, setenv, unsetenv
 from std.testing import assert_equal, assert_true, assert_almost_equal
 
 from qumo.ir.gates import Op, M2, M4, matrix_1q, matrix_2q, u3_matrix
@@ -37,12 +37,16 @@ from qumo.gpu.kernels import (
 )
 from qumo.gpu.tiles import TileProgram, build_tile_program, tile_geometry, split_1q_ok
 from qumo.gpu.emulate import stride_blocks
-from qumo.gpu.statevector_gpu import GpuStateVector, evolve_gpu, sample_gpu, expectation_gpu, reduction_blocks
-from qumo.gpu.device import (
-    gpu_compiled, gpu_available, gpu_info, query_gpu, GPU_DEFAULT_DTYPE, GPU_FP64_SUPPORTED,
-    GPU_MIN_QUBITS, GpuProfile, TileKernelLimits,
+from qumo.gpu.statevector_gpu import (
+    GpuStateVector, evolve_gpu, sample_gpu, expectation_gpu, reduction_blocks, sample_gpu_runtime,
+    expectation_gpu_runtime,
 )
-from qumo.exec.dispatch import choose_method, sample_auto
+from qumo.gpu.device import (
+    gpu_compiled, gpu_available, gpu_info, query_gpu, GPU_DEFAULT_DTYPE, GPU_FP64_SUPPORTED, GPU_FP64_RUNTIME,
+    GPU_MIN_QUBITS, GpuProfile, TileKernelLimits, parse_gpu_precision, resolve_gpu_precision, gpu_build_precision,
+    gpu_precision_available, check_gpu_precision, GPU_PRECISION_ENV,
+)
+from qumo.exec.dispatch import choose_method, sample_auto, sample_on
 from qumo.exec.orchestrator import Workflow, Device
 from qumo.ai.registry import full_registry
 from qumo.ai.json import parse_json
@@ -838,6 +842,212 @@ def check_tools() raises:
     assert_true(bad.is_error and bad.structured.find("QM-E940") >= 0, bad.structured)
 
 
+def raises_code(code: String, e: Error) -> Bool:
+    return String(e).startswith(code)
+
+
+def check_precision() raises:
+    """Precision policy: fp32 by default on every GPU (CUDA-Q's choice), the
+    run-time selector "auto" | "fp32" | "fp64" (QM-E941 otherwise), the
+    QUMO_GPU_PRECISION override of "auto", QM-E472 for fp64 on Apple, and the
+    precision-selecting entry points in emulation (both dtypes)."""
+    _ = unsetenv(GPU_PRECISION_ENV)
+    # build default: fp32 unless -D QUMO_GPU_FP64 on a GPU with fp64
+    comptime if is_defined["QUMO_GPU_FP64"]() and GPU_FP64_SUPPORTED:
+        assert_true(GPU_DEFAULT_DTYPE == DType.float64)
+        assert_equal(gpu_build_precision(), "fp64")
+    else:
+        assert_true(GPU_DEFAULT_DTYPE == DType.float32, "fp32 must be the default GPU precision")
+        assert_equal(gpu_build_precision(), "fp32")
+    # selector parsing
+    assert_equal(parse_gpu_precision("auto"), "auto")
+    assert_equal(parse_gpu_precision(""), "auto")
+    assert_equal(parse_gpu_precision("fp32"), "fp32")
+    assert_equal(parse_gpu_precision(" FP64 "), "fp64")
+    for bad in ["fp16", "double", "float64", "gpu"]:
+        var raised = False
+        try:
+            _ = parse_gpu_precision(String(bad))
+        except e:
+            raised = raises_code("QM-E941", e)
+        assert_true(raised, "QM-E941 expected for " + String(bad))
+    assert_equal(resolve_gpu_precision("auto"), gpu_build_precision())
+    assert_equal(resolve_gpu_precision("fp32"), "fp32")
+    assert_equal(resolve_gpu_precision("fp64"), "fp64")
+    # environment override of "auto" (explicit selectors win)
+    _ = setenv(GPU_PRECISION_ENV, "fp64")
+    assert_equal(resolve_gpu_precision("auto"), "fp64")
+    assert_equal(resolve_gpu_precision("fp32"), "fp32")
+    _ = setenv(GPU_PRECISION_ENV, "FP32")
+    assert_equal(resolve_gpu_precision("auto"), "fp32")
+    _ = setenv(GPU_PRECISION_ENV, "auto")
+    assert_equal(resolve_gpu_precision("auto"), gpu_build_precision())
+    _ = setenv(GPU_PRECISION_ENV, "half")
+    var raised = False
+    try:
+        _ = resolve_gpu_precision("auto")
+    except e:
+        raised = raises_code("QM-E941", e) and String(e).find(GPU_PRECISION_ENV) >= 0
+    assert_true(raised, "QM-E941 expected for an invalid " + GPU_PRECISION_ENV)
+    assert_equal(resolve_gpu_precision("fp64"), "fp64")  # the environment is read for 'auto' only
+    var ji = parse_json(query_gpu().to_json())  # info reports the invalid value instead of raising
+    assert_equal(ji.get("precision_env").as_string(), "half")
+    assert_true(ji.get("precision_note").as_string().find("QM-E941") >= 0, ji.to_json())
+    _ = unsetenv(GPU_PRECISION_ENV)
+    # availability on this target
+    assert_true(gpu_precision_available("fp32"))
+    assert_equal(gpu_precision_available("fp64"), GPU_FP64_RUNTIME)
+    raised = False
+    try:
+        check_gpu_precision("fp64")
+    except e:
+        raised = raises_code("QM-E472", e)
+    assert_equal(raised, not GPU_FP64_SUPPORTED)
+    check_gpu_precision("fp32")
+    var info = parse_json(query_gpu().to_json())
+    assert_equal(info.get("precision").as_string(), gpu_build_precision())
+    assert_equal(info.get("precision_build_default").as_string(), gpu_build_precision())
+    assert_equal(info.get("fp64_supported").as_bool(), GPU_FP64_SUPPORTED)
+    assert_equal(len(info.get("precisions")), 2 if GPU_FP64_SUPPORTED else 1)
+    assert_true(info.get("precision_note").as_string().byte_length() > 20)
+    # precision-selecting entry points (host emulator: both dtypes on every machine)
+    var c = Circuit(5)
+    for q in range(5):
+        c.h(q)
+    c.t(0)
+    c.cx(0, 4)
+    c.rz(0.3, 2)
+    c.measure_all()
+    var cpu = sample(c, 3000, 11)
+    var gpu_ok = gpu_compiled() and gpu_available()
+    comptime if not is_defined["QUMO_GPU"]():  # emulated fp64 exists only in builds without device code
+        var r64 = sample_gpu_runtime(c, 3000, 11, List[Float64](), "fp64", emulate=True)
+        assert_equal(r64.method, "gpu-emulator:statevector:fp64")
+        assert_equal(r64.counts.get("00000", 0), cpu.counts.get("00000", 0))  # fp64 emulation = CPU sampler
+        _ = setenv(GPU_PRECISION_ENV, "fp64")
+        assert_equal(sample_gpu_runtime(c, 100, 1, List[Float64](), "auto", emulate=True).method,
+                     "gpu-emulator:statevector:fp64")
+        _ = unsetenv(GPU_PRECISION_ENV)
+        var ev = expectation_gpu_runtime(prep_circuit(4), parse_pauli_sum("Z0 Z3 + 0.5*X1"), List[Float64](), "fp64", True)
+        assert_almost_equal(ev[0], evolve(prep_circuit(4)).expectation(parse_pauli_sum("Z0 Z3 + 0.5*X1")), atol=1e-12)
+        assert_equal(ev[1], "gpu-emulator:statevector:fp64")
+        raised = False
+        try:  # device mode without -D QUMO_GPU
+            _ = sample_gpu_runtime(c, 10, 1, List[Float64](), "fp64")
+        except e:
+            raised = raises_code("QM-E470", e)
+        assert_true(raised, "QM-E470 expected without -D QUMO_GPU")
+    var r32 = sample_gpu_runtime(c, 3000, 11, List[Float64](), "fp32", emulate=True)
+    assert_equal(r32.method, "gpu-emulator:statevector:fp32")
+    assert_equal(sample_gpu_runtime(c, 100, 1, List[Float64](), "auto", emulate=True).method,
+                 "gpu-emulator:statevector:" + gpu_build_precision())
+    var ev32 = expectation_gpu_runtime(prep_circuit(4), parse_pauli_sum("Z0 Z3"), List[Float64](), "fp32", True)
+    assert_almost_equal(ev32[0], evolve(prep_circuit(4)).expectation(parse_pauli_sum("Z0 Z3")), atol=1e-5)
+    assert_equal(ev32[1], "gpu-emulator:statevector:fp32")
+    raised = False
+    try:
+        _ = sample_gpu_runtime(c, 10, 1, List[Float64](), "fp128", emulate=True)
+    except e:
+        raised = raises_code("QM-E941", e)
+    assert_true(raised, "QM-E941 expected")
+    # explicit device "gpu": the precision that ran is in the method; fp64 on Apple is QM-E472
+    var wide = Circuit(GPU_MIN_QUBITS)
+    for q in range(GPU_MIN_QUBITS):
+        wide.h(q)
+    wide.t(0)
+    wide.cx(0, GPU_MIN_QUBITS - 1)
+    wide.measure_all()
+    for prec in ["auto", "fp32", "fp64"]:
+        var note = String()
+        var p = String(prec)
+        if gpu_ok and p == "fp64" and not GPU_FP64_SUPPORTED:
+            raised = False
+            try:
+                _ = sample_on(wide, 200, 4, List[Float64](), "gpu", note, p)
+            except e:
+                raised = raises_code("QM-E472", e)
+            assert_true(raised, "QM-E472 expected for fp64 on an Apple GPU")
+            # automatic dispatch keeps it on the (fp64) CPU instead of failing
+            var ra = sample_on(wide, 200, 4, List[Float64](), "auto", note, p)
+            assert_equal(ra.method, "statevector:static")
+            continue
+        var r = sample_on(wide, 200, 4, List[Float64](), "gpu", note, p)
+        if gpu_ok:
+            var want = gpu_build_precision() if p == "auto" else p
+            assert_equal(r.method, "gpu:statevector:" + want)
+            assert_equal(note, "")
+        else:
+            assert_equal(r.method, "statevector:static")
+            assert_true(note.byte_length() > 0)
+        # Clifford circuits take the GPU Pauli frames whatever the precision (no floating point)
+        var g = Circuit(3)
+        g.h(0)
+        g.cx(0, 1)
+        g.cx(1, 2)
+        g.measure_all()
+        var rf = sample_on(g, 100, 2, List[Float64](), "gpu", note, p)
+        assert_equal(rf.method, "gpu:pauli_frame" if gpu_ok else "statevector:static")
+    raised = False
+    try:
+        var note = String()
+        _ = sample_on(wide, 10, 1, List[Float64](), "cpu", note, "fp8")
+    except e:
+        raised = raises_code("QM-E941", e)
+    assert_true(raised, "QM-E941 expected from sample_on")
+    # orchestrator: device / job precision, unknown selector rejected by plan
+    var wf = Workflow()
+    var t = Circuit(4)
+    t.h(0)
+    t.t(0)
+    t.cx(0, 3)
+    t.measure_all()
+    _ = wf.add_sample("t4-fp32", t, 300, precision="fp32")
+    _ = wf.add_estimate("zz", prep_circuit(4), parse_pauli_sum("Z0 Z3"))
+    var pool = List[Device]()
+    pool.append(Device.gpu("gpu0", precision="fp64"))
+    assert_true(String(pool[0]).find("precision=fp64") >= 0, String(pool[0]))
+    var res = wf.run(pool)
+    if gpu_ok:
+        assert_true(res[0].ok, res[0].error)
+        assert_equal(res[0].backend, "gpu:statevector:fp32")  # the job's precision overrides the device's
+        comptime if GPU_FP64_SUPPORTED:
+            assert_true(res[1].ok, res[1].error)
+            assert_equal(res[1].backend, "gpu:statevector:fp64")
+        else:
+            assert_true(not res[1].ok and res[1].error.startswith("QM-E472"), res[1].error)
+    else:
+        for jr in res:
+            assert_true(jr.ok, jr.error)
+            assert_true(jr.backend.find("fallback") >= 0, jr.backend)
+    var bad_pool = List[Device]()
+    bad_pool.append(Device.gpu("gpu0", precision="fp80"))
+    raised = False
+    try:
+        _ = wf.plan(bad_pool)
+    except e:
+        raised = raises_code("QM-E941", e)
+    assert_true(raised, "QM-E941 expected from Workflow.plan")
+    # MCP tool: precision argument, precision_used, QM-W021 / QM-E472 / QM-E941
+    var reg = full_registry()
+    var q = "OPENQASM 3.0; include \\\"stdgates.inc\\\"; qubit[3] q; bit[3] c; h q[0]; t q[0]; cx q[0], q[2]; c = measure q;"
+    var rc = reg.call("qumo_run_device", parse_json("{\"qasm\":\"" + q + "\",\"shots\":100,\"device\":\"cpu\",\"precision\":\"fp32\"}"))
+    assert_true(not rc.is_error, rc.structured)
+    var jc = parse_json(rc.structured)
+    assert_equal(jc.get("precision").as_string(), "fp32")
+    assert_equal(jc.get("precision_used").as_string(), "fp64")
+    assert_true(rc.structured.find("QM-W021") >= 0, rc.structured)
+    var rg = reg.call("qumo_run_device", parse_json("{\"qasm\":\"" + q + "\",\"shots\":100,\"device\":\"gpu\",\"precision\":\"fp64\"}"))
+    if gpu_ok and not GPU_FP64_SUPPORTED:
+        assert_true(rg.is_error and rg.structured.find("QM-E472") >= 0, rg.structured)
+    else:
+        assert_true(not rg.is_error, rg.structured)
+        var jg = parse_json(rg.structured)
+        assert_equal(jg.get("precision_used").as_string(), "fp64")
+        assert_equal(jg.get("method").as_string(), "gpu:statevector:fp64" if gpu_ok else "statevector:static")
+    var rb = reg.call("qumo_run_device", parse_json("{\"qasm\":\"" + q + "\",\"device\":\"gpu\",\"precision\":\"fp16\"}"))
+    assert_true(rb.is_error and rb.structured.find("QM-E941") >= 0, rb.structured)
+
+
 def check_low_bits[dt: DType](emulate: Bool, tol: Float64, big: Bool) raises:
     """Tiles with 3 or 4 always-resident low qubits (GpuProfile.low, the
     per-device knob): same states, fewer runs on wide circuits."""
@@ -981,6 +1191,7 @@ def main() raises:
     check_errors()
     check_integration()
     check_tools()
+    check_precision()
     comptime if is_defined["QUMO_GPU"]():
         if gpu_available():
             print("running device suites on:", gpu_info())

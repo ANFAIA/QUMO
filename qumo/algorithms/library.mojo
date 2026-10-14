@@ -696,3 +696,259 @@ def h2_ansatz() raises -> Circuit:
     reached with both singles at 0 and d(0,1->2,3) = 0.11177 rad.
     """
     return uccsd_ansatz(4, 2)
+
+
+# ---------------------------------------------------------------------------
+# Classical reversible oracles: controlled permutations, order finding (Shor)
+# ---------------------------------------------------------------------------
+def _gcd(a: Int, b: Int) -> Int:
+    var x = abs(a)
+    var y = abs(b)
+    while y != 0:
+        var t = x % y
+        x = y
+        y = t
+    return x
+
+
+def _pow_mod(base: Int, exponent: Int, modulus: Int) -> Int:
+    """base^exponent mod modulus (modulus >= 1, exponent >= 0, values < 2^31)."""
+    var result = 1 % modulus
+    var b = base % modulus
+    if b < 0:
+        b += modulus
+    var e = exponent
+    while e > 0:
+        if (e & 1) == 1:
+            result = (result * b) % modulus
+        b = (b * b) % modulus
+        e >>= 1
+    return result
+
+
+def _append_conditioned_mcx(mut c: Circuit, controls: List[Int], targets: List[Int], flip: Int,
+                            state: Int, ancillas: List[Int]) raises:
+    """X on targets[flip] iff every control is 1 and every other target bit j
+    equals bit j of `state` (X-conjugation of the 0-valued bits + append_mcx)."""
+    var k = len(targets)
+    var ctrls = controls.copy()
+    for j in range(k):
+        if j == flip:
+            continue
+        if ((state >> j) & 1) == 0:
+            c.x(targets[j])
+        ctrls.append(targets[j])
+    append_mcx(c, ctrls, targets[flip], ancillas)
+    for j in range(k):
+        if j != flip and ((state >> j) & 1) == 0:
+            c.x(targets[j])
+
+
+def _append_transposition(mut c: Circuit, controls: List[Int], targets: List[Int], u: Int, v: Int,
+                          ancillas: List[Int]) raises:
+    """Swap basis states |u> and |v> of the target register (controlled).
+
+    Gray-code chain u = g_0, g_1, ..., g_r = v (one differing bit flipped per
+    step); (g_0 g_r) = t_1 .. t_{r-1} t_r t_{r-1} .. t_1 with t_i = (g_{i-1} g_i),
+    each a multi-controlled X: 2r - 1 MCX gates for Hamming distance r.
+    """
+    var bits = List[Int]()
+    var d = u ^ v
+    for j in range(len(targets)):
+        if ((d >> j) & 1) == 1:
+            bits.append(j)
+    var r = len(bits)
+    var g = List[Int](capacity=r + 1)
+    g.append(u)
+    for i in range(r):
+        g.append(g[i] ^ (1 << bits[i]))
+    for i in range(r):
+        _append_conditioned_mcx(c, controls, targets, bits[i], g[i], ancillas)
+    var i = r - 2
+    while i >= 0:
+        _append_conditioned_mcx(c, controls, targets, bits[i], g[i], ancillas)
+        i -= 1
+
+
+def append_controlled_permutation(mut c: Circuit, controls: List[Int], targets: List[Int], perm: List[Int],
+                                  ancillas: List[Int] = List[Int]()) raises:
+    """|x> -> |perm[x]> on `targets` (targets[j] = bit j of x) when every control is 1.
+
+    perm must be a permutation of 0..2^k-1 (k = len(targets)), else QM-E802.
+    Construction: each cycle (a_1 .. a_m) becomes the transpositions
+    (a_{m-1} a_m), ..., (a_1 a_2) (applied in that order), and each
+    transposition a Gray-code chain of multi-controlled X gates
+    (`append_mcx`, Toffoli V-chain). Ancillas: num_mcz_ancillas(len(controls)
+    + k) clean qubits (QM-E802 if too few); restored to |0>.
+    Cost: sum over transpositions of (2 * Hamming distance - 1) MCX gates.
+    With no controls this is the plain permutation oracle U_perm.
+    """
+    var k = len(targets)
+    if k < 1 or k > 20:
+        raise Error("QM-E802: append_controlled_permutation() needs 1 <= len(targets) <= 20, got " + String(k) + ".")
+    var size = 1 << k
+    if len(perm) != size:
+        raise Error("QM-E802: perm has " + String(len(perm)) + " entries but " + String(k) + " target qubits need 2^" + String(k) + " = " + String(size) + ". Hint: map every basis state, e.g. fixed points to themselves.")
+    var seen = List[Bool](length=size, fill=False)
+    for x in range(size):
+        var y = perm[x]
+        if y < 0 or y >= size or seen[y]:
+            raise Error("QM-E802: perm is not a permutation of 0.." + String(size - 1) + " (entry " + String(x) + " -> " + String(y) + "). Hint: a reversible oracle must be a bijection.")
+        seen[y] = True
+    var need = num_mcz_ancillas(len(controls) + k)
+    if len(ancillas) < need:
+        raise Error("QM-E802: append_controlled_permutation() with " + String(len(controls)) + " controls and " + String(k) + " targets needs " + String(need) + " clean ancillas, got " + String(len(ancillas)) + ". Hint: allocate num_mcz_ancillas(len(controls) + len(targets)) extra qubits.")
+    var visited = List[Bool](length=size, fill=False)
+    for start in range(size):
+        if visited[start] or perm[start] == start:
+            visited[start] = True
+            continue
+        var cyc = List[Int]()
+        var x = start
+        while not visited[x]:
+            visited[x] = True
+            cyc.append(x)
+            x = perm[x]
+        var i = len(cyc) - 2
+        while i >= 0:
+            _append_transposition(c, controls, targets, cyc[i], cyc[i + 1], ancillas)
+            i -= 1
+
+
+def modmul_permutation(a: Int, modulus: Int, num_bits: Int) raises -> List[Int]:
+    """Permutation x -> a x mod N for x < N, x -> x for N <= x < 2^num_bits.
+
+    QM-E802 if N does not fit in num_bits (or N < 2); QM-E801 if gcd(a, N) != 1
+    (multiplication would not be reversible).
+    """
+    if num_bits < 1 or num_bits > 20:
+        raise Error("QM-E802: modmul_permutation() needs 1 <= num_bits <= 20, got " + String(num_bits) + ".")
+    if modulus < 2 or modulus > (1 << num_bits):
+        raise Error("QM-E802: modulus " + String(modulus) + " does not fit in " + String(num_bits) + " bits (need 2 <= N <= 2^num_bits).")
+    var ar = a % modulus
+    if ar < 0:
+        ar += modulus
+    if _gcd(ar, modulus) != 1:
+        raise Error("QM-E801: modmul_permutation() needs gcd(a, N) = 1, got gcd(" + String(a) + ", " + String(modulus) + ") = " + String(_gcd(ar, modulus)) + ". Hint: a non-coprime a already reveals a factor of N classically.")
+    var size = 1 << num_bits
+    var out = List[Int](length=size, fill=0)
+    for x in range(size):
+        out[x] = (ar * x) % modulus if x < modulus else x
+    return out^
+
+
+def append_controlled_modmul(mut c: Circuit, control: Int, targets: List[Int], a: Int, modulus: Int,
+                             ancillas: List[Int] = List[Int]()) raises:
+    """Controlled |x> -> |a x mod N> on `targets` (x < N); see append_controlled_permutation."""
+    var ctrls: List[Int] = [control]
+    append_controlled_permutation(c, ctrls, targets, modmul_permutation(a, modulus, len(targets)), ancillas)
+
+
+def order_finding(a: Int, modulus: Int, n_eval: Int, measure: Bool = False) raises -> Circuit:
+    """Shor order finding for a mod N with generic modular-multiplication oracles.
+
+    Layout: evaluation register 0..n_eval-1 (little-endian, readout y ~ s/r 2^n_eval),
+    work register n_eval..n_eval+L-1 prepared in |1> (L = bit length of N),
+    clean ancillas after it (num_mcz_ancillas(L + 1)). Eval qubit j controls
+    multiplication by a^(2^j) mod N (classically precomputed; identity powers
+    are skipped), then the inverse QFT on the eval register. measure=True
+    measures eval qubit j into clbit j. Params: none.
+    """
+    if n_eval < 1 or n_eval > 16:
+        raise Error("QM-E802: order_finding() needs 1 <= n_eval <= 16, got " + String(n_eval) + ".")
+    if modulus < 3:
+        raise Error("QM-E802: order_finding() needs N >= 3, got " + String(modulus) + ".")
+    var nbits = 0
+    while (1 << nbits) < modulus:
+        nbits += 1
+    var nanc = num_mcz_ancillas(nbits + 1)
+    var c = Circuit(n_eval + nbits + nanc, name="order_finding")
+    var targets = _range_list(n_eval, n_eval + nbits)
+    var anc = _range_list(n_eval + nbits, n_eval + nbits + nanc)
+    _ = modmul_permutation(a, modulus, nbits)  # validates gcd(a, N) = 1
+    c.x(targets[0])
+    for j in range(n_eval):
+        c.h(j)
+    var mult = a % modulus
+    if mult < 0:
+        mult += modulus
+    for j in range(n_eval):
+        if mult != 1:
+            append_controlled_modmul(c, j, targets, mult, modulus, anc)
+        mult = (mult * mult) % modulus
+    c.compose(iqft(n_eval))
+    if measure:
+        for j in range(n_eval):
+            c.measure(j, j)
+    return c^
+
+
+def continued_fraction_convergents(num: Int, den: Int) raises -> List[Tuple[Int, Int]]:
+    """Convergents (p_i, q_i) of num/den (num >= 0, den > 0), in order."""
+    if den <= 0 or num < 0:
+        raise Error("QM-E802: continued_fraction_convergents() needs num >= 0 and den > 0, got " + String(num) + "/" + String(den) + ".")
+    var out = List[Tuple[Int, Int]]()
+    var p_prev = 1
+    var p_prev2 = 0
+    var q_prev = 0
+    var q_prev2 = 1
+    var x = num
+    var y = den
+    while y != 0:
+        var q = x // y
+        var p = q * p_prev + p_prev2
+        var qq = q * q_prev + q_prev2
+        out.append((p, qq))
+        p_prev2 = p_prev
+        p_prev = p
+        q_prev2 = q_prev
+        q_prev = qq
+        var t = x - q * y
+        x = y
+        y = t
+    return out^
+
+
+def order_from_phase(measured: Int, num_bits: Int, a: Int, modulus: Int, max_multiple: Int = 4) -> Int:
+    """Order r of a mod N from one phase-estimation outcome, or 0 on failure.
+
+    measured / 2^num_bits ~ s / r: every continued-fraction convergent p/q with
+    2 <= q <= N proposes q and its small multiples m q (m <= max_multiple,
+    covering gcd(s, r) > 1); the first candidate with a^r = 1 mod N is reduced
+    to the smallest divisor that still satisfies it (the order divides every
+    such r). measured = 0 carries no information and returns 0.
+    """
+    if measured <= 0 or num_bits < 1 or num_bits > 62 or modulus < 2:
+        return 0
+    var den = 1 << num_bits
+    var found = 0
+    try:
+        var convs = continued_fraction_convergents(measured % den, den)
+        for t in convs:
+            var q = t[1]
+            if q > modulus:
+                break
+            if q < 2:
+                continue
+            for m in range(1, max_multiple + 1):
+                var r = m * q
+                if r > modulus:
+                    break
+                if _pow_mod(a, r, modulus) == 1:
+                    found = r
+                    break
+            if found > 0:
+                break
+    except:
+        return 0
+    if found == 0:
+        return 0
+    # reduce to the true order (it divides `found`)
+    var r = found
+    var p = 2
+    while p <= r:
+        if r % p == 0 and _pow_mod(a, r // p, modulus) == 1:
+            r = r // p
+        else:
+            p += 1
+    return r

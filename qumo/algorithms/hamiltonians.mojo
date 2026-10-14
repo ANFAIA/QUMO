@@ -627,3 +627,242 @@ def exact_evolve(h: PauliSum, psi: StateVector, time: Float64, tol: Float64 = 1e
                 break
             k += 1
     return acc^
+
+
+# ---------------------------------------------------------------------------
+# Subspace projection: sample-based quantum diagonalisation (SQD / SKQD)
+# ---------------------------------------------------------------------------
+comptime SUBSPACE_MAX_STATES = 4096  # projected_hamiltonian / subspace_ground_energy limit
+comptime SUBSPACE_DENSE_MAX = 192  # above this, subspace_ground_energy uses sparse Lanczos
+
+
+struct _Subspace(Movable):
+    var states: List[Int]  # basis states in the caller's order
+    var keys: List[Int]  # sorted copy for binary search
+    var pos: List[Int]  # pos[k] = caller index of keys[k]
+
+    def __init__(out self, basis_states: List[Int], num_qubits: Int, what: String) raises:
+        var m = len(basis_states)
+        if m == 0:
+            raise Error("QM-E802: " + what + " needs at least one basis state.")
+        if m > SUBSPACE_MAX_STATES:
+            raise Error("QM-E807: " + what + " is limited to " + String(SUBSPACE_MAX_STATES) + " basis states, got " + String(m) + ". Hint: keep the most frequent bitstrings (configuration recovery) or a symmetry sector.")
+        if num_qubits < 1 or num_qubits > 48:
+            raise Error("QM-E802: " + what + " needs 1 <= num_qubits <= 48, got " + String(num_qubits) + ".")
+        var lim = 1 << num_qubits
+        var packed = List[Int](capacity=m)
+        for i in range(m):
+            var s = basis_states[i]
+            if s < 0 or s >= lim:
+                raise Error("QM-E802: basis state " + String(s) + " is outside [0, 2^" + String(num_qubits) + ").")
+            packed.append(s * 8192 + i)  # m <= 4096 < 2^13
+        sort(packed)
+        self.states = basis_states.copy()
+        self.keys = List[Int](capacity=m)
+        self.pos = List[Int](capacity=m)
+        for k in range(m):
+            var s = packed[k] // 8192
+            if k > 0 and s == self.keys[k - 1]:
+                raise Error("QM-E802: basis state " + String(s) + " is listed twice. Hint: de-duplicate the sampled bitstrings first.")
+            self.keys.append(s)
+            self.pos.append(packed[k] % 8192)
+
+    def find(self, s: Int) -> Int:
+        """Caller index of basis state s, or -1."""
+        var lo = 0
+        var hi = len(self.keys) - 1
+        while lo <= hi:
+            var mid = (lo + hi) // 2
+            var v = self.keys[mid]
+            if v == s:
+                return self.pos[mid]
+            if v < s:
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        return -1
+
+
+def _subspace_coo(h: PauliSum, sub: _Subspace, mut rows: List[Int], mut cols: List[Int],
+                  mut vre: List[Float64], mut vim: List[Float64]):
+    """Non-zero entries <b_i|H|b_j> (one per Pauli term and source state)."""
+    for j in range(len(sub.states)):
+        var b = sub.states[j]
+        for t in h.terms:
+            var i = sub.find(b ^ Int(t.x))
+            if i < 0:
+                continue
+            var s = t.coeff
+            if (pop_count(b & Int(t.z)) & 1) == 1:
+                s = -s
+            var ny = Int(pop_count(t.x & t.z)) & 3
+            rows.append(i)
+            cols.append(j)
+            if ny == 0:
+                vre.append(s)
+                vim.append(0.0)
+            elif ny == 1:
+                vre.append(0.0)
+                vim.append(s)
+            elif ny == 2:
+                vre.append(-s)
+                vim.append(0.0)
+            else:
+                vre.append(0.0)
+                vim.append(-s)
+
+
+def projected_hamiltonian(h: PauliSum, basis_states: List[Int], num_qubits: Int) raises -> Tuple[List[Float64], List[Float64]]:
+    """Dense (re, im) row-major m x m matrix <b_i|H|b_j> on the given basis states.
+
+    Each Pauli string maps a basis state to exactly one basis state with a
+    phase, so the cost is O(m * terms * log m) (no 2^n work). Equals
+    `dense_matrix(h, n)` restricted to rows/columns `basis_states` (in that
+    order). QM-E807 above 4096 states; QM-E802 for duplicates / out-of-range.
+    """
+    check_fits(h, num_qubits)
+    var sub = _Subspace(basis_states, num_qubits, "projected_hamiltonian()")
+    var m = len(basis_states)
+    var rows = List[Int]()
+    var cols = List[Int]()
+    var vre = List[Float64]()
+    var vim = List[Float64]()
+    _subspace_coo(h, sub, rows, cols, vre, vim)
+    var re = List[Float64](length=m * m, fill=0.0)
+    var im = List[Float64](length=m * m, fill=0.0)
+    for k in range(len(rows)):
+        re[rows[k] * m + cols[k]] += vre[k]
+        im[rows[k] * m + cols[k]] += vim[k]
+    return (re^, im^)
+
+
+def _dense_lowest(re: List[Float64], im: List[Float64], m: Int) -> Float64:
+    var is_real = True
+    for v in im:
+        if abs(v) > 1e-15:
+            is_real = False
+            break
+    if is_real:
+        return jacobi_eigh(re, m).values[0]
+    var mm = 2 * m
+    var big = List[Float64](length=mm * mm, fill=0.0)
+    for r in range(m):
+        for c in range(m):
+            var a = re[r * m + c]
+            var b = im[r * m + c]
+            big[r * mm + c] = a
+            big[(r + m) * mm + c + m] = a
+            big[r * mm + c + m] = -b
+            big[(r + m) * mm + c] = b
+    return jacobi_eigh(big, mm).values[0]
+
+
+def subspace_ground_energy(h: PauliSum, basis_states: List[Int], num_qubits: Int,
+                           max_iter: Int = 300, tol: Float64 = 1e-13) raises -> Float64:
+    """Lowest eigenvalue of H projected onto span{|b> : b in basis_states}.
+
+    Variational: >= the true ground energy, equal to it when the span contains
+    the ground state (e.g. the full basis or the right symmetry sector).
+    m <= 192: dense `jacobi_eigh` (complex H through the 2m x 2m real
+    embedding [[A, -B], [B, A]]). Larger m: Lanczos with full
+    re-orthogonalisation on the sparse projected matrix (complex arithmetic,
+    seeded start vector, converged to `tol` relative), so 4096 states cost
+    milliseconds instead of a dense O(m^3) sweep.
+    """
+    check_fits(h, num_qubits)
+    var sub = _Subspace(basis_states, num_qubits, "subspace_ground_energy()")
+    var m = len(basis_states)
+    var rows = List[Int]()
+    var cols = List[Int]()
+    var vre = List[Float64]()
+    var vim = List[Float64]()
+    _subspace_coo(h, sub, rows, cols, vre, vim)
+    if m <= SUBSPACE_DENSE_MAX:
+        var re = List[Float64](length=m * m, fill=0.0)
+        var im = List[Float64](length=m * m, fill=0.0)
+        for k in range(len(rows)):
+            re[rows[k] * m + cols[k]] += vre[k]
+            im[rows[k] * m + cols[k]] += vim[k]
+        return _dense_lowest(re, im, m)
+    # --- sparse Lanczos (complex Hermitian), full re-orthogonalisation ---
+    var nnz = len(rows)
+    var rng = Rng(2024)
+    var bre = List[List[Float64]]()
+    var bim = List[List[Float64]]()
+    var x_re = List[Float64](length=m, fill=0.0)
+    var x_im = List[Float64](length=m, fill=0.0)
+    var nrm = 0.0
+    for i in range(m):
+        x_re[i] = rng.uniform() - 0.5
+        x_im[i] = rng.uniform() - 0.5
+        nrm += x_re[i] * x_re[i] + x_im[i] * x_im[i]
+    nrm = sqrt(nrm)
+    for i in range(m):
+        x_re[i] /= nrm
+        x_im[i] /= nrm
+    bre.append(x_re^)
+    bim.append(x_im^)
+    var alpha = List[Float64]()
+    var beta = List[Float64]()
+    var w_re = List[Float64](length=m, fill=0.0)
+    var w_im = List[Float64](length=m, fill=0.0)
+    var m_max = min(max_iter, m)
+    var theta_old = 1e300
+    var k = 0
+    while k < m_max:
+        for i in range(m):
+            w_re[i] = 0.0
+            w_im[i] = 0.0
+        for e in range(nnz):
+            var r = rows[e]
+            var c = cols[e]
+            var hr = vre[e]
+            var hi = vim[e]
+            var xr = bre[k][c]
+            var xi = bim[k][c]
+            w_re[r] += hr * xr - hi * xi
+            w_im[r] += hr * xi + hi * xr
+        var a = 0.0
+        for i in range(m):
+            a += bre[k][i] * w_re[i] + bim[k][i] * w_im[i]
+        alpha.append(a)
+        for i in range(m):
+            w_re[i] -= a * bre[k][i]
+            w_im[i] -= a * bim[k][i]
+            if k > 0:
+                w_re[i] -= beta[k - 1] * bre[k - 1][i]
+                w_im[i] -= beta[k - 1] * bim[k - 1][i]
+        for _ in range(2):
+            for j in range(k + 1):
+                var cr = 0.0
+                var ci = 0.0
+                for i in range(m):
+                    cr += bre[j][i] * w_re[i] + bim[j][i] * w_im[i]
+                    ci += bre[j][i] * w_im[i] - bim[j][i] * w_re[i]
+                for i in range(m):
+                    var ur = bre[j][i]
+                    var ui = bim[j][i]
+                    w_re[i] -= cr * ur - ci * ui
+                    w_im[i] -= cr * ui + ci * ur
+        var b = 0.0
+        for i in range(m):
+            b += w_re[i] * w_re[i] + w_im[i] * w_im[i]
+        b = sqrt(b)
+        k += 1
+        var done = b < 1e-10 or k >= m_max
+        if not done and k % 4 == 0:
+            var th = tridiag_lowest(alpha, beta, k)
+            if abs(th - theta_old) < tol * max(1.0, abs(th)):
+                done = True
+            theta_old = th
+        if done:
+            break
+        beta.append(b)
+        var nr = List[Float64](length=m, fill=0.0)
+        var ni = List[Float64](length=m, fill=0.0)
+        for i in range(m):
+            nr[i] = w_re[i] / b
+            ni[i] = w_im[i] / b
+        bre.append(nr^)
+        bim.append(ni^)
+    return tridiag_lowest(alpha, beta, k)

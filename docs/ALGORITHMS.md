@@ -12,12 +12,15 @@ qumo/algorithms/
   optimizers.mojo    Objective + Optimizer traits; BFGS, Adam, GradientDescent, SPSA, NelderMead; minimize()
   variational.mojo   VQE, QAOA-MaxCut, parameter sweeps / landscapes
   linalg.mojo        state-vector BLAS-1, Jacobi eigensolver, tridiagonal bisection
+  mitigation.mojo    zero-noise extrapolation: unitary folding, Richardson/poly/exp extrapolation, ZNE driver
 ```
 
 Run the tests and examples from the repo root:
 
 ```bash
 .venv/bin/mojo run -I . tests/test_algorithms.mojo     # prints "test_algorithms OK"
+.venv/bin/mojo run -I . tests/test_algorithms_ext.mojo # permutation oracles, order finding, subspace projection
+.venv/bin/mojo run -I . tests/test_mitigation.mojo     # folding + zero-noise extrapolation
 .venv/bin/mojo run -I . examples/vqe_h2.mojo
 .venv/bin/mojo run -I . examples/qaoa_maxcut.mojo
 .venv/bin/mojo run -I . examples/grover.mojo
@@ -69,6 +72,11 @@ Run the tests and examples from the repo root:
 | `append_double_excitation(mut c, theta, p, q, r, s)` | p < q < r < s | 8 rotations sharing theta (angles +-theta/4) | Yordanov et al. |
 | `uccsd_ansatz(num_qubits, num_electrons, include_singles=True, include_doubles=True)` | interleaved spin orbitals (even = up); HF = X on 0..N_e-1 | `s(i->a)`, `d(i,j->a,b)` (spin-conserving) | UCCSD (Peruzzo 2014), first-order Trotterised |
 | `h2_ansatz()` | = `uccsd_ansatz(4, 2)` | `s(0->2)`, `s(1->3)`, `d(0,1->2,3)` | exact for H2: d = 0.11177 |
+| `append_controlled_permutation(mut c, controls, targets, perm, ancillas=[])` | targets[j] = bit j of x; needs `num_mcz_ancillas(len(controls) + len(targets))` clean ancillas | none | \|x> -> \|perm[x]> when all controls are 1: cycles -> transpositions -> Gray-code chains of multi-controlled X (2r - 1 MCX for Hamming distance r); generic reversible-oracle builder |
+| `modmul_permutation(a, N, num_bits)` | - | - | x -> a x mod N for x < N, identity above (QM-E801 if gcd(a, N) != 1) |
+| `append_controlled_modmul(mut c, control, targets, a, N, ancillas)` | as above, one control | none | controlled modular multiplication (Shor) |
+| `order_finding(a, N, n_eval, measure=False)` | eval 0..n_eval-1, work register (L = bits of N) prepared in \|1>, then num_mcz_ancillas(L+1) ancillas | none | Shor order finding: eval qubit j controls x a^(2^j) mod N (classically precomputed), then `iqft` |
+| `continued_fraction_convergents(num, den)`, `order_from_phase(measured, num_bits, a, N, max_multiple=4)` | - | - | classical post-processing: convergents p/q with 2 <= q <= N and small multiples of q, the first r with a^r = 1 mod N reduced to the true order; 0 on failure (e.g. measured 0) |
 
 ## Hamiltonians and exact references (`hamiltonians.mojo`)
 
@@ -86,6 +94,36 @@ Run the tests and examples from the repo root:
 | `ground_energy(h, n=-1)` | Lanczos energy |
 | `dense_matrix(h, n)` (n <= 12), `exact_spectrum(h, n)` (n <= 7) | dense Hermitian matrix; all eigenvalues by Jacobi (complex H via real embedding) |
 | `exact_evolve(h, psi, t)` | `exp(-iHt)|psi>` by scaled Taylor series (Trotter reference) |
+| `projected_hamiltonian(h, basis_states, n)` | dense (re, im) m x m matrix `<b_i|H|b_j>` on sampled basis states (m <= 4096, QM-E807; duplicates / out-of-range QM-E802); each Pauli string maps a basis state to one basis state, so the cost is O(m terms log m), no 2^n work |
+| `subspace_ground_energy(h, basis_states, n, max_iter=300, tol=1e-13)` | lowest eigenvalue of H on span{\|b>} (variational): dense `jacobi_eigh` for m <= 192 (complex H via the 2m x 2m real embedding), sparse Lanczos with full re-orthogonalisation above; the engine of sample-based quantum diagonalisation (SQD / SKQD) |
+
+## Error mitigation (`mitigation.mojo`)
+
+Zero-noise extrapolation (Temme et al. 2017; Giurgica-Tiron et al. 2020; Mitiq):
+run the circuit at amplified noise, extrapolate the expectation value to zero noise.
+
+| API | Meaning | Origin |
+|---|---|---|
+| `fold_gates_global(c, scale)` | U (U^dag U)^k plus L^dag L for the last round(frac d / 2) gates; scale * d gates (+-1), same unitary and global phase | Mitiq `fold_global` |
+| `fold_gates_from_left(c, scale)`, `fold_gates_at_random(c, scale, seed)`, `fold_gates(c, scale, "global"\|"left"\|"random", seed)` | local folding G -> G (G^dag G)^m with round(d (scale - 1)/2) single folds spread over the gates (extra folds on the leftmost / seeded random gates) | Mitiq `fold_gates_from_left` / `fold_gates_at_random` |
+| `folded_scale(original, folded)` | achieved scale (unitary gate ratio) | |
+| `richardson_extrapolate(scales, values)` | Lagrange polynomial through all points at scale 0 (exact on degree len-1 polynomials) | Mitiq `RichardsonFactory` |
+| `linear_extrapolate`, `poly_extrapolate(scales, values, order)` | least squares (Vandermonde QR) at scale 0 | `LinearFactory`, `PolyFactory` |
+| `exp_extrapolate(scales, values, asymptote=0)` | y = a + b e^{-c s}, log-linear fit with known asymptote | `ExpFactory` |
+| `extrapolate(scales, values, "richardson"\|"linear"\|"poly2"\|"poly3"\|"exp")` | dispatch by name | |
+| `sampled_expectation(c, h, shots, seed)` | (<h>, standard error) from shots: one basis-rotated measure-all setting per qubit-wise commuting group; noise channels in `c` are honoured (trajectories) | |
+| `noisy_expectation(c, h, noise, shots, seed)` | same, with `apply_noise_model(c + rotations + measurements, noise)`, so basis changes and readout are noisy too | |
+| `zne_expectation(c, h, noise, scales, shots, seed, method="richardson", folding="global", asymptote=0)` | fold -> noisy_expectation -> extrapolate over the achieved scales; returns `ZNEResult(scales, achieved_scales, values, stds, estimate, method, folding, shots)` with `raw()` | Braket + Mitiq notebook |
+
+Folding rejects (QM-E801) scale < 1, noise channels (fold first, then add noise),
+resets, classical control and mid-circuit measurements; terminal measurements are
+removed and re-appended. The exact Estimator primitive evolves only the unitary part
+of a circuit, so noisy estimates sample instead.
+
+Measured (tests/examples): GHZ-6 <Z^6> with gate errors e1 = 1e-3, e2 = 1e-2
+(DEPOLARIZE1(1.5e-3), DEPOLARIZE2(1.25e-2)), scales [1, 3, 5], 20k shots:
+raw 0.9327 -> ZNE (global, Richardson) 0.9952 (ideal 1). Folded circuits equal the
+original state vector to 2e-15.
 
 ## Gradients (`gradients.mojo`)
 
@@ -166,6 +204,15 @@ Measured (tests/examples):
 * QPE: dyadic phases exact (P = 1), phase 1/3 converges at 2^-n_eval.
 * Trotter (TFIM, n = 4, t = 1): infidelity scales as steps^-2 (order 1) and
   steps^-4 (order 2); 32 Strang steps -> 1.4e-7.
+* Permutation oracles: random permutations on 3-5 targets with 0-2 controls map every
+  basis state exactly (amplitude 1 at 1e-12) and act as the identity with a control
+  off. Order finding: `order_finding(2, 15, 8)` reproduces the peaks {0, 64, 128, 192}
+  at 0.25 (1e-12); `order_finding(2, 21, 8)` (16 qubits, 5904 gates) returns r = 6
+  for 83% of the probability mass.
+* Subspace projection: the full basis reproduces `ground_energy` to 4e-15 (10- and
+  12-qubit Heisenberg, complex random Hamiltonians on 6 and 8 qubits); SKQD on a
+  12-qubit Heisenberg chain with fields reaches 0.55% at Krylov dimension 8
+  (examples/frameworks/qiskit/skqd_heisenberg.mojo).
 
 ## Error codes (QM-E8xx)
 
@@ -173,13 +220,13 @@ Every error starts with a stable code and ends with a `Hint:` where a fix is kno
 
 | Code | Raised by | Meaning |
 |---|---|---|
-| QM-E801 | `hardware_efficient_ansatz`, `append_entangler`, excitations | invalid option (unknown entanglement / rotation, wrong orbital ordering) |
-| QM-E802 | builders, `h2_sto3g`, model Hamiltonians | invalid size or index (n out of range, marked item outside search space, duplicate marked item, missing ancillas) |
+| QM-E801 | `hardware_efficient_ansatz`, `append_entangler`, excitations, `modmul_permutation`, mitigation | invalid option (unknown entanglement / rotation, wrong orbital ordering, gcd(a, N) != 1, folding scale < 1 or an unfoldable circuit, unknown folding / extrapolation method, data an exponential fit cannot take) |
+| QM-E802 | builders, `h2_sto3g`, model Hamiltonians, permutation oracles, subspace projection, extrapolation | invalid size or index (n out of range, marked item outside search space, duplicate marked item, missing ancillas, perm not a permutation of 2^k entries, duplicate / out-of-range basis states, mismatched or too few extrapolation points) |
 | QM-E803 | `PauliOperator`, `ExpectationEngine`, `append_pauli_rotation` | Hamiltonian / Pauli string acts on more qubits than the circuit/state |
 | QM-E804 | `ExpectationEngine`, optimisers, sweeps | parameter vector length or parameter index mismatch |
 | QM-E805 | `check_differentiable`, adjoint | circuit not differentiable (classical control, reset, noise, mid-circuit measurement) |
 | QM-E806 | `minimize`, `grad_method_from_name` | unknown optimiser or gradient method |
-| QM-E807 | `ground_state`, `dense_matrix`, `exact_spectrum`, `Graph.max_cut` | problem too large for an exact / brute-force routine |
+| QM-E807 | `ground_state`, `dense_matrix`, `exact_spectrum`, `Graph.max_cut`, `projected_hamiltonian`, `subspace_ground_energy` | problem too large for an exact / brute-force routine (subspaces: > 4096 basis states) |
 | QM-E808 | `trotter` | steps < 1 or order not in {1, 2} |
 | QM-E809 | `Graph` | self-loop, negative node, unparsable edge text |
 | QM-E810 | `qpe` | n_eval outside 1..16, empty unitary, state_prep too wide |
@@ -200,6 +247,11 @@ Every error starts with a stable code and ends with a `Hint:` where a fix is kno
   counts, executions per gradient via `shift_evaluations`).
 * **Cirq / Braket / Qibo**: graph-based QAOA helpers and brute-force reference
   solutions next to the quantum result (approximation ratio, P(optimal)).
+* **Mitiq / Braket**: unitary folding and extrapolation factories (ZNE).
+* **Qiskit / CUDA-Q SKQD and SQD**: sampled bitstrings projected classically
+  (`projected_hamiltonian`, `subspace_ground_energy`).
+* **Shor implementations (Qiskit, Q#, Cirq, CUDA-Q)**: the generic
+  controlled-permutation oracle replaces hand-made SWAP networks for N > 15.
 
 ## Limitations
 
@@ -211,3 +263,15 @@ Every error starts with a stable code and ends with a `Hint:` where a fix is kno
   integral/driver interface beyond the built-in H2 integrals.
 * `ground_state` stores the full Krylov basis (n <= 20); `exact_spectrum` n <= 7.
 * `append_pauli_rotation` with a symbolic angle drops identity terms (global phase).
+* Permutation oracles cost O(transpositions x Hamming distance) multi-controlled X
+  gates; they are exact but not optimised modular arithmetic (no adders, no
+  windowing): keep the work register <= ~6 bits for simulation.
+* ZNE uses Pauli-channel noise models (trajectories); readout error is not folded
+  (mitigate it separately with `ReadoutCalibration` / `mitigate_counts`).
+
+## Framework examples
+
+`examples/frameworks/qiskit`, `braket` and `qsharp` reproduce signature examples
+of those SDKs with this module (QAOA, CHSH, Shor N = 15/21, SKQD, Simon, DJ/BV,
+noise simulation, ZNE, Grover, QPE/IQPE, hidden shift, resource estimation); each
+folder's README lists the original, the URL and the checked reference numbers.

@@ -211,6 +211,9 @@ def _source_args(a: CliArgs, mut w: JsonWriter) raises:
 # Commands
 # ---------------------------------------------------------------------------
 def cmd_run(a: CliArgs) raises -> Int:
+    # --device / --precision select the simulator explicitly (MCP tool
+    # qumo_run_device); without them `qumo run` is qumo_run_qasm (automatic).
+    var explicit = a.has("device") or a.has("precision")
     var w = JsonWriter()
     w.begin_object()
     _source_args(a, w)
@@ -218,13 +221,17 @@ def cmd_run(a: CliArgs) raises -> Int:
     w.kv_int("seed", a.get_int("seed", 1234))
     if a.has("max-qubits"):
         w.kv_int("max_qubits", a.get_int("max-qubits", 28))
+    if explicit:
+        w.kv_string("device", a.get("device", "auto"))
+        w.kv_string("precision", a.get("precision", "auto"))
     w.end_object()
-    var r = call_tool("qumo_run_qasm", w^)
+    var r = call_tool("qumo_run_device" if explicit else "qumo_run_qasm", w^)
     var human = String()
     if not r.is_error:
         var v = parse_json(r.structured)
         var shots = v.get("shots").as_int()
-        human = a.positional[0] + ": " + String(v.get("num_qubits").as_int()) + " qubits, " + String(shots) + " shots, seed " + String(v.get("seed").as_int()) + ", " + v.get("method").as_string() + ", " + fmt_fixed(v.get("timing_ms").get("simulate").as_float(), 3) + " ms"
+        var ms = v.get("total_ms").as_float() if explicit else v.get("timing_ms").get("simulate").as_float()
+        human = a.positional[0] + ": " + String(v.get("num_qubits").as_int()) + " qubits, " + String(shots) + " shots, seed " + String(v.get("seed").as_int()) + ", " + v.get("method").as_string() + ", " + fmt_fixed(ms, 3) + " ms"
         var counts = v.get("counts")
         var width = 4
         for i in range(len(counts)):
@@ -510,7 +517,7 @@ struct Command(Copyable):
 
 def command_table() -> List[Command]:
     var t = List[Command]()
-    t.append(Command("run", "Sample measurement counts (seeded, deterministic)", "qumo run <file.qasm|-> [--shots N] [--seed S] [--params '[0.1]'|'{\"theta\":0.1}'] [--max-qubits N] [--json]", cmd_run))
+    t.append(Command("run", "Sample measurement counts (seeded, deterministic)", "qumo run <file.qasm|-> [--shots N] [--seed S] [--params '[0.1]'|'{\"theta\":0.1}'] [--max-qubits N] [--device auto|cpu|gpu] [--precision auto|fp32|fp64] [--json]\n\n--device / --precision run through the MCP tool qumo_run_device: 'gpu' needs a build made with -D QUMO_GPU (make cli-gpu); --precision applies to GPU state vectors (auto = QUMO_GPU_PRECISION or the build default, fp32; fp64 on NVIDIA / AMD only).", cmd_run))
     t.append(Command("statevector", "Print the exact final state vector", "qumo statevector <file.qasm|-> [--max-amplitudes N] [--params ...] [--json]", cmd_statevector))
     t.append(Command("expect", "Exact Pauli expectation value(s)", "qumo expect <file.qasm|-> \"0.5*Z0 Z1 - X0\" [more observables...] [--params ...] [--json]", cmd_expect))
     t.append(Command("validate", "Parse + lint OpenQASM with structured diagnostics", "qumo validate <file.qasm|-> [--json]", cmd_validate))
