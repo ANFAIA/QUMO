@@ -33,7 +33,7 @@ from qumo.sim.runner import evolve, sample
 from qumo.algorithms.library import (
     grover, grover_optimal_iterations, grover_success_probability, bitstring_to_int,
 )
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 comptime N = 5
 comptime SHOTS = 1000

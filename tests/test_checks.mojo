@@ -1,10 +1,10 @@
-"""Tests for qumo.ai.checks.CheckLog (the CHECK line format parsed by
+"""Tests for qumo.testing.checks.CheckLog (the CHECK line format parsed by
 examples/run_examples.py and by agents)."""
 
 from std.testing import assert_equal, assert_true, assert_false
 from std.math import nan
 
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 
 def _starts(s: String, prefix: String) -> Bool:

@@ -35,7 +35,7 @@ from std.os.path import exists
 from std.sys.defines import is_defined
 from std.time import perf_counter_ns
 
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 from qumo.algorithms.hamiltonians import Graph, maxcut
 from qumo.algorithms.library import qaoa_maxcut_ansatz
 from qumo.algorithms.optimizers import NelderMead

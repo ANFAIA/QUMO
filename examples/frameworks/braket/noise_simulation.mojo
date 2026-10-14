@@ -50,7 +50,7 @@ from qumo.sim.runner import sample
 from qumo.qec.characterization import NoiseModel, apply_noise_model
 from qumo.algorithms.library import ghz
 from qumo.algorithms.mitigation import sampled_expectation
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 comptime SHOTS = 50000
 

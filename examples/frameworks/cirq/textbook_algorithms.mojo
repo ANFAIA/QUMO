@@ -41,7 +41,7 @@ from qumo.ir.pauli import parse_pauli_sum
 from qumo.sim.statevector import StateVector
 from qumo.sim.runner import evolve, evolve_into, sample
 from qumo.algorithms.library import qft, iqft, qpe, qpe_phase, grover
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 comptime SHOTS = 20000
 

@@ -39,7 +39,7 @@ from qumo.ir.circuit import Circuit
 from qumo.sim.runner import evolve, sample
 from qumo.sim.rng import Rng
 from qumo.qec.characterization import fit_decay
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 comptime E_PAULI = 5e-3
 comptime N_CIRCUITS = 10

@@ -33,7 +33,7 @@ from qumo.algorithms.qkernels import (
     kernel_matrix_symmetric, kernel_circuit, kernel_value_and_grad, kernel_matrix_symmetric_and_grad,
     target_alignment, target_alignment_grad, svc_fit, svc_decision, svc_predict,
 )
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 from _common import Fixture, vmax_abs_diff, seconds_since, fmt_s
 

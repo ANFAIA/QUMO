@@ -10,7 +10,7 @@ Python, `//` comments for OpenQASM):
     example-meta: {"framework": "qiskit", "tier": "fast", "timeout": 60, "requires": [], "args": []}
 
 and prints machine-readable `CHECK <label>: PASS|FAIL ...` lines through
-qumo.ai.checks.CheckLog (Mojo) or examples/_checks.py (Python), ending with
+qumo.testing.checks.CheckLog (Mojo) or examples/_checks.py (Python), ending with
 `ALL CHECKS PASSED (n)`.
 
 Usage (from the repository root):

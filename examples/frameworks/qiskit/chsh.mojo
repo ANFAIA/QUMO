@@ -37,7 +37,7 @@ from std.math import pi, sqrt, cos, sin
 from qumo.ir.circuit import Circuit
 from qumo.ir.pauli import PauliSum
 from qumo.exec.primitives import EstimatorPub, run_estimator
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 comptime NUM_THETA = 21
 comptime PRECISION = 0.01

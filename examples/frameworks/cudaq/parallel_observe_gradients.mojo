@@ -49,7 +49,7 @@ from qumo.algorithms.gradients import ExpectationEngine, Grad, batch_gradient
 from qumo.exec.primitives import EstimatorPub, run_estimator
 from qumo.exec.orchestrator import Workflow, Device
 from qumo.sim.rng import Rng
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 comptime NSETS = 10000
 

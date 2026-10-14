@@ -32,7 +32,7 @@ from qumo.sim.rng import Rng
 from qumo.compiler.target import parse_target, Target
 from qumo.compiler.pass_manager import transpile, conformance_error, CompileResult
 from qumo.algorithms.library import deutsch_jozsa, bernstein_vazirani, bitstring_to_int
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 comptime SHOTS = 1000
 

@@ -40,7 +40,7 @@ from qumo.algorithms.qml import (
     append_qcnn_conv, append_qcnn_pool, append_arbitrary_unitary, append_amplitude_embedding_real, amplitude_state,
 )
 from qumo.algorithms.qml_train import StepOptimizer, cosine_lr
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 from _common import Fixture, vmax_abs_diff, seconds_since, fmt_s, DATA_DIR
 

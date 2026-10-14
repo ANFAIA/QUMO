@@ -37,7 +37,7 @@ example-meta: {"framework": "tket", "tier": "fast", "timeout": 60, "requires": [
 from std.math import sqrt
 from qumo.ir.circuit import Circuit
 from qumo.sim.runner import sample
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 comptime SHOTS = 4000
 comptime DEP_ERR = 0.03  # page noise model: depolarising error on every CX

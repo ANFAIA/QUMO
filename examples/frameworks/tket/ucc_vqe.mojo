@@ -52,7 +52,7 @@ from qumo.compiler.target import Target
 from qumo.compiler.pass_manager import compile_spec
 from qumo.exec.primitives import EstimatorPub, run_estimator
 from qumo.sim.rng import Rng
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 comptime SHOTS = 4000
 comptime PIPELINE = "remove_identities,pauli_simp,kak,cancel,commute"

@@ -39,7 +39,7 @@ from qumo.algorithms.qkernels import (
     kernel_matrix, kernel_matrix_symmetric, kernel_circuit, kernel_circuit_params, kernel_value_and_grad,
     sampled_kernel_entry, svc_fit, svc_decision, svc_predict, SVCModel,
 )
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 from _common import Fixture, vmax_abs_diff, seconds_since, fmt_s, DATA_DIR
 

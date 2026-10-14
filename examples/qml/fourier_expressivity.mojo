@@ -34,7 +34,7 @@ from qumo.ir.pauli import PauliSum, parse_pauli_sum
 from qumo.algorithms.gradients import batch_value_and_gradient, batch_expectation
 from qumo.algorithms.qml import append_rot, append_strongly_entangling_layers
 from qumo.algorithms.qml_train import StepOptimizer
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 from _common import Fixture, vmax_abs_diff, seconds_since, fmt_s
 

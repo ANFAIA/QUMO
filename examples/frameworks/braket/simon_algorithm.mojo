@@ -28,7 +28,7 @@ example-meta: {"framework": "braket", "tier": "fast", "timeout": 60, "requires":
 from std.bit import pop_count
 from qumo.ir.circuit import Circuit
 from qumo.sim.runner import evolve, sample
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 comptime N = 6
 comptime SHOTS = 4 * N

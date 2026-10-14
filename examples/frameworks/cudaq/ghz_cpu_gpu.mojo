@@ -36,7 +36,7 @@ from std.time import perf_counter_ns
 from qumo.ir.circuit import Circuit
 from qumo.sim.runner import SampleResult
 from qumo.exec.dispatch import sample_on
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 comptime SHOTS = 1000
 

@@ -43,7 +43,7 @@ from qumo.sim.runner import evolve_into, sample
 from qumo.algorithms.hamiltonians import heisenberg_xxz, exact_evolve
 from qumo.algorithms.library import trotter
 from qumo.algorithms.linalg import sv_dot
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 comptime HT_SHOTS = 100000
 

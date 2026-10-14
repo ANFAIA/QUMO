@@ -41,7 +41,7 @@ from qumo.sim.runner import evolve, sample
 from qumo.exec.primitives import EstimatorPub, run_estimator, pop_parity
 from qumo.algorithms.library import hardware_efficient_ansatz
 from qumo.sim.rng import Rng
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 comptime N = 5
 comptime SHOTS = 10000

@@ -34,7 +34,7 @@ from qumo.ir.pauli import PauliSum, parse_pauli_sum
 from qumo.sim.rng import Rng
 from qumo.algorithms.gradients import Grad, value_and_gradient, expectation_value
 from qumo.algorithms.optimizers import Objective, Adam
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 comptime LAYERS = 2
 comptime NPARAMS = 3 * LAYERS

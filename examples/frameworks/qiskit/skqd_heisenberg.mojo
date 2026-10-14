@@ -40,7 +40,7 @@ from qumo.ir.pauli import PauliSum
 from qumo.exec.primitives import SamplerPub, run_sampler
 from qumo.algorithms.hamiltonians import heisenberg_xxz, ground_energy, subspace_ground_energy
 from qumo.algorithms.library import trotter, bitstring_to_int
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 comptime NQ = 12
 comptime D_MAX = 8

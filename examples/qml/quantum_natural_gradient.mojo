@@ -31,7 +31,7 @@ from qumo.ir.pauli import parse_pauli_sum
 from qumo.algorithms.gradients import ExpectationEngine, Grad
 from qumo.algorithms.qml_train import StepOptimizer
 from qumo.algorithms.qgeometry import metric_tensor, parameter_layers, QNGOptimizer
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 from _common import Fixture, vmax_abs_diff, seconds_since, fmt_s
 

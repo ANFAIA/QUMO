@@ -42,7 +42,7 @@ from qumo.algorithms.optimizers import NelderMead
 from qumo.algorithms.variational import VQEObjective
 from qumo.algorithms.library import bitstring_to_int
 from qumo.sim.rng import Rng
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 comptime N = 5
 comptime LAYERS = 2

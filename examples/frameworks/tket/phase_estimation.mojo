@@ -29,7 +29,7 @@ from qumo.ir.circuit import Circuit
 from qumo.sim.statevector import StateVector
 from qumo.sim.runner import evolve, evolve_into, sample
 from qumo.algorithms.library import qpe, qpe_phase, bitstring_to_int
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 comptime N_EVAL = 4
 comptime SHOTS = 1000

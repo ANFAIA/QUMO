@@ -35,7 +35,7 @@ from qumo.ir.pauli import PauliSum
 from qumo.sim.rng import Rng
 from qumo.algorithms.gradients import ExpectationEngine, Grad
 from qumo.algorithms.qml import projector_zero, local_projector_zero
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 from _common import Fixture, vmax_abs_diff, seconds_since, fmt_s
 

@@ -33,7 +33,7 @@ from qumo.algorithms.gradients import ExpectationEngine, Grad
 from qumo.algorithms.datasets import bars_and_stripes
 from qumo.algorithms.qml import append_strongly_entangling_layers, diagonal_observable
 from qumo.algorithms.qml_train import StepOptimizer
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 from _common import Fixture, vmax_abs_diff, seconds_since, fmt_s
 

@@ -46,7 +46,7 @@ from qumo.algorithms.optimizers import NelderMead
 from qumo.algorithms.variational import VQEObjective, linspace
 from qumo.algorithms.gradients import expectation_value
 from qumo.exec.primitives import EstimatorPub, run_estimator
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 comptime L = 3
 comptime NQ = 9

@@ -26,7 +26,7 @@ from qumo.ir.circuit import Circuit
 from qumo.ir.pauli import parse_pauli_sum
 from qumo.algorithms.gradients import ExpectationEngine, Grad
 from qumo.algorithms.qml_train import StepOptimizer
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 from _common import Fixture, vmax_abs_diff, seconds_since, fmt_s
 

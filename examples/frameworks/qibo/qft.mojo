@@ -39,7 +39,7 @@ from qumo.sim.rng import Rng
 from qumo.algorithms.library import qft, iqft
 from qumo.algorithms.linalg import sv_dot
 from qumo.exec.dispatch import sample_on
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 
 def random_state(n: Int, seed: UInt64) -> StateVector:

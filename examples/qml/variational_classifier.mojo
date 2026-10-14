@@ -41,7 +41,7 @@ from qumo.algorithms.gradients import ExpectationEngine, Grad, batch_value_and_g
 from qumo.algorithms.datasets import parity_dataset, load_csv, train_test_split, take_rows, take_values
 from qumo.algorithms.qml import append_rot, append_basis_embedding, append_angle_embedding, mottonen_angles
 from qumo.algorithms.qml_train import StepOptimizer, square_loss, expectations, vjp
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 from _common import Fixture, load_table, vmax_abs_diff, seconds_since, fmt_s, DATA_DIR
 

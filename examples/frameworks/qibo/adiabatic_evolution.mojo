@@ -36,7 +36,7 @@ from qumo.sim.runner import evolve, evolve_into
 from qumo.algorithms.hamiltonians import transverse_field_ising, ground_state, exact_evolve
 from qumo.algorithms.library import trotter
 from qumo.algorithms.linalg import sv_dot
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 
 def x_field(n: Int) -> PauliSum:

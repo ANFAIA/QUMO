@@ -51,7 +51,7 @@ from qumo.algorithms.library import qaoa_maxcut_ansatz, bitstring_to_int
 from qumo.algorithms.optimizers import Objective, NelderMead
 from qumo.algorithms.gradients import gradient, Grad
 from qumo.algorithms.variational import vqe
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 comptime SHOTS = 10000
 comptime P = 2

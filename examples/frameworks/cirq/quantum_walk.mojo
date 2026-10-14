@@ -41,7 +41,7 @@ from std.math import sqrt, pi
 from qumo.ir.circuit import Circuit
 from qumo.sim.runner import evolve, sample
 from qumo.algorithms.library import append_mcx, num_mcz_ancillas, bitstring_to_int
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 comptime NPOS = 7
 comptime SITES = 1 << NPOS

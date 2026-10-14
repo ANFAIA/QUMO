@@ -39,7 +39,7 @@ from std.math import pi, cos, sin, floor
 from qumo.ir.circuit import Circuit
 from qumo.sim.runner import evolve, sample
 from qumo.algorithms.library import qpe
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 comptime BITS = 6
 comptime ANC = 3

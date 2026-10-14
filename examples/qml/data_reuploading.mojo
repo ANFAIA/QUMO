@@ -32,7 +32,7 @@ from qumo.ir.pauli import PauliSum, parse_pauli_sum
 from qumo.algorithms.gradients import ExpectationEngine, Grad, batch_value_and_gradient, batch_expectation
 from qumo.algorithms.qml import append_rot
 from qumo.algorithms.qml_train import StepOptimizer, fidelity_loss
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 from _common import Fixture, vmax_abs_diff, seconds_since, fmt_s
 

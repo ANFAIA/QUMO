@@ -42,7 +42,7 @@ from qumo.algorithms.mitigation import (
     fold_gates_global, fold_gates_at_random, folded_scale, zne_expectation,
     richardson_extrapolate, linear_extrapolate, exp_extrapolate, ZNEResult,
 )
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 comptime NQ = 5
 comptime STEPS = 4

@@ -57,7 +57,7 @@ from qumo.exec.resources import (
     estimate_resources, estimate_hardware, estimate_fault_tolerant, HardwareProfile,
 )
 from qumo.algorithms.library import append_controlled_modmul, order_finding, qft, num_mcz_ancillas
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 
 def ccz_clifford_t(mut c: Circuit, a: Int, b: Int, t: Int):

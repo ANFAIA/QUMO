@@ -47,7 +47,7 @@ from qumo.sim.rng import Rng
 from qumo.algorithms.library import iqft, order_finding, order_from_phase
 from qumo.compiler.target import parse_target
 from qumo.compiler.pass_manager import transpile
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 comptime N_CTRL = 8
 comptime SHOTS = 2000

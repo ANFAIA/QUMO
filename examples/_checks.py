@@ -1,6 +1,6 @@
 """Machine-readable verification lines for Python examples.
 
-Python twin of ``qumo/ai/checks.mojo`` (same line format, same semantics)::
+Python twin of ``qumo/testing/checks.mojo`` (same line format, same semantics)::
 
     CHECK <label>: PASS|FAIL value=<v> ref=<r> diff=<d> tol=<t>     # close()
     CHECK <label>: PASS|FAIL value=<v> range=[<lo>, <hi>]          # within()

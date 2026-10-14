@@ -16,7 +16,7 @@ ALL CHECKS PASSED (<n>)                                        # finish()
 failed check is a result, not a QUMO error), so `mojo run` exits non-zero.
 
 ```mojo
-from qumo.ai.checks import CheckLog
+from qumo.testing.checks import CheckLog
 
 def main() raises:
     var log = CheckLog("qaoa_maxcut")
