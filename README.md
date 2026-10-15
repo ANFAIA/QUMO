@@ -49,6 +49,7 @@ Caveat: QUMO's compiler was tuned during the project on part of these benchmarks
 git clone https://github.com/ANFAIA/QUMO.git
 cd QUMO          # every make target runs from the repository root
 make setup        # .venv with Mojo 1.1 + MAX runtime (uv pip install mojo max-mojo-libs max-core)
+make setup-py     # optional: bench/.venv with the latest Qiskit, Aer, TKET, Cirq, Stim (examples, benchmarks, test-py)
 make test         # every Mojo test suite (tests/test_*.mojo); prints PASS/FAIL per suite
 make cli          # build/qumo     — CLI + MCP server
 make py           # build/qumo_py.so — CPython extension (import qumo_py)

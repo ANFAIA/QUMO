@@ -3,12 +3,18 @@ MOJO ?= .venv/bin/mojo
 PY ?= bench/.venv/bin/python
 TESTS := $(wildcard tests/test_*.mojo)
 
-.PHONY: all setup test cli py bench-sv bench-neutral benchpress clean examples examples-all examples-gpu test-py
+.PHONY: all setup setup-py test cli py bench-sv bench-neutral benchpress clean examples examples-all examples-gpu test-py
 
 all: cli py
 
 setup:  ## create .venv with the Mojo toolchain + MAX runtime (parallelize)
 	uv venv .venv --python 3.12 && uv pip install --python .venv/bin/python mojo max-mojo-libs max-core
+
+setup-py:  ## bench/.venv: Python 3.12 + latest Qiskit, Aer, TKET, Cirq, Stim, PyMatching (examples, benchmarks, plugin tests)
+	[ -x bench/.venv/bin/python ] || uv venv bench/.venv --python 3.12
+	uv pip install --python bench/.venv/bin/python -U qiskit qiskit-aer qiskit-ibm-runtime pytket pytket-qiskit \
+		cirq-core stim pymatching numpy scipy matplotlib psutil pytest nbformat
+	uv pip install --python bench/.venv/bin/python -U "./plugins/hardware[all]"
 
 test:  ## run every Mojo test file
 	@fail=0; for t in $(TESTS); do \
