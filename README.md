@@ -13,6 +13,7 @@ in one language and one binary:
 | `qumo.exec` | PUB primitives (Sampler/Estimator with broadcasting, exact or shot-based with QWC grouping), HEFT orchestration over CPU/GPU/QPU pools with cost model, resource estimation (logical, NISQ, fault-tolerant) | Qiskit V2 primitives, CUDA-Q mqpu, Braket ProgramSets, Q# QRE |
 | `qumo.algorithms` | Kernels (QFT, Grover, QPE, ansätze, Trotter, UCCSD), adjoint / parameter-shift gradients, optimizers, VQE, QAOA | PennyLane, CUDA-Q, Q#, Qualtran |
 | `qumo.gpu` | One Mojo source for NVIDIA, AMD and Apple GPUs (MAX): tile-run state vector, GPU Pauli frames | qsim, cuStateVec, CUDA-Q |
+| `qumo.ft` | Fault-tolerant programming: generic stabilizer codes (Steane, Iceberg, [[4,2,2]], [[5,1,3]], surface/repetition adapters), `compile` / `implement_ops` / `encode` passes with feed-forward, tableau-verified gadgets, state factories, magic-state T, comparator Rz, noisy emulation — [docs/FT.md](docs/FT.md) | Guppy FT, Stim |
 | `qumo.qec` | Surface/repetition code circuits, detector error models, Union-Find and sparse-blossom MWPM decoders, Sinter-like sweeps, calibration-driven noise, RB, readout mitigation | Stim, PyMatching, Sinter, CUDA-Q QEC, Qibocal |
 | `qumo.ai` + `cli/` | JSON everywhere, stable `QM-Exxx` error codes with hints, self-description, MCP server, CLI | — (AI-native layer) |
 
@@ -141,6 +142,11 @@ xcodebuild -downloadComponent MetalToolchain
 xcrun metal --version                                         # must print a version
 ```
 
+## AI transpiler and fault-tolerant programming
+
+- **AI transpiler** ([docs/AI_TRANSPILER.md](docs/AI_TRANSPILER.md)): a native, hardware-neutral version of the techniques of [qiskit-ibm-transpiler](https://github.com/Qiskit/qiskit-ibm-transpiler) — block collection (Clifford, linear function, permutation, Pauli network), topology-aware resynthesis with exact search and learned policies, replacement only if better (always verified exactly), learned routing and a hybrid heuristic + AI pass manager (`transpile_ai`, `qumo_transpile` with `"ai": true`). Models are trained here with qiskit-gym on QUMO's own topologies (`training/`, `models/`); no IBM weights or services are used. Compile-time overhead: about 3x the default level.
+- **Fault tolerance** ([docs/FT.md](docs/FT.md)): `qumo.ft` brings the key ideas of Quantinuum's [Guppy FT](https://github.com/Quantinuum/guppyft) — write QEC-agnostic circuits and `encode` them with a Steane or Iceberg architecture (QEC-cycle policies, state factories, Pauli-frame feed-forward, magic-state T, comparator-based Rz), verify gadgets with the stabilizer tableau, emulate with noise (examples in `examples/ft`; MCP tools `qumo_ft_codes`, `qumo_ft_encode`, `qumo_ft_verify`).
+
 ## Examples
 
 Every example cites its original source and checks its own results (`CHECK ...: PASS` lines); `make examples` runs the fast tier ([examples/README.md](examples/README.md)).
@@ -163,6 +169,7 @@ qumo/
   gpu/         MAX GPU kernels, GPU state vector, host emulator for kernel tests (opt-in: -D QUMO_GPU)
   exec/        PUB primitives, HEFT orchestrator, resource estimation, auto dispatch, agent tools
   algorithms/  kernels (QFT, Grover, QPE, ansätze, Trotter, UCCSD), gradients, optimizers, VQE/QAOA
+  ft/          fault-tolerant layer: stabilizer codes, logical programs, encoding passes, gadget verification, emulation
   qec/         codes, detector error models, decoders (UF, sparse-blossom MWPM), Sinter-style experiments, characterization
   ai/          JSON, diagnostics, self-description, tool registry, MCP server
   bench/       benchmark circuit generators (QV, EfficientSU2, DTC, ...)
@@ -190,7 +197,7 @@ The benchmark venv needs `qiskit qiskit-aer qiskit-ibm-runtime pytket pytket-qis
 
 - [docs/ANALYSIS.md](docs/ANALYSIS.md) — deep analysis of the 8 frameworks and the synthesis
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — architecture and design decisions
-- Modules: [COMPILER](docs/COMPILER.md) · [SIMULATION](docs/SIMULATION.md) · [GPU](docs/GPU.md) · [QEC](docs/QEC.md) · [ALGORITHMS](docs/ALGORITHMS.md) · [QML](docs/QML.md) · [AI_NATIVE](docs/AI_NATIVE.md) · [HARDWARE_PLUGINS](docs/HARDWARE_PLUGINS.md) · [ERRORS](docs/ERRORS.md)
+- Modules: [COMPILER](docs/COMPILER.md) · [SIMULATION](docs/SIMULATION.md) · [GPU](docs/GPU.md) · [QEC](docs/QEC.md) · [ALGORITHMS](docs/ALGORITHMS.md) · [QML](docs/QML.md) · [AI_TRANSPILER](docs/AI_TRANSPILER.md) · [FT](docs/FT.md) · [AI_NATIVE](docs/AI_NATIVE.md) · [HARDWARE_PLUGINS](docs/HARDWARE_PLUGINS.md) · [ERRORS](docs/ERRORS.md)
 - [docs/MOJO_GUIDE.md](docs/MOJO_GUIDE.md) — the exact Mojo 1.1 dialect QUMO uses
 - Benchmarking: [bias audit of Benchpress](docs/BENCHPRESS_BIAS_REPORT.md) · [QUMO on Benchpress](docs/BENCHPRESS_RESULTS.md) · [neutral benchmark](docs/NEUTRAL_BENCHMARK_REPORT.md) · [cloud GPUs](docs/BENCHMARKING_ON_CLOUD_GPUS.md)
 - [llms.txt](llms.txt) — compact index for LLM agents

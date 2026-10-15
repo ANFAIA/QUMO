@@ -1,0 +1,10 @@
+# Training-time dependencies of QUMO's AI-transpiler models (never needed at
+# runtime: inference is native Mojo). All Apache-2.0 / BSD licensed.
+# Install into a separate venv:  uv venv .venv-train --python 3.12 && uv pip install -r requirements.txt
+qiskit-gym==0.4.1      # RL environments (Apache-2.0)
+twisterl==0.5.1        # PPO / AlphaZero engine used by qiskit-gym (Apache-2.0)
+torch==2.14.1
+safetensors==0.8.0
+numpy==2.5.4
+qiskit==2.5.2
+gymnasium==1.4.0

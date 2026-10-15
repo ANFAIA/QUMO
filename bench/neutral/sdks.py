@@ -11,8 +11,11 @@ compile(qasm_text, target, level, seed) -> CompileOutput
 SDK's highest generally-applicable effort). Unsupported combinations raise
 `Unsupported` with the reason; they are reported as such, never as failures.
 """
+import json
+import os
+import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import qiskit
 from qiskit import QuantumCircuit, qasm2
@@ -31,6 +34,7 @@ class CompileOutput:
     cpu_s: float
     parse_s: float
     sdk_version: str
+    extra: dict = field(default_factory=dict)  # SDK-specific record fields (e.g. AI pass statistics)
 
 
 def _timed(fn):
@@ -273,6 +277,100 @@ def compile_qumo(qasm_text, target, level, seed):
     return CompileOutput(qc, list(init)[:nlog], list(final)[:nlog], wall, cpu, parse_s, qumo_py.version())
 
 
+_REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+_SYNTH_PASSES = ("clifford_synth", "linear_synth", "perm_synth", "pauli_network")
+
+
+def ai_stats(report_json):
+    """Per-technique statistics from a QUMO CompileResult JSON report: for each
+    AI synthesis pass the summed blocks / proposed / verified / replaced /
+    saved_cost / rejected counts (parsed from the pass notes), whether the
+    learned router won its portfolio against SABRE, and the winning pipeline
+    (at AI level 3 the O3 portfolio member may win)."""
+    rep = json.loads(report_json)
+    pipeline = rep.get("pipeline", "")
+    out = {"route_ai_kept": 0, "route_ai_tried": 0}
+    out["winner"] = "ai" if any(p in pipeline for p in _SYNTH_PASSES) or "policy=" in pipeline else "heuristic"
+    for p in rep.get("passes", []):
+        name = p.get("pass", "")
+        note = p.get("note", "")
+        base = name.split("(")[0]
+        if base == "fixpoint":
+            # nested synthesis passes: "| <pass> blocks=.. replaced=.." sections of the fixpoint note
+            for sec in note.split(" | ")[1:]:
+                sp = sec.split(" ")[0]
+                if sp in _SYNTH_PASSES:
+                    d = out.setdefault(sp, {})
+                    for k, v in re.findall(r"(blocks|proposed|verified|replaced|saved_cost|rejected)=(-?\d+)", sec):
+                        d[k] = d.get(k, 0) + int(v)
+            continue
+        if base in _SYNTH_PASSES:
+            d = out.setdefault(base, {})
+            for k, v in re.findall(r"(blocks|proposed|verified|replaced|saved_cost|saved_depth|rejected)=(-?\d+)", note):
+                d[k] = d.get(k, 0) + int(v)
+            d["2q_delta"] = d.get("2q_delta", 0) + (p["2q"][1] - p["2q"][0])
+        if base == "route" and "ai-route" in note:
+            out["route_ai_tried"] += 1
+            if "kept ai-route" in note:
+                out["route_ai_kept"] += 1
+    return out
+
+
+def compile_qumo_ai(qasm_text, target, level, seed):
+    """QUMO hybrid heuristic + AI preset: default -> transpile_ai level 2,
+    max -> level 3 (portfolio with O3). Models come from $QUMO_MODEL_DIR,
+    defaulting to the repository's models/ai_transpiler."""
+    import qumo_py
+
+    os.environ.setdefault("QUMO_MODEL_DIR", os.path.join(_REPO, "models", "ai_transpiler"))
+    (circ, parse_s, _) = _timed(lambda: qumo_py.load_qasm(qasm_text))
+    nlog = circ.num_qubits()
+    lvl = 2 if level == "default" else 3
+    edges = [] if target.all_to_all else [list(e) for e in target.edges]
+    width = nlog if target.all_to_all else target.num_qubits
+    res, wall, cpu = _timed(lambda: qumo_py.transpile_ai_report(circ, width, edges, target.basis, lvl, seed))
+    out, init, final, report = res
+    qc = qasm2.loads(out.to_qasm2(), custom_instructions=qasm2.LEGACY_CUSTOM_INSTRUCTIONS)
+    return CompileOutput(qc, list(init)[:nlog], list(final)[:nlog], wall, cpu, parse_s, qumo_py.version(),
+                         {"ai": ai_stats(report)})
+
+
+# --------------------------------------------------------------------------- Qiskit + IBM AI (optional baseline)
+# IBM-trained external baseline ONLY: qiskit-ibm-transpiler's local AI mode
+# downloads IBM model weights from Hugging Face at runtime. It is installed
+# only in a scratch venv and is never a QUMO dependency.
+_IBM_AI_TARGETS = ("sc_heavy_hex", "linear_cx")
+
+
+def compile_qiskit_ibm_ai(qasm_text, target, level, seed):
+    try:
+        from qiskit_ibm_transpiler import generate_ai_pass_manager
+    except Exception as e:  # not installed: optional baseline
+        raise Unsupported(f"qiskit-ibm-transpiler not installed ({type(e).__name__}); optional IBM-trained baseline")
+    from qiskit.transpiler import CouplingMap
+
+    if target.name not in _IBM_AI_TARGETS:
+        raise Unsupported("IBM AI baseline is run on heavy-hex / IBM-like (CX/CZ) targets only")
+    (qc, parse_s, _) = _timed(lambda: qasm2.loads(qasm_text, custom_instructions=qasm2.LEGACY_CUSTOM_INSTRUCTIONS))
+    n_log = qc.num_qubits
+    opt = 2 if level == "default" else 3
+    cmap = CouplingMap(list(target.edge_set))
+    pm = generate_ai_pass_manager(coupling_map=cmap, ai_optimization_level=opt, optimization_level=opt,
+                                  ai_layout_mode="optimize", include_ai_synthesis=True,
+                                  qiskit_transpile_options={"basis_gates": list(target.basis),
+                                                            "seed_transpiler": seed})
+    tqc, wall, cpu = _timed(lambda: pm.run(qc))
+    if tqc.layout is not None:
+        init = tqc.layout.initial_index_layout(filter_ancillas=True)[:n_log]
+        final = tqc.layout.final_index_layout(filter_ancillas=True)[:n_log]
+    else:
+        init = list(range(n_log))
+        final = list(range(n_log))
+    import qiskit_ibm_transpiler
+    return CompileOutput(tqc, list(init), list(final), wall, cpu, parse_s,
+                         f"qiskit {qiskit.__version__} + qiskit-ibm-transpiler {qiskit_ibm_transpiler.__version__}")
+
+
 def warm_up(sdk):
     """Pay one-time import/plugin-loading costs in the parent process (before
     fork) so per-job timings measure compilation, not first-call latency."""
@@ -288,6 +386,8 @@ def warm_up(sdk):
 
 SDKS = {
     "qumo": compile_qumo,
+    "qumo-ai": compile_qumo_ai,
+    "qiskit+ibm-ai": compile_qiskit_ibm_ai,
     "qiskit": compile_qiskit,
     "tket": compile_tket,
     "cirq": compile_cirq,

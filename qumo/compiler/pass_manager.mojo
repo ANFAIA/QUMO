@@ -36,6 +36,8 @@ from qumo.compiler.basis import translate_to_basis, unroll_3q
 from qumo.compiler.routing import (
     RouteOptions, RoutePlan, route_circuit, star_preroute, plan_route, finish_route, has_exact_layout,
 )
+from qumo.compiler.resynth import SynthOptions, SynthStats, resynthesize_blocks
+from qumo.compiler.ai_route import AIRouteOptions, ai_route, routed_cost
 
 
 struct PassId:
@@ -54,7 +56,13 @@ struct PassId:
     comptime KAK = 12
     comptime ELIDE_SWAPS = 13
     comptime PAULI_SIMP = 14
-    comptime NUM = 15
+    # AI-transpiler block resynthesis (docs/AI_TRANSPILER.md); the block kind
+    # of each pass is `PassId.<pass> - PassId.CLIFFORD_SYNTH` (= BlockKind).
+    comptime CLIFFORD_SYNTH = 15
+    comptime LINEAR_SYNTH = 16
+    comptime PERM_SYNTH = 17
+    comptime PAULI_NETWORK = 18
+    comptime NUM = 19
 
 
 def pass_name(id: Int) -> String:
@@ -73,6 +81,10 @@ def pass_name(id: Int) -> String:
     if id == PassId.KAK: return "kak"
     if id == PassId.ELIDE_SWAPS: return "elide_swaps"
     if id == PassId.PAULI_SIMP: return "pauli_simp"
+    if id == PassId.CLIFFORD_SYNTH: return "clifford_synth"
+    if id == PassId.LINEAR_SYNTH: return "linear_synth"
+    if id == PassId.PERM_SYNTH: return "perm_synth"
+    if id == PassId.PAULI_NETWORK: return "pauli_network"
     return "unknown"
 
 
@@ -92,7 +104,19 @@ def pass_description(id: Int) -> String:
     if id == PassId.KAK: return "consolidate 2q blocks and resynthesise with KAK (<= 3 cx) when cheaper"
     if id == PassId.ELIDE_SWAPS: return "remove swap gates by relabelling (folded into final_layout); only trailing swaps once routed"
     if id == PassId.PAULI_SIMP: return "Pauli-gadget resynthesis (Clifford tableau extraction, identical-Pauli merging, ladder-sharing chains); kept only when it saves 2q gates"
+    if id == PassId.CLIFFORD_SYNTH: return "collect Clifford blocks (h,s,sdg,sx,x,y,z,cx,cy,cz,swap; <= 9 qubits) and resynthesise them topology-aware (exact search, greedy or learned policy); a block is replaced only when verified equal by tableau and cheaper (2q cost, then 2q depth); " + _SYNTH_ARGS_DOC
+    if id == PassId.LINEAR_SYNTH: return "collect linear-function blocks (cx,swap; <= 9 qubits) and resynthesise them on the coupling subgraph; replaced only when verified equal by GF(2) matrix and cheaper; " + _SYNTH_ARGS_DOC
+    if id == PassId.PERM_SYNTH: return "collect SWAP networks (<= 12 qubits) and resynthesise the permutation by token swapping (exact A* for small blocks, greedy or learned policy); replaced only when verified equal and cheaper; " + _SYNTH_ARGS_DOC
+    if id == PassId.PAULI_NETWORK: return "collect Pauli-rotation networks (Clifford + rx/ry/rz/rzz/rxx/ryy; <= 6 qubits) and resynthesise rotations + Clifford tail topology-aware; replaced only when verified equal (unitary) and cheaper; " + _SYNTH_ARGS_DOC
     return ""
+
+
+comptime _SYNTH_ARGS_DOC = "args: method=auto|exact|astar|greedy|policy, max_qubits, min_block, direction=forward|backward|both, commute=0|1, reps, model=auto|off|<id>, beams, searches, metric=cost_depth|cost, strict=0|1, budget, model_dir, seed"
+
+
+def is_synth_pass(id: Int) -> Bool:
+    """True for the four collect-and-resynthesise passes (ids 15..18)."""
+    return id >= PassId.CLIFFORD_SYNTH and id <= PassId.PAULI_NETWORK
 
 
 def pass_id_from_name(name: String) -> Int:
@@ -112,6 +136,10 @@ def pass_id_from_name(name: String) -> Int:
     if s == "kak" or s == "consolidate" or s == "consolidate_blocks" or s == "2q_synth": return PassId.KAK
     if s == "elide_swaps" or s == "elide" or s == "elide_permutations": return PassId.ELIDE_SWAPS
     if s == "pauli_simp" or s == "paulisimp" or s == "pauli" or s == "gadgets": return PassId.PAULI_SIMP
+    if s == "clifford_synth" or s == "ai_clifford" or s == "clifford_synthesis": return PassId.CLIFFORD_SYNTH
+    if s == "linear_synth" or s == "ai_linear" or s == "ai_linear_function" or s == "linear_function_synth": return PassId.LINEAR_SYNTH
+    if s == "perm_synth" or s == "ai_permutation" or s == "permutation_synth": return PassId.PERM_SYNTH
+    if s == "pauli_network" or s == "ai_pauli_network" or s == "pauli_network_synth": return PassId.PAULI_NETWORK
     return -1
 
 
@@ -273,8 +301,22 @@ def _validate_args(id: Int, args: List[String]) raises:
             elif key == "weight" or key == "decay" or key == "absorb" or key == "absorb_alt" or key == "mirror_gain":
                 if not _is_float(val):
                     raise Error("QM-E602: route argument '" + key + "' needs a number, got '" + val + "'. Hint: e.g. route(sabre," + key + "=0.5).")
+            elif key == "policy":
+                if val.byte_length() == 0:
+                    raise Error("QM-E616: empty routing policy name. Hint: policy=off|auto|<model id>; list models with describe.")
+            elif key == "ai_level":
+                if not _is_int(val) or Int(val) < 1 or Int(val) > 3:
+                    raise Error("QM-E602: route argument 'ai_level' must be 1, 2 or 3, got '" + val + "'. Hint: route(sabre,policy=auto,ai_level=2).")
+            elif key == "layout_mode":
+                if val != "optimize" and val != "improve" and val != "keep":
+                    raise Error("QM-E602: route argument 'layout_mode' must be optimize, improve or keep, got '" + val + "'. Hint: route(sabre,policy=auto,layout_mode=optimize).")
+            elif key == "model_dir":
+                pass
             else:
-                raise Error("QM-E602: unknown route argument '" + key + "'. Hint: valid keys are layout, seed, trials, iterations, lookahead, weight, decay, vf2_steps, valve, star, heuristic, swap_trials, absorb, absorb_alt, mirror, mirror_gain, commute.")
+                raise Error("QM-E602: unknown route argument '" + key + "'. Hint: valid keys are layout, seed, trials, iterations, lookahead, weight, decay, vf2_steps, valve, star, heuristic, swap_trials, absorb, absorb_alt, mirror, mirror_gain, commute, policy, ai_level, layout_mode, model_dir.")
+        return
+    if is_synth_pass(id):
+        _validate_synth_args(pn, args)
         return
     if id == PassId.FIXPOINT:
         var inner = String()
@@ -294,6 +336,61 @@ def _validate_args(id: Int, args: List[String]) raises:
         return
     if len(args) > 0:
         raise Error("QM-E602: pass '" + pn + "' takes no arguments, got '" + args[0] + "'. Hint: write just '" + pn + "'.")
+
+
+def _is_method(v: String) -> Bool:
+    return v == "auto" or v == "exact" or v == "astar" or v == "greedy" or v == "policy"
+
+
+def _is_bool_word(v: String) -> Bool:
+    return v == "0" or v == "1" or v == "true" or v == "false" or v == "on" or v == "off"
+
+
+def _bool_word(v: String) -> Bool:
+    return v == "1" or v == "true" or v == "on"
+
+
+def _validate_synth_args(pn: String, args: List[String]) raises:
+    """Arguments of clifford_synth / linear_synth / perm_synth / pauli_network."""
+    comptime KEYS = "method, max_qubits, min_block, direction, commute, reps, model, beams, searches, metric, strict, budget, model_dir, seed"
+    for a in args:
+        var eq = a.find("=")
+        if eq < 0:
+            # a bare word is the method: linear_synth(greedy)
+            if not _is_method(a):
+                raise Error("QM-E616: unknown synthesis method '" + a + "' for pass '" + pn + "'. Hint: method=auto|exact|astar|greedy|policy; list models with describe.")
+            continue
+        var key = String(a[byte=0:eq].strip())
+        var val = String(a[byte=eq + 1:].strip())
+        if key == "method":
+            if not _is_method(val):
+                raise Error("QM-E616: unknown synthesis method '" + val + "' for pass '" + pn + "'. Hint: method=auto|exact|astar|greedy|policy; list models with describe.")
+        elif key == "max_qubits" or key == "min_block" or key == "reps" or key == "beams" or key == "searches" or key == "budget" or key == "seed":
+            if not _is_int(val):
+                raise Error("QM-E602: " + pn + " argument '" + key + "' needs an integer, got '" + val + "'. Hint: e.g. " + pn + "(" + key + "=4).")
+            var iv = Int(val)
+            if (key == "max_qubits" or key == "reps" or key == "beams" or key == "searches") and iv < 1:
+                raise Error("QM-E602: " + pn + " argument '" + key + "' must be >= 1, got " + val + ". Hint: e.g. " + pn + "(" + key + "=4).")
+            if (key == "min_block" or key == "budget") and iv < 0:
+                raise Error("QM-E602: " + pn + " argument '" + key + "' must be >= 0, got " + val + ". Hint: e.g. " + pn + "(" + key + "=4).")
+            if key == "max_qubits" and iv > 64:
+                raise Error("QM-E618: " + pn + " max_qubits=" + val + " is above the 64-qubit block limit. Hint: lower max_qubits or use method=greedy.")
+        elif key == "direction":
+            if val != "forward" and val != "backward" and val != "both":
+                raise Error("QM-E602: " + pn + " direction must be forward, backward or both, got '" + val + "'. Hint: " + pn + "(direction=both).")
+        elif key == "commute" or key == "strict":
+            if not _is_bool_word(val):
+                raise Error("QM-E602: " + pn + " argument '" + key + "' must be 0/1 (on/off), got '" + val + "'. Hint: " + pn + "(" + key + "=1).")
+        elif key == "metric":
+            if val != "cost_depth" and val != "cost":
+                raise Error("QM-E602: " + pn + " metric must be cost_depth or cost, got '" + val + "'. Hint: " + pn + "(metric=cost_depth).")
+        elif key == "model":
+            if val.byte_length() == 0:
+                raise Error("QM-E616: empty model name for pass '" + pn + "'. Hint: model=auto|off|<model id>; list models with describe.")
+        elif key == "model_dir":
+            pass
+        else:
+            raise Error("QM-E602: unknown " + pn + " argument '" + key + "'. Hint: valid keys are " + KEYS + ".")
 
 
 def parse_pipeline(spec: String) raises -> List[PassSpec]:
@@ -496,6 +593,9 @@ struct _State(Movable):
     var dropped: Bool
     var seed: Int
     var routed: Bool
+    # running totals of the AI synthesis passes, per block kind (0..3):
+    # blocks, proposed, verified, replaced, saved 2q cost, rejected
+    var synth_totals: List[Int]
 
     def __init__(out self, n: Int, seed: Int):
         self.init = List[Int](length=n, fill=0)
@@ -505,6 +605,7 @@ struct _State(Movable):
         self.dropped = False
         self.seed = seed
         self.routed = False
+        self.synth_totals = List[Int](length=4 * 6, fill=0)
 
 
 def _compose(prev: List[Int], route: List[Int]) -> List[Int]:
@@ -583,6 +684,8 @@ def _apply(p: PassSpec, mut c: Circuit, target: Target, mut st: _State) raises -
     if id == PassId.ROUTE:
         var opts = RouteOptions()
         opts.seed = st.seed
+        var aopts = AIRouteOptions()
+        aopts.policy = "off"
         var star = True
         for a in p.args:
             var eq = a.find("=")
@@ -613,6 +716,11 @@ def _apply(p: PassSpec, mut c: Circuit, target: Target, mut st: _State) raises -
             elif key == "commute":
                 opts.commute_auto = val == "auto"
                 opts.commute = val != "0" and val != "false" and val != "off"
+            elif key == "policy": aopts.policy = val
+            elif key == "ai_level": aopts.level = Int(val)
+            elif key == "layout_mode": aopts.layout_mode = val
+            elif key == "model_dir": aopts.model_dir = val
+        aopts.seed = opts.seed
         _ = unroll_3q(c)
         var star_map = List[Int]()
         var star_note = String()
@@ -653,8 +761,14 @@ def _apply(p: PassSpec, mut c: Circuit, target: Target, mut st: _State) raises -
         var il = List[Int]()
         var fl = List[Int]()
         var note = String()
+        var use_ai = aopts.policy != "off" and not plan.trivial and not plan.vf2
+        var pre = Circuit(1)
+        if use_ai:
+            pre = c.copy()
         var swaps = finish_route(c, target, opts, plan, il, fl, note)
         note += star_note
+        if use_ai and swaps > 0:
+            note += _ai_route_portfolio(pre, c, target, opts, aopts, plan, il, fl)
         _ = swaps
         st.init = _compose(st.init, il)
         if len(star_map) > 0:
@@ -681,6 +795,19 @@ def _apply(p: PassSpec, mut c: Circuit, target: Target, mut st: _State) raises -
             var dropped = False
             _ = translate_to_basis(c, gs, dropped)
         return "resynthesised " + String(blocks) + " blocks, 2q cost -" + String(saved)
+    if is_synth_pass(id):
+        var opts = synth_options_from_args(id, p.args, st.seed)
+        var stats = SynthStats()
+        var physical = st.routed and not target.full
+        var saved = resynthesize_blocks(c, target, physical, opts, stats)
+        var k = (id - PassId.CLIFFORD_SYNTH) * 6
+        st.synth_totals[k] += stats.blocks
+        st.synth_totals[k + 1] += stats.proposed
+        st.synth_totals[k + 2] += stats.verified
+        st.synth_totals[k + 3] += stats.replaced
+        st.synth_totals[k + 4] += stats.saved_cost
+        st.synth_totals[k + 5] += stats.rejected_not_equal
+        return _synth_note(stats, saved, physical)
     if id == PassId.PAULI_SIMP:
         var saved = pauli_resynthesize(c, 64, GateSet(target.basis))
         return ("saved " + String(saved) + " 2q gates") if saved > 0 else "kept original"
@@ -697,6 +824,109 @@ def _apply(p: PassSpec, mut c: Circuit, target: Target, mut st: _State) raises -
             raise Error("QM-E615: compiled circuit does not conform to target '" + target.name + "': " + err + ". Hint: add 'route' and 'basis' passes before 'check' (or use a preset level).")
         return "conforms to " + target.name
     return ""
+
+
+def synth_options_from_args(id: Int, args: List[String], seed: Int) raises -> SynthOptions:
+    """SynthOptions for a synthesis pass: the per-kind defaults (IBM collector
+    defaults) overridden by the pass arguments (already validated)."""
+    var opts = SynthOptions.default(id - PassId.CLIFFORD_SYNTH)
+    opts.seed = seed
+    for a in args:
+        var eq = a.find("=")
+        if eq < 0:
+            opts.method = a
+            continue
+        var key = String(a[byte=0:eq].strip())
+        var val = String(a[byte=eq + 1:].strip())
+        if key == "method": opts.method = val
+        elif key == "max_qubits": opts.max_qubits = Int(val)
+        elif key == "min_block": opts.min_block = Int(val)
+        elif key == "direction": opts.direction = val
+        elif key == "commute": opts.commute = _bool_word(val)
+        elif key == "reps": opts.reps = Int(val)
+        elif key == "model": opts.model = val
+        elif key == "beams": opts.beams = Int(val)
+        elif key == "searches": opts.searches = Int(val)
+        elif key == "metric": opts.metric = val
+        elif key == "strict": opts.strict = _bool_word(val)
+        elif key == "budget": opts.budget = Int(val)
+        elif key == "model_dir": opts.model_dir = val
+        elif key == "seed": opts.seed = Int(val)
+    return opts^
+
+
+def _json_safe(s: String) -> String:
+    """Notes are embedded verbatim in PassReport JSON: drop quotes / backslashes / newlines."""
+    return s.replace("\\", "/").replace("\"", "'").replace("\n", " ")
+
+
+def _synth_note(stats: SynthStats, saved: Int, physical: Bool) -> String:
+    var s = String("blocks=") + String(stats.blocks) + " proposed=" + String(stats.proposed)
+    s += " verified=" + String(stats.verified) + " replaced=" + String(stats.replaced)
+    s += " saved_cost=" + String(stats.saved_cost) + " saved_depth=" + String(stats.saved_depth)
+    s += " rejected=" + String(stats.rejected_not_equal)
+    s += " (" + ("topology-aware" if physical else "all-to-all") + ")"
+    if stats.note.byte_length() > 0:
+        s += " " + _json_safe(stats.note)
+    _ = saved
+    return s
+
+
+def _synth_totals_note(inner: List[PassSpec], before: List[Int], after: List[Int]) -> String:
+    """Synthesis statistics accumulated inside a fixpoint ("" when it holds
+    no synthesis pass, so heuristic presets keep their notes)."""
+    var s = String()
+    for kind in range(4):
+        var nm = pass_name(PassId.CLIFFORD_SYNTH + kind)
+        var present = False
+        for p in inner:
+            if p.id == PassId.CLIFFORD_SYNTH + kind:
+                present = True
+        if not present:
+            continue
+        var k = kind * 6
+        s += " | " + nm + " blocks=" + String(after[k] - before[k]) + " proposed=" + String(after[k + 1] - before[k + 1])
+        s += " verified=" + String(after[k + 2] - before[k + 2]) + " replaced=" + String(after[k + 3] - before[k + 3])
+        s += " saved_cost=" + String(after[k + 4] - before[k + 4]) + " rejected=" + String(after[k + 5] - before[k + 5])
+    return s
+
+
+def _ai_route_portfolio(pre: Circuit, mut c: Circuit, target: Target, opts: RouteOptions,
+                        aopts: AIRouteOptions, plan: RoutePlan,
+                        mut il: List[Int], mut fl: List[Int]) raises -> String:
+    """Learned-policy routing of the pre-route circuit `pre`, seeded with the
+    SABRE layout; replaces the SABRE result `c` (+ its layouts `il` / `fl`)
+    only when the policy result is verified by `ai_route` and strictly cheaper
+    under `routed_cost` (2q cost in CX units, then 2q depth)."""
+    var a2 = aopts.copy()
+    a2.seed_layout = plan.layout.copy()
+    a2.portfolio = False  # SABRE already ran: the portfolio is decided here
+    if len(opts.initial_layout) > 0 and a2.layout_mode == "optimize":
+        a2.layout_mode = "improve"  # IBM rule: a user layout is improved, not replaced
+    var out = Circuit(1)
+    var ail = List[Int]()
+    var afl = List[Int]()
+    var anote = String()
+    var ok: Bool
+    try:
+        ok = ai_route(pre, target, opts, a2, out, ail, afl, anote)
+    except e:
+        var msg = String(e)
+        if msg.startswith("QM-E616") or msg.startswith("QM-E617") or msg.startswith("QM-E620"):
+            if a2.policy != "auto":
+                raise e^  # an explicitly requested model must exist and match
+        return ", ai-route: failed (" + _json_safe(msg) + "), kept sabre"
+    if not ok:
+        return ", ai-route: no proposal (" + _json_safe(anote) + "), kept sabre"
+    var cs = routed_cost(c, target)
+    var ca = routed_cost(out, target)
+    var tag = ", ai-route cost " + String(ca[0]) + "/" + String(ca[1]) + " vs sabre " + String(cs[0]) + "/" + String(cs[1])
+    if ca[0] < cs[0] or (ca[0] == cs[0] and ca[1] < cs[1]):
+        c = out^
+        il = ail^
+        fl = afl^
+        return tag + ": kept ai-route (" + _json_safe(anote) + ")"
+    return tag + ": kept sabre"
 
 
 def _stats(c: Circuit, mut g: Int, mut t: Int, mut d: Int):
@@ -771,6 +1001,7 @@ def _run_list(passes: List[PassSpec], mut c: Circuit, target: Target, mut st: _S
                 cnt += 1
             var inner = parse_pipeline(inner_txt)
             var deltas = List[Int](length=len(inner), fill=0)
+            var totals0 = st.synth_totals.copy()
             var it = 0
             var gb = g0
             var tb = t0
@@ -800,6 +1031,7 @@ def _run_list(passes: List[PassSpec], mut c: Circuit, target: Target, mut st: _S
             note = String(it) + " iters:"
             for k in range(len(inner)):
                 note += " " + pass_name(inner[k].id) + " " + String(deltas[k])
+            note += _synth_totals_note(inner, totals0, st.synth_totals)
             var us = Float64(perf_counter_ns() - start) / 1000.0
             reports.append(PassReport(String(p), g0, gb, t0, tb, d0, db, us, note))
             g0 = gb
@@ -962,3 +1194,117 @@ def compile_spec(circuit: Circuit, target: Target, spec: String, seed: Int = 7) 
     """Compile with an explicit text pipeline."""
     var pm = PassManager(spec, seed)
     return pm.run(circuit, target)
+
+
+# ----------------------------------------------------------------------------
+# Hybrid heuristic + AI presets (docs/AI_TRANSPILER.md)
+# ----------------------------------------------------------------------------
+def preset_pipeline_ai(level: Int, target: Target) raises -> String:
+    """Hybrid heuristic + AI pipeline for AI level 1..3 (the vendor-neutral
+    counterpart of qiskit-ibm-transpiler's `generate_ai_pass_manager`).
+
+    * ai1: O1 with learned-policy routing (`route(...,policy=auto,ai_level=1)`).
+    * ai2: O2 with policy routing (ai_level=2), then the IBM post-routing
+      linear-function resynthesis (forward, then backward collection, no
+      commutation analysis) and permutation resynthesis of residual SWAP
+      networks, then kak, basis and cleanup.
+    * ai3: O3 with all-to-all Clifford resynthesis before routing, policy
+      routing (ai_level=3, layout_mode=optimize), kak, then the post-routing
+      synthesis list [linear_synth (commutation-aware, both directions),
+      clifford_synth, perm_synth, pauli_network] run twice inside a fixpoint,
+      then basis and the O3 cleanup fixpoint. `transpile_ai(..., 3)` runs it
+      as a portfolio with `transpile(..., 3)`.
+
+    Every synthesis pass keeps a block only when its replacement is verified
+    exactly equal and cheaper, so without trained models (or on all-to-all
+    targets) the exact / greedy synthesizers still run and routing falls back
+    to SABRE.
+    """
+    if level < 1 or level > 3:
+        raise Error("QM-E609: AI optimization level must be 1..3, got " + String(level) + ". Hint: 1 = O1 + policy routing, 2 = default (+ linear / permutation resynthesis), 3 = heavy (+ Clifford / Pauli-network resynthesis, portfolio with O3).")
+    var route = not target.full
+    var basis = len(target.basis) > 0
+    var parts = List[String]()
+    if level == 1:
+        parts.append("remove_identities")
+        parts.append("cancel")
+        parts.append("merge")
+        if route:
+            parts.append("route(sabre,layout=auto,trials=5,iterations=1,swap_trials=5,policy=auto,ai_level=1)")
+        if basis:
+            parts.append("basis")
+        parts.append("cancel")
+        parts.append("merge")
+        parts.append("fuse1q")
+        parts.append("check")
+    elif level == 2:
+        parts.append("remove_identities")
+        parts.append("elide_swaps")
+        parts.append("pauli_simp")
+        parts.append("fixpoint(cancel,commute,fuse1q,max=4)")
+        if route:
+            parts.append("route(sabre,layout=auto,trials=20,iterations=2,swap_trials=20,policy=auto,ai_level=2)")
+        elif basis and not target.supports(Op.CCX):
+            parts.append("unroll3q")
+        # IBM's level-2 post-routing linear-function stage, placed before
+        # kak: KAK then consolidates the resynthesised CX networks into the
+        # target entangler (measured on the neutral set: 31 wins / 1 loss vs
+        # O2 instead of 19 / 0 when run after kak, same compile time)
+        parts.append("linear_synth(direction=forward,commute=0)")
+        parts.append("linear_synth(direction=backward,commute=0)")
+        parts.append("perm_synth")
+        parts.append("kak")
+        if basis:
+            parts.append("basis")
+        parts.append("cancel")
+        parts.append("commute")
+        parts.append("fuse1q")
+        parts.append("check")
+    else:
+        parts.append("remove_identities")
+        parts.append("elide_swaps")
+        parts.append("pauli_simp")
+        parts.append("clifford_synth")
+        parts.append("fixpoint(cancel,commute,phase_fold,fuse1q,max=4)")
+        if not route and basis and not target.supports(Op.CCX):
+            parts.append("unroll3q")
+        parts.append("kak")
+        if route:
+            parts.append("route(sabre,layout=auto,trials=40,iterations=3,swap_trials=40,policy=auto,ai_level=3,layout_mode=optimize)")
+            parts.append("kak")
+        parts.append("fixpoint(linear_synth(direction=both,commute=1),clifford_synth,perm_synth,pauli_network,max=2)")
+        if basis:
+            parts.append("basis")
+        parts.append("fixpoint(cancel,commute,phase_fold,eject_z,fuse1q,max=10)")
+        parts.append("check")
+    var s = String()
+    for i in range(len(parts)):
+        if i > 0:
+            s += ","
+        s += parts[i]
+    return s
+
+
+def transpile_ai(circuit: Circuit, target: Target, level: Int = 2, seed: Int = 7) raises -> CompileResult:
+    """Compile `circuit` for `target` with the hybrid heuristic + AI preset
+    `preset_pipeline_ai(level)` (level 1..3).
+
+    Level 3 is a portfolio with `transpile(circuit, target, 3, seed)` (itself
+    O3 + O2): the better result under `_better` (2q count, then depth, then
+    gate count) is returned, so AI level 3 is never worse than O3. Results are
+    exact (every learned proposal is verified) and deterministic for a seed.
+    """
+    var pm = PassManager(preset_pipeline_ai(level, target), seed)
+    var r = pm.run(circuit, target)
+    if level == 3:
+        var r2 = transpile(circuit, target, 3, seed)
+        if _better(r2, r):
+            r2.total_us += r.total_us
+            return r2^
+        r.total_us += r2.total_us
+    return r^
+
+
+def transpile_ai(circuit: Circuit, level: Int = 2, seed: Int = 7) raises -> CompileResult:
+    """`transpile_ai` for the default, vendor-neutral target: all-to-all, any gate."""
+    return transpile_ai(circuit, Target.all_to_all(circuit.num_qubits), level, seed)

@@ -42,7 +42,7 @@ from qumo.ai.diagnostics import (
 from qumo.ai.describe import (
     QUMO_VERSION, describe_gates_json, describe_gate_json, describe_errors_json,
     describe_errors_markdown, describe_error_json, describe_capabilities_json, write_circuit_json,
-    write_circuit_summary, circuit_from_json,
+    write_circuit_summary, circuit_from_json, describe_passes_json, describe_models_json,
 )
 
 
@@ -473,7 +473,11 @@ def _describe(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
         return tool_ok(describe_error_json(name))
     if topic == "capabilities":
         return tool_ok(describe_capabilities_json(ctx.tool_names))
-    raise Error("QM-E913: unknown topic '" + topic + "'. Hint: topic is one of gates, gate, errors, error, capabilities.")
+    if topic == "passes":
+        return tool_ok(describe_passes_json())
+    if topic == "models":
+        return tool_ok(describe_models_json(name))
+    raise Error("QM-E913: unknown topic '" + topic + "'. Hint: topic is one of gates, gate, errors, error, capabilities, passes, models.")
 
 
 def _circuit_info(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
@@ -559,8 +563,8 @@ def register_core_tools(mut reg: ToolRegistry):
     )
     reg.add(
         "qumo_describe", "Describe QUMO",
-        "Machine-readable self-description: topic 'gates' (every gate: arity, params, Clifford/diagonal flags, QASM syntax, matrix), 'gate' + name, 'errors' (error-code catalog with fix hints; format 'markdown' returns docs/ERRORS.md), 'error' + name (one code), or 'capabilities' (simulators, QASM subset, conventions, tools).",
-        "{\"type\":\"object\",\"properties\":{\"topic\":{\"type\":\"string\",\"enum\":[\"gates\",\"gate\",\"errors\",\"error\",\"capabilities\"],\"default\":\"capabilities\"},\"name\":{\"type\":\"string\",\"description\":\"Gate name/alias or error code for topic gate/error\"},\"format\":{\"type\":\"string\",\"enum\":[\"json\",\"markdown\"],\"default\":\"json\",\"description\":\"'markdown' (topic 'errors' only): the generated docs/ERRORS.md text\"}},\"additionalProperties\":false}",
+        "Machine-readable self-description: topic 'gates' (every gate: arity, params, Clifford/diagonal flags, QASM syntax, matrix), 'gate' + name, 'errors' (error-code catalog with fix hints; format 'markdown' returns docs/ERRORS.md), 'error' + name (one code), 'capabilities' (simulators, QASM subset, conventions, tools), 'passes' (compiler pass catalog incl. the AI synthesis passes, route AI keys and presets) or 'models' (installed AI-transpiler models from the INDEX.json registries; 'name' = optional model directory).",
+        "{\"type\":\"object\",\"properties\":{\"topic\":{\"type\":\"string\",\"enum\":[\"gates\",\"gate\",\"errors\",\"error\",\"capabilities\",\"passes\",\"models\"],\"default\":\"capabilities\"},\"name\":{\"type\":\"string\",\"description\":\"Gate name/alias or error code for topic gate/error; model directory for topic models\"},\"format\":{\"type\":\"string\",\"enum\":[\"json\",\"markdown\"],\"default\":\"json\",\"description\":\"'markdown' (topic 'errors' only): the generated docs/ERRORS.md text\"}},\"additionalProperties\":false}",
         _describe,
     )
     reg.add(

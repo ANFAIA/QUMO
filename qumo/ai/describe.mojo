@@ -23,8 +23,11 @@ from qumo.ir.gates import (
 from qumo.ir.circuit import Circuit, Instruction
 from qumo.ir.param import Param
 from qumo.ir.qasm import builtin_gate_table, format_param
-from qumo.ai.json import JsonWriter, JsonValue, JsonKind
+from qumo.ai.json import JsonWriter, JsonValue, JsonKind, parse_json
 from qumo.ai.diagnostics import error_catalog, error_ranges, range_index_of
+from qumo.compiler.pass_manager import PassId, pass_name, pass_description, is_synth_pass
+from std.os import getenv
+from std.os.path import exists
 
 comptime QUMO_VERSION = "0.1.0"
 
@@ -384,6 +387,150 @@ def describe_capabilities_json(tools: List[String], commands: List[String] = Lis
     if len(commands) > 0:
         w.kv_string_list("cli_commands", commands)
     w.kv_string("mcp_protocol", "2025-06-18 (stdio, newline-delimited JSON-RPC 2.0)")
+    w.end_object()
+    return w.finish()
+
+
+# ---------------------------------------------------------------------------
+# Compiler passes and AI-transpiler models
+# ---------------------------------------------------------------------------
+def describe_passes_json() -> String:
+    """Pass catalog (`qumo.passes.v1`): every pass of the text pipeline
+    language with its description, the AI synthesis passes flagged, the
+    preset families and the AI-transpiler error codes."""
+    var w = JsonWriter()
+    w.begin_object()
+    w.kv_string("schema", "qumo.passes.v1")
+    w.kv_string("grammar", "pipeline := item ((','|';') item)*; item := name [ '(' arg (',' arg)* ')' ]; arg := word | key=value | item")
+    w.key("passes")
+    w.begin_array()
+    for i in range(PassId.NUM):
+        w.begin_object()
+        w.kv_string("name", pass_name(i))
+        w.kv_string("description", pass_description(i))
+        w.kv_bool("ai_synthesis", is_synth_pass(i))
+        w.end_object()
+    w.end_array()
+    w.key("route_ai_keys")
+    w.begin_object()
+    w.kv_string("policy", "off (default) | auto | <model id>: learned-policy layout + routing, kept only when verified and cheaper than SABRE")
+    w.kv_string("ai_level", "1..3 effort (IBM AIRouting table: 8/2/2, 16/16/8, 32/16/8 runs/iterations/repetitions)")
+    w.kv_string("layout_mode", "optimize | improve | keep (a user initial layout turns optimize into improve)")
+    w.kv_string("model_dir", "directory with qumo.rlroute.v0 models (default: $QUMO_MODEL_DIR, then ./models/ai_transpiler)")
+    w.end_object()
+    w.key("presets")
+    w.begin_object()
+    w.kv_string("transpile(level=0..3)", "heuristic presets O0-O3 (O3 is a portfolio with O2)")
+    w.kv_string("transpile_ai(level=1)", "O1 + learned-policy routing")
+    w.kv_string("transpile_ai(level=2)", "O2 + policy routing + post-route linear_synth (forward, backward) + perm_synth")
+    w.kv_string("transpile_ai(level=3)", "O3 + pre-route clifford_synth + policy routing + post-route fixpoint(linear_synth, clifford_synth, perm_synth, pauli_network); portfolio with transpile(level=3)")
+    w.end_object()
+    w.kv_string_list("ai_error_codes", ["QM-E616", "QM-E617", "QM-E618", "QM-E619", "QM-E620"])
+    w.end_object()
+    return w.finish()
+
+
+def ai_model_search_dirs(explicit: String) -> List[String]:
+    """Model directories in lookup order: explicit `model_dir`, then
+    $QUMO_MODEL_DIR, then ./models/ai_transpiler (same order as
+    `qumo.compiler.policy.model_search_dirs`)."""
+    var out = List[String]()
+    if explicit.byte_length() > 0:
+        out.append(explicit)
+    var env = getenv("QUMO_MODEL_DIR")
+    if env.byte_length() > 0:
+        out.append(env)
+    out.append("models/ai_transpiler")
+    return out^
+
+
+def _str_field(v: JsonValue, k1: String, k2: String) -> String:
+    try:
+        var a = v.get(k1)
+        if not a.is_defined():
+            a = v.get(k2)
+        if a.is_string():
+            return a.as_string()
+        if a.is_number():
+            return String(a.as_int())
+    except:
+        pass
+    return String()
+
+
+def _write_model(mut w: JsonWriter, e: JsonValue, fallback_id: String, family: String, index: String):
+    w.begin_object()
+    var id = _str_field(e, "id", "name")
+    w.kv_string("id", id if id.byte_length() > 0 else fallback_id)
+    var kind = _str_field(e, "kind", "env")
+    w.kv_string("kind", kind if kind.byte_length() > 0 else family)
+    var n = _str_field(e, "num_qubits", "n")
+    if n.byte_length() > 0:
+        try:
+            w.kv_int("num_qubits", Int(n))
+        except:
+            w.kv_string("num_qubits", n)
+    var topo = _str_field(e, "topology", "graph")
+    if topo.byte_length() > 0:
+        w.kv_string("topology", topo)
+    var fmt = _str_field(e, "format", "schema")
+    if fmt.byte_length() > 0:
+        w.kv_string("format", fmt)
+    w.kv_string("index", index)
+    w.kv_raw("entry", e.to_json())
+    w.end_object()
+
+
+def describe_models_json(model_dir: String = "") -> String:
+    """Installed AI-transpiler models (`qumo.models.v1`), read from the
+    INDEX.json registries (<dir>/INDEX.json, <dir>/synth/INDEX.json,
+    <dir>/route/INDEX.json) of every search directory. Never raises: an
+    unreadable registry is reported under `errors`."""
+    var w = JsonWriter()
+    w.begin_object()
+    w.kv_string("schema", "qumo.models.v1")
+    var dirs = ai_model_search_dirs(model_dir)
+    w.kv_string_list("search_dirs", dirs)
+    var seen = List[String]()
+    var errors = List[String]()
+    var count = 0
+    w.key("models")
+    w.begin_array()
+    for d in dirs:
+        for sub in ["", "/synth", "/route"]:
+            var path = d + String(sub) + "/INDEX.json"
+            var dup = False
+            for p in seen:
+                if p == path:
+                    dup = True
+            if dup or not exists(path):
+                continue
+            seen.append(path)
+            var family = "synth" if String(sub) == "/synth" else ("route" if String(sub) == "/route" else "")
+            try:
+                var text: String
+                with open(path, "r") as f:
+                    text = f.read()
+                var root = parse_json(text)
+                var lst = root.get("models")
+                if lst.is_array():
+                    for i in range(len(lst)):
+                        _write_model(w, lst.at(i), String(i), family, path)
+                        count += 1
+                elif lst.is_object():
+                    for i in range(len(lst)):
+                        _write_model(w, lst.at(i), lst.key_at(i), family, path)
+                        count += 1
+                elif root.is_array():
+                    for i in range(len(root)):
+                        _write_model(w, root.at(i), String(i), family, path)
+                        count += 1
+            except e:
+                errors.append(path + ": " + String(e))
+    w.end_array()
+    w.kv_int("count", count)
+    w.kv_string_list("errors", errors)
+    w.kv_string("hint", "verify integrity with 'make models-verify'; retrain with 'make train-ai' (docs/AI_TRANSPILER.md)")
     w.end_object()
     return w.finish()
 

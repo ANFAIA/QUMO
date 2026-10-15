@@ -522,7 +522,7 @@ def command_table() -> List[Command]:
     t.append(Command("expect", "Exact Pauli expectation value(s)", "qumo expect <file.qasm|-> \"0.5*Z0 Z1 - X0\" [more observables...] [--params ...] [--json]", cmd_expect))
     t.append(Command("validate", "Parse + lint OpenQASM with structured diagnostics", "qumo validate <file.qasm|-> [--json]", cmd_validate))
     t.append(Command("info", "Circuit summary: depth, gate counts, T-count, flags, lint", "qumo info <file.qasm|-> [--qasm] [--instructions] [--json]", cmd_info))
-    t.append(Command("describe", "Self-description: gates | gate <name> | errors | error <code> | capabilities", "qumo describe [gates|gate <name>|errors|error <code>|capabilities] [--json]", cmd_describe))
+    t.append(Command("describe", "Self-description: gates | gate <name> | errors | error <code> | capabilities | passes | models", "qumo describe [gates|gate <name>|errors|error <code>|capabilities|passes|models [model_dir]] [--json]", cmd_describe))
     t.append(Command("convert", "Re-emit canonical OpenQASM 3 (or circuit JSON)", "qumo convert <file.qasm|-> [--to qasm3|json] [-o out]", cmd_convert))
     t.append(Command("tool", "Call any registered MCP tool with JSON arguments", "qumo tool list | qumo tool <name> '<json-args>'|- [--pretty]", cmd_tool))
     t.append(Command("mcp", "Run the MCP server on stdio (JSON-RPC 2.0, MCP 2025-06-18)", "qumo mcp", cmd_mcp))

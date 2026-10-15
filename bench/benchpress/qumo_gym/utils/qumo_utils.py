@@ -1,9 +1,14 @@
 """IO, target extraction and validation helpers for the QUMO gym."""
+import os
 from time import perf_counter
 
 import qumo_py
 
 from benchpress.config import Configuration, POSSIBLE_2Q_GATES
+
+
+# repository models (the gym's _build symlink points at <repo>/build)
+_MODEL_DIR = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", "_build", "..", "models", "ai_transpiler"))
 
 
 class QumoTarget:
@@ -42,8 +47,28 @@ def flexible_target(num_qubits, topology):
     return QumoTarget.from_qiskit_backend(FlexibleBackend(num_qubits, topology), "flexible-" + topology)
 
 
+def _truthy(v):
+    return str(v).strip().lower() in ("1", "true", "yes", "on")
+
+
+def ai_settings():
+    """`[qumo] ai = true` (or env QUMO_BENCH_AI=1) switches every gym test to
+    the hybrid heuristic + AI preset `transpile_ai`; `[qumo] ai_level` (1..3,
+    default: the optimization level clamped to 1..3) picks its level."""
+    opts = Configuration.options.get("qumo", {})
+    ai = _truthy(os.environ.get("QUMO_BENCH_AI", opts.get("ai", "false")))
+    lvl = opts.get("ai_level", os.environ.get("QUMO_BENCH_AI_LEVEL", ""))
+    return ai, (int(lvl) if str(lvl).strip() else None)
+
+
 def transpile(circuit, target, level, seed=12345):
     edges = [] if target.all_to_all else [list(e) for e in target.edges]
+    ai, ai_level = ai_settings()
+    if ai:
+        os.environ.setdefault("QUMO_MODEL_DIR", _MODEL_DIR)
+        lvl = ai_level if ai_level is not None else min(max(int(level), 1), 3)
+        out, _init, _final = qumo_py.transpile_ai(circuit, target.num_qubits, edges, target.basis, lvl, seed)
+        return out
     out, _init, _final = qumo_py.transpile(circuit, target.num_qubits, edges, target.basis, level, seed)
     return out
 

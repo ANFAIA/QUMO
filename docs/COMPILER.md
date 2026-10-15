@@ -79,11 +79,31 @@ machine-readable summary.
 | `basis(gates)` | exact rule-based translation to any gate family (cx, cz, ecr, iswap, iswapdg, rzz, rxx, ryy, cp entanglers) | Qiskit `BasisTranslator`, TKET `rebase` |
 | `fixpoint(p1,...,max=N)` | repeat until 2q / gates / depth stop improving | TKET `RepeatPass` |
 | `check` | predicate: fail with QM-E615 unless the circuit conforms to the target | TKET predicates |
+| `clifford_synth` | collect Clifford blocks (h, s, sdg, sx, x, y, z, cx, cy, cz, swap; <= 9 qubits, >= 2 gates) and resynthesise them on the block's coupling subgraph (exact search for small blocks, greedy, or a learned policy); replaced only when verified equal by tableau and cheaper | qiskit-ibm-transpiler `CollectCliffords` + `AICliffordSynthesis` |
+| `linear_synth` | the same for CNOT/SWAP linear functions (<= 9 qubits, >= 4 gates), verified by GF(2) matrix | `CollectLinearFunctions` + `AILinearFunctionSynthesis` |
+| `perm_synth` | the same for SWAP networks (<= 12 qubits) by token swapping (exact A* / greedy / policy), verified by permutation | `CollectPermutations` + `AIPermutationSynthesis` |
+| `pauli_network` | the same for Pauli-rotation networks (Clifford + rx / ry / rz / rzz / rxx / ryy; <= 6 qubits), verified by dense unitary | `CollectPauliNetworks` + `AIPauliNetworkSynthesis` |
 
 `route` keys: `layout=auto|sabre|dense|trivial|random|vf2`, `seed`, `trials`,
 `iterations`, `swap_trials`, `lookahead` (extended-set size), `weight`,
 `decay`, `heuristic=auto|extended|layer`, `vf2_steps`, `valve`, `star=on|off`,
 `absorb` / `absorb_alt` (score factor for absorbable swaps; 1.0 / 0.9).
+AI routing keys (docs/AI_TRANSPILER.md): `policy=off|auto|<model id>` (off by
+default; otherwise the learned-policy layout + routing runs after SABRE on the
+same circuit, seeded with SABRE's layout, and replaces it only when its
+verified result is strictly cheaper in 2q cost (target CX units), then 2q
+depth), `ai_level=1..3` (effort), `layout_mode=optimize|improve|keep`,
+`model_dir=<dir>`.
+
+Synthesis pass keys (`clifford_synth`, `linear_synth`, `perm_synth`,
+`pauli_network`): `method=auto|exact|astar|greedy|policy` (a bare word is the
+method), `max_qubits`, `min_block`, `direction=forward|backward|both`,
+`commute=0|1`, `reps`, `model=auto|off|<id>`, `beams`, `searches`,
+`metric=cost_depth|cost`, `strict=0|1` (raise QM-E619 instead of silently
+keeping a block whose proposal fails verification), `budget` (search node
+cap), `model_dir`, `seed`. Before routing (or on all-to-all targets) blocks are
+synthesised all-to-all; after routing on the induced coupling subgraph of the
+block's physical qubits.
 
 Passes that only optimise (cancel, merge, commute, fuse1q, eject_z,
 phase_fold) emit gates of the *working gate set*: any gate before basis
@@ -101,6 +121,24 @@ placed after `basis` never leave the basis.
 * **O3** adds phase folding and pre-routing KAK, 40 trials / 3 iterations, a
   post-basis fixpoint with eject_z; `transpile(..., 3)` also runs O2 and returns
   the better of the two (so O3 is never worse than O2).
+
+### AI presets (`preset_pipeline_ai(level, target)`, `transpile_ai`)
+
+The hybrid heuristic + AI presets mirror qiskit-ibm-transpiler's
+`generate_ai_pass_manager` while staying vendor neutral (docs/AI_TRANSPILER.md):
+
+* **ai1** O1 with `route(..., policy=auto, ai_level=1)`.
+* **ai2** O2 with policy routing (`ai_level=2`), then after `route`:
+  `linear_synth(direction=forward,commute=0)`, `linear_synth(direction=backward,commute=0)`,
+  `perm_synth`, then kak, basis, cancel, commute, fuse1q, check.
+* **ai3** O3 with `clifford_synth` before routing (all-to-all), policy routing
+  (`ai_level=3, layout_mode=optimize`), `kak`, then
+  `fixpoint(linear_synth(direction=both,commute=1), clifford_synth, perm_synth, pauli_network, max=2)`,
+  basis, the O3 cleanup fixpoint and check; `transpile_ai(..., 3)` runs it as a
+  portfolio with `transpile(..., 3)`, so it is never worse than O3 in 2q count.
+
+`transpile` / `preset_pipeline` / `compile_spec` and the O0-O3 outputs are
+unchanged (a snapshot test in tests/test_ai_transpiler.mojo pins them).
 
 ## Correctness model
 
@@ -133,6 +171,11 @@ placed after `basis` never leave the basis.
 | QM-E611 | malformed target spec |
 | QM-E612 | invalid target construction (bad edge, even heavy-hex distance, ...) |
 | QM-E615 | `check` predicate failed (gate outside basis or off the coupling map) |
+| QM-E616 | unknown synthesis method or model name (`method=auto|exact|astar|greedy|policy`) |
+| QM-E617 | AI model file missing, corrupt, or failed its checksum / format check |
+| QM-E618 | block too wide for the requested synthesis method |
+| QM-E619 | synthesized block not equivalent to the original (`strict=1` only; otherwise the original is kept) |
+| QM-E620 | AI model incompatible with the request (kind, size, topology or gate set) |
 
 ## Benchmarks
 

@@ -1,0 +1,97 @@
+[
+ {
+  "id": "fx_cliff_line2",
+  "kind": "clifford",
+  "num_qubits": 2,
+  "edges": [
+   [
+    0,
+    1
+   ]
+  ],
+  "wl_hash": "ac1fed6a7c868776",
+  "dir": "fx_cliff_line2",
+  "sha256": "c2d1df34c7f4fd98a314f8c05261f5c71dceeb091b564445d194cba509c6ce13",
+  "bytes": 4654
+ },
+ {
+  "id": "fx_lf_line3",
+  "kind": "linear_function",
+  "num_qubits": 3,
+  "edges": [
+   [
+    0,
+    1
+   ],
+   [
+    1,
+    2
+   ]
+  ],
+  "wl_hash": "30f7d5bfb0487582",
+  "dir": "fx_lf_line3",
+  "sha256": "4c4d68f8c299eed3969a545ad3199fb69ff3d9489d9ed4451bccb6ed23cf3d91",
+  "bytes": 3981
+ },
+ {
+  "id": "fx_pauli_line3",
+  "kind": "pauli_network",
+  "num_qubits": 3,
+  "edges": [
+   [
+    0,
+    1
+   ],
+   [
+    1,
+    2
+   ]
+  ],
+  "wl_hash": "30f7d5bfb0487582",
+  "dir": "fx_pauli_line3",
+  "sha256": "087ca5c3a806a502aa863e1fc87573cbcff8027cfd2c829d4e0c5b94102382be",
+  "bytes": 6844
+ },
+ {
+  "id": "fx_perm_line3",
+  "kind": "permutation",
+  "num_qubits": 3,
+  "edges": [
+   [
+    0,
+    1
+   ],
+   [
+    1,
+    2
+   ]
+  ],
+  "wl_hash": "30f7d5bfb0487582",
+  "dir": "fx_perm_line3",
+  "sha256": "aeb5f1d846dfc27958977a07caffd6ab9e2ee553f7399f49fa6241236fd72568",
+  "bytes": 4247
+ },
+ {
+  "id": "fx_perm_star4",
+  "kind": "permutation",
+  "num_qubits": 4,
+  "edges": [
+   [
+    0,
+    1
+   ],
+   [
+    0,
+    2
+   ],
+   [
+    0,
+    3
+   ]
+  ],
+  "wl_hash": "022d975486ad494d",
+  "dir": "fx_perm_star4",
+  "sha256": "26589d428310765b77525bd5ad9571a2cf52d072a16b14647eefb7b37832dc93",
+  "bytes": 4123
+ }
+]

@@ -54,6 +54,7 @@ Conventions an agent must know:
 - [Mojo 1.1 contributor guide](docs/MOJO_GUIDE.md): the exact Mojo dialect QUMO uses
 - [GPU acceleration](docs/GPU.md): vendor-neutral MAX kernels, precision policy, dispatch rules, error codes QM-E470..QM-E475
 - [QEC](docs/QEC.md): codes, detector error models, decoders, benchmarks against Stim and PyMatching
+- [Fault-tolerant programming](docs/FT.md): `qumo.ft` (Guppy FT ideas in Mojo): `StabilizerCode`, `SteaneBuilder().build(n_blocks)` / `IcebergBuilder(k)`, `compile` / `implement_ops` / `encode`, tableau gadget verification, magic-state T, comparator Rz, `run_encoded`; MCP tools `qumo_ft_codes`, `qumo_ft_encode`, `qumo_ft_verify`; errors QM-E720..QM-E730
 - [Benchmarking on cloud GPUs](docs/BENCHMARKING_ON_CLOUD_GPUS.md): `bench/run_benchmarks.py` and the Google Colab notebooks in `examples/colab/`
 - [Algorithms](docs/ALGORITHMS.md): the `qumo.algorithms` reference
 - [Framework analysis](docs/ANALYSIS.md): the design synthesis of Qiskit, TKET, CUDA-Q, PennyLane, Cirq, Q#, Braket and Qibo

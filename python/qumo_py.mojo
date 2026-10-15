@@ -23,7 +23,7 @@ from qumo.ir.qasm2 import to_qasm2
 from qumo.compiler.target import Target
 from qumo.exec.dispatch import sample_on
 from qumo.gpu.device import query_gpu
-from qumo.compiler.pass_manager import transpile, compile_spec
+from qumo.compiler.pass_manager import transpile, compile_spec, transpile_ai, CompileResult
 from qumo.bench.circuits import (
     quantum_volume, efficient_su2, dtc_unitary, random_clifford_circuit,
     bv_all_ones, trivial_bvlike_circuit, multi_control_circuit, pauli_twirl_2q,
@@ -268,6 +268,52 @@ def py_compile_spec(circ: PythonObject, num_qubits: PythonObject, edges: PythonO
     return Python.tuple(_wrap(r.circuit.copy()), r.to_json())
 
 
+def _layouts(r: CompileResult) raises -> Tuple[PythonObject, PythonObject]:
+    var init = Python.list()
+    for v in r.initial_layout:
+        init.append(v)
+    var fin = Python.list()
+    for v in r.final_layout:
+        fin.append(v)
+    return (init, fin)
+
+
+def py_transpile_ai(circ: PythonObject, num_qubits: PythonObject, edges: PythonObject,
+                    basis: PythonObject, level: PythonObject, seed: PythonObject) raises -> PythonObject:
+    """Hybrid heuristic + AI compile (`transpile_ai`, AI level 1..3):
+    (circuit, num_qubits, edges, basis, level, seed) -> (circuit, initial, final).
+
+    Same conventions as `transpile`. Models are looked up in $QUMO_MODEL_DIR,
+    then ./models/ai_transpiler; without models exact / greedy synthesis and
+    SABRE routing still run. Every learned proposal is verified exactly.
+    """
+    var t = _target(num_qubits, edges, basis)
+    var r = transpile_ai(PyCircuit._get(circ)[].c, t, Int(py=level), Int(py=seed))
+    var lay = _layouts(r)
+    return Python.tuple(_wrap(r.circuit.copy()), lay[0], lay[1])
+
+
+def py_transpile_ai_report(circ: PythonObject, num_qubits: PythonObject, edges: PythonObject,
+                           basis: PythonObject, level: PythonObject, seed: PythonObject) raises -> PythonObject:
+    """`transpile_ai` with the per-pass report:
+    -> (circuit, initial, final, report_json). At AI level 3 the report is the
+    portfolio winner's (its pipeline names the preset that won)."""
+    var t = _target(num_qubits, edges, basis)
+    var r = transpile_ai(PyCircuit._get(circ)[].c, t, Int(py=level), Int(py=seed))
+    var lay = _layouts(r)
+    return Python.tuple(_wrap(r.circuit.copy()), lay[0], lay[1], r.to_json())
+
+
+def py_compile_spec_full(circ: PythonObject, num_qubits: PythonObject, edges: PythonObject,
+                         basis: PythonObject, spec: PythonObject, seed: PythonObject) raises -> PythonObject:
+    """Explicit text pipeline with a seed and layouts:
+    -> (circuit, initial, final, report_json)."""
+    var t = _target(num_qubits, edges, basis)
+    var r = compile_spec(PyCircuit._get(circ)[].c, t, String(py=spec), Int(py=seed))
+    var lay = _layouts(r)
+    return Python.tuple(_wrap(r.circuit.copy()), lay[0], lay[1], r.to_json())
+
+
 def py_sample(circ: PythonObject, shots: PythonObject, seed: PythonObject) raises -> PythonObject:
     var r = sample(PyCircuit._get(circ)[].c, Int(py=shots), UInt64(Int(py=seed)))
     var d = Python.dict()
@@ -373,6 +419,9 @@ def PyInit_qumo_py() abi("C") -> PythonObject:
         m.def_function[py_transpile]("transpile")
         m.def_function[py_translate]("translate")
         m.def_function[py_compile_spec]("compile_spec")
+        m.def_function[py_transpile_ai]("transpile_ai")
+        m.def_function[py_compile_spec_full]("compile_spec_full")
+        m.def_function[py_transpile_ai_report]("transpile_ai_report")
         m.def_function[py_sample]("sample")
         m.def_function[py_expectation]("expectation")
         m.def_function[py_sample_device]("sample_device")

@@ -261,6 +261,9 @@ Module tools (`qumo/exec/tools.mojo`, registered by `full_registry()`):
 | `qumo_vqe`, `qumo_qaoa_maxcut` | Pauli-sum `hamiltonian` / edge-list `graph`, optimizer options, `seed` | energy or cut, parameters, convergence |
 | `qumo_qec_memory` | `code`: surface_z \| surface_x \| repetition, `distance`, `rounds`, `p`, `shots`, `decoder`, `seed`, `max_errors` | logical error rate, std error, Wilson interval, per-round rate, timing |
 | `qumo_qec_dem` | `code`, `distance`, `rounds`, `p`, `include_stim` | detector error model in Stim DEM text |
+| `qumo_ft_codes` (`qumo/ft/tools.mojo`) | `code` (optional), `check_distance`, `architecture`: steane \| iceberg_<k>, `verify_gadgets` | code definitions, verified distance, architecture description, verification status of every gadget ([FT.md](FT.md)) |
+| `qumo_ft_encode` | `qasm` \| `circuit`, `architecture`, `n_blocks`, QEC policy (`qec_style`, `qec_threshold`, `qec_costs`), factories, `feed_forward`, `magic_prep`, `rz_mode`, `shots`, `noise_p`, `include_logical`, `include_qasm` | logical program summary, resource report, outputs / post-selection bits, optional emulation next to the unencoded reference |
+| `qumo_ft_verify` | `code`, `kind`: clifford \| state, `semantic_qasm`, `impl_qasm`, `num_blocks`, `num_ancillas` | valid + the first failing operator |
 | `qumo_gpu_info` | none | whether the build has GPU support (`-D QUMO_GPU`), device name, API (CUDA, ROCm/HIP, Metal), `precision` (what `auto` runs: fp32 by default on every GPU), `precision_build_default`, `precision_env` (`QUMO_GPU_PRECISION`), `precisions` (selectable), `precision_note`, `fp64_supported`, auto-dispatch threshold, device profile |
 | `qumo_run_device` | as `qumo_run_qasm`, plus `device`: auto \| cpu \| gpu and `precision`: auto \| fp32 \| fp64 | `counts`, `method`, `device_used`, `precision`, `precision_used`, `warnings` |
 

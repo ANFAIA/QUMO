@@ -22,3 +22,28 @@ Third-party material redistributed in this repository keeps its own license:
   file layout of PennyLane's tutorial_variational_classifier data
   (PennyLaneAI/qml, Apache-2.0). The examples in examples/qml re-implement
   PennyLane demos (Apache-2.0) and cite each one in their headers.
+
+AI transpiler (qumo/compiler/{blockalg,block_synth,collect,resynth,policy,
+policy_synth,ai_route}.mojo, training/ai_transpiler, models/ai_transpiler;
+docs/AI_TRANSPILER.md):
+
+- The block collectors, smart replacement, synthesis-model lookup, learned
+  routing and hybrid pass manager are native, hardware-neutral
+  re-implementations whose algorithms follow qiskit-ibm-transpiler 0.18.0
+  (Copyright IBM, Apache-2.0, https://github.com/Qiskit/qiskit-ibm-transpiler),
+  used as an algorithmic reference only. No source file of that project is
+  copied, and no IBM-trained model weights (Hugging Face
+  qiskit/ai-transpiler_*) or code from qiskit-ibm-ai-local-transpiler are
+  used, redistributed or required at runtime.
+- The synthesis models in models/ai_transpiler were trained locally by QUMO on
+  QUMO's own coupling graphs with qiskit-gym 0.4.1 (AI4quantum, Apache-2.0,
+  https://github.com/AI4quantum/qiskit-gym) and its RL engine twisterl 0.5.1
+  (Apache-2.0); the routing model was trained locally by QUMO. The model
+  weights are QUMO's and are licensed under Apache-2.0 with the rest of this
+  repository. qiskit-gym and twisterl are needed only at training time.
+- Method references: D. Kremer et al., "Practical and efficient quantum
+  circuit synthesis and transpiling with Reinforcement Learning",
+  arXiv:2405.13196; A. Dubal et al., "Pauli Network Circuit Synthesis with
+  Reinforcement Learning", arXiv:2503.14448; P. D. Nation et al.,
+  "Benchmarking the performance of quantum computing software"
+  (Benchpress), arXiv:2409.08844.

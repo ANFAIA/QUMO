@@ -57,11 +57,17 @@ Every example below is run and verified by `bench/.venv/bin/python examples/run_
 |---|---|---|---|
 | [`examples/`](.) | 15 | qumo (legacy smoke tests) | 15 / 0 |
 | [`frameworks/`](frameworks/) | 27 | braket, cirq, cudaq, qibo, qiskit, qsharp, tket | 24 / 3 |
+| [`ft/`](ft/) | 5 | guppyft | 4 / 1 |
 | [`heterogeneous/`](heterogeneous/) | 2 | qumo | 2 / 0 |
 | [`qml/`](qml/) | 11 | pennylane | 11 / 0 |
 
 | Example | Framework | Tier | Reproduces |
 |---|---|---|---|
+| [`ft/clifford_verification.mojo`](ft/clifford_verification.mojo) — Verifying logical Clifford gadgets and state preparations with the stabilizer tableau | guppyft | fast | Guppy FT - Clifford verification |
+| [`ft/iceberg_program.mojo`](ft/iceberg_program.mojo) — Multi-logical-qubit Iceberg program: native rotations, block allocation and error detection | guppyft | fast | Guppy FT - Iceberg logical API (Block[N], rotations, measure_all, measure_syndrome) |
+| [`ft/logical_error_sweep.mojo`](ft/logical_error_sweep.mojo) — Logical versus physical error rate of an encoded Steane program under circuit-level noise | guppyft | fast | Guppy FT - Steane encoding emulated with Stim (logical vs unencoded behaviour) |
+| [`ft/magic_t_and_comparator_rz.mojo`](ft/magic_t_and_comparator_rz.mojo) — Magic-state T gates on Steane, and Rz synthesis for known and run-time angles | guppyft | slow | Guppy FT - Custom T injection (logical program) and Comparator-based Rz synthesis with the Steane architecture |
+| [`ft/steane_teleportation.mojo`](ft/steane_teleportation.mojo) — Encoded teleportation with feed-forward on the Steane code, three QEC architectures | guppyft | fast | Guppy FT - Getting started (encoding with Steane) and Writing logical programs directly |
 | [`heterogeneous/ai_gpu_qpu.py`](heterogeneous/ai_gpu_qpu.py) — AI-selected algorithm, run partly on a GPU and partly on a QPU (with an offline selector) | qumo | fast | heterogeneous CPU+GPU+QPU workflow pattern - CUDA-Q multi-QPU, Qiskit execution modes, Braket Hybrid Jobs, PennyLane device swaps |
 | [`heterogeneous/orchestrate_cpu_gpu_qpu.mojo`](heterogeneous/orchestrate_cpu_gpu_qpu.mojo) — Mojo twin of ai_gpu_qpu.py: rule-based selection, HEFT over CPU + GPU, final job on a QPU pool | qumo | fast | heterogeneous CPU+GPU+QPU workflow pattern - CUDA-Q multi-QPU (mqpu) asynchronous execution |
 | [`qml/barren_plateaus.mojo`](qml/barren_plateaus.mojo) — Barren plateaus: gradient variance of random circuits, global versus local cost | pennylane | fast | PennyLane - Barren plateaus in quantum neural networks |

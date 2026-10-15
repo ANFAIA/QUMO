@@ -520,6 +520,36 @@ def test_every_raised_code_is_catalogued() raises:
     assert_true(missing.byte_length() == 0, "codes used but missing from error_catalog() in qumo/ai/diagnostics.mojo: " + missing)
 
 
+def test_ai_transpiler_tools() raises:
+    """AI transpiler surface: qumo_transpile ai / ai_level, describe passes / models."""
+    var s = McpServer()
+    var dp = tool(s, 90, "qumo_describe", "{\"topic\":\"passes\"}")
+    assert_false(dp.get("isError").as_bool(), dp.to_json())
+    var pv = dp.get("structuredContent")
+    var ai = 0
+    for i in range(len(pv.get("passes"))):
+        if pv.get("passes").at(i).get_bool("ai_synthesis", False):
+            ai += 1
+    assert_equal(ai, 4)
+    assert_true(pv.to_json().find("pauli_network") >= 0 and pv.to_json().find("QM-E619") >= 0)
+    var dm = tool(s, 91, "qumo_describe", "{\"topic\":\"models\"}")
+    assert_false(dm.get("isError").as_bool(), dm.to_json())
+    var mv = dm.get("structuredContent")
+    assert_equal(mv.get("count").as_int(), len(mv.get("models")))
+    var dmf = tool(s, 92, "qumo_describe", "{\"topic\":\"models\",\"name\":\"tests/fixtures/ai/policy\"}")
+    assert_true(dmf.get("structuredContent").get("count").as_int() >= 1, dmf.to_json())
+    var qasm = "OPENQASM 3.0; include \"stdgates.inc\"; qubit[4] q; h q[0]; cx q[0], q[3]; cx q[1], q[2]; swap q[0], q[2]; cx q[3], q[1];"
+    for lvl in [1, 2, 3]:
+        var r = tool(s, 93, "qumo_transpile", "{\"qasm\":" + json_quote(qasm) + ",\"target\":\"line:4/sc_cz\",\"ai\":true,\"ai_level\":" + String(lvl) + ",\"include_qasm\":false}")
+        assert_false(r.get("isError").as_bool(), r.to_json())
+        assert_true(r.get("structuredContent").get("pipeline").as_string().find("policy=auto") >= 0, r.to_json())
+    var bad = tool(s, 94, "qumo_transpile", "{\"qasm\":" + json_quote(qasm) + ",\"target\":\"line:4\",\"ai\":true,\"pipeline\":\"cancel\"}")
+    assert_equal(bad.get("structuredContent").get("error").get("code").as_string(), "QM-E913")
+    var bad2 = tool(s, 95, "qumo_transpile", "{\"qasm\":" + json_quote(qasm) + ",\"target\":\"line:4\",\"ai\":true,\"ai_level\":4}")
+    assert_equal(bad2.get("structuredContent").get("error").get("code").as_string(), "QM-E913")
+    print("  AI transpiler tools (qumo_transpile ai, describe passes/models) ok")
+
+
 def main() raises:
     test_protocol()
     test_run_tool()
@@ -530,4 +560,5 @@ def main() raises:
     test_exec_tools()
     test_errors_doc_in_sync()
     test_every_raised_code_is_catalogued()
+    test_ai_transpiler_tools()
     print("test_mcp OK")

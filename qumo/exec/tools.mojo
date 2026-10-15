@@ -20,7 +20,7 @@ from qumo.ai.tools import (
 from qumo.exec.dispatch import sample_on
 from qumo.gpu.device import query_gpu, GPU_MIN_QUBITS, parse_gpu_precision
 from qumo.compiler.target import Target, parse_target
-from qumo.compiler.pass_manager import transpile, compile_spec
+from qumo.compiler.pass_manager import transpile, compile_spec, transpile_ai, CompileResult
 from qumo.exec.resources import (
     estimate_resources, estimate_hardware, estimate_fault_tolerant, HardwareProfile,
 )
@@ -62,7 +62,17 @@ def _transpile_tool(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
     var seed = arg_int(args, "seed", 7, 0, 1 << 62)
     var t0 = perf_counter_ns()
     var spec = args.get_string("pipeline", "")
-    var r = compile_spec(c, t, spec, seed) if spec.byte_length() > 0 else transpile(c, t, level, seed)
+    var ai = args.get_bool("ai", False)
+    var ai_level = arg_int(args, "ai_level", 2, 1, 3)
+    if ai and spec.byte_length() > 0:
+        raise Error("QM-E913: 'ai' and 'pipeline' are mutually exclusive. Hint: drop 'ai' and add AI passes (linear_synth, perm_synth, clifford_synth, pauli_network, route(sabre,policy=auto)) to the pipeline, or drop 'pipeline'.")
+    var r: CompileResult
+    if spec.byte_length() > 0:
+        r = compile_spec(c, t, spec, seed)
+    elif ai:
+        r = transpile_ai(c, t, ai_level, seed)
+    else:
+        r = transpile(c, t, level, seed)
     var t1 = perf_counter_ns()
     var w = JsonWriter()
     w.begin_object()
@@ -268,8 +278,8 @@ comptime _CIRC = "\"qasm\":{\"type\":\"string\",\"description\":\"OpenQASM 2 or 
 def register_exec_tools(mut reg: ToolRegistry):
     reg.add(
         "qumo_transpile", "Compile for a target",
-        "Optimize, map and route a circuit for ANY target (vendor-neutral): either a one-line spec 'target' like 'grid:4x4/sc_cz', 'heavy_hex:5/rz,sx,x,ecr', 'trapped_ion:11', 'neutral_atom:4x4', 'line:20/u,cx', or explicit 'edges' [[a,b],...] + 'basis' 'rz,sx,x,cz'. 'level' 0-3 picks a preset; 'pipeline' runs a text pass spec, e.g. 'cancel,merge,fuse1q,route(sabre),basis,cancel'. Returns compiled OpenQASM 3, per-pass report, layouts, swap count and estimated fidelity.",
-        "{\"type\":\"object\",\"properties\":{" + _CIRC + ",\"target\":{\"type\":\"string\"},\"edges\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"integer\"}}},\"num_qubits\":{\"type\":\"integer\"},\"basis\":{\"type\":\"string\",\"default\":\"any\"},\"level\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":3,\"default\":2},\"pipeline\":{\"type\":\"string\"},\"seed\":{\"type\":\"integer\",\"default\":7},\"include_qasm\":{\"type\":\"boolean\",\"default\":true}},\"additionalProperties\":false}",
+        "Optimize, map and route a circuit for ANY target (vendor-neutral): either a one-line spec 'target' like 'grid:4x4/sc_cz', 'heavy_hex:5/rz,sx,x,ecr', 'trapped_ion:11', 'neutral_atom:4x4', 'line:20/u,cx', or explicit 'edges' [[a,b],...] + 'basis' 'rz,sx,x,cz'. 'level' 0-3 picks a preset; 'ai': true runs the hybrid heuristic + AI preset 'ai_level' 1-3 (learned-policy routing, verified Clifford / linear / permutation / Pauli-network block resynthesis, kept only when cheaper; level 3 is a portfolio with O3); 'pipeline' runs a text pass spec, e.g. 'cancel,merge,fuse1q,route(sabre),basis,cancel'. Returns compiled OpenQASM 3, per-pass report, layouts, swap count and estimated fidelity.",
+        "{\"type\":\"object\",\"properties\":{" + _CIRC + ",\"target\":{\"type\":\"string\"},\"edges\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"integer\"}}},\"num_qubits\":{\"type\":\"integer\"},\"basis\":{\"type\":\"string\",\"default\":\"any\"},\"level\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":3,\"default\":2},\"pipeline\":{\"type\":\"string\"},\"ai\":{\"type\":\"boolean\",\"default\":false},\"ai_level\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":3,\"default\":2},\"seed\":{\"type\":\"integer\",\"default\":7},\"include_qasm\":{\"type\":\"boolean\",\"default\":true}},\"additionalProperties\":false}",
         _transpile_tool,
     )
     reg.add(

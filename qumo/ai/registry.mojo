@@ -9,10 +9,12 @@ registry types without import cycles. Front ends (MCP server, CLI) use
 from qumo.ai.tools import ToolRegistry, default_registry
 from qumo.exec.tools import register_exec_tools
 from qumo.ai.algorithm_tools import register_algorithm_tools
+from qumo.ft.tools import register_ft_tools
 
 
 def full_registry() -> ToolRegistry:
     var reg = default_registry()
     register_exec_tools(reg)  # compile, resources, VQE, QAOA
     register_algorithm_tools(reg)  # qumo_build_circuit (algorithm library by name)
+    register_ft_tools(reg)  # qumo_ft_codes, qumo_ft_encode, qumo_ft_verify (qumo.ft)
     return reg^

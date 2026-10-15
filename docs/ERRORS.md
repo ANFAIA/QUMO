@@ -421,6 +421,31 @@ Fix: Edges are pairs of distinct qubits; heavy_hex distance is odd.
 **Compiled circuit does not conform to the target (basis or connectivity).**  
 Fix: Add 'route' and 'basis' passes before 'check', or use a preset level.
 
+### QM-E616
+
+**Unknown synthesis method or model name.**  
+Fix: method=auto|exact|astar|greedy|policy; list models with describe.
+
+### QM-E617
+
+**AI model file missing, corrupt, or failed checksum/format check.**  
+Fix: Set QUMO_MODEL_DIR or model_dir=, run make models-verify.
+
+### QM-E618
+
+**Block too wide for the requested synthesis method.**  
+Fix: Lower max_qubits or use method=greedy.
+
+### QM-E619
+
+**Synthesized block not equivalent to the original (strict mode).**  
+Fix: Report a bug; non-strict mode silently keeps the original.
+
+### QM-E620
+
+**AI model incompatible with the request (kind, size, topology or gate set).**  
+Fix: Use model=auto.
+
 ## QM-E7xx — Stabilizer simulation and QEC
 
 See [QEC.md](QEC.md).
@@ -484,6 +509,61 @@ Fix: Probabilities must lie in [0, 1].
 
 **Internal invariant violation in the sparse-blossom decoder (never raised per shot; counted in SparseBlossomDecoder.anomalies, which must stay 0).**  
 Fix: Report the syndrome; decode it with 'mwpm_dense' meanwhile.
+
+### QM-E720
+
+**Invalid Pauli label or Pauli size mismatch in a code definition (qumo.ft.pauli).**  
+Fix: One character I/X/Y/Z per physical qubit (character i = qubit i), optionally prefixed by + or -.
+
+### QM-E721
+
+**Invalid stabilizer-code definition: wrong number of generators or logicals, anticommuting or dependent generators, logicals not commuting with the stabilizers or violating X_i Z_j relations.**  
+Fix: List n-k independent commuting generators and k X/Z logicals with canonical commutation; the message names the offending operators.
+
+### QM-E722
+
+**Unknown code name or invalid code parameter (e.g. odd k for an Iceberg code).**  
+Fix: Use steane, five_qubit, css_422, noncss_422, iceberg_<even k>, surface_<d>, repetition_<d> (qumo_ft_codes lists them).
+
+### QM-E723
+
+**Circuit not suitable for gadget verification (sizes do not match num_blocks*k / num_blocks*n, non-unitary or non-Clifford ops, conditioned ops, flag that never accepts).**  
+Fix: Clifford gadgets: unitary Clifford circuits; state preparations: valid_stabilizer_state_preparation; magic states: valid_magic_state_preparation.
+
+### QM-E724
+
+**Gate or logical op not supported by the chosen QEC architecture (no decomposition into its logical gate set).**  
+Fix: Translate to {h, s, t, cx, rz} first, or pick the architecture that implements it (Iceberg: native rotations; Steane: Clifford+T).
+
+### QM-E725
+
+**The architecture ran out of logical blocks (more simultaneously live logical qubits than n_blocks * k).**  
+Fix: Build the architecture with a larger n_blocks (SteaneBuilder().build(n_blocks)); magic states also occupy a block while live.
+
+### QM-E726
+
+**Unsupported classically-conditioned logical operation (conditioned T / magic-state injection, measurement, reset, or cross-block conditioned SWAP on Iceberg).**  
+Fix: Condition Clifford gates only; make non-Clifford gates unconditional (e.g. conditioned SWAP into a scratch qubit, as the comparator Rz does).
+
+### QM-E727
+
+**Invalid architecture option, QEC policy or malformed logical program (unknown style/cost key, bad factory sizes, use of a consumed logical handle).**  
+Fix: Check qumo.ft.arch option names; logical handles come from alloc()/prep_t() and are consumed by measure/free/inject.
+
+### QM-E728
+
+**Invalid Rz-synthesis option (epsilon outside (0, 1), T budget outside [0, 24], bad comparator attempts or angle register).**  
+Fix: epsilon 1e-2 with max_t 16 is the default; comparator angle registers hold n + 2 clbits (comparator_register_size).
+
+### QM-E729
+
+**Emulation request not supported (state vector wider than its limit, non-Clifford circuit on the tableau method, non-deterministic program in an error-rate sweep, shots < 1).**  
+Fix: Use method 'auto', fewer logical qubits / magic_prep 'nonft' for state-vector runs, or a deterministic program for error-rate sweeps.
+
+### QM-E730
+
+**A computational circuit given to encode() contains noise channels, QEC annotations or unbound symbolic parameters.**  
+Fix: Encode noiseless, QEC-agnostic, bound circuits; add noise with qumo.ft.emulate.add_noise; use the comparator circuit for run-time angles.
 
 ## QM-E8xx — Algorithms
 
