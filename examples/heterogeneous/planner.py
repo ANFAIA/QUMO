@@ -83,16 +83,60 @@ ALGORITHMS: dict[str, dict] = {
         "qpu": ["inference"],
         "metric": ["test_accuracy"],
     },
+    # multi-device pipelines (pipelines.py): each stage on the device that can do it
+    "sqd_krylov": {
+        "kinds": ["lattice_fermions"],
+        "summary": "Sample-based Krylov quantum diagonalisation (SQD/SKQD): QPU samples Krylov states, CPU configuration "
+                   "recovery restores particle number and spin, HPC (multi-core) diagonalises the projected Hamiltonian; "
+                   "depth = Krylov dimension (2-6).",
+        "gpu": ["ideal_twin", "none"],
+        "cpu": ["configuration_recovery"],
+        "qpu": ["krylov_sampling"],
+        "metric": ["energy_error"],
+    },
+    "cut_two_modalities": {
+        "kinds": ["wide_circuit"],
+        "summary": "Circuit cutting: a CPU cut finder splits a circuit no single QPU holds; the dense fragment runs on an "
+                   "all-to-all ion QPU, the wide one on a superconducting grid; quasi-probability reconstruction; "
+                   "depth = wire-cut budget (1-2).",
+        "gpu": ["fragment_exact", "none"],
+        "cpu": ["cut_finding"],
+        "qpu": ["fragment_sampling"],
+        "metric": ["expectation_error"],
+    },
+    "stream_decode_qec": {
+        "kinds": ["qec_memory"],
+        "summary": "Surface-code memory streamed from a QPU stand-in (Pauli frames) to a CPU decoder pool (sparse-blossom "
+                   "MWPM) under an emulated real-time budget; depth = code distance (3 or 5); shots = shots per batch.",
+        "gpu": ["syndrome_frames", "none"],
+        "cpu": ["streaming_decode"],
+        "qpu": ["syndrome_rounds"],
+        "metric": ["logical_error_rate"],
+    },
+    "ws_qaoa_escalation": {
+        "kinds": ["maxcut"],
+        "summary": "Warm-started QAOA (Egger et al. 2021): CPU Goemans-Williamson warm start, GPU adjoint training, many "
+                   "superconducting shots, few high-fidelity ion shots to verify candidates, CPU local search; depth = p (1-3).",
+        "gpu": ["train_exact"],
+        "cpu": ["warm_start_local_search"],
+        "qpu": ["escalated_sampling"],
+        "metric": ["approximation_ratio"],
+    },
 }
+PIPELINE_ALGORITHMS = ("sqd_krylov", "cut_two_modalities", "stream_decode_qec", "ws_qaoa_escalation")
 OPTIMIZERS = ["cobyla", "nelder-mead", "bfgs", "adam", "spsa"]
 GRADIENTS = ["adjoint", "parameter-shift", "none"]
 MAXITER = [50, 100, 200, 400]
-GPU_TASKS = ["landscape_scan", "train_exact", "kernel_gram", "verify_exact", "none"]
-CPU_TASKS = ["refine_adjoint", "refine_gradient_free", "svm_solve", "postprocess"]
-QPU_TASKS = ["final_sampling", "final_estimation", "inference", "kernel_test_entries"]
+GPU_TASKS = ["landscape_scan", "train_exact", "kernel_gram", "verify_exact", "ideal_twin", "fragment_exact",
+             "syndrome_frames", "none"]
+CPU_TASKS = ["refine_adjoint", "refine_gradient_free", "svm_solve", "postprocess", "configuration_recovery",
+             "cut_finding", "streaming_decode", "warm_start_local_search"]
+QPU_TASKS = ["final_sampling", "final_estimation", "inference", "kernel_test_entries", "krylov_sampling",
+             "fragment_sampling", "syndrome_rounds", "escalated_sampling"]
 PRECISIONS = ["auto", "fp32", "fp64"]
 SHOTS = [500, 1000, 2000, 4000, 8000]
-METRICS = ["approximation_ratio", "energy_error", "success_probability", "test_accuracy"]
+METRICS = ["approximation_ratio", "energy_error", "success_probability", "test_accuracy", "expectation_error",
+           "logical_error_rate"]
 CONFIDENCE = ["low", "medium", "high"]
 DEPTHS = [1, 2, 3, 4, 5, 6]
 RATIONALE_MAX = 3000
@@ -147,7 +191,10 @@ def backend_capacity(qpu: str) -> int | None:
 
 
 def required_qubits(problem: dict) -> int:
-    """Physical qubits the QPU stage needs (Grover adds clean ancillas)."""
+    """Physical qubits the QPU stage needs (Grover adds clean ancillas). The multi-device pipelines
+    (lattice_fermions, wide_circuit, qec_memory) choose their QPU targets per stage: 0 here."""
+    if problem["kind"] in ("lattice_fermions", "wide_circuit", "qec_memory"):
+        return 0
     n = problem_qubits(problem)
     if problem["kind"] == "search":
         return n + max(0, n - 3)
@@ -237,7 +284,29 @@ def offline_plan(problem: dict, qpu: str = DEFAULT_QPU, goal: str = "") -> tuple
     n = problem_qubits(problem)
     notes: list[str] = []
     goal_l = (goal or problem.get("goal") or "").lower()
-    if kind == "maxcut":
+    if kind == "maxcut" and any(w in goal_l for w in ("warm start", "warm-start", "warm-started", "escalat")):
+        plan = _plan("ws_qaoa_escalation", 1, "bfgs", "adjoint", 100,
+                     ("train_exact", "warm_start_local_search", "escalated_sampling"), 4000, "approximation_ratio",
+                     f"MaxCut on {n} nodes with a warm-start / escalation goal: Goemans-Williamson warm start on the "
+                     "CPU, exact adjoint training on the GPU, cheap superconducting shots, few trapped-ion shots to "
+                     "verify candidates; p=1 is where warm starting helps most.")
+        notes.append("goal keyword: warm start / escalation -> ws_qaoa_escalation")
+    elif kind == "lattice_fermions":
+        plan = _plan("sqd_krylov", 3, "cobyla", "none", 100,
+                     ("ideal_twin", "configuration_recovery", "krylov_sampling"), 2000, "energy_error",
+                     f"Fermionic lattice model on {n} qubits: SQD/SKQD samples Krylov states on the QPU, repairs "
+                     "noisy samples on the CPU and diagonalises in the sampled subspace; 3 Krylov states.")
+    elif kind == "wide_circuit":
+        plan = _plan("cut_two_modalities", 2, "cobyla", "none", 100,
+                     ("fragment_exact", "cut_finding", "fragment_sampling"), 8000, "expectation_error",
+                     f"{n}-qubit circuit wider than any one QPU: cut it (budget 2 wire cuts) and run each fragment "
+                     "on the modality that suits it.")
+    elif kind == "qec_memory":
+        plan = _plan("stream_decode_qec", int(problem["data"].get("distance", 5)), "cobyla", "none", 50,
+                     ("syndrome_frames", "streaming_decode", "syndrome_rounds"), 1000, "logical_error_rate",
+                     "QEC memory: syndromes must be decoded while they are produced; a CPU decoder pool keeps up "
+                     "with the stream; 1000-shot batches keep the reaction time short.")
+    elif kind == "maxcut":
         plan = _plan("qaoa_maxcut", 2 if n <= 16 else 1, "cobyla", "none", 200,
                      ("landscape_scan", "refine_gradient_free", "final_sampling"), 2000, "approximation_ratio",
                      f"MaxCut on {n} nodes: QAOA is the catalogue's only MaxCut algorithm; depth "
@@ -328,7 +397,20 @@ def validate_plan(plan: Any, problem: dict, qpu_backends: list[str], gpu_info: d
         errs.append("quantum_kernel_svm depth (embedding repetitions) is capped at 3")
     if alg == "vqe_uccsd" and p["depth"] > 2:
         errs.append("vqe_uccsd depth (Trotter repetitions) is capped at 2")
-    if n > LOCAL_QUBIT_CAP:
+    if alg == "ws_qaoa_escalation":
+        if p["depth"] > 3:
+            errs.append(f"ws_qaoa_escalation depth {p['depth']} is over the cap 3")
+        if p["gradient"] != "adjoint":
+            errs.append("ws_qaoa_escalation trains with adjoint gradients (gradient must be 'adjoint')")
+        if n > 20:
+            errs.append(f"ws_qaoa_escalation brute-forces the check: at most 20 nodes, got {n}")
+    if alg == "sqd_krylov" and p["depth"] < 2:
+        errs.append("sqd_krylov depth (Krylov dimension) must be at least 2")
+    if alg == "cut_two_modalities" and p["depth"] > 2:
+        errs.append("cut_two_modalities depth (wire-cut budget) is capped at 2")
+    if alg == "stream_decode_qec" and p["depth"] not in (3, 5):
+        errs.append("stream_decode_qec depth (code distance) must be 3 or 5")
+    if n > LOCAL_QUBIT_CAP and kind != "qec_memory":  # QEC runs on Pauli frames, not a state vector
         errs.append(f"problem needs {n} qubits; the local limit is {LOCAL_QUBIT_CAP}")
     cap = backend_capacity(plan["qpu_backend"])
     need = required_qubits(problem)
@@ -369,6 +451,8 @@ def phase1_overrides(plan: dict) -> list[str]:
     """What this phase cannot run as requested, mapped to the nearest equivalent (logged)."""
     notes = []
     p, part = plan["parameters"], plan["partition"]
+    if plan["algorithm"] in PIPELINE_ALGORITHMS:
+        return notes  # the pipelines use qumo_py.value_and_gradient / expectation_device directly
     if part["cpu"] == "refine_adjoint" or p["gradient"] == "adjoint":
         notes.append("adjoint gradients are not exposed to Python yet (phase 2: qumo_py.value_and_gradient): "
                      "gradients use central finite differences of exact expectations")
@@ -398,7 +482,11 @@ def context_pack(problem: dict, candidates: list[dict], gpu_info: dict, capabili
         "placement_policy": "QUMO runs a stage on the GPU when gpu_info shows a usable device and the circuit has "
                             "at least min_qubits_auto qubits; otherwise on the CPU (exact, fp64). QPU jobs go to "
                             "qpu_backend; remote backends are never submitted without a human's --submit --yes.",
-        "notes": ["depth = QAOA p, ansatz layers, UCCSD repetitions or embedding repetitions",
+        "notes": ["depth = QAOA p, ansatz layers, UCCSD repetitions or embedding repetitions; for the pipelines: "
+                  "Krylov dimension (sqd_krylov), wire-cut budget (cut_two_modalities), code distance "
+                  "(stream_decode_qec), QAOA p (ws_qaoa_escalation)",
+                  "the four pipelines choose their QPU targets per stage (ion + superconducting where two "
+                  "modalities are needed); qpu_backend is recorded for them",
                   "QAOA angles are shared across gates: use gradient 'none' or 'adjoint'",
                   "shots are per QPU job; molecule problems run one job per qubit-wise-commuting group"],
     }

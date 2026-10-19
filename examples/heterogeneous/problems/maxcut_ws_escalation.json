@@ -1,0 +1,11 @@
+{
+ "schema": "qumo.hetero_problem.v1",
+ "name": "maxcut_ws_escalation",
+ "kind": "maxcut",
+ "title": "Weighted MaxCut on 12 nodes with a warm start and QPU escalation",
+ "description": "Random weighted graph (density 0.3, weights 0.5-1.5). Goemans-Williamson's best of 10 hyperplanes misses the optimum on this instance.",
+ "goal": "Warm start QAOA from a classical solution and escalate to a high-fidelity QPU to verify the best candidates.",
+ "data": {
+  "graph": "0-1:1.0 0-4:0.8 0-6:1.321 0-10:0.755 1-2:1.0 1-8:0.66 1-10:0.536 2-3:1.0 2-8:0.512 2-9:1.192 2-10:0.87 2-11:1.33 3-4:0.768 3-10:1.041 4-5:1.0 4-8:0.888 4-10:1.316 5-6:1.0 5-11:0.94 6-7:0.902 6-8:1.468 6-9:1.172 7-8:1.0 7-9:1.345 8-9:1.0 8-10:0.692 9-10:1.0 9-11:1.384 10-11:1.0"
+ }
+}

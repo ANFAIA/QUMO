@@ -1,0 +1,11 @@
+{
+ "schema": "qumo.hetero_problem.v1",
+ "name": "cut_two_modalities",
+ "kind": "wide_circuit",
+ "title": "Expectation value of an 18-qubit circuit that no single local QPU holds",
+ "description": "A 6-qubit all-to-all coupling block followed by a 13-qubit shallow brickwork sharing one qubit; estimate a sum of Pauli correlators across both parts.",
+ "goal": "Estimate the observable on the available QPUs (8-qubit ion trap, 16-qubit grid).",
+ "data": {
+  "num_qubits": 18
+ }
+}

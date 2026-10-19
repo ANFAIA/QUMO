@@ -26,6 +26,13 @@ Otherwise they run on the CPU and `JobResult.backend` ends with
 bits, Clifford feed-forward, or a dynamic / noisy non-Clifford circuit). GPU
 jobs of a wave run one after another (they share the device).
 
+Device pinning: `add_sample / add_estimate(..., device="name")` pins a job to
+the pool device with that name (e.g. a fragment that a fidelity-aware planner
+assigned to a trapped-ion QPU); HEFT then only places the unpinned jobs and
+schedules pinned ones on their device. Unknown names raise QM-E463, a pinned
+device that cannot run the job (too few qubits, Clifford-only) QM-E464.
+The schedule notes mark pinned placements ("-> name (pinned)").
+
 GPU precision: `Device.gpu(..., precision="auto" | "fp32" | "fp64")`, and per
 job `add_sample / add_estimate(..., precision=...)` (a job's "fp32" / "fp64"
 overrides its device's). "auto" = QUMO_GPU_PRECISION when set, else the build
@@ -130,9 +137,11 @@ struct Job(Copyable):
     var deps: List[Int]
     var seed: UInt64
     var precision: String  # "auto" = the device's precision; "fp32" / "fp64" override it on a GPU
+    var device: String  # "" = HEFT chooses; else the name of the pool device this job is pinned to
 
     def __init__(out self, name: String, kind: Int, circuit: Circuit, observable: PauliSum,
-                 params: List[Float64], shots: Int, deps: List[Int], seed: UInt64, precision: String = "auto"):
+                 params: List[Float64], shots: Int, deps: List[Int], seed: UInt64, precision: String = "auto",
+                 device: String = ""):
         self.name = name
         self.kind = kind
         self.circuit = circuit.copy()
@@ -142,6 +151,7 @@ struct Job(Copyable):
         self.deps = deps.copy()
         self.seed = seed
         self.precision = precision
+        self.device = device
 
 
 struct JobResult(Copyable):
@@ -284,16 +294,19 @@ struct Workflow(Movable):
 
     def add_sample(mut self, name: String, circuit: Circuit, shots: Int,
                    params: List[Float64] = List[Float64](), deps: List[Int] = List[Int](),
-                   seed: UInt64 = 1234, precision: String = "auto") -> Int:
+                   seed: UInt64 = 1234, precision: String = "auto", device: String = "") -> Int:
         """`precision` ("auto" | "fp32" | "fp64"): GPU precision of this job
-        when it runs on a GPU state vector ("auto" = the device's)."""
-        self.jobs.append(Job(name, JobKind.SAMPLE, circuit, PauliSum(), params, shots, deps, seed, precision))
+        when it runs on a GPU state vector ("auto" = the device's).
+        `device`: pin the job to the pool device of that name ("" = HEFT)."""
+        self.jobs.append(Job(name, JobKind.SAMPLE, circuit, PauliSum(), params, shots, deps, seed, precision,
+                             device))
         return len(self.jobs) - 1
 
     def add_estimate(mut self, name: String, circuit: Circuit, observable: PauliSum,
                      params: List[Float64] = List[Float64](), deps: List[Int] = List[Int](),
-                     seed: UInt64 = 1234, precision: String = "auto") -> Int:
-        self.jobs.append(Job(name, JobKind.ESTIMATE, circuit, observable, params, 0, deps, seed, precision))
+                     seed: UInt64 = 1234, precision: String = "auto", device: String = "") -> Int:
+        self.jobs.append(Job(name, JobKind.ESTIMATE, circuit, observable, params, 0, deps, seed, precision,
+                             device))
         return len(self.jobs) - 1
 
     def plan(self, devices: List[Device], cost_weight: Float64 = 0.0) raises -> Schedule:
@@ -309,12 +322,26 @@ struct Workflow(Movable):
             _ = parse_gpu_precision(self.jobs[i].precision)
         var w = List[List[Float64]]()
         var avg = List[Float64](length=n, fill=0.0)
+        var pin = List[Int](length=n, fill=-1)
+        for i in range(n):
+            ref pname = self.jobs[i].device
+            if pname.byte_length() > 0:
+                for d in range(nd):
+                    if devices[d].name == pname:
+                        pin[i] = d
+                        break
+                if pin[i] < 0:
+                    raise Error("QM-E463: job '" + self.jobs[i].name + "' is pinned to device '" + pname + "', which is not in the pool. Hint: use the name of a Device in the list passed to plan()/run(), or device=\"\" to let HEFT choose.")
+                if estimate_job_seconds(self.jobs[i], devices[pin[i]]) >= INF:
+                    raise Error("QM-E464: job '" + self.jobs[i].name + "' (" + String(self.jobs[i].circuit.num_qubits) + " qubits) is pinned to '" + pname + "', which cannot run it (max_qubits " + String(devices[pin[i]].max_qubits) + (", Clifford only" if devices[pin[i]].clifford_only else "") + "). Hint: pin it to a larger device or unpin it.")
         for i in range(n):
             var row = List[Float64]()
             var s = 0.0
             var cnt = 0
             for d in range(nd):
                 var t = estimate_job_seconds(self.jobs[i], devices[d])
+                if pin[i] >= 0 and d != pin[i]:
+                    t = INF
                 row.append(t)
                 if t < INF:
                     s += t
@@ -380,6 +407,8 @@ struct Workflow(Movable):
             sch.total_cost += sch.cost[j]
             sch.makespan = max(sch.makespan, best_finish)
             var why = String("job ") + String(j) + " '" + self.jobs[j].name + "' (" + String(self.jobs[j].circuit.num_qubits) + "q) -> " + devices[best].name
+            if pin[j] >= 0:
+                why += " (pinned)"
             why += " [start " + String(sch.start[j]) + " s, est " + String(w[j][best]) + " s"
             if sch.cost[j] > 0:
                 why += ", $" + String(sch.cost[j])

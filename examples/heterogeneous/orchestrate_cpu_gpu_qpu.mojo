@@ -12,10 +12,10 @@ What it shows (all offline, deterministic):
    device the GPU jobs run on the GPU state vector (method gpu:statevector:fp32); otherwise
    they fall back to the CPU and say so.
 3. CPU refinement: Nelder-Mead on exact energies (ExpectationEngine) from the best grid point.
-4. Workflow 2: one SAMPLE job on a QPU-only pool, Device.qpu("superconducting-sim", 133, ...).
-   QPU jobs run on the local emulator and are flagged `emulated`. (Phase 1 workaround: a
-   separate QPU-only workflow, because jobs cannot be pinned to a device yet; TODO phase 2:
-   add_sample(..., device="superconducting-sim") in a single workflow.)
+4. Workflow 2: one SAMPLE job pinned to Device.qpu("superconducting-sim", 133, ...) with
+   add_sample(..., device="superconducting-sim") in a pool that also holds the CPU and GPU
+   (HEFT alone would send it to a simulator, which is faster in its cost model). QPU jobs run
+   on the local emulator and are flagged `emulated`.
 5. The bound OpenQASM 3 payload is written to build/hetero/payload.qasm, ready for
    `python -m qumo_hardware run build/hetero/payload.qasm -p local -b <backend>` (dry run by
    default for remote backends).
@@ -134,8 +134,10 @@ def main() raises:
     var meas = ansatz.copy()
     meas.measure_all()
     var wf2 = Workflow()
-    _ = wf2.add_sample("final sampling", meas, 2000, opt.x, List[Int](), UInt64(7))
+    _ = wf2.add_sample("final sampling", meas, 2000, opt.x, List[Int](), UInt64(7), "auto", "superconducting-sim")
     var qpool = List[Device]()
+    qpool.append(Device.cpu("cpu0"))
+    qpool.append(Device.gpu("gpu0"))
     qpool.append(Device.qpu("superconducting-sim", 133, 60.0, 1e-4, 0.0, 0.0))
     var sched2 = wf2.plan(qpool)
     for line in sched2.notes:

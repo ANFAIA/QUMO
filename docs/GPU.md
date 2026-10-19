@@ -874,6 +874,39 @@ Nothing in rounds 2-3 has run on NVIDIA or AMD. On the next Colab run
    resident workgroups for the heaviest variants); A/B the families against
    a `-D QUMO_GPU_TILE_LAUNCH_BOUND=0` build (spilling, unbounded).
 
+## Adjoint gradients on the GPU (`qumo.algorithms.gradients_device`)
+
+`gpu_value_and_gradient[dt](circuit, h, params)` computes E(theta) and the
+adjoint gradient on the GPU state vector without a new kernel. Adjoint
+differentiation needs <lam|G|psi> for two states (psi = U|0>, lam = H psi
+uncomputed gate by gate), while the engine reduces <phi|P|phi> of one state,
+so both live in one register with an extra most-significant qubit A:
+Phi = (|0>_A psi + |1>_A lam/||lam||)/sqrt(2). Every inverse gate acts on the
+system qubits, so it uncomputes psi and lam together, and
+<Phi|Y_A (x) P|Phi> = -Im<lam|P|psi>/||lam||. Generators that commute with
+every gate un-applied in between are reduced in one batch (one host
+synchronisation): 2 batches per QAOA layer. Cost: one forward pass, one
+download (n qubits), one upload (n + 1 qubits), the fused inverse gates and
+the reduction batches; memory 2^(n+1) amplitudes. H psi and the energy are
+fp64 on the host; the sweep runs in the GPU precision (fp32 by default).
+Differentiable gates as on the CPU (RX, RY, RZ, P, RXX, RYY, RZZ, CP, CRX,
+CRY, CRZ, U).
+
+`value_and_gradient_on(circuit, h, params, device, note)` dispatches
+('cpu' fp64 adjoint, 'gpu', 'auto' from `GPU_MIN_QUBITS`) with the usual
+fallback note; `expectations_on` evaluates many observables from one
+evolved state (one reduction batch). Python: `qumo_py.value_and_gradient(circ,
+obs, params, device="gpu")`, `expectation_device`, `expectations_device`.
+Tests: `tests/test_gpu_adjoint.mojo` (emulated kernels in fp64 and fp32 vs
+the CPU adjoint; real device under `make test-gpu`; max gradient difference
+2e-7 on the M5).
+
+Measured (Apple M5, fp32, 2026-10-17): one value + gradient of a p = 2
+warm-start QAOA circuit, CPU fp64 adjoint vs GPU: 16 qubits 33 vs 19 ms,
+20 qubits 224 vs 73 ms, 22 qubits 1217 vs 232 ms. Below 16 qubits the CPU is
+faster, and an optimiser on fp32 gradients needs a looser tolerance
+(examples/heterogeneous/qaoa_escalation).
+
 ## Error codes
 
 | Code | Meaning |

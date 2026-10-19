@@ -114,6 +114,12 @@ def candidates(problem: dict, qpu: str, prefer_tool: bool) -> list[dict]:
     for alg, spec in sorted(P.ALGORITHMS.items()):
         if kind not in spec["kinds"]:
             continue
+        if alg in P.PIPELINE_ALGORITHMS:  # multi-device pipeline: described, built inside the pipeline
+            import pipelines as HP
+            out.append({"algorithm": alg, "pipeline": HP.PIPELINES[alg]["path"],
+                        "num_qubits": K.problem_qubits(problem), "stages": spec["summary"],
+                        "within_local_limit": True})
+            continue
         rules_plan, _ = P.offline_plan(problem, qpu)
         depth = rules_plan["parameters"]["depth"] if rules_plan["algorithm"] == alg else 2
         try:
@@ -413,6 +419,10 @@ def main(argv=None, runner=None, client_factory=None, transport=None) -> dict:
     for o in decision["overrides"]:
         say(f"[override] {o}")
 
+    if plan["algorithm"] in P.PIPELINE_ALGORITHMS:
+        return run_pipeline(a, q, problem, plan, decision, cands, t_ctx, gpu_info, qpu_pinned, qpu, runner, say,
+                            t_start)
+
     # Stages 3-7: build, GPU, CPU, QPU, post-process
     from stages import PIPELINES, Runtime
 
@@ -458,6 +468,49 @@ def main(argv=None, runner=None, client_factory=None, transport=None) -> dict:
     report["_out_dir"] = str(out_dir)
     report["_all_passed"] = log.all_passed()
     log.finish(exit_on_failure=(__name__ == "__main__"))
+    return report
+
+
+def run_pipeline(a, q, problem, plan, decision, cands, t_ctx, gpu_info, qpu_pinned, qpu, runner, say,
+                 t_start) -> dict:
+    """Dispatch a validated plan to one of the four multi-device pipelines (allow-listed by name)."""
+    import pipelines as HP
+
+    alg = plan["algorithm"]
+    safety = (["--allow-remote"] if a.allow_remote else []) + (["--submit"] if a.submit else []) + \
+        (["--yes"] if a.yes else []) + (["--max-cost", repr(float(a.max_cost))] if a.max_cost is not None else [])
+    sc_qpu = qpu if (qpu_pinned and modality_of(qpu) == "superconducting") else None
+    out_dir = Path(a.out) / f"{problem['name']}-{a.seed}"
+    say(f"[pipeline] {alg} -> {HP.PIPELINES[alg]['path']} (QPU targets chosen per stage by the pipeline"
+        + (f"; superconducting stage pinned to {sc_qpu}" if sc_qpu else "") + ")")
+    rep = HP.run(alg, problem, plan, a.seed, str(out_dir / "pipeline"), sc_qpu, safety, runner=runner)
+    wall = time.perf_counter() - t_start
+    report = {
+        "schema": "qumo.hetero_report.v1",
+        "problem": {"name": problem["name"], "kind": problem["kind"], "sha256": problem["sha256"],
+                    "size": problem["size"], "qubits": K.problem_qubits(problem)},
+        "seed": a.seed, "qpu": "per stage (see stages)", "environment": environment(q), "gpu_info": gpu_info,
+        "context": {"seconds": round(t_ctx, 3), "sha256": decision["context_sha256"],
+                    "bytes": decision["context_bytes"], "candidates": cands},
+        "decision_log": decision, "plan": plan, "pipeline": HP.PIPELINES[alg]["path"],
+        "stages": rep.get("stages", []), "results": rep.get("results", {}), "qpu_jobs": rep.get("qpu_jobs", []),
+        "cost": {"billed": "nothing billed" if all(j.get("local") or not j.get("submitted")
+                                                   for j in rep.get("qpu_jobs", [])) else "see provider",
+                 "llm_usd": sum((x.get("cost_usd") or 0.0) for x in decision["attempts"])},
+        "checks": rep.get("checks", []), "wall_seconds": round(wall, 3),
+        "phase": "multi-device pipeline (qumo_py.value_and_gradient / expectation_device / subspace_ground_state / "
+                 "QecMemory / schedule)",
+    }
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "report.json").write_text(json.dumps(report, indent=1, sort_keys=True, default=str) + "\n")
+    (out_dir / "plan.json").write_text(json.dumps({
+        "schema": "qumo.hetero_plan.v1", "plan": plan, "selector": decision["selector"],
+        "problem": problem["name"], "problem_sha256": problem["sha256"]}, indent=1) + "\n")
+    say(f"[report] {out_dir / 'report.json'}")
+    report["_out_dir"] = str(out_dir)
+    report["_all_passed"] = bool(rep.get("_all_passed"))
+    if __name__ == "__main__" and not report["_all_passed"]:
+        sys.exit(1)
     return report
 
 

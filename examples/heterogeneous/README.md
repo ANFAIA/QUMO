@@ -72,6 +72,45 @@ for confirmation, cost limits, credentials, files or commands.
 | `grover_5.json` | search, 5 qubits | `grover_search` | exact verification / post-process / sampling |
 | `moons_classification.json` | classification | `quantum_kernel_svm` | Gram matrix / SVM solve / 20 kernel entries on the QPU |
 | `injection_test.json` | maxcut | `qaoa_maxcut` | a problem whose text tries to make the model submit to real hardware: it never can |
+| `hubbard_sqd.json` | lattice_fermions, 16 qubits | `sqd_krylov` (pipeline) | GPU ideal twin / CPU configuration recovery + multi-core diagonalisation / QPU Krylov sampling |
+| `cut_two_modalities.json` | wide_circuit, 18 qubits | `cut_two_modalities` (pipeline) | GPU uncut reference + fragment tensors / CPU cut finder + contraction / ion + superconducting QPUs |
+| `surface_code_stream.json` | qec_memory, d = 5 | `stream_decode_qec` (pipeline) | QPU stand-in (Pauli frames) / CPU decoder pool / emulated FPGA budget |
+| `maxcut_ws_escalation.json` | maxcut + warm-start goal | `ws_qaoa_escalation` (pipeline) | GPU adjoint training / CPU GW warm start + local search / superconducting then ion QPU |
+
+## Four multi-device pipelines
+
+Each pipeline uses a device for something the others cannot do, and is
+runnable on its own or through the planner (offline rules or a model choose
+it for a matching problem; dispatch is by allow-listed name through
+`pipelines.py`, and the plan's generic fields map to pipeline options by
+fixed rules).
+
+| Folder | Pipeline | QPU | CPU | GPU | Emulated roles |
+|---|---|---|---|---|---|
+| [`sqd/`](sqd/) | Sample-based Krylov quantum diagonalisation of a Hubbard chain (qiskit-addon-sqd / IBM + RIKEN pattern) | Krylov-state sampling (superconducting grid) | configuration recovery; multi-core subspace diagonalisation (`subspace_ground_state`) | ideal twin of the QPU circuits | QPU |
+| [`cutting/`](cutting/) | Circuit cutting across two modalities (qiskit-addon-cutting / CutQC) | dense fragment on an ion trap, wide fragment on a grid | cut finder (QUMO compiles each fragment per target); contraction | 18-qubit uncut reference, batched fragment tensors | both QPUs |
+| [`realtime_qec/`](realtime_qec/) | Decoding while sampling (CUDA-Q QEC / NVQLink / Riverlane) | syndrome stream (Pauli-frame stand-in, CPU or GPU frames by measurement) | sparse-blossom decoder pool, PyMatching reference | stand-in frames when faster | QPU, FPGA budget |
+| [`qaoa_escalation/`](qaoa_escalation/) | Warm-started QAOA with escalation (Egger et al. 2021) | many superconducting shots, few ion shots | Goemans-Williamson warm start, local search | exact adjoint training (`value_and_gradient(device="gpu")`) | both QPUs |
+
+```bash
+make py                     # or make py-gpu (then PYTHONPATH=build/gpu:plugins/hardware)
+export PYTHONPATH=build:plugins/hardware
+bench/.venv/bin/python examples/heterogeneous/sqd/sqd_hubbard.py                 # ~22-38 s
+bench/.venv/bin/python examples/heterogeneous/cutting/cut_two_modalities.py      # ~2 s
+bench/.venv/bin/python examples/heterogeneous/realtime_qec/stream_decode.py      # ~2 s
+bench/.venv/bin/python examples/heterogeneous/qaoa_escalation/ws_qaoa_escalation.py   # ~2-5 s
+bench/.venv/bin/python examples/heterogeneous/ai_gpu_qpu.py --offline --problem examples/heterogeneous/problems/hubbard_sqd.json
+```
+
+For these pipelines QUMO chooses the QPU target of each stage (ion and
+superconducting emulators where two modalities are needed; a human's
+`--qpu` replaces the superconducting stage's target); the plan's
+`qpu_backend` is recorded. Circuit jobs are planned by QUMO's orchestrator
+(`qumo_py.schedule`, HEFT): QPU jobs are pinned to their device, exact jobs
+are placed over CPU and GPU. Shared helpers live in `hetero_common.py`
+(stage log, multi-QPU safety gate with the same `--allow-remote --submit
+--yes --max-cost` rules, HEFT, reports). Reports go to
+`build/hetero/<pipeline>/seed<N>/report.{json,md}`.
 
 ## Choosing the model
 
@@ -203,11 +242,14 @@ backend gets a dry run that reports the provider's cost estimate (for example
   Apple M5, 7.8x QUMO's own CPU simulator) and on batched scans. The GPU
   default precision is fp32; Apple GPUs have no fp64, so a plan asking for
   fp64 there is rejected by the validator.
-* Phase 1 limits: the GPU stage uses `qumo_py.sample_device` (sampled
-  energies with standard errors); exact expectations, adjoint gradients and
-  kernel matrices run on the CPU. Phase 2 adds `expectation_device`,
-  `batch_value_and_gradient` and `kernel_matrix` to `qumo_py`, and job pinning
-  to the orchestrator; the report's `phase` field says which applies.
+* The original six algorithms still use phase 1 paths: the GPU stage uses
+  `qumo_py.sample_device` (sampled energies with standard errors); exact
+  expectations and gradients run on the CPU. `qumo_py` now also has
+  `expectation_device`, `expectations_device`, `value_and_gradient`
+  (CPU or GPU adjoint), `batch_value_and_gradient`, `subspace_ground_state`,
+  `QecMemory` and `schedule` (HEFT with device pinning); the four pipelines
+  use them. A `kernel_matrix` binding does not exist yet. The report's
+  `phase` field says which applies.
 * QAOA's angles are shared across gates, so per-gate parameter shift is not a
   valid gradient; the CPU stage uses gradient-free optimisers (or adjoint in
   phase 2).
@@ -252,8 +294,9 @@ Sources: <https://nvidia.github.io/cuda-quantum/latest/using/backends/sims/mqpus
 `orchestrate_cpu_gpu_qpu.mojo` runs the same pattern natively with QUMO's
 orchestrator: rule-based selection, 64 estimate jobs for an 8x8 QAOA grid
 scheduled by HEFT over `[cpu, gpu]` (the schedule explains every placement),
-Nelder-Mead refinement on the CPU, then one sampling job on a QPU-only pool
-and the bound payload written to `build/hetero/payload.qasm`.
+Nelder-Mead refinement on the CPU, then one sampling job pinned to the QPU
+device (`add_sample(..., device="superconducting-sim")`) in a CPU + GPU + QPU
+pool, and the bound payload written to `build/hetero/payload.qasm`.
 
 ```bash
 .venv/bin/mojo run -I . examples/heterogeneous/orchestrate_cpu_gpu_qpu.mojo             # ~7 s
@@ -279,6 +322,10 @@ python -m qumo_hardware run build/hetero/payload.qasm -p local -b 'qumo-sim:grid
 | `problems/*.json` | problem descriptions |
 | `test_ai_gpu_qpu.py` | offline tests with a fake OpenAI-compatible server (stdlib `http.server`) |
 | `orchestrate_cpu_gpu_qpu.mojo` | Mojo twin |
+| `pipelines.py` | the four multi-device pipelines as planner targets (allow-listed dispatch, fixed option mapping) |
+| `hetero_common.py` | stage log, multi-QPU safety gate, HEFT via `qumo_py.schedule`, reports |
+| `sqd/`, `cutting/`, `realtime_qec/`, `qaoa_escalation/` | the pipelines, each with a README and tests |
+| `test_pipelines.py` | planner tie-in, QPU safety gate, HEFT pinning, end-to-end dispatch |
 
 Tests: `bench/.venv/bin/python -m pytest -q examples/heterogeneous` (no
 network; the fake server covers valid answers, invalid JSON, schema

@@ -161,10 +161,18 @@ def test_offline_selection_deterministic_for_every_problem():
         qpu = P.DEFAULT_QPU if P.required_qubits(prob) <= 16 else P.DEFAULT_QPU_LARGE
         a, _ = P.offline_plan(prob, qpu)
         assert P.validate_plan(a, prob, P.LOCAL_QPUS) == [], f.name
-    kinds = {K.load_problem(f)["kind"]: P.offline_plan(K.load_problem(f), P.DEFAULT_QPU)[0]["algorithm"]
-             for f in (HERE / "problems").glob("*.json")}
-    assert kinds == {"maxcut": "qaoa_maxcut", "molecule": "vqe_uccsd", "spin_model": "vqe_hea",
-                     "search": "grover_search", "classification": "quantum_kernel_svm"}
+    chosen = {f.stem: P.offline_plan(K.load_problem(f), P.DEFAULT_QPU)[0]["algorithm"]
+              for f in (HERE / "problems").glob("*.json")}
+    by_kind: dict[str, set] = {}
+    for f in (HERE / "problems").glob("*.json"):
+        by_kind.setdefault(K.load_problem(f)["kind"], set()).add(chosen[f.stem])
+    assert by_kind == {"maxcut": {"qaoa_maxcut", "ws_qaoa_escalation"}, "molecule": {"vqe_uccsd"},
+                       "spin_model": {"vqe_hea"}, "search": {"grover_search"},
+                       "classification": {"quantum_kernel_svm"}, "lattice_fermions": {"sqd_krylov"},
+                       "wide_circuit": {"cut_two_modalities"}, "qec_memory": {"stream_decode_qec"}}
+    assert chosen["maxcut_ws_escalation"] == "ws_qaoa_escalation"
+    assert all(chosen[n] == "qaoa_maxcut" for n in ("maxcut_8_ring", "maxcut_16_3reg", "maxcut_20_3reg",
+                                                     "injection_test"))
 
 
 def test_goal_keywords():

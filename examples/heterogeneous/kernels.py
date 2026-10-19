@@ -30,7 +30,8 @@ LOCAL_QUBIT_CAP = 26  # local state-vector / emulator limit (qumo_hardware.local
 
 
 # --------------------------------------------------------------------------- problems
-PROBLEM_KINDS = ("maxcut", "molecule", "spin_model", "search", "classification")
+PROBLEM_KINDS = ("maxcut", "molecule", "spin_model", "search", "classification", "lattice_fermions", "wide_circuit",
+                 "qec_memory")
 
 
 def load_problem(path: str | Path, size: str = "default") -> dict:
@@ -74,6 +75,10 @@ def problem_qubits(problem: dict) -> int:
         return len(d["marked"][0])
     if k == "classification":
         return int(d.get("num_qubits", 2))
+    if k == "lattice_fermions":
+        return 2 * int(d["sites"])
+    if k in ("wide_circuit", "qec_memory"):
+        return int(d["num_qubits"])
     raise ValueError(k)
 
 

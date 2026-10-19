@@ -1,0 +1,13 @@
+{
+ "schema": "qumo.hetero_problem.v1",
+ "name": "hubbard_sqd",
+ "kind": "lattice_fermions",
+ "title": "Ground state of an 8-site Fermi-Hubbard chain (16 qubits)",
+ "description": "Open 1D Hubbard chain, t = 1, U = 4 (particle-hole symmetric form), half filling, Sz = 0. Find the ground-state energy.",
+ "goal": "Ground-state energy within a few percent while diagonalising less than the full symmetry sector.",
+ "data": {
+  "sites": 8,
+  "t": 1.0,
+  "U": 4.0
+ }
+}

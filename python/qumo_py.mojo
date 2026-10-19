@@ -16,7 +16,7 @@ from std.time import perf_counter_ns
 
 from qumo.ir.circuit import Circuit
 from qumo.ir.gates import Op, op_name, op_arity, op_is_unitary, op_from_name
-from qumo.ir.pauli import parse_pauli_sum
+from qumo.ir.pauli import parse_pauli_sum, PauliSum
 from qumo.sim.runner import sample, evolve
 from qumo.ir.qasm import parse_qasm, load_qasm, to_qasm
 from qumo.ir.qasm2 import to_qasm2
@@ -24,6 +24,18 @@ from qumo.compiler.target import Target
 from qumo.exec.dispatch import sample_on
 from qumo.gpu.device import query_gpu
 from qumo.compiler.pass_manager import transpile, compile_spec, transpile_ai, CompileResult
+from qumo.algorithms.gradients import batch_value_and_gradient, Grad
+from qumo.algorithms.gradients_device import value_and_gradient_on, expectations_on
+from qumo.algorithms.sqd import subspace_ground_state
+from qumo.exec.orchestrator import Workflow, Device
+from qumo.qec.codes import generate_code, NoiseParams, CodeCircuit
+from qumo.qec.dem import detector_error_model, DetectorErrorModel
+from qumo.qec.decoders import MatchingGraph, decode_samples
+from qumo.qec.sparse_blossom import SparseBlossomDecoder
+from qumo.sim.frame import FrameSimulator, DetectorSamples, BATCH, FW
+from qumo.gpu.frame_gpu import GpuFrameSampler
+from qumo.gpu.device import gpu_available
+from std.sys.defines import is_defined
 from qumo.bench.circuits import (
     quantum_volume, efficient_su2, dtc_unitary, random_clifford_circuit,
     bv_all_ones, trivial_bvlike_circuit, multi_control_circuit, pauli_twirl_2q,
@@ -381,6 +393,418 @@ def py_expectation(circ: PythonObject, observable: PythonObject) raises -> Pytho
     return sv.expectation(parse_pauli_sum(String(py=observable)))
 
 
+# ---------------------------------------------------------------------------
+# Device-placed values and gradients, SQD subspace solver, HEFT schedules,
+# streaming QEC (used by examples/heterogeneous/{sqd,cutting,realtime_qec,
+# qaoa_escalation}). All keyword arguments are optional and keyword-only.
+# ---------------------------------------------------------------------------
+def _floats(values: PythonObject) raises -> List[Float64]:
+    var out = List[Float64]()
+    for v in values:
+        out.append(Float64(py=v))
+    return out^
+
+
+def _float_list(values: List[Float64]) raises -> PythonObject:
+    var out = Python.list()
+    for v in values:
+        out.append(v)
+    return out
+
+
+def py_expectation_device(circ: PythonObject, observable: PythonObject, device: PythonObject,
+                          var **kwargs: PythonObject) raises -> PythonObject:
+    """<observable> of a bound circuit on a device -> (value, method, note).
+
+    Python: expectation_device(circ, observable, device, precision="auto").
+    device 'auto' | 'cpu' | 'gpu' (GPU state vector, fp32 by default; falls
+    back to the CPU with a note when the build or the machine has no GPU).
+    """
+    var prec = String("auto")
+    for kv in kwargs.items():
+        if kv.key == "precision":
+            prec = String(py=kv.value)
+        else:
+            raise Error("QM-E913: expectation_device() got an unexpected keyword argument '" + kv.key + "'. Hint: the only keyword argument is precision='auto'|'fp32'|'fp64'.")
+    var obs = List[PauliSum]()
+    obs.append(parse_pauli_sum(String(py=observable)))
+    var note = String()
+    var method = String()
+    var vals = expectations_on(PyCircuit._get(circ)[].c, obs, List[Float64](), String(py=device), note, method, prec)
+    return Python.tuple(vals[0], method, note)
+
+
+def py_expectations_device(circ: PythonObject, observables: PythonObject, device: PythonObject,
+                           var **kwargs: PythonObject) raises -> PythonObject:
+    """Many observables of one bound circuit -> (values, method, note): one
+    simulation, all Pauli terms reduced in one batch on the GPU.
+
+    Python: expectations_device(circ, [obs, ...], device, precision="auto").
+    """
+    var prec = String("auto")
+    for kv in kwargs.items():
+        if kv.key == "precision":
+            prec = String(py=kv.value)
+        else:
+            raise Error("QM-E913: expectations_device() got an unexpected keyword argument '" + kv.key + "'. Hint: the only keyword argument is precision='auto'|'fp32'|'fp64'.")
+    var obs = List[PauliSum]()
+    for o in observables:
+        obs.append(parse_pauli_sum(String(py=o)))
+    var note = String()
+    var method = String()
+    var vals = expectations_on(PyCircuit._get(circ)[].c, obs, List[Float64](), String(py=device), note, method, prec)
+    return Python.tuple(_float_list(vals), method, note)
+
+
+def py_value_and_gradient(circ: PythonObject, observable: PythonObject, params: PythonObject,
+                          var **kwargs: PythonObject) raises -> PythonObject:
+    """Exact E(params) and its adjoint gradient -> (value, grad, method, note).
+
+    Python: value_and_gradient(circ, observable, params, device="cpu", precision="auto").
+    device 'cpu' (fp64 adjoint), 'gpu' (GPU adjoint through a doubled register,
+    fp32 by default; CPU fallback with a note), 'auto' (GPU from the dispatch
+    threshold). Shared and affine parameters (QAOA angles) are exact: the
+    chain rule sums every occurrence. Errors: QM-E804, QM-E805, QM-E940, QM-E941.
+    """
+    var dev = String("cpu")
+    var prec = String("auto")
+    for kv in kwargs.items():
+        if kv.key == "device":
+            dev = String(py=kv.value)
+        elif kv.key == "precision":
+            prec = String(py=kv.value)
+        else:
+            raise Error("QM-E913: value_and_gradient() got an unexpected keyword argument '" + kv.key + "'. Hint: keyword arguments: device, precision.")
+    var note = String()
+    var r = value_and_gradient_on(PyCircuit._get(circ)[].c, parse_pauli_sum(String(py=observable)), _floats(params),
+                                  dev, note, prec)
+    return Python.tuple(r.value, _float_list(r.grad), r.method, note)
+
+
+def py_batch_value_and_gradient(circ: PythonObject, observable: PythonObject, param_sets: PythonObject) raises -> PythonObject:
+    """CPU adjoint values and gradients for many parameter sets -> (values, grads)
+    (parallel over sets for <= 14 qubits; bit-identical to one-by-one calls)."""
+    var sets = List[List[Float64]]()
+    for ps in param_sets:
+        sets.append(_floats(ps))
+    var r = batch_value_and_gradient(PyCircuit._get(circ)[].c, parse_pauli_sum(String(py=observable)), sets,
+                                     Grad.ADJOINT)
+    var gs = Python.list()
+    for g in r[1]:
+        gs.append(_float_list(g))
+    return Python.tuple(_float_list(r[0]), gs)
+
+
+def py_subspace_ground_state(observable: PythonObject, basis_states: PythonObject, num_qubits: PythonObject,
+                             var **kwargs: PythonObject) raises -> PythonObject:
+    """Lowest eigenpair of a Pauli-sum Hamiltonian projected onto basis states
+    (the SQD / SKQD classical stage) -> dict with energy, occupations (<n_q>),
+    dimension, nonzeros, matvecs, restarts, residual, converged, seconds and
+    probabilities (|c_k|^2 per basis state, same order).
+
+    Python: subspace_ground_state(observable, states, n, tol=1e-9, krylov=40).
+    """
+    var tol = 1e-9
+    var krylov = 40
+    for kv in kwargs.items():
+        if kv.key == "tol":
+            tol = Float64(py=kv.value)
+        elif kv.key == "krylov":
+            krylov = Int(py=kv.value)
+        else:
+            raise Error("QM-E913: subspace_ground_state() got an unexpected keyword argument '" + kv.key + "'. Hint: keyword arguments: tol, krylov.")
+    var states = List[Int]()
+    for b in basis_states:
+        states.append(Int(py=b))
+    var t0 = perf_counter_ns()
+    var r = subspace_ground_state(parse_pauli_sum(String(py=observable)), states, Int(py=num_qubits), tol, krylov)
+    var secs = Float64(perf_counter_ns() - t0) / 1e9
+    var d = Python.dict()
+    d["energy"] = r.energy
+    d["occupations"] = _float_list(r.occupations)
+    var probs = List[Float64](capacity=len(r.re))
+    for k in range(len(r.re)):
+        probs.append(r.re[k] * r.re[k] + r.im[k] * r.im[k])
+    d["probabilities"] = _float_list(probs)
+    d["dimension"] = r.dimension
+    d["nonzeros"] = r.nonzeros
+    d["matvecs"] = r.matvecs
+    d["restarts"] = r.restarts
+    d["residual"] = r.residual
+    d["converged"] = r.converged
+    d["seconds"] = secs
+    return d
+
+
+def _dget(d: PythonObject, key: String, default: PythonObject) raises -> PythonObject:
+    return d.get(key, default)
+
+
+def py_schedule(jobs: PythonObject, devices: PythonObject, var **kwargs: PythonObject) raises -> PythonObject:
+    """HEFT plan of quantum jobs over a device pool (qumo.exec.orchestrator),
+    without running them -> dict(device_of, start, finish, cost, makespan,
+    total_cost, notes).
+
+    Python: schedule(jobs, devices, cost_weight=0.0)
+    jobs: [{"name", "circuit" (Circuit), "kind": "sample"|"estimate", "shots",
+            "observable" (estimate), "deps": [earlier job indices], "device": pin}]
+    devices: [{"name", "kind": "cpu"|"gpu"|"qpu"|"stabilizer", "max_qubits",
+               "queue_s", "shot_time_s", "cost_per_task", "cost_per_shot",
+               "precision"}]
+    Errors: QM-E460..QM-E464 (empty pool, nothing fits, bad deps, unknown or
+    too small pinned device).
+    """
+    var cw = 0.0
+    for kv in kwargs.items():
+        if kv.key == "cost_weight":
+            cw = Float64(py=kv.value)
+        else:
+            raise Error("QM-E913: schedule() got an unexpected keyword argument '" + kv.key + "'. Hint: keyword argument: cost_weight.")
+    var pool = List[Device]()
+    for d in devices:
+        var name = String(py=d["name"])
+        var kind = String(py=_dget(d, "kind", "cpu"))
+        var mq = Int(py=_dget(d, "max_qubits", 30))
+        if kind == "cpu":
+            pool.append(Device.cpu(name, mq))
+        elif kind == "gpu":
+            pool.append(Device.gpu(name, mq, String(py=_dget(d, "precision", "auto"))))
+        elif kind == "stabilizer":
+            pool.append(Device.stabilizer(name))
+        elif kind == "qpu":
+            pool.append(Device.qpu(name, mq, Float64(py=_dget(d, "queue_s", 0.0)), Float64(py=_dget(d, "shot_time_s", 1e-4)),
+                                   Float64(py=_dget(d, "cost_per_task", 0.0)), Float64(py=_dget(d, "cost_per_shot", 0.0))))
+        else:
+            raise Error("QM-E913: device '" + name + "' has unknown kind '" + kind + "'. Hint: use cpu, gpu, qpu or stabilizer.")
+    var wf = Workflow()
+    for j in jobs:
+        var name = String(py=j["name"])
+        ref c = PyCircuit._get(j["circuit"])[].c
+        var kind = String(py=_dget(j, "kind", "sample"))
+        var deps = List[Int]()
+        for x in _dget(j, "deps", Python.list()):
+            deps.append(Int(py=x))
+        var pin = String(py=_dget(j, "device", ""))
+        if kind == "estimate":
+            _ = wf.add_estimate(name, c, parse_pauli_sum(String(py=_dget(j, "observable", "Z0"))), List[Float64](), deps,
+                                1234, "auto", pin)
+        else:
+            _ = wf.add_sample(name, c, Int(py=_dget(j, "shots", 1000)), List[Float64](), deps, 1234, "auto", pin)
+    var sch = wf.plan(pool, cw)
+    var out = Python.dict()
+    var dev = Python.list()
+    for k in range(len(sch.device_of)):
+        dev.append(pool[sch.device_of[k]].name)
+    out["device_of"] = dev
+    out["start"] = _float_list(sch.start)
+    out["finish"] = _float_list(sch.finish)
+    out["cost"] = _float_list(sch.cost)
+    out["makespan"] = sch.makespan
+    out["total_cost"] = sch.total_cost
+    var notes = Python.list()
+    for line in sch.notes:
+        notes.append(line)
+    out["notes"] = notes
+    return out
+
+
+comptime _HEXD = "0123456789abcdef"
+
+
+def _hex_nibble(c: Int) raises -> Int:
+    if c >= 48 and c <= 57:
+        return c - 48
+    if c >= 97 and c <= 102:
+        return c - 87
+    if c >= 65 and c <= 70:
+        return c - 55
+    raise Error("QM-E913: invalid hex digit in a packed detection-event string. Hint: pass the string returned by QecMemory.sample().")
+
+
+struct PyQecMemory(Movable, Writable):
+    """A QEC memory experiment for streaming: syndrome sampling (CPU or GPU
+    Pauli frames) and batch decoding (sparse blossom) on packed strings.
+
+    Packed format (hex, like Stim's b8): one record of ceil(D/8) bytes per
+    shot, bit k of byte j = detector 8j + k; observables likewise."""
+
+    var cc: CodeCircuit
+    var dem: DetectorErrorModel
+    var decoder: SparseBlossomDecoder
+    var frames: FrameSimulator
+    var num_detectors: Int
+    var num_observables: Int
+
+    def __init__(out self, var cc: CodeCircuit) raises:
+        self.dem = detector_error_model(cc.circuit, True)
+        self.decoder = SparseBlossomDecoder(MatchingGraph(self.dem))
+        self.frames = FrameSimulator(cc.circuit)
+        self.num_detectors = self.dem.num_detectors
+        self.num_observables = self.dem.num_observables
+        self.cc = cc^
+
+    @staticmethod
+    def _get(py_self: PythonObject) raises -> Pointer[PyQecMemory, MutAnyOrigin]:
+        return py_self.downcast_value_ptr[Self]().as_unsafe_any_origin()
+
+    @staticmethod
+    def info(py_self: PythonObject) raises -> PythonObject:
+        ref m = Self._get(py_self)[]
+        var d = Python.dict()
+        d["code"] = m.cc.code
+        d["basis"] = m.cc.basis
+        d["distance"] = m.cc.distance
+        d["rounds"] = m.cc.rounds
+        d["num_qubits"] = m.cc.circuit.num_qubits
+        d["num_detectors"] = m.num_detectors
+        d["num_observables"] = m.num_observables
+        d["dem_errors"] = m.dem.num_errors()
+        d["p"] = m.cc.noise.after_clifford_depolarization
+        return d
+
+    @staticmethod
+    def dem_text(py_self: PythonObject) raises -> PythonObject:
+        return Self._get(py_self)[].dem.to_text()
+
+    @staticmethod
+    def stim_text(py_self: PythonObject) raises -> PythonObject:
+        return Self._get(py_self)[].cc.to_stim()
+
+    @staticmethod
+    def sample(py_self: PythonObject, shots: PythonObject, seed: PythonObject, device: PythonObject,
+               threads: PythonObject) raises -> PythonObject:
+        """-> (dets_hex, obs_hex, method, note, seconds). device 'cpu' | 'gpu'
+        ('gpu' = GPU Pauli frames; CPU fallback with a note); threads: CPU
+        frame workers (0 = all cores)."""
+        ref m = Self._get(py_self)[]
+        var n = Int(py=shots)
+        var dev = String(py=device)
+        if dev != "cpu" and dev != "gpu" and dev != "auto":
+            raise Error("QM-E940: unknown device '" + dev + "'. Hint: use 'auto', 'cpu' or 'gpu'.")
+        var note = String()
+        var method = String("cpu:pauli_frame")
+        var t0 = perf_counter_ns()
+        var samples: DetectorSamples
+        var on_gpu = False
+        if dev != "cpu":
+            comptime if is_defined["QUMO_GPU"]():
+                var ok: Bool
+                try:
+                    ok = gpu_available()
+                except:
+                    ok = False
+                on_gpu = ok
+                if not ok and dev == "gpu":
+                    note = "no usable GPU device: ran on the CPU"
+            else:
+                if dev == "gpu":
+                    note = "GPU support not compiled (build with -D QUMO_GPU): ran on the CPU"
+        if on_gpu:
+            var gs = GpuFrameSampler(m.cc.circuit)
+            samples = gs.sample_detectors(n, UInt64(Int(py=seed)))
+            method = gs.method_name()
+        else:
+            samples = m.frames.sample_detectors(n, UInt64(Int(py=seed)), Int(py=threads))
+        var secs = Float64(perf_counter_ns() - t0) / 1e9
+        var D = m.num_detectors
+        var K = m.num_observables
+        var bd = (D + 7) // 8
+        var bk = (K + 7) // 8
+        var digits = _HEXD.as_bytes()
+        var hd = List[UInt8](capacity=2 * bd * n)
+        var hk = List[UInt8](capacity=2 * bk * n)
+        for s in range(n):
+            for j in range(bd):
+                var byte = 0
+                for k in range(8):
+                    var det = 8 * j + k
+                    if det < D and samples.get(s, det):
+                        byte |= 1 << k
+                hd.append(digits[byte >> 4])
+                hd.append(digits[byte & 15])
+            for j in range(bk):
+                var byte = 0
+                for k in range(8):
+                    var o = 8 * j + k
+                    if o < K and samples.observable(s, o):
+                        byte |= 1 << k
+                hk.append(digits[byte >> 4])
+                hk.append(digits[byte & 15])
+        return Python.tuple(String(unsafe_from_utf8=Span(hd)), String(unsafe_from_utf8=Span(hk)), method, note, secs)
+
+    @staticmethod
+    def decode(py_self: PythonObject, dets_hex: PythonObject, shots: PythonObject, threads: PythonObject) raises -> PythonObject:
+        """Sparse-blossom predictions for packed detection events ->
+        (predictions_hex, seconds, detection_events). threads=1: this thread
+        only (one decoder worker); 0: every core (decode_samples)."""
+        ref m = Self._get(py_self)[]
+        var text = String(py=dets_hex)
+        var bs = text.as_bytes()
+        var n = Int(py=shots)
+        var D = m.num_detectors
+        var K = m.num_observables
+        var bd = (D + 7) // 8
+        var bk = (K + 7) // 8
+        if text.byte_length() != 2 * bd * n:
+            raise Error("QM-E913: packed detection events have " + String(text.byte_length()) + " hex digits, expected " + String(2 * bd * n) + " for " + String(n) + " shots of " + String(D) + " detectors. Hint: decode with the QecMemory that sampled them.")
+        var t0 = perf_counter_ns()
+        var preds = List[UInt64](length=max(1, n), fill=0)
+        var events = 0
+        if Int(py=threads) == 1:
+            var fired = List[Int]()
+            for s in range(n):
+                fired.clear()
+                var base = 2 * bd * s
+                for j in range(bd):
+                    var byte = _hex_nibble(Int(bs[base + 2 * j])) * 16 + _hex_nibble(Int(bs[base + 2 * j + 1]))
+                    if byte == 0:
+                        continue
+                    for k in range(8):
+                        if (byte >> k) & 1 == 1:
+                            fired.append(8 * j + k)
+                events += len(fired)
+                preds[s] = m.decoder.decode(fired)
+        else:
+            var smp = DetectorSamples(n, D, K)
+            for s in range(n):
+                var base = 2 * bd * s
+                var b = s // BATCH
+                var w = (s % BATCH) >> 6
+                var bit = UInt64(1) << UInt64(s & 63)
+                for j in range(bd):
+                    var byte = _hex_nibble(Int(bs[base + 2 * j])) * 16 + _hex_nibble(Int(bs[base + 2 * j + 1]))
+                    if byte == 0:
+                        continue
+                    for k in range(8):
+                        if (byte >> k) & 1 == 1:
+                            smp.dets[(b * D + 8 * j + k) * FW + w] |= bit
+                            events += 1
+            preds = decode_samples(m.decoder, smp)
+        var secs = Float64(perf_counter_ns() - t0) / 1e9
+        var digits = _HEXD.as_bytes()
+        var hk = List[UInt8](capacity=2 * bk * n)
+        for s in range(n):
+            for j in range(bk):
+                var byte = Int((preds[s] >> UInt64(8 * j)) & 255)
+                hk.append(digits[byte >> 4])
+                hk.append(digits[byte & 15])
+        return Python.tuple(String(unsafe_from_utf8=Span(hk)), secs, events)
+
+    def write_to(self, mut w: Some[Writer]):
+        w.write("<qumo.QecMemory ", self.cc.code, " d=", self.cc.distance, " rounds=", self.cc.rounds, " detectors=",
+                self.num_detectors, ">")
+
+    def write_repr_to(self, mut w: Some[Writer]):
+        self.write_to(w)
+
+
+def py_qec_memory(code: PythonObject, distance: PythonObject, rounds: PythonObject, p: PythonObject) raises -> PythonObject:
+    """QecMemory for a generated memory circuit ('surface_z', 'surface_x',
+    'repetition') under uniform circuit noise p (Stim/Sinter convention)."""
+    var cc = generate_code(String(py=code), Int(py=distance), Int(py=rounds), NoiseParams.uniform(Float64(py=p)))
+    return PythonObject(alloc=PyQecMemory(cc^))
+
+
 @export
 def PyInit_qumo_py() abi("C") -> PythonObject:
     try:
@@ -426,6 +850,21 @@ def PyInit_qumo_py() abi("C") -> PythonObject:
         m.def_function[py_expectation]("expectation")
         m.def_function[py_sample_device]("sample_device")
         m.def_function[py_gpu_info]("gpu_info")
+        _ = (
+            m.add_type[PyQecMemory]("QecMemory")
+            .def_method[PyQecMemory.info]("info")
+            .def_method[PyQecMemory.dem_text]("dem_text")
+            .def_method[PyQecMemory.stim_text]("stim_text")
+            .def_method[PyQecMemory.sample]("sample")
+            .def_method[PyQecMemory.decode]("decode")
+        )
+        m.def_function[py_expectation_device]("expectation_device")
+        m.def_function[py_expectations_device]("expectations_device")
+        m.def_function[py_value_and_gradient]("value_and_gradient")
+        m.def_function[py_batch_value_and_gradient]("batch_value_and_gradient")
+        m.def_function[py_subspace_ground_state]("subspace_ground_state")
+        m.def_function[py_schedule]("schedule")
+        m.def_function[py_qec_memory]("qec_memory")
         return m.finalize()
     except e:
         abort(String("error creating qumo_py module: ", e))

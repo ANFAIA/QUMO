@@ -76,4 +76,54 @@ def main() raises:
     except e:
         raised = String(e).startswith("QM-E941")
     assert_true(raised, "QM-E941 expected for an unknown job precision")
+    test_pinning()
     print("test_orchestrator OK")
+
+
+def test_pinning() raises:
+    """Device pinning: pinned jobs go to their device, unpinned ones to HEFT."""
+    var pool = List[Device]()
+    pool.append(Device.cpu())
+    pool.append(Device.qpu("sc-qpu", 20, 5.0, 1e-4, 0.3, 1e-4))
+    pool.append(Device.qpu("ion-qpu", 12, 30.0, 1e-2, 1.0, 1e-2))
+    var c6 = ghz(6)
+    c6.measure_all()
+    var wf = Workflow()
+    var j0 = wf.add_sample("dense-fragment", c6, 500, device="ion-qpu")
+    var j1 = wf.add_sample("wide-fragment", c6, 500, device="sc-qpu")
+    var j2 = wf.add_estimate("exact-check", ghz(6), parse_pauli_sum("Z0 Z5"))
+    var sch = wf.plan(pool)
+    assert_equal(pool[sch.device_of[j0]].name, "ion-qpu")
+    assert_equal(pool[sch.device_of[j1]].name, "sc-qpu")
+    assert_equal(pool[sch.device_of[j2]].name, "cpu0")
+    var pinned_notes = 0
+    for line in sch.notes:
+        if "(pinned)" in line:
+            pinned_notes += 1
+    assert_equal(pinned_notes, 2)
+    # without the pin HEFT sends the dense fragment to the faster QPU
+    var wf_free = Workflow()
+    var k0 = wf_free.add_sample("dense-fragment", c6, 500)
+    var sfree = wf_free.plan(pool)
+    assert_true(pool[sfree.device_of[k0]].name != "ion-qpu", "unpinned job is placed by HEFT")
+    # pinned jobs run (QPU jobs on the local emulator, flagged emulated)
+    var res = wf.run(pool)
+    assert_true(res[j0].ok and res[j0].emulated and res[j0].device == "ion-qpu", "pinned job ran")
+    var raised = False
+    var wf_bad = Workflow()
+    _ = wf_bad.add_sample("x", c6, 10, device="nope")
+    try:
+        _ = wf_bad.plan(pool)
+    except e:
+        raised = String(e).startswith("QM-E463")
+    assert_true(raised, "QM-E463 for an unknown pinned device")
+    raised = False
+    var wf_small = Workflow()
+    var big = ghz(16)
+    big.measure_all()
+    _ = wf_small.add_sample("too-big", big, 10, device="ion-qpu")
+    try:
+        _ = wf_small.plan(pool)
+    except e:
+        raised = String(e).startswith("QM-E464")
+    assert_true(raised, "QM-E464 for a pinned device that is too small")

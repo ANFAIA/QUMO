@@ -317,6 +317,8 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E460", "execution", "No devices available in the execution pool.", "Add Device.cpu() at least.")
     _e(c, "QM-E461", "execution", "A workflow job fits no device in the pool (too many qubits).", "Add a device with more qubits, or a stabilizer device for Clifford circuits.")
     _e(c, "QM-E462", "execution", "A workflow job depends on a job that is not an earlier job.", "Add jobs in dependency order; a job may only depend on earlier jobs.")
+    _e(c, "QM-E463", "execution", "A workflow job is pinned (add_sample / add_estimate device=..., qumo_py.schedule job 'device') to a device name that is not in the pool.", "Use the name of a Device in the pool passed to plan()/run(), or device=\"\" to let HEFT choose.")
+    _e(c, "QM-E464", "execution", "A workflow job is pinned to a device that cannot run it (more qubits than max_qubits, or a non-Clifford circuit on a Clifford-only device).", "Pin it to a larger / general device, or unpin it so HEFT places it.")
     # gpu
     _e(c, "QM-E470", "gpu", "GPU support is not compiled into this build.", "Rebuild with -D QUMO_GPU (make cli-gpu / py-gpu / test-gpu); on macOS install Xcode and run 'xcodebuild -downloadComponent MetalToolchain' first.")
     _e(c, "QM-E471", "gpu", "Dynamic or noisy circuit given to the GPU state-vector sampler (it runs static circuits: terminal measurements, no noise).", "Use qumo.exec.dispatch.sample_auto or sample_on, which fall back to CPU trajectories.")

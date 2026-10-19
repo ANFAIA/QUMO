@@ -188,6 +188,16 @@ Fix: Add a device with more qubits, or a stabilizer device for Clifford circuits
 **A workflow job depends on a job that is not an earlier job.**  
 Fix: Add jobs in dependency order; a job may only depend on earlier jobs.
 
+### QM-E463
+
+**A workflow job is pinned (add_sample / add_estimate device=..., qumo_py.schedule job 'device') to a device name that is not in the pool.**  
+Fix: Use the name of a Device in the pool passed to plan()/run(), or device="" to let HEFT choose.
+
+### QM-E464
+
+**A workflow job is pinned to a device that cannot run it (more qubits than max_qubits, or a non-Clifford circuit on a Clifford-only device).**  
+Fix: Pin it to a larger / general device, or unpin it so HEFT places it.
+
 ## QM-E47x — GPU acceleration
 
 See [GPU.md](GPU.md). Only GPU entry points raise these codes. The MCP tool `qumo_run_device` and `qumo.exec.dispatch.sample_on(..., "gpu")` never fail because the GPU is missing: they run on the CPU and report warning QM-W020. They do fail with QM-E472 when precision 'fp64' is requested on an Apple GPU, which has no fp64.

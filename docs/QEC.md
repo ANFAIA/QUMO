@@ -446,6 +446,22 @@ Below threshold the logical error rate falls with distance (p = 0.1 %:
 d=3 8e-4 → d=5 1.3e-4 → d=7 ~2e-5; UF crossing point ≈ 0.6–0.8 % from the
 `threshold_sweep` example).
 
+## Python streaming interface (`qumo_py.QecMemory`)
+
+`qumo_py.qec_memory(code, distance, rounds, p)` returns a `QecMemory`
+(generated circuit, detector error model, sparse-blossom decoder):
+`sample(shots, seed, device, threads)` returns packed detection events and
+observable flips as hex strings (one ceil(D/8)-byte record per shot, bit k
+of byte j = detector 8j + k, Stim's b8 layout) from CPU or GPU Pauli frames;
+`decode(dets_hex, shots, threads)` returns packed predictions (threads=1:
+one decoder in this thread, 0: all cores); `info()`, `dem_text()`,
+`stim_text()`. `examples/heterogeneous/realtime_qec` streams it to a pool of
+decoder processes under a real-time budget. Note: PyMatching built from
+`dem_text()` disagrees with QUMO's decoder on about 0.2 % of shots at
+p = 0.004 on the d = 5 surface code, while PyMatching built from Stim's DEM
+of `stim_text()` agrees on every shot; the example uses the latter as its
+reference.
+
 ## Limitations / next steps
 
 * Sparse blossom (`mwpm`) is exact w.r.t. the discretised weights
