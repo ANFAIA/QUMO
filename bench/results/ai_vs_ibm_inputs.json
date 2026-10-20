@@ -1,0 +1,710 @@
+{
+"families/clifford_n20_s1": {
+"swaps": 3
+},
+"families/clifford_n40_s1": {
+"swaps": 5
+},
+"families/clifford_n5_s1": {
+"swaps": 1
+},
+"families/clifford_n5_s2": {
+"swaps": 2
+},
+"families/clifford_n6_s1": {
+"swaps": 3
+},
+"families/clifford_n6_s2": {
+"swaps": 0
+},
+"families/clifford_n7_s1": {
+"swaps": 1
+},
+"families/clifford_n7_s2": {
+"swaps": 4
+},
+"families/clifford_n8_s1": {
+"swaps": 3
+},
+"families/clifford_n8_s2": {
+"swaps": 1
+},
+"families/clifford_n9_s1": {
+"swaps": 0
+},
+"families/clifford_n9_s2": {
+"swaps": 3
+},
+"families/esu2_circular_r3_n100": {
+"swaps": 0
+},
+"families/esu2_circular_r3_n20": {
+"swaps": 0
+},
+"families/esu2_circular_r3_n50": {
+"swaps": 0
+},
+"families/esu2_full_r1_n100": {
+"swaps": 0
+},
+"families/esu2_full_r1_n20": {
+"swaps": 0
+},
+"families/esu2_full_r1_n50": {
+"swaps": 0
+},
+"families/linear_n20_s1": {
+"swaps": 0
+},
+"families/linear_n40_s1": {
+"swaps": 0
+},
+"families/linear_n5_s1": {
+"swaps": 0
+},
+"families/linear_n5_s2": {
+"swaps": 0
+},
+"families/linear_n6_s1": {
+"swaps": 0
+},
+"families/linear_n6_s2": {
+"swaps": 0
+},
+"families/linear_n7_s1": {
+"swaps": 0
+},
+"families/linear_n7_s2": {
+"swaps": 0
+},
+"families/linear_n8_s1": {
+"swaps": 0
+},
+"families/linear_n8_s2": {
+"swaps": 0
+},
+"families/linear_n9_s1": {
+"swaps": 0
+},
+"families/linear_n9_s2": {
+"swaps": 0
+},
+"families/perm_n12": {
+"swaps": 10
+},
+"families/perm_n27": {
+"swaps": 24
+},
+"families/perm_n65": {
+"swaps": 60
+},
+"families/perm_n8": {
+"swaps": 6
+},
+"families/qft_n100": {
+"swaps": 50
+},
+"families/qft_n20": {
+"swaps": 10
+},
+"families/qft_n50": {
+"swaps": 25
+},
+"feynman/W-state": {
+"swaps": 0
+},
+"feynman/adder": {
+"swaps": 0
+},
+"feynman/adder_8": {
+"swaps": 0
+},
+"feynman/barenco_tof_10": {
+"swaps": 0
+},
+"feynman/barenco_tof_3": {
+"swaps": 0
+},
+"feynman/barenco_tof_4": {
+"swaps": 0
+},
+"feynman/barenco_tof_5": {
+"swaps": 0
+},
+"feynman/bigadder": {
+"swaps": 0
+},
+"feynman/csla_mux_3": {
+"swaps": 0
+},
+"feynman/csum_mux_9": {
+"swaps": 0
+},
+"feynman/gf2^10_mult": {
+"swaps": 0
+},
+"feynman/gf2^16_mult": {
+"swaps": 0
+},
+"feynman/gf2^32_mult": {
+"swaps": 0
+},
+"feynman/gf2^4_mult": {
+"swaps": 0
+},
+"feynman/gf2^5_mult": {
+"swaps": 0
+},
+"feynman/gf2^6_mult": {
+"swaps": 0
+},
+"feynman/gf2^7_mult": {
+"swaps": 0
+},
+"feynman/gf2^8_mult": {
+"swaps": 0
+},
+"feynman/gf2^9_mult": {
+"swaps": 0
+},
+"feynman/grover_5": {
+"swaps": 0
+},
+"feynman/ham15-high": {
+"swaps": 0
+},
+"feynman/ham15-low": {
+"swaps": 0
+},
+"feynman/ham15-med": {
+"swaps": 0
+},
+"feynman/hwb10": {
+"swaps": 0
+},
+"feynman/hwb11": {
+"swaps": 0
+},
+"feynman/hwb12": {
+"swaps": 0
+},
+"feynman/hwb6": {
+"swaps": 0
+},
+"feynman/hwb8": {
+"swaps": 0
+},
+"feynman/mod5_4": {
+"swaps": 0
+},
+"feynman/mod_adder_1024": {
+"swaps": 0
+},
+"feynman/mod_mult_55": {
+"swaps": 0
+},
+"feynman/mod_red_21": {
+"swaps": 0
+},
+"feynman/qcla_adder_10": {
+"swaps": 0
+},
+"feynman/qcla_com_7": {
+"swaps": 0
+},
+"feynman/qcla_mod_7": {
+"swaps": 0
+},
+"feynman/qft": {
+"swaps": 0
+},
+"feynman/qft_4": {
+"swaps": 0
+},
+"feynman/qpt": {
+"swaps": 0
+},
+"feynman/rb": {
+"swaps": 0
+},
+"feynman/rc_adder_6": {
+"swaps": 0
+},
+"feynman/tof_10": {
+"swaps": 0
+},
+"feynman/tof_3": {
+"swaps": 0
+},
+"feynman/tof_4": {
+"swaps": 0
+},
+"feynman/tof_5": {
+"swaps": 0
+},
+"feynman/vbe_adder_3": {
+"swaps": 0
+},
+"hamlib/ham_0-uuf100-0810.cnf-40-res": {
+"swaps": 0
+},
+"hamlib/ham_2-uf100-0396.cnf-46-res": {
+"swaps": 0
+},
+"hamlib/ham_2-uf100-0601.cnf-46-res": {
+"swaps": 0
+},
+"hamlib/ham_4-flat100-7.cnf-90-cc": {
+"swaps": 0
+},
+"hamlib/ham_4-uf100-0246.cnf-70-res": {
+"swaps": 0
+},
+"hamlib/ham_7-uf20-0384.cnf-8-res": {
+"swaps": 0
+},
+"hamlib/ham_8-uuf100-0509.cnf-40-cc": {
+"swaps": 0
+},
+"hamlib/ham_bh_graph-1D-grid-nonpbc-qubitnodes_Lx-12_U-40_enc-unary_d-4": {
+"swaps": 0
+},
+"hamlib/ham_bh_graph-1D-grid-pbc-qubitnodes_Lx-10_U-30_enc-unary_d-8": {
+"swaps": 0
+},
+"hamlib/ham_bh_graph-1D-grid-pbc-qubitnodes_Lx-14_U-10_enc-stdbinary_d-4": {
+"swaps": 0
+},
+"hamlib/ham_bh_graph-1D-grid-pbc-qubitnodes_Lx-24_U-20_enc-stdbinary_d-4": {
+"swaps": 0
+},
+"hamlib/ham_bh_graph-1D-grid-pbc-qubitnodes_Lx-46_U-2_enc-gray_d-4": {
+"swaps": 0
+},
+"hamlib/ham_bh_graph-1D-grid-pbc-qubitnodes_Lx-4_U-40_enc-gray_d-8": {
+"swaps": 0
+},
+"hamlib/ham_bh_graph-1D-grid-pbc-qubitnodes_Lx-60_U-10_enc-stdbinary_d-4": {
+"swaps": 0
+},
+"hamlib/ham_bh_graph-2D-grid-nonpbc-qubitnodes_Lx-7_Ly-7_U-70_enc-gray_d-4": {
+"swaps": 0
+},
+"hamlib/ham_bh_graph-2D-triag-nonpbc-qubitnodes_Lx-3_Ly-5_U-30_enc-gray_d-4": {
+"swaps": 0
+},
+"hamlib/ham_bh_graph-2D-triag-pbc-qubitnodes_Lx-10_Ly-10_U-30_enc-stdbinary_d-4": {
+"swaps": 0
+},
+"hamlib/ham_bh_graph-2D-triag-pbc-qubitnodes_Lx-3_Ly-22_U-70_enc-unary_d-4": {
+"swaps": 0
+},
+"hamlib/ham_bh_graph-2D-triag-pbc-qubitnodes_Lx-5_Ly-5_U-30_enc-unary_d-4": {
+"swaps": 0
+},
+"hamlib/ham_bh_graph-3D-grid-nonpbc-qubitnodes_Lx-2_Ly-2_Lz-2_U-20_enc-unary_d-4": {
+"swaps": 0
+},
+"hamlib/ham_complbipart-n-10_a-5_b-5": {
+"swaps": 0
+},
+"hamlib/ham_dsjc1000.1,n-36,rinst-4": {
+"swaps": 0
+},
+"hamlib/ham_enc_gray_dvalues_4-4-4-4-4-4-4": {
+"swaps": 0
+},
+"hamlib/ham_enc_gray_dvalues_8-8-8": {
+"swaps": 0
+},
+"hamlib/ham_enc_gray_dvalues_d-level-16": {
+"swaps": 0
+},
+"hamlib/ham_enc_stdbinary_dvalues_d-level-4": {
+"swaps": 0
+},
+"hamlib/ham_enc_unary_dvalues_4-4-4": {
+"swaps": 0
+},
+"hamlib/ham_fh-graph-1D-grid-pbc-qubitnodes_Lx-50_U-2_enc-jw": {
+"swaps": 0
+},
+"hamlib/ham_gnp-k_2_n-4_rinst-05": {
+"swaps": 0
+},
+"hamlib/ham_gnp-k_4_n-40_rinst-07": {
+"swaps": 0
+},
+"hamlib/ham_gnp-k_4_n-6_rinst-15": {
+"swaps": 0
+},
+"hamlib/ham_gnp-k_5_n-24_rinst-04": {
+"swaps": 0
+},
+"hamlib/ham_gnp-k_5_n-60_rinst-19": {
+"swaps": 0
+},
+"hamlib/ham_gnp-k_5_n-90_rinst-02": {
+"swaps": 0
+},
+"hamlib/ham_graph-1D-grid-pbc-qubitnodes_Lx-16_h-2": {
+"swaps": 0
+},
+"hamlib/ham_graph-1D-grid-pbc-qubitnodes_Lx-26_h-6": {
+"swaps": 0
+},
+"hamlib/ham_graph-2D-grid-nonpbc-qubitnodes_Lx-5_Ly-15_h-3": {
+"swaps": 0
+},
+"hamlib/ham_graph-2D-triag-pbc-qubitnodes_Lx-13_Ly-13_h-0.1": {
+"swaps": 0
+},
+"hamlib/ham_ham_BK-14": {
+"swaps": 0
+},
+"hamlib/ham_ham_BK12": {
+"swaps": 0
+},
+"hamlib/ham_ham_BK22": {
+"swaps": 0
+},
+"hamlib/ham_ham_JW-10": {
+"swaps": 0
+},
+"hamlib/ham_ham_JW-14": {
+"swaps": 0
+},
+"hamlib/ham_ham_JW-18": {
+"swaps": 0
+},
+"hamlib/ham_ham_JW-22": {
+"swaps": 0
+},
+"hamlib/ham_ham_JW-6": {
+"swaps": 0
+},
+"hamlib/ham_ham_JW-8": {
+"swaps": 0
+},
+"hamlib/ham_ham_JW10": {
+"swaps": 0
+},
+"hamlib/ham_ham_JW12": {
+"swaps": 0
+},
+"hamlib/ham_ham_JW14": {
+"swaps": 0
+},
+"hamlib/ham_ham_JW24": {
+"swaps": 0
+},
+"hamlib/ham_ham_parity-14": {
+"swaps": 0
+},
+"hamlib/ham_ham_parity-4": {
+"swaps": 0
+},
+"hamlib/ham_ham_parity10": {
+"swaps": 0
+},
+"hamlib/ham_ham_parity12": {
+"swaps": 0
+},
+"hamlib/ham_mu_x_prime_enc_stdbinary_dvalues_8-8-8-8-8-8-8-8-8-4-4-4-4-4-4": {
+"swaps": 0
+},
+"hamlib/ham_mu_x_prime_enc_unary_dvalues_16-16-16-16-16-16-16-16-16-16-16-16-16-16-16": {
+"swaps": 0
+},
+"hamlib/ham_mu_x_prime_enc_unary_dvalues_4-4-4": {
+"swaps": 0
+},
+"hamlib/ham_mu_y_prime_enc_gray_dvalues_16-16-16": {
+"swaps": 0
+},
+"hamlib/ham_mu_y_prime_enc_stdbinary_dvalues_16-16-16-16-8-8-8": {
+"swaps": 0
+},
+"hamlib/ham_mu_y_prime_enc_stdbinary_dvalues_4-4-4-4-4-4-4-4-4-4-4-4-4-4-4-4-4-4": {
+"swaps": 0
+},
+"hamlib/ham_mu_y_prime_enc_stdbinary_dvalues_8-8-4-4": {
+"swaps": 0
+},
+"hamlib/ham_mu_y_prime_enc_stdbinary_dvalues_8-8-8-8-8-8": {
+"swaps": 0
+},
+"hamlib/ham_mu_y_prime_enc_unary_dvalues_16-16-16-16-16-16": {
+"swaps": 0
+},
+"hamlib/ham_mu_y_prime_enc_unary_dvalues_4-4-4": {
+"swaps": 0
+},
+"hamlib/ham_mu_y_prime_enc_unary_dvalues_8-8-8-8-8-8-8": {
+"swaps": 0
+},
+"hamlib/ham_mu_z_prime_enc_gray_dvalues_4-4-4-4": {
+"swaps": 0
+},
+"hamlib/ham_mu_z_prime_enc_unary_dvalues_16-16-16-16-16-16-16": {
+"swaps": 0
+},
+"hamlib/ham_queen13_13,n-28,rinst-0": {
+"swaps": 0
+},
+"hamlib/ham_reg-4_n-90_rinst-07": {
+"swaps": 0
+},
+"hamlib/ham_reg-5_n-10_rinst-07": {
+"swaps": 0
+},
+"hamlib/ham_tsp_prob-d198_Ncity-8_enc-unary": {
+"swaps": 0
+},
+"hamlib/ham_tsp_prob-fl417_Ncity-16_enc-stdbinary": {
+"swaps": 0
+},
+"hamlib/ham_tsp_prob-kroD100_Ncity-16_enc-stdbinary": {
+"swaps": 0
+},
+"hamlib/ham_tsp_prob-lin105_Ncity-7_enc-unary": {
+"swaps": 0
+},
+"hamlib/ham_tsp_prob-pr76_Ncity-10_enc-unary": {
+"swaps": 0
+},
+"hamlib/ham_tsp_prob-st70_Ncity-10_enc-unary": {
+"swaps": 0
+},
+"hamlib/ham_tsp_prob-ts225_Ncity-5_enc-unary": {
+"swaps": 0
+},
+"hamlib/ham_tsp_prob-ulysses22_Ncity-8_enc-stdbinary": {
+"swaps": 0
+},
+"hamlib/ham_tsp_rand-002_Ncity-4_enc-stdbinary": {
+"swaps": 0
+},
+"hamlib/ham_will199gpia,n-60,rinst-8": {
+"swaps": 0
+},
+"neutral/feynman__W-state": {
+"swaps": 0
+},
+"neutral/feynman__adder": {
+"swaps": 0
+},
+"neutral/feynman__barenco_tof_3": {
+"swaps": 0
+},
+"neutral/feynman__barenco_tof_4": {
+"swaps": 0
+},
+"neutral/feynman__barenco_tof_5": {
+"swaps": 0
+},
+"neutral/feynman__gf2p4_mult": {
+"swaps": 0
+},
+"neutral/feynman__grover_5": {
+"swaps": 0
+},
+"neutral/feynman__hwb6": {
+"swaps": 0
+},
+"neutral/feynman__hwb8": {
+"swaps": 0
+},
+"neutral/feynman__mod5_4": {
+"swaps": 0
+},
+"neutral/feynman__mod_mult_55": {
+"swaps": 0
+},
+"neutral/feynman__mod_red_21": {
+"swaps": 0
+},
+"neutral/feynman__qft": {
+"swaps": 0
+},
+"neutral/feynman__qft_4": {
+"swaps": 0
+},
+"neutral/feynman__qpt": {
+"swaps": 0
+},
+"neutral/feynman__rb": {
+"swaps": 0
+},
+"neutral/feynman__rc_adder_6": {
+"swaps": 0
+},
+"neutral/feynman__tof_3": {
+"swaps": 0
+},
+"neutral/feynman__tof_4": {
+"swaps": 0
+},
+"neutral/feynman__tof_5": {
+"swaps": 0
+},
+"neutral/feynman__vbe_adder_3": {
+"swaps": 0
+},
+"neutral/qb_medium__bv_n14": {
+"swaps": 0
+},
+"neutral/qb_medium__gcm_h6": {
+"swaps": 0
+},
+"neutral/qb_medium__multiply_n13": {
+"swaps": 0
+},
+"neutral/qb_medium__sat_n11": {
+"swaps": 0
+},
+"neutral/qb_medium__seca_n11": {
+"swaps": 0
+},
+"neutral/qb_small__adder_n10": {
+"swaps": 0
+},
+"neutral/qb_small__adder_n4": {
+"swaps": 0
+},
+"neutral/qb_small__basis_change_n3": {
+"swaps": 0
+},
+"neutral/qb_small__basis_test_n4": {
+"swaps": 6
+},
+"neutral/qb_small__basis_trotter_n4": {
+"swaps": 60
+},
+"neutral/qb_small__bb84_n8": {
+"swaps": 0
+},
+"neutral/qb_small__bell_n4": {
+"swaps": 0
+},
+"neutral/qb_small__cat_state_n4": {
+"swaps": 0
+},
+"neutral/qb_small__deutsch_n2": {
+"swaps": 0
+},
+"neutral/qb_small__dnn_n2": {
+"swaps": 0
+},
+"neutral/qb_small__dnn_n8": {
+"swaps": 0
+},
+"neutral/qb_small__error_correctiond3_n5": {
+"swaps": 0
+},
+"neutral/qb_small__fredkin_n3": {
+"swaps": 0
+},
+"neutral/qb_small__grover_n2": {
+"swaps": 0
+},
+"neutral/qb_small__hhl_n7": {
+"swaps": 0
+},
+"neutral/qb_small__hs4_n4": {
+"swaps": 0
+},
+"neutral/qb_small__ising_n10": {
+"swaps": 0
+},
+"neutral/qb_small__iswap_n2": {
+"swaps": 0
+},
+"neutral/qb_small__linearsolver_n3": {
+"swaps": 0
+},
+"neutral/qb_small__lpn_n5": {
+"swaps": 0
+},
+"neutral/qb_small__pea_n5": {
+"swaps": 0
+},
+"neutral/qb_small__qaoa_n3": {
+"swaps": 0
+},
+"neutral/qb_small__qaoa_n6": {
+"swaps": 0
+},
+"neutral/qb_small__qec_en_n5": {
+"swaps": 0
+},
+"neutral/qb_small__qft_n4": {
+"swaps": 0
+},
+"neutral/qb_small__qpe_n9": {
+"swaps": 0
+},
+"neutral/qb_small__qrng_n4": {
+"swaps": 0
+},
+"neutral/qb_small__quantumwalks_n2": {
+"swaps": 0
+},
+"neutral/qb_small__sat_n7": {
+"swaps": 0
+},
+"neutral/qb_small__simon_n6": {
+"swaps": 0
+},
+"neutral/qb_small__teleportation_n3": {
+"swaps": 0
+},
+"neutral/qb_small__toffoli_n3": {
+"swaps": 0
+},
+"neutral/qb_small__variational_n4": {
+"swaps": 0
+},
+"neutral/qb_small__vqe_n4": {
+"swaps": 0
+},
+"neutral/qb_small__vqe_uccsd_n4": {
+"swaps": 0
+},
+"neutral/qb_small__vqe_uccsd_n6": {
+"swaps": 0
+},
+"neutral/qb_small__vqe_uccsd_n8": {
+"swaps": 0
+},
+"neutral/qb_small__wstate_n3": {
+"swaps": 0
+},
+"summit/BV_100": {
+"swaps": 0
+},
+"summit/BVlike_100": {
+"swaps": 0
+},
+"summit/QAOA_100": {
+"swaps": 0
+},
+"summit/QFT_100": {
+"swaps": 0
+},
+"summit/QV_100": {
+"swaps": 0
+},
+"summit/circSU2_100": {
+"swaps": 0
+},
+"summit/circSU2_89": {
+"swaps": 0
+},
+"summit/clifford_100": {
+"swaps": 70
+},
+"summit/square_heisenberg_100": {
+"swaps": 0
+}
+}

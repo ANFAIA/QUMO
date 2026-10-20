@@ -336,39 +336,163 @@ def compile_qumo_ai(qasm_text, target, level, seed):
 
 
 # --------------------------------------------------------------------------- Qiskit + IBM AI (optional baseline)
-# IBM-trained external baseline ONLY: qiskit-ibm-transpiler's local AI mode
-# downloads IBM model weights from Hugging Face at runtime. It is installed
-# only in a scratch venv and is never a QUMO dependency.
+# IBM-trained external baseline ONLY. qiskit-ibm-transpiler 0.18.x local mode
+# (routing: a Rust extension shipped in the wheel; synthesis: qiskit-gym RL
+# policies) downloads IBM's model weights from Hugging Face
+# (qiskit/ai-transpiler_*) on first use. It is installed only in a scratch
+# venv (bench/ai_vs_ibm/README.md) and is never a QUMO dependency; set
+# HF_HUB_OFFLINE=1 once the models are cached so nothing is fetched while
+# timing. No IBM Quantum cloud service is used (local_mode=True everywhere).
+# Targets: IBM's local routing accepts any coupling map; its synthesis models
+# only match heavy-hex-like subgraphs (lines / trees of degree <= 3, 12-rings),
+# so the baseline is restricted to IBM-like CX / CZ targets.
 _IBM_AI_TARGETS = ("sc_heavy_hex", "linear_cx")
 
 
-def compile_qiskit_ibm_ai(qasm_text, target, level, seed):
+def _import_ibm_ai():
+    """Import qiskit-ibm-transpiler (optional). 0.18.0 imports
+    `qiskit.synthesis.linear.linear_matrix_utils`, a module Qiskit 2.x removed;
+    the one function it takes from it is still public
+    (`qiskit.synthesis.linear.random_invertible_binary_matrix`), so alias the
+    module. It is only used by IBM's random-test-circuit helpers, never on the
+    transpilation path. IBM's loggers are set to INFO at import; keep errors only."""
+    import logging
+    import sys
+    import types
+    name = "qiskit.synthesis.linear.linear_matrix_utils"
+    if name not in sys.modules:
+        try:
+            import importlib
+            importlib.import_module(name)
+        except ImportError:
+            import qiskit.synthesis.linear as lin
+            mod = types.ModuleType(name)
+            mod.random_invertible_binary_matrix = lin.random_invertible_binary_matrix
+            sys.modules[name] = mod
+    import qiskit_ibm_transpiler
+    for lname in list(logging.root.manager.loggerDict):
+        if lname.startswith("qiskit_ibm_transpiler"):
+            logging.getLogger(lname).setLevel(logging.ERROR)
+    return qiskit_ibm_transpiler
+
+
+def ibm_ai_pass_manager(cmap, basis, level, seed, variant="default"):
+    """IBM AI pass managers (local mode), all on Qiskit preset level `level`:
+
+    * default: `generate_ai_pass_manager(optimization_level=level,
+      ai_optimization_level=level, ai_layout_mode="optimize")` - AIRouting
+      replaces Sabre layout + routing; post-routing AI linear-function
+      synthesis (IBM's documented hybrid pass manager);
+    * route: the same without AI synthesis (AIRouting only);
+    * full: AIRouting + the whole documented collection / synthesis list
+      (CollectCliffords + AICliffordSynthesis, CollectLinearFunctions forward
+      and backward + AILinearFunctionSynthesis, CollectPermutations +
+      AIPermutationSynthesis, CollectPauliNetworks + AIPauliNetworkSynthesis);
+    * synth: Qiskit's own Sabre layout / routing + that synthesis list.
+    """
+    _import_ibm_ai()
+    from qiskit.transpiler import PassManager
+    from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
+    from qiskit_ibm_transpiler import generate_ai_pass_manager
+    from qiskit_ibm_transpiler.ai.collection import (CollectCliffords, CollectLinearFunctions,
+                                                     CollectPermutations, CollectPauliNetworks)
+    from qiskit_ibm_transpiler.ai.synthesis import (AICliffordSynthesis, AILinearFunctionSynthesis,
+                                                    AIPermutationSynthesis, AIPauliNetworkSynthesis)
+
+    opts = {"basis_gates": list(basis), "seed_transpiler": seed}
+    if variant in ("default", "route", "full"):
+        pm = generate_ai_pass_manager(coupling_map=cmap, ai_optimization_level=level, optimization_level=level,
+                                      ai_layout_mode="optimize", include_ai_synthesis=(variant == "default"),
+                                      qiskit_transpile_options=opts)
+    elif variant == "synth":
+        pm = generate_preset_pass_manager(optimization_level=level, coupling_map=cmap, **opts)
+    else:
+        raise ValueError(variant)
+    if variant in ("default", "route", "full"):
+        # Workaround for an IBM bug (0.18.0 with Qiskit 2.5): AIRouting
+        # overwrites property_set["original_qubit_indices"] with the routed
+        # DAG's new qubits, so when the O2/O3 init stage's ElidePermutations has
+        # elided a SWAP (it records a virtual permutation keyed by the original
+        # qubits) TranspileLayout.from_property_set raises KeyError; any input
+        # with a SWAP / permutation gate fails. Dropping ElidePermutations for
+        # the AIRouting pipelines keeps them running (input SWAPs are then
+        # routed instead of relabelled); minimal repro in bench/ai_vs_ibm/README.md.
+        for i in reversed(range(len(pm.init._tasks))):
+            if any(type(t).__name__ == "ElidePermutations" for t in pm.init._tasks[i]):
+                pm.init.remove(i)
+        # record whether AIRouting actually ran (it is skipped when VF2Layout
+        # finds a perfect layout); see compile_qiskit_ibm_ai
+        flag = {"ran": False}
+        from qiskit_ibm_transpiler.ai.routing import AIRouting
+
+        def _mark(t):
+            if isinstance(t, AIRouting):
+                run0 = t.run
+
+                def run(dag, _run0=run0):
+                    flag["ran"] = True
+                    return _run0(dag)
+                t.run = run
+            for sub in (getattr(t, "tasks", None) or []):
+                _mark(sub)
+        for tl in pm.layout._tasks:
+            for t in tl:
+                _mark(t)
+        pm._ibm_airouting = flag
+    if variant in ("full", "synth"):
+        commute = level >= 3
+        lf = AILinearFunctionSynthesis(coupling_map=cmap, local_mode=True)
+        pm.post_routing = PassManager([
+            CollectCliffords(), AICliffordSynthesis(coupling_map=cmap, local_mode=True),
+            CollectLinearFunctions(do_commutative_analysis=commute), lf,
+            CollectLinearFunctions(do_commutative_analysis=commute, collect_from_back=True), lf,
+            CollectPermutations(), AIPermutationSynthesis(coupling_map=cmap, local_mode=True),
+            CollectPauliNetworks(), AIPauliNetworkSynthesis(coupling_map=cmap, local_mode=True),
+        ])
+    return pm
+
+
+def compile_qiskit_ibm_ai(qasm_text, target, level, seed, variant="default"):
+    """Qiskit + IBM AI transpiler, local mode: default -> AI level 2 on Qiskit
+    O2, max -> AI level 3 on Qiskit O3 (`ibm_ai_pass_manager`). IBM's learned
+    routing is not seedable (`seed` only reaches Qiskit's own passes)."""
     try:
-        from qiskit_ibm_transpiler import generate_ai_pass_manager
+        ibm = _import_ibm_ai()
     except Exception as e:  # not installed: optional baseline
         raise Unsupported(f"qiskit-ibm-transpiler not installed ({type(e).__name__}); optional IBM-trained baseline")
     from qiskit.transpiler import CouplingMap
 
-    if target.name not in _IBM_AI_TARGETS:
+    if target.gate_2q not in ("cx", "cz") or not (target.name in _IBM_AI_TARGETS or target.name.startswith("fake_")):
         raise Unsupported("IBM AI baseline is run on heavy-hex / IBM-like (CX/CZ) targets only")
     (qc, parse_s, _) = _timed(lambda: qasm2.loads(qasm_text, custom_instructions=qasm2.LEGACY_CUSTOM_INSTRUCTIONS))
     n_log = qc.num_qubits
-    opt = 2 if level == "default" else 3
-    cmap = CouplingMap(list(target.edge_set))
-    pm = generate_ai_pass_manager(coupling_map=cmap, ai_optimization_level=opt, optimization_level=opt,
-                                  ai_layout_mode="optimize", include_ai_synthesis=True,
-                                  qiskit_transpile_options={"basis_gates": list(target.basis),
-                                                            "seed_transpiler": seed})
+    opt = level if isinstance(level, int) else (2 if level == "default" else 3)
+    cmap = CouplingMap(sorted(target.edge_set))
+    pm = ibm_ai_pass_manager(cmap, target.basis, opt, seed, variant)
     tqc, wall, cpu = _timed(lambda: pm.run(qc))
+    extra = {}
     if tqc.layout is not None:
         init = tqc.layout.initial_index_layout(filter_ancillas=True)[:n_log]
         final = tqc.layout.final_index_layout(filter_ancillas=True)[:n_log]
+        if getattr(pm, "_ibm_airouting", {}).get("ran"):
+            # IBM bug (0.18.0): when AIRouting ran, the reported initial layout
+            # is the inverse permutation of the one the routed circuit uses
+            # (the final layout is right). Measured on every misreported case:
+            # the true placement of logical v is the position of v in the full
+            # reported initial layout. Correct it so that layout-aware checks
+            # (and users) see the right placement; the circuit is unchanged.
+            full = list(tqc.layout.initial_index_layout())
+            inv = [0] * len(full)
+            for v, p in enumerate(full):
+                inv[p] = v
+            fixed = inv[:n_log]
+            extra["ibm_initial_layout_corrected"] = list(fixed) != list(init)
+            init = fixed
     else:
         init = list(range(n_log))
         final = list(range(n_log))
-    import qiskit_ibm_transpiler
     return CompileOutput(tqc, list(init), list(final), wall, cpu, parse_s,
-                         f"qiskit {qiskit.__version__} + qiskit-ibm-transpiler {qiskit_ibm_transpiler.__version__}")
+                         f"qiskit {qiskit.__version__} + qiskit-ibm-transpiler {ibm.__version__}", extra)
 
 
 def warm_up(sdk):
