@@ -49,9 +49,9 @@ PyMatching agree on >= 99.9 % of shots and their logical error rates within
   time on an FPGA.
 * Packed syndromes cross processes as hex strings (pickled); a real system
   uses shared memory or an FPGA link (NVQLink).
-* PyMatching built from QUMO's own `dem_text()` disagreed on 0.2 % of shots
-  at p = 0.004 (QUMO's internal graph agrees with Stim's DEM); the reference
-  therefore uses Stim's DEM. Tracked as a separate issue.
+* The PyMatching reference is built from Stim's DEM of `stim_text()`. QUMO's own `dem_text()`
+  now exports the same graph-like decomposition QUMO's decoders use, so PyMatching built from
+  it agrees too (it used to export undecomposed hyperedges: 0.2 % disagreement, fixed).
 * No GPU-trained decoder stage.
 
 Sources: [CUDA-Q QEC](https://nvidia.github.io/cudaqx/components/qec/introduction.html);

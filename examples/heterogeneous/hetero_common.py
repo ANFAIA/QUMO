@@ -61,9 +61,9 @@ _ENV_AT_START = dict(os.environ)
 
 
 def _sanitize_env(q):
-    """Undo process-level environment changes made while the Mojo runtime starts (it sets
-    PYTHONEXECUTABLE to another interpreter and prefixes PYTHONPATH in the C environment, which
-    spawned worker processes would inherit and warn about). os.environ is unaffected."""
+    """Belt and braces for older builds: the Mojo runtime used to leave PYTHONEXECUTABLE /
+    PYTHONPATH pointing at another interpreter in the C environment after import (inherited by
+    spawned workers). qumo_py now restores them itself at import; this is a no-op then."""
     for k in ("PYTHONEXECUTABLE", "PYTHONPATH"):
         if k in _ENV_AT_START:
             os.putenv(k, _ENV_AT_START[k])

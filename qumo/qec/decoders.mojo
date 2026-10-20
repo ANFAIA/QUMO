@@ -272,6 +272,35 @@ def _weight(p: Float64) -> Float64:
 comptime UF_SCALE = 32.0
 
 
+def graphlike_dem(dem: DetectorErrorModel) -> DetectorErrorModel:
+    """Copy of `dem` in which every undecomposed hyperedge (> 2 detectors) is
+    written as the graph-like pieces the matching decoders actually use.
+
+    MatchingGraph decomposes such errors against the existing edges (pass 2 of
+    its constructor); the plain DEM text kept them as hyperedges, so an
+    external matcher (PyMatching) built from `to_text()` saw a different graph
+    and disagreed with QUMO's decoders on a fraction of shots. Exporting the
+    decomposition makes both see the same graph. Hyperedges that cannot be
+    decomposed stay as they are (the matching decoders drop them too)."""
+    var out = dem.copy()
+    var g = MatchingGraph(dem)
+    for i in range(len(out.errors)):
+        ref e = out.errors[i]
+        if len(e.dets) <= 2 or len(e.comp_dets) > 1 or len(e.dets) > 16:
+            continue
+        var parts = List[Int]()
+        if not g._decompose(e.dets, 0, e.obs, parts):
+            continue
+        for idx in parts:
+            var cd = List[Int]()
+            cd.append(g.eu[idx])
+            if g.ev[idx] != g.boundary:
+                cd.append(g.ev[idx])
+            e.comp_dets.append(cd^)
+            e.comp_obs.append(g.eobs[idx])
+    return out^
+
+
 struct UnionFindDecoder(Decoder):
     """Weighted Union-Find decoder (Delfosse & Nickerson 2017; weighted growth).
 

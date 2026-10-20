@@ -11,7 +11,7 @@ statistics, simulate. Used by the Benchpress `qumo_gym` and by
 
 from std.python import PythonObject, Python
 from std.python.bindings import PythonModuleBuilder
-from std.os import abort
+from std.os import abort, setenv, unsetenv
 from std.time import perf_counter_ns
 
 from qumo.ir.circuit import Circuit
@@ -30,7 +30,7 @@ from qumo.algorithms.sqd import subspace_ground_state
 from qumo.exec.orchestrator import Workflow, Device
 from qumo.qec.codes import generate_code, NoiseParams, CodeCircuit
 from qumo.qec.dem import detector_error_model, DetectorErrorModel
-from qumo.qec.decoders import MatchingGraph, decode_samples
+from qumo.qec.decoders import MatchingGraph, decode_samples, graphlike_dem
 from qumo.qec.sparse_blossom import SparseBlossomDecoder
 from qumo.sim.frame import FrameSimulator, DetectorSamples, BATCH, FW
 from qumo.gpu.frame_gpu import GpuFrameSampler
@@ -664,7 +664,9 @@ struct PyQecMemory(Movable, Writable):
 
     @staticmethod
     def dem_text(py_self: PythonObject) raises -> PythonObject:
-        return Self._get(py_self)[].dem.to_text()
+        # graph-like form: the same decomposition QUMO's matching decoders use,
+        # so PyMatching built from this text matches them shot for shot
+        return graphlike_dem(Self._get(py_self)[].dem).to_text()
 
     @staticmethod
     def stim_text(py_self: PythonObject) raises -> PythonObject:
@@ -805,6 +807,32 @@ def py_qec_memory(code: PythonObject, distance: PythonObject, rounds: PythonObje
     return PythonObject(alloc=PyQecMemory(cc^))
 
 
+# Environment variables the Mojo runtime sets at the C level when its Python
+# interop starts: it discovers *a* Python on the machine (e.g. a Homebrew
+# 3.14) and exports PYTHONEXECUTABLE, PYTHONPATH (":"-prefixed) and
+# MOJO_PYTHON_LIBRARY. Inside a host interpreter these are wrong, and every
+# child process (subprocess, multiprocessing spawn) inherits them: a
+# subprocess started with sys.executable then runs the other Python.
+
+
+def _restore_host_environment():
+    """Put those variables back to the host interpreter's values.
+
+    `os.environ` is a snapshot taken when the interpreter started, so it holds
+    the user's original values: restore each one, or unset it if the user had
+    not set it. Errors are ignored: the module must still import."""
+    try:
+        var environ = Python.import_module("os").environ
+        var keys: List[String] = ["PYTHONEXECUTABLE", "PYTHONPATH", "PYTHONHOME", "MOJO_PYTHON_LIBRARY"]
+        for key in keys:
+            if Bool(environ.__contains__(key)):
+                _ = setenv(key, String(py=environ[key]), True)
+            else:
+                _ = unsetenv(key)
+    except:
+        pass
+
+
 @export
 def PyInit_qumo_py() abi("C") -> PythonObject:
     try:
@@ -865,6 +893,8 @@ def PyInit_qumo_py() abi("C") -> PythonObject:
         m.def_function[py_subspace_ground_state]("subspace_ground_state")
         m.def_function[py_schedule]("schedule")
         m.def_function[py_qec_memory]("qec_memory")
-        return m.finalize()
+        var mod = m.finalize()
+        _restore_host_environment()
+        return mod
     except e:
         abort(String("error creating qumo_py module: ", e))

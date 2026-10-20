@@ -55,3 +55,61 @@ def test_stream_run_passes_and_cleans_up(tmp_path):
     assert not mp.active_children()
     budget = [s for s in rep["stages"] if s["stage"] == "realtime-budget"][0]
     assert budget["emulated"] and "fpga" in budget["device"]
+
+
+@needs_qumo
+def test_dem_text_matches_qumo_decoder():
+    """Regression: dem_text() used to export undecomposed hyperedges, so
+    PyMatching built from it saw a different graph than QUMO's decoders and
+    disagreed on ~0.2% of shots. It now exports the decomposition QUMO uses."""
+    import pymatching
+    import stim
+
+    import hetero_common as H
+
+    q = H.load_qumo()
+    m = q.qec_memory("surface_z", 5, 5, 0.004)
+    dem = stim.DetectorErrorModel(m.dem_text())
+    for inst in dem.flattened():  # every error is graph-like (pieces of <= 2 detectors)
+        if inst.type == "error":
+            piece = 0
+            for t in inst.targets_copy():
+                if t.is_separator():
+                    piece = 0
+                elif t.is_relative_detector_id():
+                    piece += 1
+                    assert piece <= 2
+    shots = 20000
+    dh, _, _, _, _ = m.sample(shots, 11, "cpu", 0)
+    nd, bd = dem.num_detectors, (dem.num_detectors + 7) // 8
+    raw = np.frombuffer(bytes.fromhex(dh), dtype=np.uint8).reshape(shots, bd)
+    dets = np.unpackbits(raw, axis=1, bitorder="little")[:, :nd]
+    ph, _, _ = m.decode(dh, shots, 0)
+    ours = np.unpackbits(np.frombuffer(bytes.fromhex(ph), dtype=np.uint8).reshape(shots, -1), axis=1,
+                         bitorder="little")[:, :1]
+    theirs = pymatching.Matching.from_detector_error_model(dem).decode_batch(dets)[:, :1]
+    assert int((ours != theirs).any(axis=1).sum()) <= 3  # equal-weight ties only
+
+
+def test_import_keeps_host_python_environment(tmp_path):
+    """Regression: importing qumo_py let the Mojo runtime export
+    PYTHONEXECUTABLE / PYTHONPATH / MOJO_PYTHON_LIBRARY for another Python at
+    the C level, so child processes started with sys.executable ran it."""
+    import os
+    import subprocess
+
+    if not HAVE:
+        pytest.skip("build/qumo_py.so missing (make py)")
+    build = REPO / ("build" if (REPO / "build" / "qumo_py.so").is_file() else "build/gpu")
+    code = ("import ctypes, sys, subprocess; sys.path.insert(0, %r); import qumo_py; "
+            "libc = ctypes.CDLL(None); libc.getenv.restype = ctypes.c_char_p; "
+            "print([libc.getenv(k) for k in (b'PYTHONEXECUTABLE', b'MOJO_PYTHON_LIBRARY')]); "
+            "print(libc.getenv(b'PYTHONPATH')); "
+            "print(subprocess.run([sys.executable, '-c', 'import sys; print(sys.executable)'], "
+            "capture_output=True, text=True).stdout.strip())") % str(build)
+    env = {k: v for k, v in os.environ.items() if k not in ("PYTHONEXECUTABLE", "MOJO_PYTHON_LIBRARY")}
+    env["PYTHONPATH"] = str(tmp_path)
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env).stdout.splitlines()
+    assert out[0] == "[None, None]"
+    assert out[1] == repr(str(tmp_path).encode())  # the user's PYTHONPATH is kept as it was
+    assert out[2] == sys.executable

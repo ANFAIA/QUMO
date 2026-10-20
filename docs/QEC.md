@@ -456,11 +456,11 @@ of byte j = detector 8j + k, Stim's b8 layout) from CPU or GPU Pauli frames;
 `decode(dets_hex, shots, threads)` returns packed predictions (threads=1:
 one decoder in this thread, 0: all cores); `info()`, `dem_text()`,
 `stim_text()`. `examples/heterogeneous/realtime_qec` streams it to a pool of
-decoder processes under a real-time budget. Note: PyMatching built from
-`dem_text()` disagrees with QUMO's decoder on about 0.2 % of shots at
-p = 0.004 on the d = 5 surface code, while PyMatching built from Stim's DEM
-of `stim_text()` agrees on every shot; the example uses the latter as its
-reference.
+decoder processes under a real-time budget. `dem_text()` is the graph-like
+form (`decoders.graphlike_dem`): every hyperedge is written as the pieces the
+matching decoders decompose it into, so PyMatching built from it matches
+QUMO's decoders shot for shot except equal-weight ties (0-1 in 50,000 shots on
+d = 5/7 surface and repetition codes).
 
 ## Limitations / next steps
 
