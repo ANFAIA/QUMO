@@ -10,7 +10,9 @@ Random OpenQASM 3 programs go through two implementations that share no code:
     counted.
 
 The classical rules here are written from the semantics table of the project plan
-(docs/CONTROL_FLOW.md once published), not from qumo/ir/classical.mojo.
+(docs/CONTROL_FLOW.md once published), not from qumo/ir/classical.mojo. A slice of
+the programs ends in a run-time error: each side must raise QM-E480, E481 or E482
+wherever the exact weights say a shot reaches one.
 
 TV acceptance, fixed before the first comparison and not to be tuned to a result:
 for N shots and exact probabilities p_k, an unbiased sampler has expected total
@@ -52,7 +54,19 @@ LOOP_CUT = 4096
 # ("bit", n), ("bool",), ("int", n), ("uint", n), ("float",), ("angle", n)
 # --------------------------------------------------------------------------
 class OracleError(Exception):
-    pass
+    """A program the type rules refuse: QM-E580 and friends."""
+
+    def __init__(self, what, code="QM-E580"):
+        super().__init__(what)
+        self.code = code
+
+
+class RunError(Exception):
+    """An error at run time, for the worlds that reach it."""
+
+    def __init__(self, code, what):
+        super().__init__(what)
+        self.code = code
 
 
 def wrap(v, t):
@@ -90,22 +104,26 @@ def to_float(v, t):
 
 def float_to_int(x, t):
     if math.isnan(x) or math.isinf(x):
-        raise OracleError("float range")
+        raise RunError("QM-E482", "float range")
     v = int(x)  # python truncates toward zero
     if t[0] == "int":
         if not (-(1 << (t[1] - 1)) <= v < (1 << (t[1] - 1))):
-            raise OracleError("float range")
+            raise RunError("QM-E482", "float range")
     elif not (0 <= v < (1 << t[1])):
-        raise OracleError("float range")
+        raise RunError("QM-E482", "float range")
     return v
 
 
 def float_to_angle(x, n):
     if math.isnan(x) or math.isinf(x):
-        raise OracleError("float range")
+        raise RunError("QM-E482", "float range")
     turns = x / (2 * math.pi)
     frac = turns - math.floor(turns)
-    k = math.floor(frac * (1 << n) + 0.5)
+    t = frac * (1 << n)
+    k = math.floor(t)
+    d = t - k
+    if d > 0.5 or (d == 0.5 and k % 2 == 1):  # a tie goes to the even step
+        k += 1
     return 0 if k >= (1 << n) else k
 
 
@@ -134,15 +152,6 @@ def cast(val, t):
     return (t, wrap(v, t))
 
 
-def uintish(val):
-    t, v = val
-    if t[0] == "bool":
-        return (("uint", 1), v)
-    if t[0] == "bit":
-        return (("uint", t[1]), v)
-    return val
-
-
 class Lit(tuple):
     """A value that came from literals only: it adapts to the other operand."""
 
@@ -155,45 +164,66 @@ def is_lit(x):
     return isinstance(x, Lit)
 
 
-def common(a, b):
-    a2, b2 = uintish(a), uintish(b)
+def width_of(t):
+    return 1 if t[0] == "bool" else t[1]
+
+
+def promoted(val, mode):
+    """bool and bit: a 64-bit int in arithmetic, unsigned bits elsewhere."""
+    t, v = val
+    if t[0] in ("bool", "bit"):
+        if mode == "arith":
+            return (("int", 64), v if v < (1 << 63) else v - (1 << 64))
+        return (("uint", width_of(t)), v)
+    return (t, v)
+
+
+def common(a, b, mode):
+    """Both operands in one type, for mode 'arith', 'bit' or 'cmp'."""
     la, lb = is_lit(a), is_lit(b)
-    ta, tb = a2[0], b2[0]
+    pa, pb = promoted(a, mode), promoted(b, mode)
+    ta, tb = pa[0], pb[0]
+    bita, bitb = a[0][0] in ("bit", "bool"), b[0][0] in ("bit", "bool")
+    if bita and not lb and (tb[0] == "uint" or (tb[0] == "int" and mode != "arith")):
+        n = width_of(a[0])
+        ta = ("uint", max(tb[1], n)) if tb[0] == "uint" else ("int", min(64, max(tb[1], n + 1)))
+    elif bitb and not la and (ta[0] == "uint" or (ta[0] == "int" and mode != "arith")):
+        n = width_of(b[0])
+        tb = ("uint", max(ta[1], n)) if ta[0] == "uint" else ("int", min(64, max(ta[1], n + 1)))
     if ta[0] == "float" or tb[0] == "float":
         if ta[0] == "angle" and lb:
-            return cast(tuple(a), ta), cast(b2, ta)
-        if tb[0] == "angle" and la:
-            return cast(a2, tb), cast(tuple(b), tb)
-        return (("float",), to_float(a2[1], ta)), (("float",), to_float(b2[1], tb))
-    if la and lb:
-        return tuple(a2), tuple(b2)
-    if la or lb:
-        lv = (a2 if la else b2)[1]
+            t = ta
+        elif tb[0] == "angle" and la:
+            t = tb
+        elif "angle" in (ta[0], tb[0]):
+            raise OracleError("float and angle do not mix")
+        else:
+            t = ("float",)
+    elif la and lb:
+        t = ("uint", 64) if "uint" in (ta[0], tb[0]) else ("int", 64)
+    elif la or lb:
+        lv = pa[1] if la else pb[1]
         t = tb if la else ta
         if t[0] == "angle":
             raise OracleError("an integer literal does not mix with an angle")
         if not literal_fits(lv, t):
-            if t[0] == "uint" and lv < 0:
-                raise OracleError("a negative literal does not mix with uint")
+            if (t[0] == "uint" and lv < 0) or (t[0] == "int" and lv >= (1 << 63)) or mode != "cmp":
+                raise OracleError("a literal that does not fit")
             t = (t[0], max(t[1], smallest_width(lv, t[0] == "int")))
-        return cast(a2, t), cast(b2, t)
-    if ta[0] != tb[0]:
-        # bit and bool hold plain non-negative values
-        if a[0][0] in ("bit", "bool") and tb[0] == "int":
-            t = ("int", min(64, max(tb[1], ta[1] + 1)))
-            return cast(a2, t), cast(b2, t)
-        if b[0][0] in ("bit", "bool") and ta[0] == "int":
-            t = ("int", min(64, max(ta[1], tb[1] + 1)))
-            return cast(a2, t), cast(b2, t)
+    elif ta[0] != tb[0]:
         raise OracleError("types do not mix")
-    if ta[1] >= tb[1]:
-        return cast(a2, ta), cast(b2, ta)
-    return cast(a2, tb), cast(b2, tb)
+    elif ta[0] == "angle":
+        if ta[1] != tb[1]:
+            raise OracleError("angles of two widths")
+        t = ta
+    else:
+        t = ta if ta[1] >= tb[1] else tb
+    return cast(tuple(pa), t), cast(tuple(pb), t)
 
 
 def int_div(a, b):
     if b == 0:
-        raise OracleError("division by zero")
+        raise RunError("QM-E481", "division by zero")
     q = abs(a) // abs(b)
     return -q if (a < 0) != (b < 0) else q
 
@@ -205,15 +235,17 @@ def int_rem(a, b):
 
 def binary(op, a, b):
     if op in ("==", "!=", "<", "<=", ">", ">="):
-        ca, cb = (a, b) if a[0] == ("bool",) and b[0] == ("bool",) else common(a, b)
+        ca, cb = (a, b) if a[0] == ("bool",) and b[0] == ("bool",) else common(a, b, "cmp")
         x, y = ca[1], cb[1]
         r = {"==": x == y, "!=": x != y, "<": x < y, "<=": x <= y, ">": x > y, ">=": x >= y}[op]
         return (("bool",), 1 if r else 0)
-    if op in ("<<", ">>", "&", "|", "^") and (a[0][0] == "float" or b[0][0] == "float" or a[0][0] == "bool"):
+    if op in ("<<", ">>", "&", "|", "^") and (a[0][0] == "float" or b[0][0] == "float"):
         raise OracleError("operator on a float")
     if op in ("<<", ">>"):
         if is_lit(a) and a[0][0] == "int" and a[1] >= 0:
             a = lit(("uint", 64), a[1])  # a literal adapts, as it does to any operand
+        if a[0][0] in ("int", "bool"):
+            raise OracleError("shift of a signed value")
         t, v = a
         n = t[1]
         s = b[1]
@@ -226,26 +258,21 @@ def binary(op, a, b):
             t = a[0]
             ca, cb = a, b
         else:
-            ca, cb = common(a, b)
+            ca, cb = common(a, b, "bit")
             t = ca[0]
         x, y = ca[1], cb[1]
         return wraplit(a, b, (t, wrap(x & y if op == "&" else (x | y if op == "|" else x ^ y), t)))
     # arithmetic
     if "angle" in (a[0][0], b[0][0]):
         return angle_arith(op, a, b)
-    if is_lit(a) and is_lit(b) and a[0][0] == "int" and b[0][0] == "int":
-        if op == "/" and b[1] != 0 and a[1] % b[1] != 0:
-            return lit(("float",), a[1] / b[1])
-        if op == "**" and b[1] < 0:
-            return lit(("float",), float(a[1]) ** b[1])
     if op == "**" and a[0][0] != "float" and b[0][0] != "float":
-        base = uintish(a)
-        if b[1] < 0:
-            raise OracleError("negative exponent")
+        base = promoted(a, "arith")
+        e = b[1]
+        if e < 0:
+            raise RunError("QM-E481", "negative exponent")
         t = base[0]
-        out = (t, wrap(pow(base[1], b[1], 1 << t[1]), t))
-        return lit(*out) if is_lit(a) and is_lit(b) else out
-    ca, cb = common(a, b)
+        return wraplit(a, b, (t, wrap(pow(base[1], e, 1 << t[1]), t)))
+    ca, cb = common(a, b, "arith")
     t = ca[0]
     x, y = ca[1], cb[1]
     if t[0] == "float":
@@ -256,9 +283,14 @@ def binary(op, a, b):
         if op == "*":
             return wraplit(a, b, (t, x * y))
         if op == "**":
-            return wraplit(a, b, (t, x ** y))
+            try:
+                return wraplit(a, b, (t, math.pow(x, y)))
+            except ValueError:
+                return wraplit(a, b, (t, float("nan")))
+            except (OverflowError, ZeroDivisionError):
+                return wraplit(a, b, (t, float("inf")))
         if y == 0:
-            raise OracleError("division by zero")
+            raise RunError("QM-E481", "division by zero")
         if op == "/":
             return wraplit(a, b, (t, x / y))
         q = x / y
@@ -273,7 +305,7 @@ def binary(op, a, b):
         r = int_div(x, y)
     elif op == "%":
         if y == 0:
-            raise OracleError("division by zero")
+            raise RunError("QM-E481", "division by zero")
         r = int_rem(x, y)
     else:
         raise OracleError("operator " + op)
@@ -300,7 +332,7 @@ def angle_arith(op, a, b):
         return (angle, (ang[1] * (sc[1] & ((1 << n) - 1))) & ((1 << n) - 1))
     if op == "/":
         if b[1] == 0:
-            raise OracleError("division by zero")
+            raise RunError("QM-E481", "division by zero")
         if tb[0] == "angle":
             return (("uint", n), a[1] // b[1])
         return (angle, a[1] // b[1])
@@ -310,6 +342,19 @@ def angle_arith(op, a, b):
 FUNCS = {"sin": math.sin, "cos": math.cos, "tan": math.tan, "arcsin": math.asin, "arccos": math.acos,
          "arctan": math.atan, "exp": math.exp, "ln": math.log, "sqrt": math.sqrt, "floor": math.floor,
          "ceil": math.ceil}
+
+
+def real_fn(name, x):
+    if math.isnan(x):
+        return x
+    if math.isinf(x) and name in ("floor", "ceil"):
+        return x
+    try:
+        return float(FUNCS[name](x))
+    except ValueError:
+        return float("nan")
+    except OverflowError:
+        return float("inf")
 
 
 def parse_type(tp, const_env):
@@ -384,6 +429,29 @@ def apply_controlled(st, m, c, t):
     return out
 
 
+def apply_doubly_controlled(st, m, c0, c1, t):
+    """m on qubit t where qubits c0 and c1 are 1."""
+    idx = [slice(None)] * st.ndim
+    idx[c0] = 1
+    idx[c1] = 1
+    sub = st[tuple(idx)]
+    tt = t - (1 if c0 < t else 0) - (1 if c1 < t else 0)
+    out = st.copy()
+    out[tuple(idx)] = apply_1q(sub, m, tt)
+    return out
+
+
+def apply_cswap(st, c, a, b):
+    idx = [slice(None)] * st.ndim
+    idx[c] = 1
+    sub = st[tuple(idx)]
+    aa = a - (1 if c < a else 0)
+    bb = b - (1 if c < b else 0)
+    out = st.copy()
+    out[tuple(idx)] = np.swapaxes(sub, aa, bb)
+    return out
+
+
 # --------------------------------------------------------------------------
 # Interpreter
 # --------------------------------------------------------------------------
@@ -412,10 +480,14 @@ class Oracle:
         self.nc = 0
         self.qregs = {}
         self.cregs = {}
-        self.consts = {}
         self.outputs = []
         self.dropped = 0.0
-        for st in program.statements:
+        self.errors = defaultdict(float)  # code -> weight of the worlds that reach it
+        self.scan(program.statements)
+
+    def scan(self, stmts):
+        """Registers in source order; a block's bit is a register of its own."""
+        for st in stmts:
             if isinstance(st, ast.QubitDeclaration):
                 size = st.size.value if st.size else 1
                 self.qregs[st.qubit.name] = (self.nq, size)
@@ -431,6 +503,18 @@ class Oracle:
                     self.nc += size
                 else:
                     self.outputs.append(st.identifier.name)
+            elif isinstance(st, ast.BranchingStatement):
+                self.scan(st.if_block)
+                self.scan(st.else_block)
+            elif isinstance(st, (ast.WhileLoop, ast.ForInLoop)):
+                self.scan(st.block)
+            elif isinstance(st, ast.SwitchStatement):
+                for _, body in st.cases:
+                    self.scan(body.statements)
+                if st.default is not None:
+                    self.scan(st.default.statements)
+            elif isinstance(st, ast.CompoundStatement):
+                self.scan(st.statements)
 
     def run(self):
         st = np.zeros((2,) * max(self.nq, 1), dtype=complex)
@@ -443,7 +527,7 @@ class Oracle:
             outs = []
             for nm in self.outputs:
                 t, v = w.env[nm]
-                outs.append(round(v, 9) if t[0] == "float" else (int(v)))
+                outs.append(fmt_real(v) if t[0] == "float" else int(v))
             dist[(key,) + tuple(outs)] += w.weight
         return dist, self.dropped
 
@@ -453,8 +537,11 @@ class Oracle:
             for w in worlds:
                 if w.flow:
                     nxt.append(w)
-                else:
+                    continue
+                try:
                     nxt.extend(self.stmt(s, w))
+                except RunError as e:
+                    self.errors[e.code] += w.weight
             worlds = self.merge(nxt)
         return worlds
 
@@ -491,6 +578,9 @@ class Oracle:
             return [w]
         if isinstance(s, ast.ClassicalDeclaration):
             if isinstance(s.type, ast.BitType):
+                first, size = self.cregs[s.identifier.name]
+                for j in range(size):
+                    w.bits[first + j] = 0  # a block's bit restarts each time
                 if s.init_expression is not None:
                     self.assign_bits(s.identifier.name, None, self.expr(s.init_expression, w), w)
                 return [w]
@@ -615,6 +705,8 @@ class Oracle:
                 args.append(2 * math.pi * val[1] / (1 << val[0][1]))
             else:
                 args.append(float(val[1]))
+            if math.isnan(args[-1]) or math.isinf(args[-1]):
+                raise RunError("QM-E482", "a gate reads a NaN or an infinity")
         st = w.state
         if nm in FIXED:
             st = apply_1q(st, FIXED[nm], qs[0])
@@ -630,6 +722,12 @@ class Oracle:
             st = apply_controlled(st, rot("p", args[0]), qs[0], qs[1])
         elif nm == "swap":
             st = np.swapaxes(st, qs[0], qs[1])
+        elif nm == "ccx":
+            st = apply_doubly_controlled(st, FIXED["x"], qs[0], qs[1], qs[2])
+        elif nm == "ccz":
+            st = apply_doubly_controlled(st, FIXED["z"], qs[0], qs[1], qs[2])
+        elif nm == "cswap":
+            st = apply_cswap(st, qs[0], qs[1], qs[2])
         else:
             raise OracleError("gate " + nm)
         w.state = st
@@ -698,14 +796,21 @@ class Oracle:
         while worlds:
             nxt = []
             for x in worlds:
-                if not self.convert(self.expr(s.while_condition, x), ("bool",))[1]:
+                try:
+                    run = self.convert(self.expr(s.while_condition, x), ("bool",))[1]
+                except RunError as e:
+                    self.errors[e.code] += x.weight
+                    continue
+                if not run:
                     done.append(x)
+                    continue
+                x.loops += 1
+                if x.loops > LOOP_CUT:
+                    self.errors["QM-E480"] += x.weight  # every loop here ends in a few passes, or never
+                elif x.weight < WEIGHT_CUT:
+                    self.dropped += x.weight
                 else:
-                    x.loops += 1
-                    if x.loops > LOOP_CUT or x.weight < WEIGHT_CUT:
-                        self.dropped += x.weight
-                    else:
-                        nxt.append(x)
+                    nxt.append(x)
             worlds = []
             for x in self.block(s.block, nxt):
                 if x.flow == "break":
@@ -800,17 +905,24 @@ class Oracle:
             if op == "~":
                 t = v[0]
                 return (t, wrap(~v[1], t))
+            u = promoted(v, "arith")
             if is_lit(v):
-                return lit(v[0], -v[1])
-            u = uintish(v)
+                return lit(("int", 64) if u[0][0] == "uint" else u[0], -u[1])
             if u[0][0] == "float":
                 return (u[0], -u[1])
             return (u[0], wrap(-u[1], u[0]))  # a uint wraps too
         if isinstance(e, ast.Cast):
             t = parse_type(e.type, w.env)
-            if t[0] == "angle" and is_lit(self.expr(e.argument, w)) is False and self.expr(e.argument, w)[0][0] == "int":
-                raise OracleError("int to angle")
-            return self.convert(tuple(self.expr(e.argument, w)), t)
+            v = self.expr(e.argument, w)
+            if t[0] == "angle" and v[0][0] in ("int", "uint", "bool"):
+                raise OracleError("integer to angle")
+            if t[0] == "bit" and v[0][0] != "float":
+                if is_lit(v):
+                    if not 0 <= v[1] < (1 << t[1]):
+                        raise OracleError("a literal that does not fit the bits")
+                elif width_of(v[0]) != t[1]:
+                    raise OracleError("a cast to bit[m] takes m bits")
+            return self.convert(tuple(v), t)
         if isinstance(e, ast.FunctionCall):
             nm = e.name.name
             args = [self.expr(a, w) for a in e.arguments]
@@ -821,10 +933,15 @@ class Oracle:
                     t = args[0][0]
                     return (t, wrap(abs(args[0][1]), t))
                 return (args[0][0], abs(args[0][1]))
-            x = to_float(uintish(args[0])[1], uintish(args[0])[0])
+            u = promoted(args[0], "bit")
+            x = to_float(u[1], u[0])
             if nm in FUNCS:
-                r = FUNCS[nm](x)
-                return (("float",), float(r))
+                return (("float",), real_fn(nm, x))
+            if nm == "mod":
+                y = to_float(promoted(args[1], "bit")[1], promoted(args[1], "bit")[0])
+                if y == 0:
+                    raise RunError("QM-E481", "division by zero")
+                return (("float",), x - y * math.floor(x / y))
             raise OracleError("function " + nm)
         raise OracleError("expression " + type(e).__name__)
 
@@ -833,7 +950,12 @@ class Oracle:
 # Random programs
 # --------------------------------------------------------------------------
 class Gen:
-    def __init__(self, rng, max_qubits=3):
+    """Random programs. Every expression is well typed under the rules above, in
+    every branch, so a refusal from either side is a finding."""
+
+    WIDTHS = (2, 3, 4, 8, 16, 32, 64)
+
+    def __init__(self, rng, max_qubits=3, tail=None):
         self.r = rng
         self.nq = rng.randint(1, max_qubits)
         self.nc = rng.randint(2, 5)
@@ -842,6 +964,7 @@ class Gen:
         self.pad = 0
         self.count = 0
         self.loops = 0
+        self.tail = tail
 
     def emit(self, s):
         self.lines.append("  " * self.pad + s)
@@ -851,74 +974,96 @@ class Gen:
         self.count += 1
         return nm
 
-    def ints(self):
-        return [n for n, t in self.vars.items() if t[0] == "int"]
-
-    def uints(self):
-        return [n for n, t in self.vars.items() if t[0] == "uint"]
-
-    def bools(self):
-        return [n for n, t in self.vars.items() if t[0] == "bool"]
-
-    def floats(self):
-        return [n for n, t in self.vars.items() if t[0] == "float"]
-
-    def angles(self):
-        return [n for n, t in self.vars.items() if t[0] == "angle"]
+    def of(self, tag):
+        return [n for n, t in self.vars.items() if t[0] == tag]
 
     def bit(self):
         return "c[%d]" % self.r.randrange(self.nc)
 
-    def int_expr(self, d=0):
-        r = self.r
-        k = r.random()
-        if d > 2 or k < 0.3:
-            names = self.ints()
-            if names and r.random() < 0.75:
-                return r.choice(names)
-            return str(r.randint(-9, 9)) if r.random() < 0.5 else str(r.randint(0, 40))
-        a = self.int_expr(d + 1)
-        if k < 0.65:
-            return "(%s %s %s)" % (a, r.choice("+-*"), self.int_expr(d + 1))
-        if k < 0.75:
-            # two literals divide as reals (see qumo.ir.classical), so give it a type
-            return "(int[32](%s) %s %s)" % (a, r.choice("/%"), r.choice(["2", "3", "-3", "5", "7"]))
-        if k < 0.82:
-            return "-(%s)" % a if not a.lstrip("-").isdigit() else a
-        if k < 0.9 and self.uints():
-            return "int[%d](%s)" % (r.choice([4, 8, 16, 32]), r.choice(self.uints()))
-        if k < 0.95 and self.floats():
-            return "int[32](%s)" % r.choice(self.floats())
-        return "int[8](%s)" % self.bit()
+    def ulit(self, w):
+        return str(self.r.randint(0, min(40, (1 << w) - 1)))
 
-    def uint_expr(self, d=0):
+    def ileft(self, w):
+        names = self.of("int")
+        if names and self.r.random() < 0.8:
+            n = self.r.choice(names)
+            return n if self.vars[n][1] == w else "int[%d](%s)" % (w, n)
+        return "int[%d](%d)" % (w, self.r.randint(-1 << min(w - 1, 3), min(7, (1 << (w - 1)) - 1)))
+
+    def uleft(self, w):
+        names = self.of("uint")
+        if names and self.r.random() < 0.8:
+            n = self.r.choice(names)
+            return n if self.vars[n][1] == w else "uint[%d](%s)" % (w, n)
+        return "uint[%d](%s)" % (w, self.ulit(w))
+
+    def divisor(self, w):
+        vals = [v for v in (2, 3, 5, 7) if v < (1 << w) // 2 + (1 << w) // 2 - 1 or v < (1 << (w - 1))]
+        return str(self.r.choice(vals)) if vals else "1"
+
+    def int_expr(self, w=None, d=0):
         r = self.r
+        w = w or r.choice(self.WIDTHS)
         k = r.random()
         if d > 2 or k < 0.3:
-            names = self.uints()
-            if names and r.random() < 0.75:
-                return r.choice(names)
-            return str(r.randint(0, 40))
-        a = self.uint_expr(d + 1)
+            if r.random() < 0.75:
+                return self.ileft(w)
+            hi = min(40, (1 << (w - 1)) - 1)
+            return str(r.randint(-min(9, 1 << (w - 1)), hi))
+        a = self.ileft(w) if r.random() < 0.5 else "int[%d](%s)" % (w, self.int_expr(w, d + 1))
         if k < 0.55:
-            return "(%s %s %s)" % (a, r.choice(["+", "*"]), self.uint_expr(d + 1))
+            return "(%s %s %s)" % (a, r.choice("+-*"), self.int_expr(w, d + 1))
         if k < 0.65:
-            return "(uint[8](%s) %s %s)" % (a, r.choice(["<<", ">>"]), r.choice(["0", "1", "2", "3", "9", "70"]))
-        if k < 0.8:
-            return "(%s %s %s)" % (a, r.choice("&|^"), self.uint_expr(d + 1))
-        if k < 0.87:
-            return "(uint[32](%s) %s %s)" % (a, r.choice("/%"), r.choice(["2", "3", "5"]))
+            sign = r.choice(["", "-"])
+            bound = (1 << (w - 1)) - 1
+            div = self.divisor(w) if w > 2 else "1"
+            if int(div) > bound:
+                div, sign = "1", ""
+            return "(%s %s %s%s)" % (a, r.choice("/%"), sign, div)
+        if k < 0.72:
+            return "-(%s)" % a
+        if k < 0.78 and self.of("uint"):
+            return "int[%d](%s)" % (w, r.choice(self.of("uint")))
+        if k < 0.84 and self.of("float"):
+            return "int[%d](%s)" % (w, r.choice(self.of("float")))
+        if k < 0.92:
+            # bool and bit are ints in arithmetic
+            names = self.of("bool")
+            flag = r.choice(names) if names and r.random() < 0.5 else self.bit()
+            form = r.choice(["%s + %s" % (flag, self.bit()), "%s + 1" % flag, "-%s" % flag, "%s * 3" % flag, "%s - 2" % flag])
+            return "int[%d](%s)" % (w, form)
+        if self.of("uint"):
+            e = "uint[2](%s)" % r.choice(self.of("uint"))
+        else:
+            e = str(r.randint(0, 3))
+        return "int[%d](%s ** %s)" % (w, r.choice(["(-2)", "(-3)", "2", "(-1)"]), e)
+
+    def uint_expr(self, w=None, d=0):
+        r = self.r
+        w = w or r.choice(self.WIDTHS)
+        k = r.random()
+        if d > 2 or k < 0.3:
+            return self.uleft(w) if r.random() < 0.75 else self.ulit(w)
+        a = self.uleft(w) if r.random() < 0.5 else "uint[%d](%s)" % (w, self.uint_expr(w, d + 1))
+        if k < 0.5:
+            return "(%s %s %s)" % (a, r.choice("+-*"), self.uint_expr(w, d + 1))
+        if k < 0.62:
+            return "(%s %s %s)" % (a, r.choice(["<<", ">>"]), r.choice(["0", "1", "2", "3", "9", "70"]))
+        if k < 0.78:
+            return "(%s %s %s)" % (a, r.choice("&|^"), self.uint_expr(w, d + 1))
+        if k < 0.86:
+            return "(%s %s %s)" % (a, r.choice("/%"), self.divisor(w) if w > 2 else "1")
         if k < 0.93:
-            return "~(uint[8](%s))" % a
-        if self.ints():
-            return "uint[%d](%s)" % (r.choice([4, 8, 16]), r.choice(self.ints()))
-        return "uint[3](c[0:%d])" % min(2, self.nc - 1)
+            return "~%s" % a
+        if self.of("int"):
+            return "uint[%d](%s)" % (w, r.choice(self.of("int")))
+        return "uint[%d](c[0:%d])" % (w, min(2, self.nc - 1))
 
     def bool_expr(self, d=0):
         r = self.r
         k = r.random()
         if d > 2 or k < 0.3:
-            names = self.bools()
+            names = self.of("bool")
             if names and r.random() < 0.5:
                 return r.choice(names)
             return self.bit() if r.random() < 0.8 else r.choice(["true", "false"])
@@ -926,26 +1071,35 @@ class Gen:
             return "(%s %s %s)" % (self.bool_expr(d + 1), r.choice(["&&", "||"]), self.bool_expr(d + 1))
         if k < 0.6:
             return "!(%s)" % self.bool_expr(d + 1)
-        if k < 0.8:
-            return "(%s %s %s)" % (self.int_expr(d + 1), r.choice(["==", "!=", "<", "<=", ">", ">="]), self.int_expr(d + 1))
-        if k < 0.95:
-            return "(%s %s %s)" % (self.uint_expr(d + 1), r.choice(["==", "!=", "<", "<=", ">", ">="]), self.uint_expr(d + 1))
+        ops = ["==", "!=", "<", "<=", ">", ">="]
+        if k < 0.76:
+            return "(%s %s %s)" % (self.int_expr(None, d + 1), r.choice(ops), self.int_expr(None, d + 1))
+        if k < 0.86:
+            return "(%s %s %s)" % (self.uint_expr(None, d + 1), r.choice(ops), self.uint_expr(None, d + 1))
+        if k < 0.93:
+            # a comparison takes a literal too wide for the operand, exactly
+            lit_ = r.choice(["300", "65536", "9223372036854775807", "9223372036854775808", "18446744073709551615"])
+            return "(%s %s %s)" % (self.uleft(r.choice((2, 8, 64))), r.choice(ops), lit_)
         return "(c %s %d)" % (r.choice(["==", "!="]), r.randint(0, 3))
 
     def float_expr(self, d=0):
         r = self.r
         k = r.random()
         if d > 2 or k < 0.35:
-            names = self.floats()
+            names = self.of("float")
             if names and r.random() < 0.7:
                 return r.choice(names)
             return r.choice(["0.25", "1.5", "pi/4", "pi", "0.1", "2.0"])
-        if k < 0.6:
+        if k < 0.55:
             return "(%s %s %s)" % (self.float_expr(d + 1), r.choice("+-*"), self.float_expr(d + 1))
-        if k < 0.8:
+        if k < 0.7:
             return "%s(%s)" % (r.choice(["sin", "cos"]), self.float_expr(d + 1))
-        if self.ints():
-            return "float(%s)" % r.choice(self.ints())
+        if k < 0.78:
+            return "(%s ** %s)" % (r.choice(["(-1.5)", "(-2.0)", "1.25"]), r.choice(["2.0", "3.0"]))
+        if k < 0.86:
+            return "(%s * 1.5)" % self.bit()
+        if self.of("int"):
+            return "float(%s)" % r.choice(self.of("int"))
         return "0.5"
 
     def angle_expr(self, t):
@@ -960,15 +1114,19 @@ class Gen:
 
     def declare(self):
         r = self.r
-        kind = r.choice(["int", "uint", "bool", "float", "angle"])
+        kind = r.choice(["int", "uint", "bool", "float", "angle", "big"])
         if kind == "int":
-            t = ("int", r.choice([3, 4, 8, 16, 32, 64]))
+            t = ("int", r.choice(self.WIDTHS))
             tn = "int[%d]" % t[1]
-            e = self.int_expr()
+            e = self.int_expr(t[1])
         elif kind == "uint":
-            t = ("uint", r.choice([2, 3, 4, 8, 16, 64]))
+            t = ("uint", r.choice(self.WIDTHS))
             tn = "uint[%d]" % t[1]
-            e = self.uint_expr()
+            e = self.uint_expr(t[1])
+        elif kind == "big":
+            t = ("uint", 64)
+            tn = "uint"
+            e = r.choice(["18446744073709551615", "9223372036854775808", "9223372036854775809"])
         elif kind == "bool":
             t = ("bool",)
             tn = "bool"
@@ -991,16 +1149,16 @@ class Gen:
 
     def assign(self):
         r = self.r
-        names = [n for n in self.vars if not n.startswith("i_")]
+        names = [n for n in self.vars if not n.startswith("i_") and not n.startswith("w")]
         if not names or r.random() < 0.2:
             self.emit("%s = %s;" % (self.bit(), self.bool_expr(1)))
             return
         nm = r.choice(names)
         t = self.vars[nm]
         if t[0] == "int":
-            self.emit("%s = %s;" % (nm, self.int_expr()))
+            self.emit("%s = %s;" % (nm, self.int_expr(t[1])))
         elif t[0] == "uint":
-            self.emit("%s = %s;" % (nm, self.uint_expr()))
+            self.emit("%s = %s;" % (nm, self.uint_expr(t[1])))
         elif t[0] == "bool":
             self.emit("%s = %s;" % (nm, self.bool_expr()))
         elif t[0] == "float":
@@ -1012,16 +1170,19 @@ class Gen:
         r = self.r
         q = r.randrange(self.nq)
         k = r.random()
-        if k < 0.4:
+        if k < 0.35:
             self.emit("%s q[%d];" % (r.choice(["h", "x", "z", "s", "t", "sdg", "sx", "y"]), q))
-        elif k < 0.75:
-            if r.random() < 0.3 and self.angles():
-                arg = r.choice(self.angles())
-            elif r.random() < 0.3 and self.ints():
-                arg = r.choice(self.ints())
+        elif k < 0.65:
+            if r.random() < 0.3 and self.of("angle"):
+                arg = r.choice(self.of("angle"))
+            elif r.random() < 0.3 and self.of("int"):
+                arg = r.choice(self.of("int"))
             else:
                 arg = self.float_expr()
             self.emit("%s(%s) q[%d];" % (r.choice(["rx", "ry", "rz", "p"]), arg, q))
+        elif k < 0.8 and self.nq >= 3:
+            a, b, c = r.sample(range(self.nq), 3)
+            self.emit("%s q[%d], q[%d], q[%d];" % (r.choice(["ccx", "ccz", "cswap"]), a, b, c))
         elif self.nq >= 2:
             a, b = r.sample(range(self.nq), 2)
             if r.random() < 0.8:
@@ -1031,6 +1192,16 @@ class Gen:
         else:
             self.emit("h q[%d];" % q)
 
+    def angle_under_branch(self):
+        """A variable the gate reads only at run time, set on one path or the other."""
+        r = self.r
+        nm = self.fresh(("float",))
+        self.emit("float %s = %s;" % (nm, r.choice(["0.0", "0.3", "pi/2"])))
+        self.emit("if (%s) {" % self.bool_expr(1))
+        self.emit("  %s = %s;" % (nm, self.float_expr(1)))
+        self.emit("}")
+        self.emit("%s(%s) q[%d];" % (r.choice(["rx", "ry", "rz"]), nm, r.randrange(self.nq)))
+
     def measure(self):
         r = self.r
         if r.random() < 0.25:
@@ -1038,18 +1209,34 @@ class Gen:
         else:
             self.emit("%s = measure q[%d];" % (self.bit(), r.randrange(self.nq)))
 
+    def loop_bit(self):
+        """A bit declared in a loop body restarts at 0 on each pass."""
+        nm = self.fresh(("bit",), "b")
+        self.emit("bit %s;" % nm)
+        self.emit("if (%s) {" % nm)
+        self.emit("  x q[%d];" % self.r.randrange(self.nq))
+        self.emit("}")
+        self.emit("%s = %s;" % (nm, self.bool_expr(1)))
+        self.emit("if (%s) {" % nm)
+        self.emit("  %s q[%d];" % (self.r.choice(["z", "h"]), self.r.randrange(self.nq)))
+        self.emit("}")
+
     def stmts(self, n, depth, in_loop):
         r = self.r
         for _ in range(n):
             k = r.random()
-            if depth >= 3 or k < 0.3:
+            if depth >= 3 or k < 0.28:
                 self.gate()
-            elif k < 0.45:
+            elif k < 0.4:
                 self.measure()
-            elif k < 0.6:
+            elif k < 0.52:
                 self.assign()
-            elif k < 0.68:
+            elif k < 0.6:
                 self.declare()
+            elif k < 0.66:
+                self.angle_under_branch()
+            elif k < 0.71 and in_loop:
+                self.loop_bit()
             elif k < 0.8:
                 self.if_stmt(depth, in_loop)
             elif k < 0.88:
@@ -1086,13 +1273,11 @@ class Gen:
         cond = "%s < %d" % (nm, r.randint(1, 4))
         if r.random() < 0.6:
             cond = "(%s) && (%s)" % (cond, self.bool_expr(1))
-        self.vars[nm] = ("int", 16)
         self.emit("while (%s) {" % cond)
+
         def body():
             self.emit("%s = %s + 1;" % (nm, nm))
-            del self.vars[nm]
             self.stmts(r.randint(1, 3), depth + 1, True)
-            self.vars[nm] = ("int", 16)
         self.scoped(body)
         self.emit("}")
 
@@ -1101,18 +1286,40 @@ class Gen:
         nm = "i_%d" % self.loops
         self.loops += 1
         k = r.random()
-        if k < 0.4:
+        t = ("int", 64)
+        if k < 0.3:
             head = "for int %s in [0:%d] {" % (nm, r.randint(0, 3))
-        elif k < 0.7:
+        elif k < 0.5:
             head = "for int %s in [%d:-1:0] {" % (nm, r.randint(1, 3))
-        elif k < 0.85:
+        elif k < 0.6:
             head = "for uint[3] %s in {1, 3, 2} {" % nm
-        else:
-            names = self.ints()
-            bound = "(%s %% 3)" % r.choice(names) if names else "2"
+            t = ("uint", 3)
+        elif k < 0.7:
+            names = self.of("int")
+            bound = "(int(%s) %% 3)" % r.choice(names) if names else "2"
             head = "for int %s in [0:%s] {" % (nm, bound)
+        elif k < 0.8:
+            # a range the variable cannot hold wraps it, unrolled or not
+            head = "for uint[2] %s in [2:5] {" % nm
+            t = ("uint", 2)
+        else:
+            # the ends of int64: the value after the last one does not exist
+            top = 9223372036854775807
+            low = -9223372036854775808
+            form = r.randrange(4)
+            if form == 0:
+                head = "for int %s in [%d:%d] {" % (nm, top - r.randint(0, 2), top)
+            elif form == 1:
+                head = "for int %s in [%d:-1:%d] {" % (nm, low + r.randint(0, 2), low)
+            elif form == 2:
+                head = "for int %s in [%d:%d:%d] {" % (nm, top - 7, r.randint(3, 9), top)
+            else:
+                lim = "e%d" % self.loops
+                self.emit("int %s = %d;" % (lim, top))
+                self.emit("%s = %s - 0;" % (lim, lim))
+                head = "for int %s in [%d:%s] {" % (nm, top - 1, lim)
         self.emit(head)
-        t = ("uint", 3) if "uint[3]" in head else ("int", 64)
+
         def body():
             self.vars[nm] = t
             self.stmts(r.randint(1, 3), depth + 1, True)
@@ -1121,7 +1328,7 @@ class Gen:
 
     def switch_stmt(self, depth, in_loop):
         r = self.r
-        names = self.ints()
+        names = self.of("int")
         target = r.choice(names) if names and r.random() < 0.5 else "c[0:%d]" % min(1, self.nc - 1)
         self.emit("switch (%s) {" % target)
         self.pad += 1
@@ -1136,6 +1343,35 @@ class Gen:
             self.emit("}")
         self.pad -= 1
         self.emit("}")
+
+    def failing_tail(self):
+        """End in a run-time error, on every shot or on those of one branch."""
+        r = self.r
+        n = self.fresh(("int", 64), "t")
+        guard = r.random() < 0.3
+        if guard:
+            self.emit("if (c[0]) {")
+            self.pad += 1
+        if self.tail == "QM-E481":
+            self.emit("int %s = 0;" % n)
+            self.emit("%s = %s * 1;" % (n, n))
+            self.emit("int %s_r;" % n)
+            self.emit("%s_r = %s;" % (n, r.choice(["1 / %s" % n, "5 %% %s" % n])))
+        elif self.tail == "QM-E482":
+            self.emit("float %s = %s;" % (n, r.choice(["1e300", "-1.0"])))
+            self.emit("%s = %s * 10.0;" % (n, n))
+            if r.random() < 0.5:
+                self.emit("rx(sqrt(%s - 1e308 - 1e308)) q[0];" % n if r.random() < 0.5 else "int[8] %s_r;\n%s_r = int[8](%s * 1e300);" % (n, n, n))
+            else:
+                self.emit("rz(%s * 1e308 * 1e308) q[0];" % n)
+        else:
+            self.emit("int %s = 0;" % n)
+            self.emit("while (%s >= 0) {" % n)
+            self.emit("  %s = %s * 1;" % (n, n))
+            self.emit("}")
+        if guard:
+            self.pad -= 1
+            self.emit("}")
 
     def program(self):
         self.outputs_decl = []
@@ -1152,6 +1388,8 @@ class Gen:
         for b in range(min(self.nq, self.nc)):
             if b == 0 or self.r.random() < 0.7:
                 self.emit("c[%d] = measure q[%d];" % (b, b))
+        if self.tail:
+            self.failing_tail()
         head = ['OPENQASM 3.0;', 'include "stdgates.inc";', "qubit[%d] q;" % self.nq, "bit[%d] c;" % self.nc]
         return "\n".join(head + self.outputs_decl + self.lines) + "\n"
 
@@ -1159,6 +1397,11 @@ class Gen:
 # --------------------------------------------------------------------------
 # Comparison
 # --------------------------------------------------------------------------
+def fmt_real(v):
+    """Nine significant digits: the two sides use different libms."""
+    return "%.9g" % v
+
+
 def read_qumo(path):
     rows = {}
     with open(path) as f:
@@ -1171,7 +1414,7 @@ def read_qumo(path):
             count = int(parts[0])
             key = [parts[1]]
             for p in parts[2:]:
-                key.append(round(float(p), 9) if ("." in p or "e" in p or p in ("nan", "inf", "-inf")) else int(p))
+                key.append(fmt_real(float(p)) if ("." in p or "e" in p or p in ("nan", "inf", "-inf")) else int(p))
             rows[tuple(key)] = rows.get(tuple(key), 0) + count
     return rows, names
 
@@ -1192,6 +1435,7 @@ def main():
     ap.add_argument("--dir", default=None)
     ap.add_argument("--keep", action="store_true")
     ap.add_argument("--qubits", type=int, default=3)
+    ap.add_argument("--failing", type=float, default=0.1, help="share of programs that end in a run-time error")
     ap.add_argument("--target", default=None)
     ap.add_argument("--level", type=int, default=2)
     args = ap.parse_args()
@@ -1201,34 +1445,31 @@ def main():
     rng = random.Random(args.seed)
     exact = {}
     skipped = 0
-    oracle_refused = 0
-    made = 0
+    refused = 0
+    tails = ["QM-E480", "QM-E481", "QM-E482"]
     index = 0
-    while made < args.programs:
+    while len(exact) < args.programs:
         index += 1
-        text = Gen(random.Random(rng.random()), args.qubits).program()
+        name = "p%05d.qasm" % index
+        sub = random.Random(rng.random())
+        tail = sub.choice(tails) if sub.random() < args.failing else None
+        text = Gen(sub, args.qubits, tail).program()
         try:
-            prog = openqasm3.parse(text)
-            orc = Oracle(prog)
+            orc = Oracle(openqasm3.parse(text))
             dist, dropped = orc.run()
+            errors = dict(orc.errors)
         except OracleError as e:
-            # outside the generated subset, or an error both sides should raise:
-            # kept and compared as an error
-            exact["p%05d.qasm" % index] = ("error", str(e))
-            with open(os.path.join(work, "p%05d.qasm" % index), "w") as f:
-                f.write(text)
-            oracle_refused += 1
-            made += 1
-            continue
+            # the type rules refuse it, on a path the run reached: QUMO must too
+            exact[name] = ("refused", e.code, str(e))
+            refused += 1
         except (KeyError, OverflowError, ValueError, ZeroDivisionError) as e:
             skipped += 1
             print("oracle skipped program:", type(e).__name__, e)
             continue
-        name = "p%05d.qasm" % index
+        else:
+            exact[name] = (dist, dropped, errors)
         with open(os.path.join(work, name), "w") as f:
             f.write(text)
-        exact[name] = (dist, dropped)
-        made += 1
     exe = build_runner(root, os.path.join(root, "build"))
     cmd = [exe, work, str(args.shots), str(args.seed)]
     if args.target:
@@ -1237,19 +1478,28 @@ def main():
     tol = math.sqrt(math.log(args.programs / 1e-6) / (2 * args.shots))
     worst = 0.0
     bad = []
-    both_err = 0
+    raised = defaultdict(int)
     for name, ex in sorted(exact.items()):
-        rows, names = read_qumo(os.path.join(work, name + ".out"))
-        if ex[0] == "error":
-            if rows is None:
-                both_err += 1
+        rows, info = read_qumo(os.path.join(work, name + ".out"))
+        code = info.split()[1].rstrip(":") if rows is None else None
+        if ex[0] == "refused":
+            if code == ex[1]:
+                raised[code] += 1
             else:
-                bad.append((name, "oracle error, QUMO ran: " + ex[1]))
+                bad.append((name, "the oracle refuses it (%s), QUMO: %s" % (ex[2], code or "ran")))
             continue
-        if rows is None:
-            bad.append((name, "QUMO error, oracle ran: " + names))
+        dist, dropped, errors = ex
+        heavy = [c for c, w in errors.items() if w >= 1e-3]
+        if code is not None:
+            if code in errors:
+                raised[code] += 1
+            else:
+                bad.append((name, "QUMO error, oracle ran: " + info))
             continue
-        dist, dropped = ex
+        if heavy:
+            bad.append((name, "the oracle reaches %s with weight %.3g, QUMO ran" % (heavy[0], errors[heavy[0]])))
+            continue
+        dropped += sum(errors.values())
         N = args.shots
         keys = set(dist) | set(rows)
         tv = 0.5 * sum(abs(dist.get(k, 0.0) - rows.get(k, 0) / N) for k in keys)
@@ -1258,8 +1508,13 @@ def main():
         worst = max(worst, tv / limit if limit > 0 else 0.0)
         if tv > limit:
             bad.append((name, "TV %.4f > limit %.4f (support %d, dropped %.2e)" % (tv, limit, len(dist), dropped)))
-    print("programs %d, exact %d, both raised %d, skipped by the oracle %d, worst TV / limit %.3f"
-          % (len(exact), len(exact) - oracle_refused, both_err, skipped, worst))
+    both = sum(raised.values())
+    codes = " ".join("%s:%d" % kv for kv in sorted(raised.items()))
+    print("programs %d, ran %d, both raised %d (%s), skipped by the oracle %d, worst TV / limit %.3f"
+          % (len(exact), len(exact) - both, both, codes, skipped, worst))
+    report = os.path.join(work, "verify.txt")
+    if os.path.exists(report):
+        print(open(report).read().strip())
     for name, why in bad[:20]:
         print("FAIL", os.path.join(work, name), why)
     if not args.keep and not args.dir:
