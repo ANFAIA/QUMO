@@ -399,7 +399,7 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E624", "compiler", "A circuit with E / correlated_error was given to the compiler: its qubits live in a side table no pass reads.", "Compile first, then add noise.")
     _e(c, "QM-E622", "compiler", "A constant angle cannot be brought into the target's angle bounds.", "A Pauli rotation needs an interval covering [0, pi/2] up to a period; widen the bounds or drop them.")
     # stabilizer / qec
-    _e(c, "QM-E630", "compiler", "A Program cannot use the AI presets, synthesis passes or the learned router: they need a whole circuit.", "Use a preset level or a pipeline without them.")
+    _e(c, "QM-E630", "compiler", "A Program cannot use the AI presets, synthesis passes or the learned router, which need a whole circuit, nor a second route or a relabeling pass inside fixpoint.", "Use a preset level, or a pipeline with one route and none of these.")
     _e(c, "QM-E631", "compiler", "A compiled Program failed verification: a different control structure, two layouts meeting on a control-flow edge, or a block that does not equal its source.", "Report the program; run a lower optimization level meanwhile.")
     _e(c, "QM-E632", "compiler", "No SWAP network was found to bring a region of a Program back to its entry layout.", "Report the program; check that the target's coupling graph is what you meant.")
     _e(c, "QM-E633", "compiler", "A gate with target angle bounds takes an angle known only at run time, which cannot be wrapped into the bounds.", "Use a gate without bounds, or drop the bounds.")

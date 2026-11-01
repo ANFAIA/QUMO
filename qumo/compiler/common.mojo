@@ -122,6 +122,9 @@ def basis_str(kinds: List[Int]) -> String:
 # ----------------------------------------------------------------------------
 # Numbers
 # ----------------------------------------------------------------------------
+comptime ANGLE_REDUCE_FROM = 1e4  # above, `wrap_angle` starts to lose digits
+
+
 def wrap_angle(a: Float64, period: Float64) -> Float64:
     """Representative of `a` modulo `period` in (-period/2, period/2]."""
     var r = a - period * floor(a / period + 0.5)
@@ -130,6 +133,28 @@ def wrap_angle(a: Float64, period: Float64) -> Float64:
     if r > period / 2:
         r -= period
     return r
+
+
+def reduce_large_angles(mut c: Circuit):
+    """Bring huge constant angles into (-2 pi, 2 pi]. Passes add angles and wrap them
+    with `wrap_angle`, and at 2^63 the sum drops the smaller term and the wrap has no
+    bits left. sin and cos reduce exactly, and every QUMO rotation has a period that
+    divides 4 pi, so the half-angle pair gives the same matrix."""
+    for ref g in c.ops:
+        if not op_is_unitary(g.kind):
+            continue
+        for j in range(op_num_params(g.kind)):
+            var p = g.param(j)
+            if p.is_symbolic() or abs(p.offset) < ANGLE_REDUCE_FROM:
+                continue
+            var half = p.offset / 2.0
+            var reduced = Param(2.0 * atan2(sin(half), cos(half)))
+            if j == 0:
+                g.p0 = reduced
+            elif j == 1:
+                g.p1 = reduced
+            else:
+                g.p2 = reduced
 
 
 def near_mod(a: Float64, target: Float64, period: Float64) -> Bool:

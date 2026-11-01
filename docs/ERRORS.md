@@ -588,8 +588,8 @@ Fix: A Pauli rotation needs an interval covering [0, pi/2] up to a period; widen
 
 ### QM-E630
 
-**A Program cannot use the AI presets, synthesis passes or the learned router: they need a whole circuit.**  
-Fix: Use a preset level or a pipeline without them.
+**A Program cannot use the AI presets, synthesis passes or the learned router, which need a whole circuit, nor a second route or a relabeling pass inside fixpoint.**  
+Fix: Use a preset level, or a pipeline with one route and none of these.
 
 ### QM-E631
 

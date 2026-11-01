@@ -21,10 +21,13 @@ layout it inherits.
   * A runtime angle cannot be wrapped into a target's angle bounds: QM-E633.
 
 `verify_program` then checks the result on its own (QM-E631): the same statements
-in the same order, l_out(u) == l_in(v) on every edge of `cfg_of`, and, for blocks of
-unitary gates on at most 10 qubits, `dense_equiv` of the block against its source
-through the layouts, with runtime angles set to arbitrary values. Blocks with
-measurements or wider ones are counted as not checked by `dense_equiv`.
+in the same order, l_out(u) == l_in(v) on every edge of `cfg_of`, l_out = perm(l_in)
+in each block, and `dense_equiv` of each block against its source through the
+layouts, with runtime angles set to arbitrary values. A measurement enters that
+comparison by the principle of deferred measurement, as a CX onto a fresh ancilla,
+and the ancillas of the two sides are paired by (clbit, nth write to that clbit).
+Blocks with reset, noise or classical conditions, or above 10 qubits with their
+ancillas, are counted as not checked.
 
 `ProgramMetrics` reports `base + sum per_iteration_i * N_i`, with the costlier branch
 of each IF. There is no global depth: a single number would mislead.
@@ -41,7 +44,7 @@ from qumo.compiler.blockalg import Perm, SubGraph, dense_equiv
 from qumo.compiler.block_synth import synth_perm
 from qumo.compiler.common import shell_like
 from qumo.compiler.pass_manager import (
-    PassManager, is_synth_pass, parse_pipeline, preset_pipeline, route_options, split_top_level, transpile,
+    PassId, PassManager, is_synth_pass, parse_pipeline, preset_pipeline, route_options, split_top_level, transpile,
 )
 from qumo.compiler.routing import RouteOptions, plan_route, route_circuit
 from qumo.compiler.target import Target
@@ -131,16 +134,41 @@ def _leaf(p: Program, lo: Int, hi: Int, num_qubits: Int) -> Circuit:
     return c^
 
 
+def _relabels(spec: String) raises -> Bool:
+    """Does the pipeline text hold a pass that renames qubits for what follows it?"""
+    for q in parse_pipeline(spec):
+        if q.id == PassId.ROUTE or q.id == PassId.ELIDE_SWAPS or q.id == PassId.POST_LAYOUT:
+            return True
+        if q.id == PassId.FIXPOINT:
+            var inner = String()
+            for a in q.args:
+                if not a.startswith("max="):
+                    inner += ("," if inner.byte_length() > 0 else "") + a
+            if _relabels(inner):
+                return True
+    return False
+
+
 def _split_pipeline(spec: String, mut pre: String, mut route: String, mut post: String) raises:
-    """Cut the text at its first `route(`; what relabels qubits does not survive."""
+    """Cut the text at its route; a top-level elide_swaps or post_layout is dropped.
+    A second route, or a relabeling pass inside fixpoint, would rename qubits behind
+    the layouts this compiler tracks, so they are refused."""
+    var parsed = parse_pipeline(spec)
+    var items = split_top_level(spec)
     var seen = False
-    for it in split_top_level(spec):
-        if it.startswith("route(") and not seen:
+    for i in range(len(items)):
+        ref it = items[i]
+        var id = parsed[i].id
+        if id == PassId.ROUTE:
+            if seen:
+                raise Error("QM-E630: a pipeline for a Program takes one route. Hint: drop the second route.")
             route = it
             seen = True
             continue
-        if it.startswith("elide_swaps") or it.startswith("post_layout"):
+        if id == PassId.ELIDE_SWAPS or id == PassId.POST_LAYOUT:
             continue
+        if _relabels(it):
+            raise Error("QM-E630: '" + it + "' renames qubits inside a repeated pass, which a Program cannot follow. Hint: take route, elide_swaps and post_layout out of fixpoint.")
         if seen:
             post += ("," if post.byte_length() > 0 else "") + it
         else:
@@ -156,9 +184,10 @@ def _check_no_ai(spec: String) raises:
                 raise Error("QM-E630: the learned router is not available for a Program. Hint: use route without a policy.")
 
 
-def _restore_perm(cur: List[Int], want: List[Int], n: Int, N: Int) -> List[Int]:
+def _restore_perm(cur: List[Int], want: List[Int], n: Int, N: Int, label: List[Int]) -> List[Int]:
     """Bijection of physical qubits taking the n program qubits from `cur` to
-    `want`; the others hold |0> and go wherever is left, staying put if they can."""
+    `want`. The others hold |0> and go wherever is left, staying put if they can,
+    and always inside their component of the coupling graph."""
     var p = List[Int](length=N, fill=-1)
     var taken = List[Bool](length=N, fill=False)
     for l in range(n):
@@ -168,13 +197,20 @@ def _restore_perm(cur: List[Int], want: List[Int], n: Int, N: Int) -> List[Int]:
         if p[x] < 0 and not taken[x]:
             p[x] = x
             taken[x] = True
-    var free = 0
     for x in range(N):
-        if p[x] < 0:
-            while taken[free]:
-                free += 1
-            p[x] = free
-            taken[free] = True
+        if p[x] >= 0:
+            continue
+        for y in range(N):
+            if not taken[y] and label[y] == label[x]:
+                p[x] = y
+                taken[y] = True
+                break
+        if p[x] < 0:  # a program qubit left its component: _swap_network reports it
+            for y in range(N):
+                if not taken[y]:
+                    p[x] = y
+                    taken[y] = True
+                    break
     return p^
 
 
@@ -322,9 +358,16 @@ struct _Compiler(Movable):
             var before = len(self.arena.ops)
             self.arena.compose_mapped(out, qmap)
             self.arena.global_phase = phase
-            if len(self.arena.ops) > before:  # passes may empty a block
+            var moved = False
+            for x in range(self.N):
+                moved = moved or self.block.perm[x] != x
+            if len(self.arena.ops) > before or moved:
                 self.block.l_out = self.cur.copy()
                 self.blocks.append(self.block.copy())
+                if len(self.arena.ops) == before:
+                    # a source SWAP and a restore SWAP can cancel: no gates are left,
+                    # but the block still takes one layout to another
+                    self.tb.tape.append(Stmt(SK.OPS, before, before, -1, -1, line))
         self.tb.flush(len(self.arena.ops), line)
         self.pending = shell_like(self.src.body, self.N)
         self.has_pending = False
@@ -359,7 +402,7 @@ struct _Compiler(Movable):
             same = same and self.cur[l] == want[l]
         if same:
             return
-        var p = _restore_perm(self.cur, want, self.n, self.N)
+        var p = _restore_perm(self.cur, want, self.n, self.N, _components(self.target))
         var net = _swap_network(self.target, p, self.seed)
         self.restored += len(net)
         for g in net:
@@ -494,10 +537,14 @@ def _bound_ops(ops: List[Instruction], values: List[Float64]) -> List[Instructio
     return out^
 
 
-def _unitary_only(c: Circuit, lo: Int, hi: Int) -> Bool:
+def _checkable(c: Circuit, lo: Int, hi: Int) -> Bool:
+    """Only unitary gates and plain measurements. Pairing a reset or a noise channel
+    across a reordering could raise false alarms, and a conditional gate is not one
+    unitary."""
     for i in range(lo, hi):
         ref g = c.ops[i]
-        if (g.cond >= 0 or not op_is_unitary(g.kind)) and g.kind != Op.BARRIER and g.kind != Op.TICK:
+        var plain = op_is_unitary(g.kind) or g.kind == Op.MEASURE or g.kind == Op.BARRIER or g.kind == Op.TICK
+        if g.cond >= 0 or not plain:
             return False
     return True
 
@@ -519,29 +566,55 @@ def _relabel(g: Instruction, index: List[Int]) -> Instruction:
     return h
 
 
+def _deferred(g: Instruction, N: Int, mut keys: List[Int], mut writes: List[Int]) -> Instruction:
+    """A measurement as a CX onto its ancilla. Ancillas are qubits N, N + 1, ...,
+    one per (clbit, nth write to that clbit), the same pair on both sides of the
+    comparison, so the two blocks may order their measurements differently."""
+    var nth = 0
+    for k in range(len(writes)):
+        if writes[k] == g.clbit:
+            nth += 1
+    writes.append(g.clbit)
+    var key = (g.clbit + 1) * 1000003 + nth
+    for k in range(len(keys)):
+        if keys[k] == key:
+            return Instruction.make(Op.CX, g.q0, N + k)
+    keys.append(key)
+    return Instruction.make(Op.CX, g.q0, N + len(keys) - 1)
+
+
+def _dense_form(ops: List[Instruction], index: List[Int], count: Int, values: List[Float64]) raises -> List[Instruction]:
+    """Relabelled to 0..count-1, bound, and with 3-qubit gates unrolled, which is
+    what `dense_equiv` takes; unrolling is exact up to the phase it ignores."""
+    var c = Circuit(count)
+    for g in _bound_ops(ops, values):
+        c.ops.append(_relabel(g, index))
+    _ = unroll_3q(c)
+    return c.ops.copy()
+
+
 def _check_block(src: Program, built: Program, b: ProgramBlock, lo: Int, hi: Int, values: List[Float64]) raises -> Bool:
     """dense_equiv of a compiled block against source + layout change. False when
     the block is outside what that can check."""
-    if not _unitary_only(built.body, lo, hi):
+    if not _checkable(built.body, lo, hi):
         return False
-    if b.src_lo >= 0 and not _unitary_only(src.body, b.src_lo, b.src_hi):
+    if b.src_lo >= 0 and not _checkable(src.body, b.src_lo, b.src_hi):
         return False
     var N = built.num_qubits()
-    var index = List[Int](length=N, fill=-1)
-    var count = 0
+    var keys = List[Int]()
     var expected = List[Instruction]()
     if b.src_lo >= 0:
+        var writes = List[Int]()
         for i in range(b.src_lo, b.src_hi):
             ref g = src.body.ops[i]
-            if not op_is_unitary(g.kind):
+            if not op_is_unitary(g.kind) and g.kind != Op.MEASURE:
                 continue
             var m = g
             var a = op_arity(g.kind)
             if a >= 1: m.q0 = b.l_in[g.q0]
-            if a >= 2: m.q1 = b.l_in[g.q1]
+            if a >= 2 and g.kind != Op.MEASURE: m.q1 = b.l_in[g.q1]
             if a >= 3: m.q2 = b.l_in[g.q2]
-            expected.append(m)
-            _touch(m, index, count)
+            expected.append(_deferred(m, N, keys, writes) if g.kind == Op.MEASURE else m)
     var done = List[Bool](length=N, fill=False)
     for x in range(N):
         if done[x] or b.perm[x] == x:
@@ -549,29 +622,29 @@ def _check_block(src: Program, built: Program, b: ProgramBlock, lo: Int, hi: Int
         var y = b.perm[x]
         done[x] = True
         while y != x:
-            var sw = Instruction.make(Op.SWAP, x, y)
-            expected.append(sw)
-            _touch(sw, index, count)
+            expected.append(Instruction.make(Op.SWAP, x, y))
             done[y] = True
             y = b.perm[y]
     var got = List[Instruction]()
+    var writes = List[Int]()
     for i in range(lo, hi):
         ref g = built.body.ops[i]
         if op_is_unitary(g.kind):
             got.append(g)
-            _touch(g, index, count)
+        elif g.kind == Op.MEASURE:
+            got.append(_deferred(g, N, keys, writes))
+    var index = List[Int](length=N + len(keys), fill=-1)
+    var count = 0
+    for g in expected:
+        _touch(g, index, count)
+    for g in got:
+        _touch(g, index, count)
     if count > 10:
         return False
     if count == 0:
         return True
-    var a_ops = List[Instruction](capacity=len(expected))
-    for g in expected:
-        a_ops.append(_relabel(g, index))
-    var b_ops = List[Instruction](capacity=len(got))
-    for g in got:
-        b_ops.append(_relabel(g, index))
     var phase = 0.0
-    if not dense_equiv(_bound_ops(a_ops, values), _bound_ops(b_ops, values), count, phase, 1e-7):
+    if not dense_equiv(_dense_form(expected, index, count, values), _dense_form(got, index, count, values), count, phase, 1e-7):
         raise Error("QM-E631: compiled block at op " + String(lo) + " does not match its source. Hint: report this program; run with a lower optimization level meanwhile.")
     return True
 
@@ -636,6 +709,10 @@ def verify_program(src: Program, res: ProgramCompileResult) raises -> Tuple[Int,
                 for l in range(n):
                     if enter[v][l] != cur[l]:
                         raise Error("QM-E631: control-flow edge from block " + String(u) + " to " + String(v) + " joins two layouts (line " + String(bb.line) + "). Hint: report this program.")
+    for blk in blocks:
+        for l in range(n):
+            if blk.perm[blk.l_in[l]] != blk.l_out[l]:
+                raise Error("QM-E631: a block's permutation does not take its entry layout to its exit layout (qubit " + String(l) + "). Hint: report this program.")
     var values = List[Float64](capacity=out.body.num_params())
     for i in range(out.body.num_params()):
         values.append(0.37 + 0.11 * Float64(i))
@@ -750,8 +827,7 @@ def compile_spec_program(p: Program, target: Target, spec: String, seed: Int = 7
     if route_spec.byte_length() > 0:
         var aopts = AIRouteOptions()
         var star = False
-        var args = split_top_level(String(route_spec[byte=6:route_spec.byte_length() - 1]))
-        opts = route_options(args, seed, aopts, star)
+        opts = route_options(parse_pipeline(route_spec)[0].args, seed, aopts, star)
     # logical passes, block by block
     var pre = List[Circuit]()
     var pm_pre = PassManager(pre_spec, seed) if pre_spec.byte_length() > 0 else PassManager("remove_identities", seed)
