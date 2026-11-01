@@ -28,7 +28,14 @@ from qumo.compiler.pass_manager import (
 # Snapshot of transpile() O0-O3 on 5 circuits x 5 targets, computed with the
 # pass manager before the AI passes were added (FNV-1a of the printed circuit,
 # pipeline and layouts). Any change means O0-O3 output changed.
-comptime SNAPSHOT_TOTAL: UInt64 = 1465841153960109920
+#
+# Re-pinned for Mojo 1.2: its std.math atan2/log are Mojo code, no longer the
+# system libm, and differ in the last ulp (release notes, "Math functions").
+# Diff of the 100 outputs against Mojo 1.1: 23 identical, 69 angles only (median
+# 2.2e-16, plus -pi/pi branch flips), 8 with 1q-gate changes of up to 5 lines;
+# the two-qubit count is unchanged in all 100, and all 100 pass
+# assert_routed_equiv on 1.2.
+comptime SNAPSHOT_TOTAL: UInt64 = 10442877586487227890
 
 
 def snap_random(n: Int, ngates: Int, seed: UInt64) -> Circuit:
@@ -241,7 +248,7 @@ def pauli_rot_circuit(n: Int, terms: Int, seed: UInt64) -> Circuit:
 # tests
 # ----------------------------------------------------------------------------
 def test_spec_surface() raises:
-    assert_equal(PassId.NUM, 19)
+    assert_equal(PassId.NUM, 21)
     assert_equal(pass_name(PassId.CLIFFORD_SYNTH), "clifford_synth")
     assert_equal(pass_name(PassId.LINEAR_SYNTH), "linear_synth")
     assert_equal(pass_name(PassId.PERM_SYNTH), "perm_synth")

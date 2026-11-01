@@ -75,6 +75,11 @@ Fix: Each operand of a gate must be a distinct qubit.
 **A condition refers to a classical bit beyond the classical register.**  
 Fix: Declare enough classical bits or fix the condition bit.
 
+### QM-E005
+
+**Unknown circuit drawing style.**  
+Fix: Use 'ascii' or 'unicode'.
+
 ### QM-E004
 
 **A register condition (Circuit.c_if_register, OpenQASM 2 'if(c==N)') needs matching non-empty bit and value lists.**  
@@ -108,6 +113,21 @@ Fix: Bind parameters, or translate to the {u, cx} basis first.
 
 **The requested control qubit is already used by the circuit.**  
 Fix: Pick a fresh control qubit.
+
+### QM-E204
+
+**A multi-controlled gate uses a qubit twice among its controls, target and ancillas.**  
+Fix: Controls, target and ancillas must all be distinct.
+
+### QM-E205
+
+**Unknown multi-controlled synthesis mode.**  
+Fix: Use auto, noaux, clean, dirty or split.
+
+### QM-E206
+
+**The multi-controlled synthesis mode needs more ancillas than were given.**  
+Fix: Pass more ancillas, or use mode 'auto'.
 
 ## QM-E3xx — Pauli observables
 
@@ -162,6 +182,41 @@ Fix: Measure fewer bits or split the register.
 
 **Invalid index-bit swap layer (StateVector.apply_swap_layer): the qa/qb lists differ in length, a bit is outside [0, num_qubits), or a bit appears twice.**  
 Fix: Pass disjoint pairs of distinct in-range bits, one partner per entry.
+
+### QM-E420
+
+**split_pub needs a positive limit.**  
+Fix: Pass the device limit on parameter sets per job.
+
+### QM-E409
+
+**sample_ptsbe needs a static circuit with Pauli noise: no resets, classical conditions, mid-circuit measurements or Kraus channels.**  
+Fix: Use sample(), which runs per-shot trajectories.
+
+### QM-E410
+
+**Density matrix too large: 2^n x 2^n complex numbers.**  
+Fix: The limit is 15 qubits (16 GiB). Use sample_ptsbe or sample() for more.
+
+### QM-E411
+
+**The density-matrix simulator cannot follow one classical branch: classical conditions, or sampling after a mid-circuit measurement.**  
+Fix: Use sample(), which runs per-shot trajectories.
+
+### QM-E412
+
+**Stabilizer branching exceeded its branch limit (2^20): too many non-Clifford gates on non-commuting Paulis.**  
+Fix: Reduce the number of non-Clifford gates, or use the state vector.
+
+### QM-E413
+
+**The stabilizer branching simulator has no decomposition for this gate.**  
+Fix: Translate the circuit to Clifford gates and rotations first.
+
+### QM-E414
+
+**Invalid or unsupported Kraus channel: wrong shape, not trace preserving, or used on a simulator that needs Pauli noise.**  
+Fix: Pass matrices with sum K^dag K = identity; run them on density_evolve() or sample().
 
 ### QM-E408
 
@@ -456,6 +511,26 @@ Fix: Report a bug; non-strict mode silently keeps the original.
 **AI model incompatible with the request (kind, size, topology or gate set).**  
 Fix: Use model=auto.
 
+### QM-E621
+
+**Invalid target calibration or angle bounds: wrong number of values, an unknown edge, a gate without one angle, or an empty interval.**  
+Fix: One value per qubit or edge; bounds look like rzz[0:pi/2].
+
+### QM-E623
+
+**to_pbc cannot take this circuit: unbound parameters, conditions, resets, noise or QEC annotations.**  
+Fix: Bind parameters and pass a circuit of unitary gates and measurements.
+
+### QM-E624
+
+**A circuit with E / correlated_error was given to the compiler: its qubits live in a side table no pass reads.**  
+Fix: Compile first, then add noise.
+
+### QM-E622
+
+**A constant angle cannot be brought into the target's angle bounds.**  
+Fix: A Pauli rotation needs an interval covering [0, pi/2] up to a period; widen the bounds or drop them.
+
 ## QM-E7xx — Stabilizer simulation and QEC
 
 See [QEC.md](QEC.md).
@@ -570,6 +645,41 @@ Fix: epsilon 1e-2 with max_t 16 is the default; comparator angle registers hold 
 **Emulation request not supported (state vector wider than its limit, non-Clifford circuit on the tableau method, non-deterministic program in an error-rate sweep, shots < 1).**  
 Fix: Use method 'auto', fewer logical qubits / magic_prep 'nonft' for state-vector runs, or a deterministic program for error-rate sweeps.
 
+### QM-E732
+
+**Invalid PAULI_CHANNEL_2 or correlated error: wrong number of probabilities or letters.**  
+Fix: 15 probabilities in Stim's order; one Pauli letter per qubit.
+
+### QM-E733
+
+**ELSE_CORRELATED_ERROR has no detector error model.**  
+Fix: Sample it with the Pauli-frame simulator.
+
+### QM-E734
+
+**Stim circuit text could not be imported: unknown or unsupported instruction, bad target, or too many instructions after unrolling.**  
+Fix: See the message; docs/QEC.md lists what from_stim takes.
+
+### QM-E735
+
+**Stim detector error model text could not be parsed.**  
+Fix: Use Stim's format: error(p) D0 D1 ^ D2 L0, detector, logical_observable, shift_detectors, repeat.
+
+### QM-E736
+
+**Invalid sliding-window setup: window, step, or missing detector round data.**  
+Fix: 0 < step <= window <= rounds and (rounds - window) % step == 0; the DEM needs detector coordinates or an explicit round per detector.
+
+### QM-E737
+
+**missing_detectors needs a Clifford circuit with at most 20000 measurements.**  
+Fix: Bind parameters and remove non-Clifford gates.
+
+### QM-E731
+
+**Correlated matching needs error probabilities up to 0.5.**  
+Fix: Use plain 'mwpm' for this detector error model.
+
 ### QM-E730
 
 **A computational circuit given to encode() contains noise channels, QEC annotations or unbound symbolic parameters.**  
@@ -615,12 +725,37 @@ Fix: Reduce the size or use a variational method.
 ### QM-E808
 
 **Invalid Trotterization options.**  
-Fix: steps >= 1, order 1 or 2.
+Fix: steps >= 1, order 1 or even.
 
 ### QM-E809
 
 **Invalid graph specification.**  
 Fix: Edges are 'i-j' pairs of distinct non-negative nodes.
+
+### QM-E816
+
+**Invalid SQD policy or trim settings.**  
+Fix: policy 'standard' or 'trim', ratios in (0, 1].
+
+### QM-E817
+
+**Invalid multi-product formula: step counts must be distinct and positive, with a feasible L1 bound.**  
+Fix: Use distinct steps; 'approx' needs max_l1 >= 1.
+
+### QM-E818
+
+**Invalid IQP model: a generator is empty or outside the register, or the weights do not match the parameter groups.**  
+Fix: One weight per parameter group; generators are non-empty lists of qubits.
+
+### QM-E819
+
+**lie_closure passed max_dim.**  
+Fix: Raise max_dim: the algebra can have dimension up to 4^n - 1.
+
+### QM-E815
+
+**T-REX cannot run: too many qubits, too few shots, or a calibration too close to 0.**  
+Fix: Use at most 62 qubits and shots >= num_twirls; raise calibration_shots.
 
 ### QM-E810
 
@@ -918,3 +1053,13 @@ Fix: Rename the gate.
 
 **OpenQASM delay is ignored.**  
 Fix: Model idle noise with '#pragma qumo depolarize1(p) q[i];'.
+
+### QM-W052
+
+**OpenQASM annotation is ignored.**  
+Fix: Annotations carry no meaning in QUMO; the annotated statement still runs.
+
+### QM-W053
+
+**OpenQASM box duration is ignored.**  
+Fix: QUMO circuits have no timing model; the box still keeps its gates together.

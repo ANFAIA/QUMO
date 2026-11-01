@@ -267,6 +267,18 @@ def check_reproducible(emulate: Bool) raises:
     assert_true(e.num_detection_events() <= 70 * e.num_detectors)
 
 
+def check_table_noise_is_refused() raises:
+    var c = Circuit(2)
+    c.correlated_error(0.1, [0, 1], [1, 3])
+    c.measure(0, 0)
+    var raised = False
+    try:
+        _ = GpuFrameSampler(c, emulate=True)
+    except e:
+        raised = String(e).startswith("QM-E475")
+    assert_true(raised, "no kernel for E")
+
+
 def check_errors_and_dispatch() raises:
     var t = Circuit(1)
     t.t(0)
@@ -310,6 +322,7 @@ def main() raises:
     check_thresholds()
     run_suite(True)
     check_errors_and_dispatch()
+    check_table_noise_is_refused()
     comptime if is_defined["QUMO_GPU"]():
         if gpu_available():
             print("running device suites on:", gpu_info())

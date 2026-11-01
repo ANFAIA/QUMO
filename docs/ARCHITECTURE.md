@@ -36,9 +36,14 @@ seeding and JSON conventions.
   `op_is_diagonal`, `op_inverse_kind`, `op_is_controlled_1q`, …) used by the
   compiler, the simulators and `qumo describe`. One table, many consumers.
 * **Functors**: `inverse()` (Adjoint), `controlled(q)` (Controlled; covers the
-  gates needed by QPE / Hadamard tests), `power(k)`.
+  gates needed by QPE / Hadamard tests), `power(k)`; `qumo.ir.mc.controlled_by`
+  takes any number of controls and expands to ordinary gates at build time.
+* **Side tables**: what does not fit a POD instruction lives on the `Circuit`
+  and the instruction holds an index: register conditions, detector records,
+  Kraus channels (`Op.KRAUS1/2`), `PAULI_CHANNEL_2` probabilities, the Pauli
+  products of `E`. Pauli-based programs are a separate type, `qumo.compiler.pbc`.
 * **QEC in the same IR**: noise channels (`DEPOLARIZE1/2`, `X/Y/Z_ERROR`,
-  `PAULI_CHANNEL_1`) and annotations (`DETECTOR`, `OBSERVABLE`, `TICK`) with
+  `PAULI_CHANNEL_1/2`, `E`) and annotations (`DETECTOR`, `OBSERVABLE`, `TICK`) with
   Stim-style absolute measurement records.
 * **Text formats**: OpenQASM 3 is canonical (`qasm.mojo`, round-trip exact,
   `#pragma qumo` for noise/detectors); OpenQASM 2 export (`qasm2.mojo`) for

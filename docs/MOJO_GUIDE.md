@@ -1,8 +1,8 @@
-# QUMO — Mojo 1.1 Contributor Guide
+# QUMO — Mojo 1.2 Contributor Guide
 
 Mojo changes fast. This file records the **exact dialect QUMO compiles with**
-(Mojo 1.1.0 + MAX 26.6 Mojo libs) so humans and coding agents stop guessing.
-Toolchain lives in `.venv/` (`uv pip install mojo max-mojo-libs max-core`).
+(Mojo 1.2.0 + MAX 26.7.0 Mojo libs) so humans and coding agents stop guessing.
+Toolchain lives in `.venv/` (`make setup`; versions pinned in the Makefile).
 
 ```bash
 .venv/bin/mojo run -I . tests/test_ir.mojo        # run a test
@@ -13,7 +13,7 @@ make test                                         # all tests
 
 Ignore the `Failed to initialize Crashpad` line — harmless.
 
-## Language rules (1.1)
+## Language rules (1.2)
 
 | Topic | Rule |
 |---|---|
@@ -41,8 +41,31 @@ Ignore the `Failed to initialize Crashpad` line — harmless.
 | Sorting | `sort(lst)` for Comparable; `sort(span, cmp_fn)` custom. |
 | Errors | `raise Error("QM-E123: message. Hint: ...")`; `try: ... except e: String(e)`. |
 | **Lifetimes (ASAP destruction)** | A value is destroyed right after its *last syntactic use*. A raw pointer taken with `lst.unsafe_ptr()` does **not** keep `lst` alive: if a closure (e.g. inside `parallelize`) reads through the pointer after the last use of `lst`, it reads freed memory. Add `_ = len(lst)` after the parallel call. |
-| Reserved words | `fn` is still reserved (cannot be a variable name), as are `class`, `del`, `match`, `yield` for free functions. |
+| Reserved words | `fn` is still reserved (cannot be a variable name), as are `class`, `del`, `match`, `yield` for free functions. `async` / `await` warn: they are `__async` / `__await` now. |
+| Pattern matching (new in 1.2) | `match x:` + `case 0:`, `case 1 \| 2:`, `case (a, b):`, `case n if n > 3:`, `case _:`; `if case .Some(v) = opt:`, `while case`, `var [first, *rest] = xs`. QUMO's opcode ladders stay `if` chains: `Op.X` are `comptime` ints in hot paths, and a rewrite would not simplify them. |
+| Empty tuple | `()` is a value; the type is `Tuple[]`. |
+| Walrus | `:=` only assigns to an existing variable: declare first (`var id: Optional[Int]`, then `if id := m.get(k):`). |
+| Opting out of a trait | `struct H(not Movable): ...`, with `else "reason"`. `where cond else "message"` on signatures. |
 | Read-only kernels | Take `self` (not `mut self`) and use `self.re.unsafe_ptr()` (immutable pointer) so `evolve(c).expectation(h)` works on temporaries. |
+
+## What moved from 1.1 to 1.2
+
+Full notes: [v1.2.0 release notes](https://github.com/modular/modular/blob/main/Mojo/docs/site/releases/v1.2.0.md).
+
+* `has_nvidia_gpu_accelerator()`, `has_amd_gpu_accelerator()`, `has_apple_gpu_accelerator()` are gone from `std.sys`.
+  Use `qumo.gpu.vendor` (`gpu_target_is_apple()`, ...). Do not call `default_accelerator()` unguarded: it stops the
+  build on a host without an accelerator, and default QUMO builds must compile there.
+* `std.math.atan2`, `atan`, `log` (`float64`), `log1p`, `tan`, `hypot`, `log10`, `expm1`, `erf`/`erfc` are Mojo code
+  now, the same on CPU and GPU, no longer the system libm. Results can move by one ulp, and `log` got much more
+  accurate (it was up to 2e7 ulp off). Anything pinned to the last bit of an angle changes; the compiler snapshot in
+  `tests/test_ai_transpiler.mojo` was re-pinned for this (the comment there records the diff).
+* `FileDescriptor` is `RawFileDescriptor` and takes a `c_int`: `RawFileDescriptor(c_int(fd))`.
+* `std.hashlib` is `std.hash`; `hash(ptr, len)` is `hash_bytes(span)`.
+* `StringSpan` is immutable; `isspace()` is `is_ascii_whitespace()`; `startswith`/`endswith` take Python's
+  negative offsets.
+* `SIMD.from_bytes` takes `endian=.big`; `is_big_endian()` is deprecated.
+* `SIMD.reduce(f)`, `Tuple.consume_elements(f)` take the closure as a runtime argument.
+* `Layout` carries its alignment as a parameter (`Layout[T, alignment = .of_bytes[64]()](count=n)`).
 
 ## Strings (UTF-8 strict)
 
@@ -51,6 +74,8 @@ Ignore the `Failed to initialize Crashpad` line — harmless.
 * Substring from bytes: `String(unsafe_from_utf8=bs[a:b])`, or `s[byte=a:b]`.
 * Methods: `split`, `strip`, `startswith`, `endswith`, `find`, `replace`, `lower`, `upper`, `join`.
 * Parse numbers: `Int("42")`, `Float64("3.5")` (raise on bad input). Template strings: `String(t"{x} and {y}")`.
+* `s = String(s[byte=a:])` is an aliasing error (the call reads `s` while building its result). Use a temporary:
+  `var tail = String(s[byte=a:]); s = tail^`.
 
 ## Imports
 

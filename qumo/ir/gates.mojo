@@ -64,6 +64,10 @@ struct Op:
     comptime Y_ERROR = 53
     comptime Z_ERROR = 54
     comptime PAULI_CHANNEL_1 = 55
+    comptime KRAUS1 = 56  # p0 = index into Circuit.kraus
+    comptime KRAUS2 = 57
+    comptime PAULI_CHANNEL_2 = 58  # p0 = offset of 15 probabilities in Circuit.noise_table
+    comptime CORRELATED_ERROR = 59  # q0 = offset in Circuit.pauli_table, q1 = letters, q2 = 1 for ELSE; p0 = p
     # QEC annotations (no quantum effect)
     comptime DETECTOR = 60
     comptime OBSERVABLE = 61
@@ -116,6 +120,10 @@ def op_name(k: Int) -> String:
     if k == Op.Y_ERROR: return "y_error"
     if k == Op.Z_ERROR: return "z_error"
     if k == Op.PAULI_CHANNEL_1: return "pauli_channel_1"
+    if k == Op.KRAUS1: return "kraus1"
+    if k == Op.KRAUS2: return "kraus2"
+    if k == Op.PAULI_CHANNEL_2: return "pauli_channel_2"
+    if k == Op.CORRELATED_ERROR: return "correlated_error"
     if k == Op.DETECTOR: return "detector"
     if k == Op.OBSERVABLE: return "observable"
     if k == Op.TICK: return "tick"
@@ -143,9 +151,9 @@ def op_arity(k: Int) -> Int:
     if k <= Op.RZZ: return 2
     if k <= Op.CCZ: return 3
     if k == Op.MEASURE or k == Op.RESET: return 1
-    if k == Op.DEPOLARIZE1 or k == Op.X_ERROR or k == Op.Y_ERROR or k == Op.Z_ERROR or k == Op.PAULI_CHANNEL_1:
+    if k == Op.DEPOLARIZE1 or k == Op.X_ERROR or k == Op.Y_ERROR or k == Op.Z_ERROR or k == Op.PAULI_CHANNEL_1 or k == Op.KRAUS1:
         return 1
-    if k == Op.DEPOLARIZE2: return 2
+    if k == Op.DEPOLARIZE2 or k == Op.KRAUS2 or k == Op.PAULI_CHANNEL_2: return 2
     return 0
 
 
@@ -153,6 +161,7 @@ def op_num_params(k: Int) -> Int:
     if k == Op.U or k == Op.PAULI_CHANNEL_1: return 3
     if (k >= Op.RX and k <= Op.P) or (k >= Op.CP and k <= Op.RZZ): return 1
     if k >= Op.DEPOLARIZE1 and k <= Op.Z_ERROR: return 1
+    if k == Op.CORRELATED_ERROR: return 1
     return 0
 
 
@@ -161,7 +170,12 @@ def op_is_unitary(k: Int) -> Bool:
 
 
 def op_is_noise(k: Int) -> Bool:
-    return k >= Op.DEPOLARIZE1 and k <= Op.PAULI_CHANNEL_1
+    return k >= Op.DEPOLARIZE1 and k <= Op.CORRELATED_ERROR
+
+
+def op_is_pauli_noise(k: Int) -> Bool:
+    """Noise a stabilizer or Pauli-frame simulator can take."""
+    return op_is_noise(k) and k != Op.KRAUS1 and k != Op.KRAUS2
 
 
 def op_is_annotation(k: Int) -> Bool:
@@ -280,6 +294,10 @@ def op_description(k: Int) -> String:
     if k == Op.Y_ERROR: return "Y error with prob p."
     if k == Op.Z_ERROR: return "Phase-flip with prob p."
     if k == Op.PAULI_CHANNEL_1: return "Pauli channel with probs (px, py, pz)."
+    if k == Op.KRAUS1: return "1q Kraus channel, matrices in Circuit.kraus (non-Pauli noise)."
+    if k == Op.KRAUS2: return "2q Kraus channel, matrices in Circuit.kraus (non-Pauli noise)."
+    if k == Op.PAULI_CHANNEL_2: return "2q Pauli channel: 15 probabilities (IX, IY, ... ZZ, left Pauli on q0) in Circuit.noise_table."
+    if k == Op.CORRELATED_ERROR: return "Stim E: with probability p, a Pauli product on the qubits in Circuit.pauli_table."
     if k == Op.DETECTOR: return "QEC detector: parity of measurement records, deterministic without noise."
     if k == Op.OBSERVABLE: return "QEC logical observable: parity of measurement records."
     if k == Op.TICK: return "Time-step boundary (scheduling hint)."

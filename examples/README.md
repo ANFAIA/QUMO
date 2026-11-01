@@ -56,8 +56,8 @@ Every example below is run and verified by `bench/.venv/bin/python examples/run_
 | Folder | Examples | Frameworks | Fast / slow |
 |---|---|---|---|
 | [`examples/`](.) | 15 | qumo (legacy smoke tests) | 15 / 0 |
-| [`frameworks/`](frameworks/) | 27 | braket, cirq, cudaq, qibo, qiskit, qsharp, tket | 24 / 3 |
-| [`ft/`](ft/) | 5 | guppyft | 4 / 1 |
+| [`frameworks/`](frameworks/) | 39 | braket, cirq, cudaq, pennylane, qibo, qiskit, qsharp, tket | 36 / 3 |
+| [`ft/`](ft/) | 6 | guppyft | 5 / 1 |
 | [`heterogeneous/`](heterogeneous/) | 6 | qumo | 6 / 0 |
 | [`qml/`](qml/) | 11 | pennylane | 11 / 0 |
 
@@ -67,6 +67,7 @@ Every example below is run and verified by `bench/.venv/bin/python examples/run_
 | [`ft/iceberg_program.mojo`](ft/iceberg_program.mojo) — Multi-logical-qubit Iceberg program: native rotations, block allocation and error detection | guppyft | fast | Guppy FT - Iceberg logical API (Block[N], rotations, measure_all, measure_syndrome) |
 | [`ft/logical_error_sweep.mojo`](ft/logical_error_sweep.mojo) — Logical versus physical error rate of an encoded Steane program under circuit-level noise | guppyft | fast | Guppy FT - Steane encoding emulated with Stim (logical vs unencoded behaviour) |
 | [`ft/magic_t_and_comparator_rz.mojo`](ft/magic_t_and_comparator_rz.mojo) — Magic-state T gates on Steane, and Rz synthesis for known and run-time angles | guppyft | slow | Guppy FT - Custom T injection (logical program) and Comparator-based Rz synthesis with the Steane architecture |
+| [`ft/reichardt_iceberg_helix.mojo`](ft/reichardt_iceberg_helix.mojo) — Reichardt QEC cycles, Iceberg Pauli exponentials, the Helix code | guppyft | fast | Guppy FT 0.5 - QECStyle.Reichardt, Iceberg pauli_exp, Helix (arXiv:2609.03194, 1804.06995) |
 | [`ft/steane_teleportation.mojo`](ft/steane_teleportation.mojo) — Encoded teleportation with feed-forward on the Steane code, three QEC architectures | guppyft | fast | Guppy FT - Getting started (encoding with Steane) and Writing logical programs directly |
 | [`heterogeneous/ai_gpu_qpu.py`](heterogeneous/ai_gpu_qpu.py) — AI-selected algorithm, run partly on a GPU and partly on a QPU (with an offline selector) | qumo | fast | heterogeneous CPU+GPU+QPU workflow pattern - CUDA-Q multi-QPU, Qiskit execution modes, Braket Hybrid Jobs, PennyLane device swaps |
 | [`heterogeneous/cutting/cut_two_modalities.py`](heterogeneous/cutting/cut_two_modalities.py) — Circuit cutting across two QPU modalities: a dense fragment on a trapped-ion QPU, a wide shallow fragment on a superconducting QPU | qumo | fast | Qiskit addon cutting / CutQC - wire cutting with quasi-probability reconstruction, here with each fragment compiled for a different QPU modality |

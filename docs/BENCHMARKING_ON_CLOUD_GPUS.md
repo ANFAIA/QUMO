@@ -17,7 +17,7 @@ third-party baseline that runs on it.
 
 ## 1. Support matrix (sources checked 2026-10-12)
 
-### Where QUMO's GPU kernels run (Mojo 1.1 / MAX 26.6)
+### Where QUMO's GPU kernels run (Mojo 1.2 / MAX 26.7)
 
 | Vendor | GPUs (architecture, Mojo target) | Modular tier | Requirement |
 |---|---|---|---|
@@ -30,7 +30,7 @@ third-party baseline that runs on it.
 | Apple | M1-M5 (Metal) | known compatible | macOS 15+, Xcode 16+, `xcodebuild -downloadComponent MetalToolchain`; **fp32 only** (Metal has no double) |
 
 Sources: [Mojo system requirements, GPU tables](https://mojolang.org/docs/requirements/) ("Pre-Turing GPUs (such as
-Pascal-generation GTX 10XX and Tesla P100) are not supported out of the box") and the Mojo 1.1 target list
+Pascal-generation GTX 10XX and Tesla P100) are not supported out of the box") and the Mojo 1.2 target list
 (`_all_targets` in `std/_gpu/host/info.mojo`: `sm_52`, `sm_60`, `sm_61`, `sm_75` and newer; no `sm_70`;
 `apple-m1` ... `apple-m5`, which Mojo also accepts as `metal:1` ... `metal:5`). `bench/run_benchmarks.py`
 encodes this table in `gpu_supported()` and stores the verdict for every detected GPU in the result JSON
@@ -39,10 +39,10 @@ encodes this table in `gpu_supported()` and stores the verdict for every detecte
 ### Installing Mojo / MAX on a cloud machine
 
 * The notebooks and `run_on_any_gpu.sh` install **pinned** versions into `.venv` (the ones QUMO is developed with):
-  `uv pip install mojo==1.1.0 max-mojo-libs==26.6.0 max-core==26.6.0` (empty version fields = `make setup`, i.e.
+  `uv pip install mojo==1.2.0 max-mojo-libs==26.7.0 max-core==26.7.0` (empty version fields = `make setup`, i.e.
   the latest releases).
-* PyPI wheels (uploaded 2026-09-17): `mojo 1.1.0`, `mojo-compiler 1.1.0` and `max-core 26.6.0` for
-  `manylinux_2_34_x86_64`, `manylinux_2_34_aarch64` and `macosx_13_0_arm64`; `max-mojo-libs 26.6.0` is pure Python.
+* PyPI wheels (uploaded 2026-10-22): `mojo 1.2.0`, `mojo-compiler 1.2.0` and `max-core 26.7.0` for
+  `manylinux_2_34_x86_64`, `manylinux_2_34_aarch64` and `macosx_13_0_arm64`; `max-mojo-libs 26.7.0` is pure Python.
   Linux therefore needs **glibc >= 2.34** (Ubuntu 22.04+). Modular lists Python 3.10-3.14, x86-64-v3 (Haswell or
   newer) or ARM Neoverse N1+ CPUs, macOS 15+ on Apple silicon, and a C compiler on Linux (used as the linker).
   Sources: [pypi.org/project/mojo](https://pypi.org/project/mojo/), [pypi.org/project/max-core](https://pypi.org/project/max-core/),

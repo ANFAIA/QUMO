@@ -98,6 +98,34 @@ struct Graph(Copyable, Writable, Sized):
         return g^
 
     @staticmethod
+    def square_lattice(rows: Int, cols: Int, periodic: Bool = False, w: Float64 = 1.0) raises -> Graph:
+        """Nodes r * cols + c, nearest neighbours; `periodic` wraps both directions."""
+        if rows < 1 or cols < 1 or rows * cols < 2:
+            raise Error("QM-E809: square_lattice() needs at least 2 sites, got " + String(rows) + " x " + String(cols) + ".")
+        var g = Graph(rows * cols)
+        for r in range(rows):
+            for c in range(cols):
+                var at = r * cols + c
+                if c + 1 < cols:
+                    g.add_edge(at, r * cols + c + 1, w)
+                elif periodic and cols > 2:
+                    g.add_edge(at, r * cols, w)
+                if r + 1 < rows:
+                    g.add_edge(at, (r + 1) * cols + c, w)
+                elif periodic and rows > 2:
+                    g.add_edge(at, c, w)
+        return g^
+
+    @staticmethod
+    def triangular_lattice(rows: Int, cols: Int, w: Float64 = 1.0) raises -> Graph:
+        """Square lattice plus one diagonal per plaquette (open boundaries)."""
+        var g = Graph.square_lattice(rows, cols, False, w)
+        for r in range(rows - 1):
+            for c in range(cols - 1):
+                g.add_edge(r * cols + c, (r + 1) * cols + c + 1, w)
+        return g^
+
+    @staticmethod
     def path(n: Int, w: Float64 = 1.0) raises -> Graph:
         var g = Graph(n)
         for i in range(n - 1):
@@ -216,6 +244,44 @@ def heisenberg_xxz(n: Int, j: Float64 = 1.0, delta: Float64 = 1.0, periodic: Boo
     if field != 0.0:
         for i in range(n):
             out.add(field, 0, _bit(i))
+    return out^
+
+
+def fermi_hubbard(graph: Graph, t: Float64 = 1.0, u: Float64 = 4.0, mu: Float64 = 0.0) raises -> PauliSum:
+    """H = -t sum_<ij>,s (c+_is c_js + h.c.) + U sum_i n_iu n_id - mu sum_is n_is.
+
+    Jordan-Wigner with up spins on qubits 0..L-1 and down spins on L..2L-1, so an
+    edge (i, j) has a Z string on the sites between them. The hopping of an edge is
+    t times its weight."""
+    var L = graph.num_nodes
+    if L < 1 or 2 * L > 64:
+        raise Error("QM-E802: fermi_hubbard() needs 1 <= sites <= 32, got " + String(L) + ".")
+    var out = PauliSum()
+    for s in range(2):
+        var base = s * L
+        for e in graph.edges:
+            var a = base + e.u
+            var b = base + e.v
+            var string = UInt64(0)
+            for q in range(a + 1, b):
+                string |= _bit(q)
+            # c+_a c_b + h.c. = (X_a Z.. X_b + Y_a Z.. Y_b) / 2
+            var c = -t * e.w * 0.5
+            var ends = _bit(a) | _bit(b)
+            out.add(c, ends, string)
+            out.add(c, ends, ends | string)
+    for i in range(L):
+        # n_up n_down = (1 - Z_u)(1 - Z_d) / 4
+        var zu = _bit(i)
+        var zd = _bit(i + L)
+        out.add(u / 4, 0, 0)
+        out.add(-u / 4, 0, zu)
+        out.add(-u / 4, 0, zd)
+        out.add(u / 4, 0, zu | zd)
+        if mu != 0.0:
+            out.add(-mu, 0, 0)
+            out.add(mu / 2, 0, zu)
+            out.add(mu / 2, 0, zd)
     return out^
 
 

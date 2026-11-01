@@ -42,6 +42,8 @@ from qumo.ir.gates import (
     Op, op_name, op_arity, op_num_params, op_is_unitary, op_is_noise,
 )
 from qumo.ir.circuit import Circuit, Instruction
+from qumo.ir.mc import controlled_by
+from qumo.ir.kraus import KrausChannel
 from qumo.ir.param import Param
 
 
@@ -123,6 +125,7 @@ struct TK:
     comptime PUNCT = 5
     comptime PRAGMA = 6  # `#pragma qumo` / `pragma qumo` marker
     comptime HWQUBIT = 7  # `$3`
+    comptime ANNOTATION = 8  # `@keyword payload` up to the end of the line
 
 
 struct P:
@@ -321,6 +324,17 @@ def _close_pragma(mut toks: List[Token], at: Int, line: Int):
     _push(toks, TK.PUNCT, P.SEMI, at, at, line)
 
 
+def _at_statement_start(toks: List[Token]) -> Bool:
+    """True after ';', '{', '}' or another annotation: '@' starts an annotation
+    there, whereas the '@' of a gate modifier always follows a modifier token."""
+    if len(toks) == 0:
+        return True
+    ref t = toks[len(toks) - 1]
+    if t.kind == TK.ANNOTATION:
+        return True
+    return t.kind == TK.PUNCT and (t.sub == P.SEMI or t.sub == P.LBRACE or t.sub == P.RBRACE)
+
+
 def _lex_error(src: String, code: String, msg: String, at: Int, line: Int, hint: String) -> Error:
     return Error(format_qasm_error(src, code, msg, at, 1, line, hint))
 
@@ -386,9 +400,13 @@ def tokenize_qasm(src: String) raises -> List[Token]:
                     i += 1
                 continue
             raise _lex_error(src, "QM-E501", "unexpected character '#'", i, line, "only '#pragma' directives are supported; use // for comments")
-        if c == 0x40 and not line_has_tok:  # @annotation line
-            while i < n and Int(bs[i]) != 0x0A:
-                i += 1
+        if c == 0x40 and (not line_has_tok or (_is_ident_start(Int(bs[i + 1]) if i + 1 < n else 0) and _at_statement_start(toks))):
+            # annotation: its payload is free-form text up to the end of the line
+            var j = i
+            while j < n and Int(bs[j]) != 0x0A:
+                j += 1
+            _push(toks, TK.ANNOTATION, 0, i, j, line)
+            i = j
             continue
         line_has_tok = True
         if _is_ident_start(c):
@@ -676,6 +694,7 @@ struct QasmParser(Movable):
     var user_gates: Dict[String, Int]
     var consts: Dict[String, Param]
     var inputs: Dict[String, Int]
+    var int_vars: Dict[String, List[Int]]  # `int x;` + `x = c;`: the bits x mirrors (for switch)
     var scopes: List[Scope]
     var cond_bit: Int
     var cond_val: Int
@@ -703,6 +722,7 @@ struct QasmParser(Movable):
         self.user_gates = Dict[String, Int]()
         self.consts = Dict[String, Param]()
         self.inputs = Dict[String, Int]()
+        self.int_vars = Dict[String, List[Int]]()
         self.scopes = List[Scope]()
         self.cond_bit = -1
         self.cond_val = 1
@@ -1239,6 +1259,10 @@ struct QasmParser(Movable):
         if t.kind == TK.PRAGMA:
             self.parse_pragma()
             return
+        if t.kind == TK.ANNOTATION:
+            _ = self.next()
+            self.warn("QM-W052", "annotation '" + self.text(t) + "' is ignored", t, "annotations carry no meaning in QUMO; the statement after it still runs")
+            return
         if t.kind == TK.PUNCT:
             if t.sub == P.SEMI:
                 _ = self.next()
@@ -1328,12 +1352,18 @@ struct QasmParser(Movable):
             raise self.err("QM-E504", "subroutines ('" + self.text(t) + "') are not supported", t, "inline the subroutine body or define a 'gate'")
         elif self.is_word(t, "while"):
             raise self.err("QM-E504", "while loops are not supported", t, "QUMO circuits are straight-line; use 'for uint i in [0:n] { ... }' with constant bounds")
-        elif (self.is_word(t, "box") or self.is_word(t, "cal") or self.is_word(t, "defcal")
-              or self.is_word(t, "defcalgrammar") or self.is_word(t, "let") or self.is_word(t, "switch")
+        elif self.is_word(t, "box"):
+            self.forbid_in_gate(t)
+            self.parse_box()
+        elif self.is_word(t, "switch"):
+            self.forbid_in_gate(t)
+            self.parse_switch()
+        elif (self.is_word(t, "cal") or self.is_word(t, "defcal")
+              or self.is_word(t, "defcalgrammar") or self.is_word(t, "let")
               or self.is_word(t, "return") or self.is_word(t, "break") or self.is_word(t, "continue")
               or self.is_word(t, "end") or self.is_word(t, "array") or self.is_word(t, "duration")
               or self.is_word(t, "stretch") or self.is_word(t, "complex")):
-            raise self.err("QM-E504", "OpenQASM feature '" + self.text(t) + "' is not supported by QUMO", t, "QUMO supports the gate-level subset: declarations, gates, modifiers, measure, reset, barrier, if on one bit, constant for loops")
+            raise self.err("QM-E504", "OpenQASM feature '" + self.text(t) + "' is not supported by QUMO", t, "QUMO supports the gate-level subset: declarations, gates, modifiers, measure, reset, barrier, box, if on one bit, switch, constant for loops")
         else:
             # assignment `c = measure q;` / `c[0] = measure q[0];`
             var nm = self.text(t)
@@ -1343,6 +1373,8 @@ struct QasmParser(Movable):
                 self.parse_measure_assign()
             elif ri:
                 raise self.err("QM-E500", "statement starts with qubit register '" + nm + "'", t, "a gate name is missing, e.g. 'h " + nm + "[0];'")
+            elif nm in self.int_vars:
+                self.parse_int_assign()
             elif nm in self.consts or nm in self.inputs:
                 raise self.err("QM-E504", "assignment to classical variable '" + nm + "' is not supported", t, "declare constants once with 'const float x = ...;'")
             else:
@@ -1455,6 +1487,11 @@ struct QasmParser(Movable):
         var nt = self.expect_ident("variable name")
         self.check_new_name(nt)
         if not self.is_punct(self.peek(), P.EQ):
+            if (self.is_word(tt, "int") or self.is_word(tt, "uint")) and not is_const and self.is_punct(self.peek(), P.SEMI):
+                # Qiskit's `int switch_dummy; switch_dummy = c; switch (switch_dummy)`
+                _ = self.next()
+                self.int_vars[self.text(nt)] = List[Int]()
+                return
             raise self.err("QM-E504", "classical variables need an initializer", self.peek(), "write 'const float x = 0.5;' (QUMO folds classical values at parse time)")
         _ = self.next()
         var v = self.parse_expr()
@@ -1625,6 +1662,169 @@ struct QasmParser(Movable):
         self.cond_val = 1
         self.cond_reg = -1
 
+    def parse_int_assign(mut self) raises:
+        """`x = c;` for an `int x;`: x mirrors the bits of c, for a later switch."""
+        var t = self.next()
+        _ = self.expect_punct(P.EQ, "'=' in assignment")
+        var rt = self.peek()
+        var nm = self.text(rt)
+        var ri = self.reg_index.get(nm)
+        if rt.kind != TK.IDENT or not ri or self.regs[ri.value()].is_qubit:
+            raise self.err("QM-E504", "an integer variable can only mirror a bit register", rt, "write '" + self.text(t) + " = c;' and use it as the target of a switch")
+        self.int_vars[self.text(t)] = self.parse_bit_operand()
+        _ = self.expect_punct(P.SEMI, "';'")
+
+    def parse_box(mut self) raises:
+        """`box [dur] { ... }`: gates cannot leave or enter, so a barrier on each side."""
+        var bt = self.next()
+        if self.is_punct(self.peek(), P.LBRACK):
+            self.skip_balanced(P.LBRACK, P.RBRACK, self.peek())
+            self.warn("QM-W053", "box duration is ignored (QUMO circuits have no timing model)", bt, "the box still keeps its gates together")
+        if not self.is_punct(self.peek(), P.LBRACE):
+            raise self.err("QM-E500", "expected '{' after box, found " + self.describe(self.peek()), self.peek(), "write 'box { ... }'")
+        self.circs[self.top()].ops.append(Instruction.make(Op.BARRIER, -1))
+        self.parse_statement()
+        self.circs[self.top()].ops.append(Instruction.make(Op.BARRIER, -1))
+
+    def parse_conditioned_body(mut self, bits: List[Int], vals: List[Int], body: Int) raises:
+        """Parse the block at token `body` with every gate conditioned on bits == vals."""
+        if len(bits) > 0:
+            self.cond_bit = bits[0]
+            self.cond_val = vals[0]
+            self.cond_reg = -1
+            if len(bits) > 1:
+                ref c0 = self.circs[0]
+                self.cond_reg = len(c0.cond_table)
+                c0.cond_table.append(len(bits))
+                for i in range(len(bits)):
+                    c0.cond_table.append(bits[i])
+                    c0.cond_table.append(vals[i])
+        var t = self.toks[body]
+        var first = len(self.circs[0].ops)
+        self.pos = body
+        self.parse_statement()
+        self.cond_bit = -1
+        self.cond_val = 1
+        self.cond_reg = -1
+        # conditions are evaluated gate by gate, so the body must not change them
+        for i in range(first, len(self.circs[0].ops)):
+            var g = self.circs[0].ops[i]
+            if g.kind == Op.MEASURE:
+                for b in bits:
+                    if g.clbit == b:
+                        raise self.err("QM-E541", "a switch body cannot measure into the bits it switches on", t, "measure into another register")
+
+    def parse_switch(mut self) raises:
+        """`switch (c) { case 0 { ... } case 1, 2 { ... } default { ... } }`, also
+        Qiskit's older `case 1: case 2: { ... } break;`. The target is a bit
+        register (register conditions, one body copy per value), an `int` that
+        mirrors one, or a constant (the matching body only)."""
+        var st = self.next()
+        if self.cond_bit >= 0:
+            raise self.err("QM-E541", "nested conditions are not supported", st, "QUMO instructions carry one condition")
+        _ = self.expect_punct(P.LPAREN, "'(' after switch")
+        var t = self.peek()
+        if (self.is_word(t, "int") or self.is_word(t, "uint")) and not (self.text(t) in self.consts):
+            _ = self.skip_type()
+            _ = self.expect_punct(P.LPAREN, "'(' after the cast")
+            t = self.peek()
+        var bits = List[Int]()
+        var is_const = False
+        var cval = 0
+        var nm = self.text(t)
+        var ri = self.reg_index.get(nm)
+        if nm in self.int_vars:
+            _ = self.next()
+            bits = self.int_vars[nm].copy()
+            if len(bits) == 0:
+                raise self.err("QM-E541", "switch on '" + nm + "' before it is assigned", t, "assign it first: '" + nm + " = c;'")
+        elif ri and not self.regs[ri.value()].is_qubit:
+            bits = self.parse_bit_operand()
+        else:
+            cval = self.parse_const_int("switch target")
+            is_const = True
+        while self.is_punct(self.peek(), P.RPAREN):
+            _ = self.next()
+        var lb = self.expect_punct(P.LBRACE, "'{' to open the switch")
+        var values = List[List[Int]]()  # values of each case
+        var bodies = List[Int]()
+        var default_body = -1
+        while not self.is_punct(self.peek(), P.RBRACE):
+            var c = self.peek()
+            if c.kind == TK.EOF:
+                raise self.err("QM-E500", "missing '}' to close the switch", lb, "every '{' needs a matching '}'")
+            var vs = List[Int]()
+            var is_default = False
+            while self.is_word(self.peek(), "case") or self.is_word(self.peek(), "default"):
+                if self.is_word(self.peek(), "default"):
+                    _ = self.next()
+                    is_default = True
+                else:
+                    _ = self.next()
+                    vs.append(self.parse_const_int("case value"))
+                    while self.is_punct(self.peek(), P.COMMA):
+                        _ = self.next()
+                        vs.append(self.parse_const_int("case value"))
+                if self.is_punct(self.peek(), P.COLON):
+                    _ = self.next()
+            if len(vs) == 0 and not is_default:
+                raise self.err("QM-E500", "expected 'case' or 'default', found " + self.describe(c), c, "write 'case 0 { ... }' or 'default { ... }'")
+            if not self.is_punct(self.peek(), P.LBRACE):
+                raise self.err("QM-E500", "expected '{' to open the case, found " + self.describe(self.peek()), self.peek(), "write 'case 0 { ... }'")
+            var body = self.pos
+            self.skip_balanced(P.LBRACE, P.RBRACE, self.peek())
+            if self.is_word(self.peek(), "break"):
+                _ = self.next()
+                _ = self.expect_punct(P.SEMI, "';'")
+            if is_default:
+                if default_body >= 0:
+                    raise self.err("QM-E541", "a switch has one default", c, "merge the two bodies")
+                default_body = body
+            if len(vs) > 0:
+                values.append(vs^)
+                bodies.append(body)
+        var after = self.pos + 1
+        # cases are mutually exclusive by definition; catch duplicates early
+        var seen = List[Int]()
+        for vs in values:
+            for v in vs:
+                for u in seen:
+                    if u == v:
+                        raise self.err("QM-E541", "case value " + String(v) + " appears twice", st, "each value belongs to one case")
+                seen.append(v)
+        if is_const:
+            var chosen = default_body
+            for i in range(len(values)):
+                for v in values[i]:
+                    if v == cval:
+                        chosen = bodies[i]
+            if chosen >= 0:
+                self.parse_conditioned_body(List[Int](), List[Int](), chosen)
+            self.pos = after
+            return
+        var covered = List[List[Int]]()
+        for i in range(len(values)):
+            for v in values[i]:
+                var vb = decimal_to_bits(String(v), len(bits)) if v >= 0 else List[Int]()
+                if len(vb) == 0:
+                    raise self.err("QM-E541", "case value " + String(v) + " does not fit the " + String(len(bits)) + "-bit target", st, "use a value in 0 .. 2^" + String(len(bits)) + " - 1")
+                covered.append(vb.copy())
+                self.parse_conditioned_body(bits, vb, bodies[i])
+        if default_body >= 0:
+            # the complement of the cases as a few partial-bit conditions
+            var cubes = List[List[Int]]()
+            var cube = List[Int](length=len(bits), fill=-1)
+            _switch_cover(covered, len(bits) - 1, cube, cubes)
+            for ref q in cubes:
+                var bs = List[Int]()
+                var vs = List[Int]()
+                for i in range(len(bits)):
+                    if q[i] >= 0:
+                        bs.append(bits[i])
+                        vs.append(q[i])
+                self.parse_conditioned_body(bs, vs, default_body)
+        self.pos = after
+
     def skip_balanced(mut self, open: Int, close: Int, t: Token) raises:
         """At an `open` token: skip to just after its matching `close`."""
         var depth = 0
@@ -1748,6 +1948,21 @@ struct QasmParser(Movable):
         _ = self.expect_punct(P.SEMI, "';'")
         self.warn("QM-W051", "delay is ignored (QUMO circuits have no timing model)", dt, "model idle noise with '#pragma qumo depolarize1(p) q[0];'")
 
+    def parse_pragma_constants(mut self, what: String) raises -> List[Float64]:
+        """`(a, b, ...)` of constant expressions after a pragma word."""
+        var out = List[Float64]()
+        _ = self.expect_punct(P.LPAREN, "'(' after " + what)
+        while True:
+            var vt = self.peek()
+            var p = self.parse_expr()
+            out.append(self.need_const(p, vt, what + " value"))
+            if self.is_punct(self.peek(), P.COMMA):
+                _ = self.next()
+                continue
+            break
+        _ = self.expect_punct(P.RPAREN, "')'")
+        return out^
+
     def parse_pragma(mut self) raises:
         var pt = self.next()
         var t = self.peek()
@@ -1800,6 +2015,79 @@ struct QasmParser(Movable):
             for ref c in self.circs:
                 if ip.value() < len(c.param_names):
                     c.param_names[ip.value()] = nm
+            return
+        if self.is_word(t, "pauli_channel_2"):
+            self.forbid_in_gate(t)
+            _ = self.next()
+            var probs = self.parse_pragma_constants("pauli_channel_2")
+            if len(probs) != 15:
+                raise self.err("QM-E560", "pauli_channel_2 takes 15 probabilities, got " + String(len(probs)), t, "IX, IY, IZ, XI, ... ZZ, with the left Pauli on the first qubit")
+            var pa = self.parse_qubit_operand()
+            _ = self.expect_punct(P.COMMA, "',' between the two qubits")
+            var pb = self.parse_qubit_operand()
+            _ = self.expect_punct(P.SEMI, "end of pragma line")
+            if len(pa) != 1 or len(pb) != 1:
+                raise self.err("QM-E560", "pauli_channel_2 takes two single qubits", t, "write q[0], q[1]")
+            self.circs[self.top()].pauli_channel_2(probs, pa[0], pb[0])
+            return
+        if self.is_word(t, "correlated_error") or self.is_word(t, "else_correlated_error"):
+            self.forbid_in_gate(t)
+            var is_else = self.is_word(t, "else_correlated_error")
+            _ = self.next()
+            var ep = self.parse_pragma_constants("correlated_error")
+            if len(ep) != 1:
+                raise self.err("QM-E560", "correlated_error takes one probability", t, "write '#pragma qumo correlated_error(0.01) x q[0], z q[1];'")
+            var eq = List[Int]()
+            var el = List[Int]()
+            while True:
+                var lt = self.peek()
+                var letter = 1 if self.is_word(lt, "x") else (2 if self.is_word(lt, "y") else (3 if self.is_word(lt, "z") else 0))
+                if letter == 0:
+                    raise self.err("QM-E560", "expected a Pauli letter x, y or z", lt, "write '#pragma qumo correlated_error(0.01) x q[0], z q[1];'")
+                _ = self.next()
+                var ot = self.parse_qubit_operand()
+                if len(ot) != 1:
+                    raise self.err("QM-E560", "each Pauli takes one qubit", lt, "write 'x q[0]', not a whole register")
+                eq.append(ot[0])
+                el.append(letter)
+                if self.is_punct(self.peek(), P.COMMA):
+                    _ = self.next()
+                    continue
+                break
+            _ = self.expect_punct(P.SEMI, "end of pragma line")
+            self.circs[self.top()].correlated_error(ep[0], eq, el, is_else)
+            return
+        if self.is_word(t, "kraus1") or self.is_word(t, "kraus2"):
+            self.forbid_in_gate(t)
+            var knq = 1 if self.is_word(t, "kraus1") else 2
+            _ = self.next()
+            var kn = self.peek()
+            if kn.kind != TK.STRING:
+                raise self.err("QM-E560", "expected the channel name as a string", kn, "write '#pragma qumo kraus1 \"damp\" (re, im, ...) q[0];'")
+            _ = self.next()
+            var kv = self.parse_pragma_constants("kraus")
+            var dd = (1 << knq) * (1 << knq)
+            if len(kv) == 0 or len(kv) % (2 * dd) != 0:
+                raise self.err("QM-E560", "kraus needs (re, im) pairs for whole " + String(1 << knq) + "x" + String(1 << knq) + " matrices", t, "matrices are row-major, one after the other")
+            var ch = KrausChannel(self.text(kn), knq)
+            var at = 0
+            while at < len(kv):
+                var re = List[Float64](capacity=dd)
+                var im = List[Float64](capacity=dd)
+                for j in range(dd):
+                    re.append(kv[at + 2 * j])
+                    im.append(kv[at + 2 * j + 1])
+                ch.add(re^, im^)
+                at += 2 * dd
+            var ka = self.parse_qubit_operand()
+            var kb = List[Int]()
+            if knq == 2:
+                _ = self.expect_punct(P.COMMA, "',' between the two qubits")
+                kb = self.parse_qubit_operand()
+            _ = self.expect_punct(P.SEMI, "end of pragma line")
+            if len(ka) != 1 or len(kb) != knq - 1:
+                raise self.err("QM-E560", "kraus takes single qubits", t, "write q[0] or q[0], q[1]")
+            self.circs[self.top()].apply_channel(ch, ka[0], kb[0] if knq == 2 else -1)
             return
         if t.kind == TK.PUNCT and t.sub == P.SEMI:
             raise self.err("QM-E560", "empty qumo pragma", pt, "e.g. '#pragma qumo depolarize1(0.01) q[0];', '#pragma qumo detector 0, 1'")
@@ -2029,24 +2317,61 @@ struct QasmParser(Movable):
                     sub = sub.power(margs[m])
                 else:
                     var k = margs[m]
-                    for j in range(ci - k, ci):
-                        var cq = qs[j]
-                        var ctl = sub.controlled(cq)
+                    var before = sub.copy()
+                    var fallback = False
+                    try:
+                        for j in range(ci - k, ci):
+                            var cq = qs[j]
+                            var ctl = sub.controlled(cq)
+                            if kind == 3:
+                                var w = sub.empty_like()
+                                w.num_qubits = ctl.num_qubits
+                                w.global_phase = 0.0
+                                w.x(cq)
+                                w.compose(ctl)
+                                w.x(cq)
+                                sub = w^
+                            else:
+                                sub = ctl^
+                    except e:
+                        if not String(e).startswith("QM-E202"):
+                            raise e^
+                        fallback = True
+                    if fallback:
+                        # past what Circuit.controlled covers: full synthesis,
+                        # borrowing every qubit outside this gate as dirty
+                        var ctrls = List[Int]()
+                        for j in range(ci - k, ci):
+                            ctrls.append(qs[j])
+                        var mc = controlled_by(before, ctrls, self.idle_qubits(qs))
                         if kind == 3:
-                            var w = sub.empty_like()
-                            w.num_qubits = ctl.num_qubits
+                            var w = before.empty_like()
+                            w.num_qubits = mc.num_qubits
                             w.global_phase = 0.0
-                            w.x(cq)
-                            w.compose(ctl)
-                            w.x(cq)
+                            for q in ctrls:
+                                w.x(q)
+                            w.compose(mc)
+                            for q in ctrls:
+                                w.x(q)
                             sub = w^
                         else:
-                            sub = ctl^
+                            sub = mc^
                     ci -= k
             except e:
                 raise self.relocate(String(e), mtoks[m])
             m -= 1
         self.compose_sub(sub)
+
+    def idle_qubits(self, qs: List[Int]) -> List[Int]:
+        """Declared qubits other than `qs` (available as dirty ancillas)."""
+        var out = List[Int]()
+        for q in range(self.circs[0].num_qubits):
+            var used = False
+            for u in qs:
+                used = used or u == q
+            if not used:
+                out.append(q)
+        return out^
 
     def expand_user_gate(mut self, gi: Int, ps: List[Param], qs: List[Int], t: Token) raises:
         if self.depth >= _MAX_GATE_DEPTH:
@@ -2078,6 +2403,24 @@ struct QasmParser(Movable):
         except e:
             raise Error(String(e))
         return c^
+
+
+def _switch_cover(values: List[List[Int]], bit: Int, mut cube: List[Int], mut out: List[List[Int]]):
+    """Partial assignments covering exactly what is not in `values` (bits above
+    `bit` already fixed by `cube`, -1 = free): one per empty subtree of the bit trie."""
+    if len(values) == 0:
+        out.append(cube.copy())
+        return
+    if bit < 0:
+        return
+    for b in range(2):
+        var side = List[List[Int]]()
+        for v in values:
+            if v[bit] == b:
+                side.append(v.copy())
+        cube[bit] = b
+        _switch_cover(side, bit - 1, cube, out)
+    cube[bit] = -1
 
 
 # ===========================================================================
@@ -2299,6 +2642,39 @@ def to_qasm(circuit: Circuit) -> String:
             continue
         if k == Op.RESET:
             out += cond + "reset q[" + String(g.q0) + "];\n"
+            continue
+        if k == Op.PAULI_CHANNEL_2:
+            var pc2 = String("#pragma qumo pauli_channel_2(")
+            var po = Int(g.p0.offset)
+            for j in range(15):
+                pc2 += ", " if j > 0 else ""
+                pc2 += format_angle(circuit.noise_table[po + j])
+            out += pc2 + ") q[" + String(g.q0) + "], q[" + String(g.q1) + "];\n"
+            continue
+        if k == Op.CORRELATED_ERROR:
+            var er = String("#pragma qumo ")
+            er += "else_correlated_error(" if g.q2 != 0 else "correlated_error("
+            er += format_angle(g.p0.offset) + ")"
+            for j in range(g.q1):
+                var letter = circuit.pauli_table[g.q0 + 2 * j + 1]
+                er += ", " if j > 0 else " "
+                er += "x" if letter == 1 else ("y" if letter == 2 else "z")
+                er += " q[" + String(circuit.pauli_table[g.q0 + 2 * j]) + "]"
+            out += er + ";\n"
+            continue
+        if k == Op.KRAUS1 or k == Op.KRAUS2:
+            ref ch = circuit.kraus[Int(g.p0.offset)]
+            var kr = String("#pragma qumo ") + op_name(k) + " \"" + ch.name + "\" ("
+            var first = True
+            for m in range(ch.count()):
+                for j in range(len(ch.re[m])):
+                    kr += "" if first else ", "
+                    first = False
+                    kr += format_angle(ch.re[m][j]) + ", " + format_angle(ch.im[m][j])
+            kr += ") q[" + String(g.q0) + "]"
+            if k == Op.KRAUS2:
+                kr += ", q[" + String(g.q1) + "]"
+            out += kr + ";\n"
             continue
         var line = String()
         if op_is_noise(k):

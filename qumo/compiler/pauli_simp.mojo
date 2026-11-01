@@ -41,6 +41,7 @@ from qumo.compiler.common import (
 from qumo.compiler.basis import expand_rule
 from qumo.compiler.optimize import cancel_inverses, commute_rotations
 from qumo.compiler.kak import consolidate_2q
+from qumo.compiler.phase_fold import phase_fold
 from max.algorithm import parallelize
 
 
@@ -552,13 +553,19 @@ def _synth_candidate(mut ex: _Extract, c: Circuit, window: Int, tail: List[Instr
     _ = cancel_inverses(cand, anyset, 64)
 
 
-def pauli_resynthesize(mut c: Circuit, window: Int = 64, kak_gs: GateSet = GateSet()) -> Int:
+def pauli_resynthesize(mut c: Circuit, window: Int = 64, kak_gs: GateSet = GateSet(),
+                       objective_t: Bool = False) -> Int:
     """Gadget extraction + chained resynthesis; returns 2q gates saved.
 
     0 = the original structure is kept; when the extraction got as far as
     the comparison, the kept circuit is returned cleaned (cancel / commute,
     window 64), which the following fixpoint would compute anyway.
-    `kak_gs` (target basis) prices both versions after KAK consolidation."""
+    `kak_gs` (target basis) prices both versions after KAK consolidation.
+
+    `objective_t`: accept on fewer T / non-Clifford rotations after phase folding
+    first, 2q gates second, with no 2q budget (`pauli_simp(objective=t)`). Merging rotations
+    across Hadamards is what `phase_fold` cannot do, and it often costs 2q
+    gates, so this is an FT-track option outside O0-O3. Returns the T gates saved."""
     if c.is_parametric():
         return 0
     var n = c.num_qubits
@@ -593,7 +600,7 @@ def pauli_resynthesize(mut c: Circuit, window: Int = 64, kak_gs: GateSet = GateS
             for j in range(ex.gad.w):
                 wgt += Int(pop_count(ex.gad.x[i * ex.gad.w + j] | ex.gad.z[i * ex.gad.w + j]))
             est += 2 * max(wgt - 1, 0)
-        if est > budget:
+        if est > budget and not objective_t:
             return 0
     if rotations == 0:
         return 0
@@ -619,6 +626,20 @@ def pauli_resynthesize(mut c: Circuit, window: Int = 64, kak_gs: GateSet = GateS
             nc = cand.num_2q_gates() - consolidate_2q(cand, kak_gs, bb, False)
 
     parallelize(job, 2)
+    if objective_t:
+        # phase folding runs after this pass and sees what the two structures allow,
+        # so compare after it: the result cannot lose to folding the original
+        var fb = base.copy()
+        var fc = cand.copy()
+        _ = phase_fold(fb, kak_gs)
+        _ = phase_fold(fc, kak_gs)
+        var tb = fb.t_count()
+        var tc = fc.t_count()
+        if tc < tb or (tc == tb and nc < nb):
+            c = cand^
+            return base.t_count() - tc
+        c = base^
+        return 0
     if nc < nb:
         c = cand^
         return nb - nc

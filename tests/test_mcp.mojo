@@ -84,8 +84,9 @@ def test_protocol() raises:
         assert_true(t.get("annotations").get("readOnlyHint").as_bool())
     var want: List[String] = [
         "qumo_run_qasm", "qumo_statevector", "qumo_expectation", "qumo_validate_qasm", "qumo_describe",
-        "qumo_circuit_info", "qumo_convert", "qumo_transpile", "qumo_estimate_resources", "qumo_vqe",
+        "qumo_circuit_info", "qumo_draw", "qumo_convert", "qumo_transpile", "qumo_estimate_resources", "qumo_vqe",
         "qumo_qaoa_maxcut", "qumo_qec_memory", "qumo_qec_dem", "qumo_gpu_info", "qumo_run_device",
+        "qumo_emulate", "qumo_density", "qumo_to_pbc", "qumo_stim_import",
     ]
     for w in want:
         var found = False
@@ -347,6 +348,12 @@ def test_describe_and_diagnostics() raises:
     var back = circuit_from_json(parse_json(js))
     assert_equal(circuit_to_json(back), js)
     assert_equal(to_qasm(back), to_qasm(c))
+    # the same for noise held in side tables
+    var noisy = parse_qasm("OPENQASM 3.0; qubit[3] q;\n#pragma qumo correlated_error(0.25) x q[0], z q[2];\n#pragma qumo else_correlated_error(0.5) y q[1];\n#pragma qumo pauli_channel_2(0.01, 0.02, 0.03, 0.04, 0.05, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.06) q[0], q[1];\n#pragma qumo kraus1 \"flip\" (0.8, 0, 0, 0, 0, 0, 0.8, 0, 0, 0, 0.6, 0, 0.6, 0, 0, 0) q[1];\n")
+    var noisy_js = circuit_to_json(noisy)
+    var noisy_back = circuit_from_json(parse_json(noisy_js))
+    assert_equal(circuit_to_json(noisy_back), noisy_js)
+    assert_equal(to_qasm(noisy_back), to_qasm(noisy))
     var sm = parse_json(circuit_summary_json(c))
     assert_true(sm.get("is_dynamic").as_bool())
     assert_equal(sm.get("params").at(0).as_string(), "t")
@@ -550,6 +557,24 @@ def test_ai_transpiler_tools() raises:
     print("  AI transpiler tools (qumo_transpile ai, describe passes/models) ok")
 
 
+def test_tier1_tools() raises:
+    var s = McpServer()
+    var q = json_quote(BELL)
+    var d = tool(s, 201, "qumo_draw", "{\"qasm\":" + q + "}")
+    assert_true(d.to_json().find("M>c0") >= 0, "draw: " + d.to_json())
+    var rho = tool(s, 202, "qumo_density", "{\"qasm\":" + q + ",\"observable\":\"Z0 Z1\"}")
+    assert_true(rho.to_json().find("expectation") >= 0, "density: " + rho.to_json())
+    var pbc = tool(s, 203, "qumo_to_pbc", "{\"qasm\":" + q + "}")
+    assert_true(pbc.to_json().find("measure") >= 0, "to_pbc: " + pbc.to_json())
+    var st = tool(s, 204, "qumo_stim_import", "{\"stim\":\"H 0\\nCX 0 1\\nM 0 1\\nDETECTOR rec[-1] rec[-2]\",\"include_dem\":true}")
+    assert_true(st.to_json().find("num_detectors") >= 0, "stim: " + st.to_json())
+    var e = tool(s, 205, "qumo_emulate", "{\"qasm\":" + q + ",\"target\":\"trapped_ion:2\",\"compile\":true,\"shots\":100}")
+    assert_true(e.to_json().find("estimated_fidelity") >= 0, "emulate: " + e.to_json())
+    var t = tool(s, 206, "qumo_transpile", "{\"qasm\":" + q + ",\"target\":\"line:3/rz,sx,x,cz\",\"calibration\":{\"edge_errors\":[[0,1,0.05],[1,2,0.001]]}}")
+    assert_true(t.to_json().find("post_layout") >= 0, "calibration reaches the pipeline: " + t.to_json())
+    print("  tier 1 tools")
+
+
 def main() raises:
     test_protocol()
     test_run_tool()
@@ -561,4 +586,5 @@ def main() raises:
     test_errors_doc_in_sync()
     test_every_raised_code_is_catalogued()
     test_ai_transpiler_tools()
+    test_tier1_tools()
     print("test_mcp OK")

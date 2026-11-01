@@ -21,7 +21,7 @@
 #   --dir PATH           checkout to use or clone into (default: this checkout, else ./QUMO)
 #   --out PATH           result .json or directory (default: bench/results/cloud/)
 #   --no-baselines       do not install the vendor GPU baselines (their suites record a skip)
-#   --mojo-version V / --max-version V   pinned toolchain (default 1.1.0 / 26.6.0; "" = latest)
+#   --mojo-version V / --max-version V   pinned toolchain (default 1.2.0 / 26.7.0; "" = latest)
 #
 # Inside an existing QUMO checkout it uses that checkout (no clone). GPU vendor
 # detection: nvidia-smi -> NVIDIA, rocminfo / amd-smi / rocm-smi -> AMD,
@@ -43,8 +43,8 @@ SUITES=""
 LABEL=""
 BASELINES=1
 OUT="bench/results/cloud/"
-MOJO_VERSION="1.1.0"   # pinned: the versions QUMO is developed and benchmarked with
-MAX_VERSION="26.6.0"
+MOJO_VERSION="1.2.0"   # pinned: the versions QUMO is developed and benchmarked with
+MAX_VERSION="26.7.0"
 
 usage() {  # the comment block at the top of this file, up to the first non-comment line
   awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"
@@ -87,7 +87,7 @@ if have nvidia-smi && nvidia-smi -L >/dev/null 2>&1; then
     for p in /usr/local/cuda/bin/ptxas "$(command -v ptxas || true)"; do
       if [ -n "$p" ] && [ -x "$p" ]; then export MODULAR_NVPTX_COMPILER_PATH="$p"; break; fi
     done
-    echo "NOTE: driver $DRIVER_MAJOR < 580 (Mojo/MAX 26.6 wants >= 580); MODULAR_NVPTX_COMPILER_PATH=${MODULAR_NVPTX_COMPILER_PATH:-unset}"
+    echo "NOTE: driver $DRIVER_MAJOR < 580 (Mojo/MAX 26.7 wants >= 580); MODULAR_NVPTX_COMPILER_PATH=${MODULAR_NVPTX_COMPILER_PATH:-unset}"
   fi
 elif ROCMINFO="$( (have rocminfo && rocminfo 2>/dev/null) || true)"; \
      case "$ROCMINFO" in *gfx[0-9]*) true ;; *) have amd-smi && amd-smi list >/dev/null 2>&1 ;; esac; then

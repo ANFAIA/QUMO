@@ -360,8 +360,16 @@ def select_region(spec: TargetSpec, k: int, starts: int = 24) -> list[int] | Non
 def _sub_target(spec: TargetSpec, region: list[int]) -> TargetSpec:
     pos = {p: i for i, p in enumerate(region)}
     edges = [(pos[a], pos[b]) for a, b in spec.edges if a in pos and b in pos]
+    edge_errors = {}
+    for key, value in spec.edge_errors.items():
+        a, b = (int(x) for x in key.split("-"))
+        if a in pos and b in pos:
+            edge_errors[f"{min(pos[a], pos[b])}-{max(pos[a], pos[b])}"] = value
+    ro = list(spec.readout_errors) if spec.readout_errors else None
     return TargetSpec(f"{spec.name}[region]", spec.provider, len(region), edges, list(spec.basis), False,
-                      dict(spec.errors), dict(spec.durations), spec.max_shots)
+                      dict(spec.errors), dict(spec.durations), spec.max_shots, edge_errors=edge_errors,
+                      readout_errors=[ro[p] if p < len(ro) else None for p in region] if ro else None,
+                      angle_bounds=dict(spec.angle_bounds))
 
 
 def _widen_qasm(qasm: str, region: list[int], width: int) -> str:
@@ -383,13 +391,17 @@ def compile_for_target(
     measure_all_if_missing: bool = True,
     region: str | Sequence[int] | None = "auto",
     params: Sequence[float] | dict | None = None,
+    calibrate: bool = True,
 ) -> CompiledCircuit:
     """Compile `source` (OpenQASM 2/3 text, a path, or a qumo_py.Circuit) for `spec`.
 
     `region`: "auto" restricts large coupling-map devices to the best
     calibrated connected subset of qubits (`select_region`) before QUMO places
     and routes; None / "none" uses the whole device; a list of physical qubits
-    pins the region explicitly. `params` binds symbolic parameters first."""
+    pins the region explicitly. `params` binds symbolic parameters first.
+    `calibrate`: pass per-edge and readout errors and angle bounds to the compiler
+    (noise-aware `post_layout`, `wrap_angles`); False compiles for topology and
+    basis alone."""
     q = load_qumo_py()
     circ, text = _load_circuit(source)
     if params is not None:
@@ -440,7 +452,12 @@ def compile_for_target(
     width = n_log if work.all_to_all else work.num_qubits
     t0 = time.perf_counter()
     try:
-        out, initial, final = q.transpile(circ, width, work.qumo_edges(), list(work.basis), int(level), int(seed))
+        cal = work.calibration() if calibrate else None
+        if cal is None:
+            out, initial, final = q.transpile(circ, width, work.qumo_edges(), list(work.basis), int(level), int(seed))
+        else:
+            out, initial, final, _ = q.transpile_calibrated(circ, width, work.qumo_edges(), list(work.basis),
+                                                            int(level), int(seed), cal)
     except Exception as exc:
         raise HardwareError(E_COMPILE, f"QUMO compilation failed: {str(exc).splitlines()[0]}") from None
     ms = (time.perf_counter() - t0) * 1e3

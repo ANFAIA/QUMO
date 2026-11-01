@@ -151,7 +151,7 @@ struct CompressedEdge(ImplicitlyCopyable, Writable):
 
 def weight_normalising_constant(g: MatchingGraph, num_distinct_weights: Int = SB_NUM_DISTINCT_WEIGHTS) -> Float64:
     """Integer units per nat: the largest |weight| maps to num_distinct_weights - 1."""
-    var wmax = 0.0
+    var wmax = g.wmax_extra
     for w in g.ew:
         wmax = max(wmax, abs(w))
     if wmax <= 0.0:
@@ -219,6 +219,26 @@ struct SparseGraph(Movable):
             self.adj[fill[v]] = (wi[e] << 32) | u
             self.aobs[fill[v]] = g.eobs[e]
             fill[v] += 1
+
+    def clone(self) -> SparseGraph:
+        """Independent copy, for a decoder that changes weights."""
+        var g = SparseGraph(0, self.scale)
+        g.n = self.n
+        g.off = self.off.copy()
+        g.adj = self.adj.copy()
+        g.aobs = self.aobs.copy()
+        g.bw = self.bw.copy()
+        g.bobs = self.bobs.copy()
+        return g^
+
+    def __init__(out self, n: Int, scale: Float64):
+        self.n = n
+        self.scale = scale
+        self.off = _UVec[Int]()
+        self.adj = _UVec[Int]()
+        self.aobs = _UVec[UInt64]()
+        self.bw = _UVec[Int]()
+        self.bobs = _UVec[UInt64]()
 
     @always_inline
     def neighbour(self, a: Int) -> Int:

@@ -91,7 +91,7 @@ bash run_on_any_gpu.sh --config colab_a100 --suites sv_gpu,baseline_cudaq --labe
 # from inside a checkout it uses that checkout: bash examples/colab/run_on_any_gpu.sh --quick
 ```
 
-It installs Mojo 1.1.0 + MAX 26.6.0 (pinned; `--mojo-version "" --max-version ""` for the latest), the
+It installs Mojo 1.2.0 + MAX 26.7.0 (pinned; `--mojo-version "" --max-version ""` for the latest), the
 benchmark venv, and the vendor's baselines in their own venvs under `build/baseline-venvs` (override with
 `QUMO_VENVS`). Needs `git`, `python3`, `make` and a C compiler.
 

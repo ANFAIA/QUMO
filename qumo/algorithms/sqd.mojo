@@ -23,7 +23,8 @@ basis spans the ground state's symmetry sector. Limits: 1 <= num_qubits <= 48,
 outside [0, 2^n)).
 """
 
-from std.math import sqrt
+from std.collections import Dict
+from std.math import sqrt, ceil
 from std.bit import pop_count
 
 from qumo.ir.pauli import PauliSum
@@ -385,4 +386,222 @@ def product_basis(alpha_strings: List[Int], beta_strings: List[Int], num_orbital
             if a < 0 or a >= lim:
                 raise Error("QM-E802: alpha string " + String(a) + " is outside [0, 2^" + String(num_orbitals) + ").")
             out.append(a | (b << num_orbitals))
+    return out^
+
+
+# ---------------------------------------------------------------------------
+# Sampling side of SQD: subsampling, configuration recovery, Trim SQD
+# ---------------------------------------------------------------------------
+def partition_subsample(configs: List[Int], samples_per_batch: Int, num_batches: Int, mut rng: Rng) raises -> List[List[Int]]:
+    """`num_batches` disjoint batches from one shuffled pool: no entry of `configs`
+    lands in two batches (qiskit-addon-sqd's `partition_subsample`). With fewer
+    configurations than requested the batches come out smaller, none empty."""
+    if samples_per_batch < 1 or num_batches < 1:
+        raise Error("QM-E802: partition_subsample needs samples_per_batch >= 1 and num_batches >= 1. Hint: got " + String(samples_per_batch) + ", " + String(num_batches) + ".")
+    if len(configs) < num_batches:
+        raise Error("QM-E802: " + String(len(configs)) + " configurations cannot fill " + String(num_batches) + " disjoint batches. Hint: sample more, or use fewer batches.")
+    var pool = configs.copy()
+    var i = len(pool) - 1
+    while i > 0:
+        var j = rng.below(i + 1)
+        var t = pool[i]
+        pool[i] = pool[j]
+        pool[j] = t
+        i -= 1
+    var out = List[List[Int]]()
+    var per = min(samples_per_batch, len(pool) // num_batches)
+    for b in range(num_batches):
+        var batch = List[Int](capacity=per)
+        for k in range(per):
+            batch.append(pool[b * per + k])
+        out.append(batch^)
+    return out^
+
+
+def _relu_weight(y: Float64, filling: Float64, delta: Float64 = 0.01) -> Float64:
+    """Modified ReLU of Robledo-Moreno et al. (2025), supplementary S-CR."""
+    if y <= filling:
+        return delta * y / max(filling, 1e-12)
+    return delta + (1.0 - delta) * (y - filling) / max(1.0 - filling, 1e-12)
+
+
+def recover_half(var bits: Int, n_target: Int, occ: List[Float64], offset: Int, num_orbitals: Int, mut rng: Rng) -> Int:
+    """One spin half of a configuration with n_target electrons: flip orbitals with
+    probabilities from the occupations occ[offset + i] of the current estimate."""
+    var k = Int(pop_count(bits)) - n_target
+    if k == 0:
+        return bits
+    var filling = Float64(n_target) / Float64(num_orbitals)
+    var cand = List[Int]()
+    var w = List[Float64]()
+    for i in range(num_orbitals):
+        var set = (bits >> i) & 1 == 1
+        if (k > 0) == set:
+            var o = occ[offset + i]
+            cand.append(i)
+            w.append(1e-12 + _relu_weight(abs(1.0 - o) if k > 0 else abs(o), filling))
+    for _ in range(abs(k)):
+        var total = 0.0
+        for x in w:
+            total += x
+        var u = rng.uniform() * total
+        var pick = len(cand) - 1
+        for i in range(len(cand)):
+            u -= w[i]
+            if u < 0.0:
+                pick = i
+                break
+        bits ^= 1 << cand[pick]
+        w[pick] = 0.0
+    return bits
+
+
+def recover_configurations(configs: List[Int], num_orbitals: Int, n_alpha: Int, n_beta: Int,
+                           occupations: List[Float64], mut rng: Rng) raises -> List[Int]:
+    """Configuration recovery: push noisy bitstrings back into the (n_alpha, n_beta)
+    sector. `occupations` per qubit, alpha orbitals first (`SubspaceGroundState.occupations`)."""
+    if len(occupations) != 2 * num_orbitals:
+        raise Error("QM-E802: recover_configurations needs " + String(2 * num_orbitals) + " occupations, got " + String(len(occupations)) + ". Hint: one per spin orbital.")
+    var mask = (1 << num_orbitals) - 1
+    var out = List[Int](capacity=len(configs))
+    for x in configs:
+        var a = recover_half(x & mask, n_alpha, occupations, 0, num_orbitals, rng)
+        var b = recover_half(x >> num_orbitals, n_beta, occupations, num_orbitals, num_orbitals, rng)
+        out.append(a | (b << num_orbitals))
+    return out^
+
+
+def _unique_sorted(xs: List[Int]) -> List[Int]:
+    var s = xs.copy()
+    sort(s)
+    var out = List[Int]()
+    for i in range(len(s)):
+        if i == 0 or s[i] != s[i - 1]:
+            out.append(s[i])
+    return out^
+
+
+def _strings_of(configs: List[Int], num_orbitals: Int, mut alpha: List[Int], mut beta: List[Int]):
+    var mask = (1 << num_orbitals) - 1
+    for x in configs:
+        alpha.append(x & mask)
+        beta.append(x >> num_orbitals)
+
+
+@fieldwise_init
+struct _Ranked(ImplicitlyCopyable):
+    var weight: Float64
+    var string: Int
+
+
+def _top_strings(strings: List[Int], res: SubspaceGroundState, basis: List[Int], num_orbitals: Int,
+                 upper: Bool, ratio: Float64, threshold: Float64, max_strings: Int) -> List[Int]:
+    """CI strings of one spin sector by marginal weight: sum |c|^2 over the other sector."""
+    var index = Dict[Int, Int]()
+    var weight = List[Float64](length=len(strings), fill=0.0)
+    for i in range(len(strings)):
+        index[strings[i]] = i
+    var mask = (1 << num_orbitals) - 1
+    for k in range(len(basis)):
+        var s = basis[k] >> num_orbitals if upper else basis[k] & mask
+        var at = index.get(s, -1)
+        if at >= 0:
+            weight[at] += res.re[k] * res.re[k] + res.im[k] * res.im[k]
+    var order = List[Int]()
+    for i in range(len(strings)):
+        if weight[i] >= threshold * threshold:
+            order.append(i)
+
+    def heavier(a: Int, b: Int) {imm weight} -> Bool:
+        return weight[a] > weight[b]
+
+    sort(Span(order), heavier)
+    var keep = Int(ceil(ratio * Float64(len(order))))
+    if max_strings > 0:
+        keep = min(keep, max_strings)
+    keep = max(min(keep, len(order)), 1)
+    var out = List[Int](capacity=keep)
+    for i in range(min(keep, len(order))):
+        out.append(strings[order[i]])
+    return out^
+
+
+struct SqdIteration(Movable, Writable):
+    var energy: Float64
+    var occupations: List[Float64]
+    var alpha: List[Int]  # strings of the best subspace (standard) or the carryover (trim)
+    var beta: List[Int]
+    var dimension: Int  # subspace size of the reported energy
+    var diagonalizations: Int
+
+    def __init__(out self):
+        self.energy = 1e300
+        self.occupations = List[Float64]()
+        self.alpha = List[Int]()
+        self.beta = List[Int]()
+        self.dimension = 0
+        self.diagonalizations = 0
+
+    def write_to(self, mut w: Some[Writer]):
+        w.write("SqdIteration(energy=", self.energy, ", dimension=", self.dimension, ", diagonalizations=", self.diagonalizations, ")")
+
+
+def _solve_strings(h: PauliSum, alpha: List[Int], beta: List[Int], num_orbitals: Int, mut basis: List[Int]) raises -> SubspaceGroundState:
+    basis = product_basis(alpha, beta, num_orbitals)
+    return subspace_ground_state(h, basis, 2 * num_orbitals)
+
+
+def sqd_iteration(h: PauliSum, configs: List[Int], num_orbitals: Int, samples_per_batch: Int,
+                  num_batches: Int, seed: UInt64 = 1, policy: String = "standard", trim_ratio: Float64 = 0.1,
+                  max_strings_per_trim: Int = -1, carryover_threshold: Float64 = 1e-4,
+                  carryover_ratio: Float64 = 0.1, max_carryover: Int = -1,
+                  carryover_alpha: List[Int] = List[Int](), carryover_beta: List[Int] = List[Int]()) raises -> SqdIteration:
+    """One SQD iteration over bitstrings in the right sector (alpha low, beta high).
+
+    policy "standard": diagonalise each batch, keep the lowest energy; carries the
+    best subspace's strings. policy "trim" (Trim SQD, qiskit-addon-sqd 0.14): the
+    batches are disjoint and only *screen*: each is diagonalised, its heaviest strings
+    (trim_ratio of each sector, at most max_strings_per_trim) go into one merged
+    subspace, whose energy is the result, and its own heaviest strings seed the next
+    iteration through carryover_alpha / carryover_beta. An iteration costs
+    num_batches + 1 diagonalisations, each of about the size of the merged one."""
+    if policy != "standard" and policy != "trim":
+        raise Error("QM-E816: unknown SQD policy '" + policy + "'. Hint: use 'standard' or 'trim'.")
+    if not (trim_ratio > 0.0 and trim_ratio <= 1.0) or not (carryover_ratio > 0.0 and carryover_ratio <= 1.0):
+        raise Error("QM-E816: trim_ratio and carryover_ratio must lie in (0, 1]. Hint: 0.1 keeps a tenth of the strings.")
+    var rng = Rng(seed)
+    var batches = partition_subsample(configs, samples_per_batch, num_batches, rng)
+    var out = SqdIteration()
+    var merged_a = List[Int]()
+    var merged_b = List[Int]()
+    for batch in batches:
+        var a = carryover_alpha.copy()
+        var b = carryover_beta.copy()
+        _strings_of(batch, num_orbitals, a, b)
+        var alpha = _unique_sorted(a)
+        var beta = _unique_sorted(b)
+        var basis = List[Int]()
+        var r = _solve_strings(h, alpha, beta, num_orbitals, basis)
+        out.diagonalizations += 1
+        if policy == "standard":
+            if r.energy < out.energy:
+                out.energy = r.energy
+                out.occupations = r.occupations.copy()
+                out.alpha = _top_strings(alpha, r, basis, num_orbitals, False, 1.0, carryover_threshold, -1)
+                out.beta = _top_strings(beta, r, basis, num_orbitals, True, 1.0, carryover_threshold, -1)
+                out.dimension = len(basis)
+        else:
+            merged_a.extend(_top_strings(alpha, r, basis, num_orbitals, False, trim_ratio, 0.0, max_strings_per_trim))
+            merged_b.extend(_top_strings(beta, r, basis, num_orbitals, True, trim_ratio, 0.0, max_strings_per_trim))
+    if policy == "trim":
+        var alpha = _unique_sorted(merged_a)
+        var beta = _unique_sorted(merged_b)
+        var basis = List[Int]()
+        var r = _solve_strings(h, alpha, beta, num_orbitals, basis)
+        out.diagonalizations += 1
+        out.energy = r.energy
+        out.occupations = r.occupations.copy()
+        out.dimension = len(basis)
+        out.alpha = _top_strings(alpha, r, basis, num_orbitals, False, carryover_ratio, carryover_threshold, max_carryover)
+        out.beta = _top_strings(beta, r, basis, num_orbitals, True, carryover_ratio, carryover_threshold, max_carryover)
     return out^

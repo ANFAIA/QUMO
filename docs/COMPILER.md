@@ -71,6 +71,8 @@ machine-readable summary.
 | `fuse1q(basis)` | fuse 1q runs, resynthesise with the shortest exact Euler form of the basis (U, ZYZ, ZXZ, XYX, ZSX), memoised | Qiskit `Optimize1qGatesDecomposition` |
 | `eject_z` | push Z rotations through Z-type wires, swaps, Pauli-Z frames through CX targets, into U gates | Cirq `eject_z` (virtual Z) |
 | `phase_fold` | phase-polynomial folding of diagonal rotations on equal parities (T-count), RZZ folds too | TKET / PyZX phase folding, T-par |
+| `wrap_angles(gate[min:max])` | bring constant angles into the target's bounds with Pauli corrections; not in presets unless the target has bounds | Qiskit `WrapAngles`, IBM `FoldRzzAngle` |
+| `post_layout(call_limit)` | rename physical qubits to the best embedding under the calibration; not in presets unless the target is calibrated | Qiskit `VF2PostLayout` |
 | `pauli_simp` | Pauli-gadget resynthesis: a bit-packed stabiliser tableau pulls every rotation back to the input frame (`U = C_total . prod exp(-i t P_k)`), identical commuting Paulis merge, gadgets are re-emitted as basis change + CX chain + rz with each chain reusing the previous chain's prefix (ladders cancel between consecutive terms), commuting gadgets are reordered greedily; kept only when it beats the original after cancel/commute/KAK | TKET `PauliSimp`, Qiskit Pauli-network synthesis |
 | `elide_swaps` | delete SWAPs by relabelling (folded into `final_layout`); only trailing swaps once routed | Qiskit `ElidePermutations` |
 | `unroll3q` | ccx / ccz / cswap → 1q + cx | Qiskit `Unroll3qOrMore` |
@@ -140,6 +142,59 @@ The hybrid heuristic + AI presets mirror qiskit-ibm-transpiler's
 `transpile` / `preset_pipeline` / `compile_spec` and the O0-O3 outputs are
 unchanged (a snapshot test in tests/test_ai_transpiler.mojo pins them).
 
+### Calibration and angle bounds
+
+A `Target` holds per-qubit and per-edge errors. `set_calibration(error_1q,
+edge_errors, readout, t1_us, t2_us)` and `set_edge_error(a, b, e)` fill them, and
+`is_calibrated()` says whether they differ between qubits or edges. Presets only
+change for such a target, so uniform targets keep their output byte for byte:
+
+| Target has | Preset adds, before `check` | Pass |
+|---|---|---|
+| non-uniform errors, level >= 1 | `post_layout` | renames physical qubits to the embedding of the interaction graph with the best `estimate_fidelity`; branch and bound with a `call_limit` (default 200000), starting from the identity, so it never lowers the estimate |
+| `gate[min:max]` in the basis, e.g. `heavy_hex:3/rz,sx,x,cz,rzz[0:pi/2]` | `wrap_angles,fuse1q` | brings constant angles into the interval with Pauli corrections, exact with the tracked global phase |
+
+O3's portfolio compares by estimated fidelity on a calibrated target. `check`
+reports an angle outside its interval (QM-E615). JSON: `calibration` and
+`angle_bounds` in `qumo_transpile`; Python: `qumo_py.transpile_calibrated`; the
+hardware plugin passes `TargetSpec.calibration()` by default.
+
+`post_layout` moves the circuit, it does not route for noise: SABRE still minimises
+swaps. On IBM fake backends (Torino, Fez, Marrakesh; GHZ 5 to 16, QFT 6 and 8, BV
+12; `bench/crosscheck/tier1.py layout`, success estimated from the backend's real
+calibration) it gains 0 to 4% over the plugin's `select_region` (geomean 1.009).
+Without any calibration a compile on the whole device can land on a broken coupler
+(estimates of 1e-19 and below in that table); `select_region` already avoids those.
+Qiskit O3 is slightly ahead on some GHZ cases on Torino and behind on QFT 8.
+
+`wrap_angles` matched `FoldRzzAngle` from qiskit-ibm-runtime on 60 random angles:
+the same rzz angle in all 60, the same number of Pauli corrections, operators equal.
+
+### Pauli-based computation (`qumo.compiler.pbc`)
+
+`to_pbc(c, fix_clifford=True)` returns a `PauliProgram`: time-ordered Pauli-product
+rotations and measurements in the input frame, plus one final Clifford. A product
+can touch any number of qubits, so this is a side structure and not an opcode;
+`to_circuit()` gives gates back. Angles follow `exp(-i angle/2 P)`, so Litinski's
+pi/8 rotation (T) is `angle = pi/4`. `counts()` gives rotations, pi8, arbitrary,
+measurements, max_weight and layers. Same rotations as Qiskit's
+`LitinskiTransformation` on 40 of 40 random Clifford+T circuits. Conditions, resets
+and noise raise QM-E623.
+
+### T-count objective
+
+`pauli_simp(objective=t)` keeps the resynthesis when it has fewer T / non-Clifford
+rotations after phase folding, with two-qubit gates as the tie break and no
+two-qubit budget, so it can never lose to folding the original. It can cost
+two-qubit gates, so it stays out of O0-O3. On the Feynman circuits against
+`unroll3q` + phase folding:
+
+| circuit | T in | folding | + objective=t | tket `PauliGraphResynthesis` folding |
+|---|---|---|---|---|
+| mod5_4 | 28 | 16 | **8** | 8 |
+| adder_8 | 399 | 215 | **201** | 173 |
+| tof_3, barenco_tof_3, rc_adder_6, gf2p4_mult, csum_mux_9, qcla_com_7, mod_mult_55, ham15-low | | same | same | same |
+
 ## Correctness model
 
 * Every pass is exact; phases are tracked (`global_phase`). The tests check
@@ -205,3 +260,7 @@ harness): 2q geometric mean QUMO / Qiskit 0.92, QUMO fewer 2q gates on 37 of 114
 * `phase_fold` treats measurement / reset / barriers as hard region boundaries.
 * KAK skips blocks that contain symbolic parameters or classically conditioned gates.
 * SABRE is heuristic: results depend on `seed` (deterministic for a given seed).
+* SABRE ignores calibration: the noise-aware step is `post_layout` after routing.
+  KAK and `fuse1q` still price native gates, not per-edge errors.
+* A `clifford_t` target needs angles it can express exactly (QM-E604 names the first
+  input gate that it cannot); there is no gridsynth yet.

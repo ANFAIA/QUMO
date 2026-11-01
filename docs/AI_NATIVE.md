@@ -247,6 +247,7 @@ tool (with `data` `{code: "QM-E912", available: [...]}`).
 | `qumo_validate_qasm` | `qasm` | `valid`, `errors[]`, `warnings[]` (lint), `summary` |
 | `qumo_describe` | `topic`: gates \| gate \| errors \| error \| capabilities, `name`, `format`: json \| markdown | self-description JSON (`markdown`, topic `errors` only: the text of docs/ERRORS.md) |
 | `qumo_circuit_info` | `qasm`, `include_instructions`, `include_qasm`, `include_lint` | `summary`, `lint`, and optionally `circuit` and `qasm` |
+| `qumo_draw` | `qasm` \| `circuit`, `width`=80, `style`: ascii \| unicode | `drawing`: one line per qubit, columns of gates (also `qumo draw file.qasm`, `Circuit.draw()`) |
 | `qumo_convert` | `qasm` \| `circuit`, `to`: qasm3 \| qasm2 \| json, `params` | canonical QASM 3, portable QASM 2 (both also returned as plain text content) or circuit JSON |
 
 `params` binds `input float` parameters. Pass either an array in declaration
@@ -261,6 +262,10 @@ Module tools (`qumo/exec/tools.mojo`, registered by `full_registry()`):
 | `qumo_vqe`, `qumo_qaoa_maxcut` | Pauli-sum `hamiltonian` / edge-list `graph`, optimizer options, `seed` | energy or cut, parameters, convergence |
 | `qumo_qec_memory` | `code`: surface_z \| surface_x \| repetition, `distance`, `rounds`, `p`, `shots`, `decoder`, `seed`, `max_errors` | logical error rate, std error, Wilson interval, per-round rate, timing |
 | `qumo_qec_dem` | `code`, `distance`, `rounds`, `p`, `include_stim` | detector error model in Stim DEM text |
+| `qumo_emulate` | `qasm` \| `circuit`, target as `qumo_transpile`, `calibration`, `compile`, `level`, `shots`, `seed` | counts under the target's noise, `method`, `estimated_fidelity`; nothing touches a device |
+| `qumo_density` | `qasm` \| `circuit`, `observable` | exact `probabilities`, `trace`, `purity`, `expectation`; up to 15 qubits |
+| `qumo_to_pbc` | `qasm` \| `circuit`, `fix_clifford` | Pauli-product rotations and measurements in the input frame, with `counts` |
+| `qumo_stim_import` | `stim`, `include_dem`, `include_qasm` | sizes, `missing_detectors`, optionally the DEM and OpenQASM |
 | `qumo_ft_codes` (`qumo/ft/tools.mojo`) | `code` (optional), `check_distance`, `architecture`: steane \| iceberg_<k>, `verify_gadgets` | code definitions, verified distance, architecture description, verification status of every gadget ([FT.md](FT.md)) |
 | `qumo_ft_encode` | `qasm` \| `circuit`, `architecture`, `n_blocks`, QEC policy (`qec_style`, `qec_threshold`, `qec_costs`), factories, `feed_forward`, `magic_prep`, `rz_mode`, `shots`, `noise_p`, `include_logical`, `include_qasm` | logical program summary, resource report, outputs / post-selection bits, optional emulation next to the unencoded reference |
 | `qumo_ft_verify` | `code`, `kind`: clifford \| state, `semantic_qasm`, `impl_qasm`, `num_blocks`, `num_ancillas` | valid + the first failing operator |
@@ -270,7 +275,9 @@ Module tools (`qumo/exec/tools.mojo`, registered by `full_registry()`):
 Decoders of `qumo_qec_memory` (QM-E707 lists them for an unknown name):
 `mwpm` (the default; exact minimum-weight perfect matching by sparse
 blossom, the algorithm of PyMatching 2; aliases `matching`, `pymatching`),
-`sparse_blossom` (the same decoder), `mwpm_dense` (exact MWPM by all-pairs
+`sparse_blossom` (the same decoder), `mwpm_correlated` (two-pass reweighting, opt-in:
+1.3 to 2.2 times fewer logical errors at d >= 5, worse at d = 3, about 3 times
+slower), `mwpm_dense` (exact MWPM by all-pairs
 shortest paths plus a dense blossom; small codes and reference), `uf`
 (union-find; fast, slightly lower threshold) and `lookup` (lookup table;
 tiny codes with at most 64 detectors). See [QEC.md](QEC.md).

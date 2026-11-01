@@ -15,6 +15,23 @@ from std.os import abort, setenv, unsetenv
 from std.time import perf_counter_ns
 
 from qumo.ir.circuit import Circuit
+from qumo.ir.mc import append_mcx
+from qumo.sim.ptsbe import sample_ptsbe, plan_trajectories
+from qumo.sim.runner import SampleResult
+from qumo.sim.branching import sample_branching
+from qumo.sim.density import density_evolve
+from qumo.compiler.pbc import to_pbc
+from qumo.qec.characterization import ReadoutCalibration
+from qumo.qec.mthree import mitigate_counts_m3
+from qumo.qec.codes import to_stim
+from qumo.qec.dem import detector_error_model
+from qumo.qec.decoders import MatchingGraph
+from qumo.qec.sparse_blossom import SparseBlossomDecoder
+from qumo.qec.correlated import CorrelatedMatchingDecoder
+from qumo.qec.stim_text import from_stim, parse_dem, sample_dem
+from qumo.qec.lint import missing_detectors, count_determined_measurements
+from qumo.ai.json import JsonWriter
+from std.collections import Dict
 from qumo.ir.gates import Op, op_name, op_arity, op_is_unitary, op_from_name
 from qumo.ir.pauli import parse_pauli_sum, PauliSum
 from qumo.sim.runner import sample, evolve
@@ -262,6 +279,205 @@ def py_transpile(circ: PythonObject, num_qubits: PythonObject, edges: PythonObje
     for v in r.final_layout:
         fin.append(v)
     return Python.tuple(_wrap(r.circuit.copy()), init, fin)
+
+
+def _apply_calibration(mut t: Target, cal: PythonObject) raises:
+    """Keys, all optional: error_1q, readout, t1_us, t2_us (one value per qubit),
+    edge_errors ({"a-b": e}), angle_bounds ({"rzz": (lo, hi)})."""
+    var empty = List[Float64]()
+    var e1 = _floats(cal["error_1q"]) if cal.__contains__("error_1q") else empty.copy()
+    var ro = _floats(cal["readout"]) if cal.__contains__("readout") else empty.copy()
+    var t1 = _floats(cal["t1_us"]) if cal.__contains__("t1_us") else empty.copy()
+    var t2 = _floats(cal["t2_us"]) if cal.__contains__("t2_us") else empty.copy()
+    t.set_calibration(e1, empty, ro, t1, t2)
+    if cal.__contains__("edge_errors"):
+        var d = cal["edge_errors"]
+        for key in d:
+            var parts = String(py=key).split("-")
+            t.set_edge_error(Int(parts[0]), Int(parts[1]), Float64(py=d[key]))
+    if cal.__contains__("angle_bounds"):
+        var d = cal["angle_bounds"]
+        for key in d:
+            var k = op_from_name(String(py=key))
+            if k < 0:
+                raise Error("QM-E610: unknown gate '" + String(py=key) + "' in angle_bounds. Hint: use gate names such as rzz.")
+            t.set_angle_bounds(k, Float64(py=d[key][0]), Float64(py=d[key][1]))
+
+
+def py_transpile_calibrated(circ: PythonObject, num_qubits: PythonObject, edges: PythonObject,
+                            basis: PythonObject, level: PythonObject, seed: PythonObject,
+                            calibration: PythonObject) raises -> PythonObject:
+    """`transpile` with device data: (..., seed, calibration) -> (circuit, initial, final, est_fidelity).
+
+    calibration: dict with optional error_1q, readout, t1_us, t2_us (per qubit),
+    edge_errors ({"a-b": e}) and angle_bounds ({"rzz": (lo, hi)}). Uniform data
+    changes nothing; non-uniform data adds `post_layout`, bounds add `wrap_angles`.
+    """
+    var t = _target(num_qubits, edges, basis)
+    _apply_calibration(t, calibration)
+    var r = transpile(PyCircuit._get(circ)[].c, t, Int(py=level), Int(py=seed))
+    var lay = _layouts(r)
+    return Python.tuple(_wrap(r.circuit.copy()), lay[0], lay[1], t.estimate_fidelity(r.circuit))
+
+
+def py_mcx_circuit(num_controls: PythonObject, mode: PythonObject, num_ancillas: PythonObject,
+                   clean: PythonObject) raises -> PythonObject:
+    """Multi-controlled X on qubits 0..k-1 -> k, ancillas after: (k, mode, ancillas, clean) -> circuit."""
+    var k = Int(py=num_controls)
+    var na = Int(py=num_ancillas)
+    var controls = List[Int]()
+    for i in range(k):
+        controls.append(i)
+    var ancillas = List[Int]()
+    for i in range(na):
+        ancillas.append(k + 1 + i)
+    var c = Circuit(k + 1 + na, name="mcx")
+    append_mcx(c, controls, k, ancillas, String(py=mode), Bool(py=clean))
+    return _wrap(c^)
+
+
+def py_draw(circ: PythonObject, width: PythonObject, style: PythonObject) raises -> PythonObject:
+    """Text drawing: (circuit, width, style) -> str; style 'ascii' or 'unicode', width 0 = no fold."""
+    return PythonObject(PyCircuit._get(circ)[].c.draw(Int(py=width), String(py=style)))
+
+
+def _counts_dict(r: SampleResult) raises -> PythonObject:
+    var d = Python.dict()
+    for kv in r.counts.items():
+        d[kv.key] = kv.value
+    return d
+
+
+def py_sample_ptsbe(circ: PythonObject, shots: PythonObject, seed: PythonObject) raises -> PythonObject:
+    """Static noisy circuit, one simulation per distinct Pauli error pattern -> counts."""
+    return _counts_dict(sample_ptsbe(PyCircuit._get(circ)[].c, Int(py=shots), UInt64(Int(py=seed))))
+
+
+def py_plan_trajectories(circ: PythonObject, shots: PythonObject, seed: PythonObject) raises -> PythonObject:
+    """What sample_ptsbe would run: (distinct patterns, noise sites, error-free shots)."""
+    var p = plan_trajectories(PyCircuit._get(circ)[].c, Int(py=shots), UInt64(Int(py=seed)))
+    return Python.tuple(p.unique, p.sites, p.error_free)
+
+
+def py_sample_branching(circ: PythonObject, shots: PythonObject, seed: PythonObject) raises -> PythonObject:
+    """Stabilizer branching sampler: near-Clifford circuits on up to 512 qubits -> counts."""
+    return _counts_dict(sample_branching(PyCircuit._get(circ)[].c, Int(py=shots), UInt64(Int(py=seed))))
+
+
+def py_density_probabilities(circ: PythonObject) raises -> PythonObject:
+    """Exact outcome probabilities of all qubits from the density matrix."""
+    var out = Python.list()
+    for p in density_evolve(PyCircuit._get(circ)[].c).probabilities():
+        out.append(p)
+    return out
+
+
+def py_density_expectation(circ: PythonObject, observable: PythonObject) raises -> PythonObject:
+    """Tr(rho H) for a Pauli-sum string."""
+    return density_evolve(PyCircuit._get(circ)[].c).expectation(parse_pauli_sum(String(py=observable)))
+
+
+def py_mitigate_m3(counts: PythonObject, p01: PythonObject, p10: PythonObject, hamming: PythonObject) raises -> PythonObject:
+    """M3 readout mitigation: ({bitstring: count}, p01, p10, hamming) -> {bitstring: quasi-probability}."""
+    var c = Dict[String, Int]()
+    for key in counts:
+        c[String(py=key)] = Int(py=counts[key])
+    var e01 = _floats(p01)
+    var e10 = _floats(p10)
+    var cal = ReadoutCalibration(len(e01))
+    cal.p01 = e01^
+    cal.p10 = e10^
+    var out = Python.dict()
+    var m = mitigate_counts_m3(c, cal, Int(py=hamming))
+    for kv in m.items():
+        out[kv.key] = kv.value
+    return out
+
+
+def py_to_pbc(circ: PythonObject, fix_clifford: PythonObject) raises -> PythonObject:
+    """Pauli-based form as JSON text: rotations and measurements in the input frame."""
+    var w = JsonWriter()
+    to_pbc(PyCircuit._get(circ)[].c, Bool(py=fix_clifford)).write_json(w)
+    return PythonObject(w.finish())
+
+
+def py_from_stim(text: PythonObject) raises -> PythonObject:
+    """Stim circuit text -> Circuit."""
+    return _wrap(from_stim(String(py=text)).circuit.copy())
+
+
+def py_to_stim(circ: PythonObject) raises -> PythonObject:
+    """Clifford + Pauli-noise Circuit -> Stim circuit text."""
+    return PythonObject(to_stim(PyCircuit._get(circ)[].c))
+
+
+def py_dem_text(circ: PythonObject) raises -> PythonObject:
+    """Detector error model of a noisy Clifford circuit, in Stim DEM text."""
+    return PythonObject(detector_error_model(PyCircuit._get(circ)[].c).to_text())
+
+
+def py_parse_dem(text: PythonObject) raises -> PythonObject:
+    """Round trip Stim DEM text through QUMO: (num_detectors, num_observables, num_errors, text)."""
+    var d = parse_dem(String(py=text))
+    return Python.tuple(d.num_detectors, d.num_observables, d.num_errors(), d.to_text())
+
+
+def py_sample_dem(text: PythonObject, shots: PythonObject, seed: PythonObject) raises -> PythonObject:
+    """Detector firing rates of `shots` samples of a DEM: list per detector, then per observable."""
+    var d = parse_dem(String(py=text))
+    var n = Int(py=shots)
+    var s = sample_dem(d, n, UInt64(Int(py=seed)))
+    var out = Python.list()
+    for k in range(d.num_detectors):
+        var c = 0
+        for shot in range(n):
+            c += 1 if s.get(shot, k) else 0
+        out.append(Float64(c) / Float64(n))
+    for k in range(d.num_observables):
+        var c = 0
+        for shot in range(n):
+            c += 1 if s.observable(shot, k) else 0
+        out.append(Float64(c) / Float64(n))
+    return out
+
+
+def py_decode_dem(text: PythonObject, shots: PythonObject, decoder: PythonObject) raises -> PythonObject:
+    """Decode with a DEM given as text: (dem_text, [[fired detector ids], ...], 'mwpm' or
+    'mwpm_correlated') -> list of observable masks."""
+    var d = parse_dem(String(py=text))
+    var name = String(py=decoder)
+    var out = Python.list()
+    if name == "mwpm_correlated":
+        var dec = CorrelatedMatchingDecoder(d)
+        for shot in shots:
+            var f = List[Int]()
+            for x in shot:
+                f.append(Int(py=x))
+            out.append(Int(dec.decode(f)))
+        return out
+    var dec = SparseBlossomDecoder(MatchingGraph(d))
+    for shot in shots:
+        var f = List[Int]()
+        for x in shot:
+            f.append(Int(py=x))
+        out.append(Int(dec.decode(f)))
+    return out
+
+
+def py_missing_detectors(circ: PythonObject, unknown_input: PythonObject) raises -> PythonObject:
+    """Deterministic record parities the circuit does not declare: list of record lists."""
+    var out = Python.list()
+    for recs in missing_detectors(PyCircuit._get(circ)[].c, Bool(py=unknown_input)):
+        var row = Python.list()
+        for r in recs:
+            row.append(r)
+        out.append(row)
+    return out
+
+
+def py_count_determined(circ: PythonObject, unknown_input: PythonObject) raises -> PythonObject:
+    """Stim's count_determined_measurements."""
+    return count_determined_measurements(PyCircuit._get(circ)[].c, Bool(py=unknown_input))
 
 
 def py_translate(circ: PythonObject, basis: PythonObject) raises -> PythonObject:
@@ -866,6 +1082,24 @@ def PyInit_qumo_py() abi("C") -> PythonObject:
         m.def_function[py_twirl]("pauli_twirl_2q")
         m.def_function[py_hamiltonian_circuit]("hamiltonian_circuit")
         m.def_function[py_version]("version")
+        m.def_function[py_transpile_calibrated]("transpile_calibrated")
+        m.def_function[py_mcx_circuit]("mcx_circuit")
+        m.def_function[py_draw]("draw")
+        m.def_function[py_sample_ptsbe]("sample_ptsbe")
+        m.def_function[py_plan_trajectories]("plan_trajectories")
+        m.def_function[py_sample_branching]("sample_branching")
+        m.def_function[py_density_probabilities]("density_probabilities")
+        m.def_function[py_density_expectation]("density_expectation")
+        m.def_function[py_mitigate_m3]("mitigate_m3")
+        m.def_function[py_to_pbc]("to_pbc")
+        m.def_function[py_from_stim]("from_stim")
+        m.def_function[py_to_stim]("to_stim")
+        m.def_function[py_dem_text]("dem_text")
+        m.def_function[py_parse_dem]("parse_dem")
+        m.def_function[py_sample_dem]("sample_dem")
+        m.def_function[py_decode_dem]("decode_dem")
+        m.def_function[py_missing_detectors]("missing_detectors")
+        m.def_function[py_count_determined]("count_determined_measurements")
         m.def_function[py_load_qasm]("load_qasm")
         m.def_function[py_load_qasm_file]("load_qasm_file")
         m.def_function[py_transpile]("transpile")

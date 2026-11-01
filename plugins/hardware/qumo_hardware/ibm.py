@@ -205,6 +205,7 @@ def target_from_qiskit(backend, use_fractional_gates: bool = False, provider: st
         readout_errors=readout,
         simulator=bool(_cfg(backend, "simulator", False)),
         local=name.startswith("fake_"),
+        angle_bounds={"rzz": (0.0, math.pi / 2)} if "rzz" in basis else {},
         extras={
             "dt": getattr(t, "dt", None),
             "default_rep_delay": rep_delay,
@@ -215,6 +216,19 @@ def target_from_qiskit(backend, use_fractional_gates: bool = False, provider: st
             **({"warnings": notes} if notes else {}),
         },
     )
+
+
+def _rzz_angle_problem(qc) -> str:
+    """Why `qc` breaks IBM's fractional-gate rule 0 <= rzz angle <= pi/2 ("" if it does not)."""
+    for inst in qc.data:
+        if inst.operation.name != "rzz":
+            continue
+        angle = inst.operation.params[0]
+        if hasattr(angle, "parameters") and angle.parameters:
+            continue  # bound at submission, checked by the service
+        if not -1e-9 <= float(angle) <= math.pi / 2 + 1e-9:
+            return f"rzz angle {float(angle)} is outside [0, pi/2]"
+    return ""
 
 
 def _absorb_global_phase_gates(qc):
@@ -382,7 +396,9 @@ class IBMProvider:
             if flips:
                 qc = PassManager([GateDirection(None, target=t), Optimize1qGatesDecomposition(target=t)]).run(qc)
                 report["passes"].append({"name": "GateDirection+Optimize1qGatesDecomposition", "flipped": flips})
-        if "rzz" in qc.count_ops():
+        if _rzz_angle_problem(qc):
+            # QUMO wraps rzz angles itself (TargetSpec.angle_bounds, `wrap_angles`);
+            # this only runs for a compiled circuit that came without those bounds
             from qiskit.transpiler import PassManager
             from qiskit.transpiler.passes import Optimize1qGatesDecomposition
             from qiskit_ibm_runtime.transpiler.passes import FoldRzzAngle
@@ -406,11 +422,9 @@ class IBMProvider:
         pm.run(payload)
         if not pm.property_set.get("all_gates_in_basis", False):
             raise HardwareError(E_INVALID_PAYLOAD, f"Qiskit GatesInBasis rejects the circuit for {backend}")
-        if self.use_fractional_gates and "rzz" in payload.count_ops():
-            from qiskit_ibm_runtime.utils.utils import _is_valid_rzz_pub_helper  # noqa: PLC0415
-
-            bad = _is_valid_rzz_pub_helper(payload)
-            if isinstance(bad, str) and bad:
+        if self.use_fractional_gates:
+            bad = _rzz_angle_problem(payload)
+            if bad:
                 raise HardwareError(E_INVALID_PAYLOAD, bad)
         return {"isa": True, "checks": ["qiskit_ibm_runtime.is_isa_circuit", "qiskit.GatesInBasis"]}
 

@@ -150,19 +150,19 @@ struct Architecture(Copyable, Writable):
         if self.kind == "steane":
             var s: List[String] = ["x", "y", "z", "h", "s", "sdg", "cx", "cz", "swap (relabel)", "t / tdg (magic-state injection)", "measure (decoded)", "qec_cycle", "prep_t", "inject_t", "inject_tdg"]
             return s^
-        var s: List[String] = ["x", "y", "z", "rz(theta)", "rx(theta)", "rzz(theta)", "rxx(theta)", "swap (relabel)", "measure (decoded, error-detecting)", "qec_cycle (syndrome)"]
+        var s: List[String] = ["x", "y", "z", "rz(theta)", "rx(theta)", "rzz(theta)", "rxx(theta)", "pauli_exp(theta, block-wide Pauli)", "swap (relabel)", "measure (decoded, error-detecting)", "qec_cycle (syndrome)"]
         return s^
 
     def validate(self) raises:
         if self.n_blocks < 1:
             raise Error("QM-E727: n_blocks must be >= 1 (got " + String(self.n_blocks) + "). Hint: one logical block per simultaneously live logical qubit (k per block).")
         var st = self.qec.style
-        if st != "none" and st != "steane" and st != "knill" and st != "syndrome":
-            raise Error("QM-E727: unknown QEC style '" + st + "'. Hint: steane, knill (Steane architecture), syndrome (Iceberg) or none.")
-        if self.kind == "iceberg" and (st == "steane" or st == "knill") and self.qec.active():
+        if st != "none" and st != "steane" and st != "knill" and st != "reichardt" and st != "syndrome":
+            raise Error("QM-E727: unknown QEC style '" + st + "'. Hint: steane, knill, reichardt (Steane architecture), syndrome (Iceberg) or none.")
+        if self.kind == "iceberg" and (st == "steane" or st == "knill" or st == "reichardt") and self.qec.active():
             raise Error("QM-E727: QEC style '" + st + "' needs a distance-3 CSS code with a transversal Clifford group. Hint: use style 'syndrome' for Iceberg.")
         if self.kind == "steane" and st == "syndrome" and self.qec.active():
-            raise Error("QM-E727: QEC style 'syndrome' is the Iceberg detection cycle. Hint: use 'steane' or 'knill' for the Steane architecture.")
+            raise Error("QM-E727: QEC style 'syndrome' is the Iceberg detection cycle. Hint: use 'steane', 'knill' or 'reichardt' for the Steane architecture.")
         if self.qec.threshold <= 0.0:
             raise Error("QM-E727: QEC threshold must be > 0. Hint: e.g. 1.0.")
         if self.feed_forward != "frame" and self.feed_forward != "eager":

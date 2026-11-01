@@ -60,7 +60,7 @@ from qumo.ft.arch import Architecture
 from qumo.ft.gadgets import (
     steane_encoder_zero, steane_prep_zero_ft, steane_prep_t_nonft, steane_prep_t_ft,
     transversal_1q, transversal_2q, steane_physical_kind, iceberg_prep_zero, iceberg_pauli,
-    iceberg_rotation, iceberg_syndrome_cycle,
+    iceberg_rotation, iceberg_exp_kind, iceberg_syndrome_cycle, steane_reichardt_cycle, steane_syndrome_supports,
 )
 from qumo.ai.json import JsonWriter
 
@@ -856,6 +856,25 @@ struct Engine(Movable):
             for q in qs:
                 self.emit(Op.H, q, -1, 0.0, c)
 
+    def pauli_exp(mut self, lp: LogicalProgram, g: LogicalInstr) raises:
+        """exp(-i angle/2 P) for a Pauli on a whole block: one weight-2 rotation."""
+        var first = lp.pauli_args[g.q0]
+        var letters = List[UInt8](length=self.k, fill=UInt8(ord("I")))
+        for i in range(g.q1):
+            var h = lp.pauli_args[g.q0 + 2 * i]
+            if self.hblock[h] != self.hblock[first]:
+                raise Error("QM-E724: pauli_exp acts on one Iceberg block; these logical qubits are in different blocks. Hint: put them in one block, with n_blocks = 1.")
+            letters[self.hslot[h]] = UInt8(lp.pauli_args[g.q0 + 2 * i + 1])
+        var word = String("")
+        for b in letters:
+            word += chr(Int(b))
+        var kind = iceberg_exp_kind(word)
+        for h in range(len(self.hblock)):
+            if self.hlive[h] and self.hblock[h] == self.hblock[first]:
+                self.flush(h)
+        var dummy = List[Int]()
+        self.emit_template(iceberg_rotation(self.n, kind[0], kind[1], -1, g.angle), self.block_qubits(first), self.cond_of(CExpr.one()), dummy)
+
     def _iceberg_gate(mut self, kind: Int, h0: Int, h1: Int, angle: Float64, e: CExpr) raises:
         var hp = pi / 2
         if kind == LOp.RZ:
@@ -1042,6 +1061,35 @@ struct Engine(Movable):
             self.blocks[self.hblock[h]].counter = 0.0
             return
         var one = CExpr.one()
+        if style == "reichardt":
+            # dense extraction with 3 ancillas; each 3-bit syndrome names one data
+            # qubit, which assumes no fault during the extraction (flags are not read)
+            self.flush(h)
+            var data = self.block_qubits(h)
+            var qs = data.copy()
+            var anc = self.phys_fresh_list(3)
+            for a in anc:
+                qs.append(a)
+            var bits = List[Int]()
+            self.emit_template(steane_reichardt_cycle(), qs, Cond.none(), bits)
+            self.release_qubits(anc)
+            var sup = steane_syndrome_supports()
+            for q in range(7):
+                var vals = List[Int]()
+                for s in range(3):
+                    var inside = 0
+                    for x in sup[s]:
+                        if x == q:
+                            inside = 1
+                    vals.append(inside)
+                var zbits: List[Int] = [bits[0], bits[4], bits[5]]
+                var xbits: List[Int] = [bits[3], bits[1], bits[2]]
+                self.circ.z(data[q])
+                self.circ.c_if_register(zbits, vals)
+                self.circ.x(data[q])
+                self.circ.c_if_register(xbits, vals)
+            self.blocks[self.hblock[h]].counter = 0.0
+            return
         if style == "steane":
             # X-type syndrome by one-bit teleportation into a fresh |0>_L
             var a = self.new_handle()
@@ -1200,6 +1248,10 @@ def implement_ops(arch: Architecture, lp: LogicalProgram) raises -> EncodedProgr
                 raise Error("QM-E726: conditioned magic-state injection is not supported. Hint: inject unconditionally.")
             eng.inject(g.q0, g.q1, k == LOp.INJECT_TDG)
             eng.after_op(k, g.q0, -1)
+        elif k == LOp.PAULI_EXP:
+            if arch.kind != "iceberg":
+                raise Error("QM-E724: pauli_exp is an Iceberg op. Hint: Steane takes Clifford + T; compile() synthesises rotations.")
+            eng.pauli_exp(lp, g)
         elif k == LOp.BARRIER:
             eng._sync_size()
             eng.circ.barrier()

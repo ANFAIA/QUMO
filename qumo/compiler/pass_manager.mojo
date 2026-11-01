@@ -24,7 +24,7 @@ from std.time import perf_counter_ns
 from qumo.ir.gates import Op, op_name, op_arity, op_is_unitary
 from qumo.ir.circuit import Circuit, Instruction
 from qumo.compiler.common import GateSet, fmt_num, basis_str, wrap_angle, TWO_PI
-from qumo.compiler.target import Target, parse_basis
+from qumo.compiler.target import Target, parse_basis, parse_angle_bound
 from qumo.compiler.optimize import (
     remove_identities, cancel_inverses, merge_rotations, commute_rotations,
     fuse_1q, eject_z, elide_swaps,
@@ -32,12 +32,14 @@ from qumo.compiler.optimize import (
 from qumo.compiler.kak import consolidate_2q
 from qumo.compiler.pauli_simp import pauli_resynthesize
 from qumo.compiler.phase_fold import phase_fold
-from qumo.compiler.basis import translate_to_basis, unroll_3q
+from qumo.compiler.basis import translate_to_basis, unroll_3q, first_inexpressible_1q, can_synthesize_1q
 from qumo.compiler.routing import (
     RouteOptions, RoutePlan, route_circuit, star_preroute, plan_route, finish_route, has_exact_layout,
 )
 from qumo.compiler.resynth import SynthOptions, SynthStats, resynthesize_blocks
 from qumo.compiler.ai_route import AIRouteOptions, ai_route, routed_cost
+from qumo.compiler.wrap import wrap_angles
+from qumo.compiler.layout_fidelity import post_layout
 
 
 struct PassId:
@@ -62,7 +64,9 @@ struct PassId:
     comptime LINEAR_SYNTH = 16
     comptime PERM_SYNTH = 17
     comptime PAULI_NETWORK = 18
-    comptime NUM = 19
+    comptime WRAP_ANGLES = 19
+    comptime POST_LAYOUT = 20
+    comptime NUM = 21
 
 
 def pass_name(id: Int) -> String:
@@ -85,6 +89,8 @@ def pass_name(id: Int) -> String:
     if id == PassId.LINEAR_SYNTH: return "linear_synth"
     if id == PassId.PERM_SYNTH: return "perm_synth"
     if id == PassId.PAULI_NETWORK: return "pauli_network"
+    if id == PassId.WRAP_ANGLES: return "wrap_angles"
+    if id == PassId.POST_LAYOUT: return "post_layout"
     return "unknown"
 
 
@@ -103,11 +109,13 @@ def pass_description(id: Int) -> String:
     if id == PassId.CHECK: return "predicate: fail with QM-E615 unless every gate is in the target basis and on a coupling edge"
     if id == PassId.KAK: return "consolidate 2q blocks and resynthesise with KAK (<= 3 cx) when cheaper"
     if id == PassId.ELIDE_SWAPS: return "remove swap gates by relabelling (folded into final_layout); only trailing swaps once routed"
-    if id == PassId.PAULI_SIMP: return "Pauli-gadget resynthesis (Clifford tableau extraction, identical-Pauli merging, ladder-sharing chains); kept only when it saves 2q gates"
+    if id == PassId.PAULI_SIMP: return "Pauli-gadget resynthesis (Clifford tableau extraction, identical-Pauli merging, ladder-sharing chains); kept only when it saves 2q gates; objective=t keeps it on fewer T / non-Clifford rotations instead (FT track, may cost 2q gates, not in O0-O3)"
     if id == PassId.CLIFFORD_SYNTH: return "collect Clifford blocks (h,s,sdg,sx,x,y,z,cx,cy,cz,swap; <= 9 qubits) and resynthesise them topology-aware (exact search, greedy or learned policy); a block is replaced only when verified equal by tableau and cheaper (2q cost, then 2q depth); " + _SYNTH_ARGS_DOC
     if id == PassId.LINEAR_SYNTH: return "collect linear-function blocks (cx,swap; <= 9 qubits) and resynthesise them on the coupling subgraph; replaced only when verified equal by GF(2) matrix and cheaper; " + _SYNTH_ARGS_DOC
     if id == PassId.PERM_SYNTH: return "collect SWAP networks (<= 12 qubits) and resynthesise the permutation by token swapping (exact A* for small blocks, greedy or learned policy); replaced only when verified equal and cheaper; " + _SYNTH_ARGS_DOC
     if id == PassId.PAULI_NETWORK: return "collect Pauli-rotation networks (Clifford + rx/ry/rz/rzz/rxx/ryy; <= 6 qubits) and resynthesise rotations + Clifford tail topology-aware; replaced only when verified equal (unitary) and cheaper; " + _SYNTH_ARGS_DOC
+    if id == PassId.WRAP_ANGLES: return "bring constant angles into the target's angle bounds (spec gate[min:max]) with Pauli corrections, exact up to the tracked global phase; arg: gate[min:max] adds a bound for this pass"
+    if id == PassId.POST_LAYOUT: return "rename physical qubits to the embedding with the best estimated fidelity under the target calibration (never lowers it; no effect on uniform targets); arg: call_limit"
     return ""
 
 
@@ -140,6 +148,8 @@ def pass_id_from_name(name: String) -> Int:
     if s == "linear_synth" or s == "ai_linear" or s == "ai_linear_function" or s == "linear_function_synth": return PassId.LINEAR_SYNTH
     if s == "perm_synth" or s == "ai_permutation" or s == "permutation_synth": return PassId.PERM_SYNTH
     if s == "pauli_network" or s == "ai_pauli_network" or s == "pauli_network_synth": return PassId.PAULI_NETWORK
+    if s == "wrap_angles" or s == "wrap" or s == "fold_angles": return PassId.WRAP_ANGLES
+    if s == "post_layout" or s == "vf2_post_layout" or s == "noise_layout": return PassId.POST_LAYOUT
     return -1
 
 
@@ -267,6 +277,24 @@ def _validate_args(id: Int, args: List[String]) raises:
                 v = String(a[byte=7:])
             if not _is_int(v):
                 raise Error("QM-E602: bad argument '" + a + "' for pass '" + pn + "'. Hint: use an integer window, e.g. " + pn + "(64).")
+        return
+    if id == PassId.PAULI_SIMP:
+        for a in args:
+            if a != "objective=t" and a != "objective=2q":
+                raise Error("QM-E602: bad argument '" + a + "' for pass 'pauli_simp'. Hint: objective=2q (default) or objective=t.")
+        return
+    if id == PassId.POST_LAYOUT:
+        for a in args:
+            var v = a
+            if a.startswith("call_limit="):
+                v = String(a[byte=11:])
+            if not _is_int(v):
+                raise Error("QM-E602: bad argument '" + a + "' for pass 'post_layout'. Hint: use an integer, e.g. post_layout(call_limit=100000).")
+        return
+    if id == PassId.WRAP_ANGLES:
+        for a in args:
+            if a.find("[") < 0 or a.find("]") < 0:
+                raise Error("QM-E602: bad argument '" + a + "' for pass 'wrap_angles'. Hint: use gate[min:max], e.g. wrap_angles(rzz[0:pi/2]).")
         return
     if id == PassId.FUSE1Q or id == PassId.BASIS:
         if len(args) > 0:
@@ -578,6 +606,10 @@ def conformance_error(c: Circuit, target: Target) -> String:
                 return "instruction #" + String(i) + " '" + String(g) + "' acts on 3 qubits (no 3q coupling)"
             if not target.are_connected(g.q0, g.q1):
                 return "instruction #" + String(i) + " '" + String(g) + "' is not on a coupling edge of " + target.name
+        if target.angle_bound[g.kind] and not g.p0.is_symbolic():
+            var v = g.p0.value()
+            if v < target.angle_lo[g.kind] - 1e-9 or v > target.angle_hi[g.kind] + 1e-9:
+                return "instruction #" + String(i) + " '" + String(g) + "' has its angle outside [" + String(target.angle_lo[g.kind]) + ", " + String(target.angle_hi[g.kind]) + "]"
         for s in range(a):
             if g.qubit(s) >= target.num_qubits:
                 return "instruction #" + String(i) + " uses qubit " + String(g.qubit(s)) + " beyond the target size"
@@ -809,7 +841,12 @@ def _apply(p: PassSpec, mut c: Circuit, target: Target, mut st: _State) raises -
         st.synth_totals[k + 5] += stats.rejected_not_equal
         return _synth_note(stats, saved, physical)
     if id == PassId.PAULI_SIMP:
-        var saved = pauli_resynthesize(c, 64, GateSet(target.basis))
+        var objective_t = False
+        for a in p.args:
+            objective_t = objective_t or a == "objective=t"
+        var saved = pauli_resynthesize(c, 64, GateSet(target.basis), objective_t)
+        if objective_t:
+            return ("saved " + String(saved) + " T gates") if saved > 0 else "kept original"
         return ("saved " + String(saved) + " 2q gates") if saved > 0 else "kept original"
     if id == PassId.ELIDE_SWAPS:
         var wm = List[Int]()
@@ -818,6 +855,24 @@ def _apply(p: PassSpec, mut c: Circuit, target: Target, mut st: _State) raises -
         if k > 0:
             st.final = _compose(st.final, wm)
         return "elided " + String(k) + " swaps" + (" (trailing only)" if trailing else "")
+    if id == PassId.WRAP_ANGLES:
+        var bounded = target.copy()
+        for a in p.args:
+            parse_angle_bound(a, bounded)
+        var changed = wrap_angles(c, bounded)
+        var g2 = GateSet(target.basis)
+        if changed > 0 and len(target.basis) > 0:
+            # Pauli corrections may be outside the basis
+            var dropped = False
+            _ = translate_to_basis(c, g2, dropped)
+        return "wrapped " + String(changed) + " angles"
+    if id == PassId.POST_LAYOUT:
+        var wm = List[Int]()
+        var gain = post_layout(c, target, wm, _int_arg(p.args, 200000))
+        if gain > 0.0:
+            st.init = _compose(st.init, wm)
+            st.final = _compose(st.final, wm)
+        return "log fidelity gain " + fmt_num(gain)
     if id == PassId.CHECK:
         var err = conformance_error(c, target)
         if err.byte_length() > 0:
@@ -1050,6 +1105,22 @@ def _run_list(passes: List[PassSpec], mut c: Circuit, target: Target, mut st: _S
         d0 = d1
 
 
+def _name_inexpressible_gate(err: String, circuit: Circuit, target: Target) raises -> Error:
+    """QM-E604 points at whatever gate the pipeline reached: after fuse1q and
+    routing that is a fused `u` on a physical qubit, which the user never wrote.
+    Name the first gate of the input that has no exact form in the basis."""
+    if not err.startswith("QM-E604"):
+        return Error(err)
+    var gs = GateSet(target.basis)
+    var i = first_inexpressible_1q(circuit, gs)
+    if i < 0:
+        return Error(err)
+    var hint = String("include rz+sx, rz+ry, rz+rx, rx+ry or u in the basis")
+    if not can_synthesize_1q(gs):
+        hint = "this basis is not universal for exact 1q synthesis: use angles it can express exactly (for Clifford+T, multiples of pi/4), or approximate the rotation first (qumo.ft.rz)"
+    return Error("QM-E604: cannot express 1-qubit gate '" + String(circuit.ops[i]) + "' (instruction #" + String(i) + " of the input circuit) in basis " + String(gs) + ". Hint: " + hint + ".")
+
+
 struct PassManager(Copyable, Writable):
     var spec: String
     var passes: List[PassSpec]
@@ -1069,6 +1140,8 @@ struct PassManager(Copyable, Writable):
 
     def run(self, circuit: Circuit, target: Target) raises -> CompileResult:
         circuit.validate()
+        if circuit.count(Op.CORRELATED_ERROR) > 0:
+            raise Error("QM-E624: E / correlated_error reaches the compiler, which cannot see the qubits it touches. Hint: compile first, then add noise (qumo.exec.emulate does that order).")
         var res = CompileResult(circuit)
         res.pipeline = self.canonical()
         res.target_name = target.name
@@ -1076,7 +1149,11 @@ struct PassManager(Copyable, Writable):
         var c = circuit.copy()
         var st = _State(c.num_qubits, self.seed)
         var t0 = perf_counter_ns()
-        _run_list(self.passes, c, target, st, res.reports)
+        try:
+            _run_list(self.passes, c, target, st, res.reports)
+        except e:
+            var named = _name_inexpressible_gate(String(e), circuit, target)
+            raise named^
         res.total_us = Float64(perf_counter_ns() - t0) / 1000.0
         res.initial_layout = st.init.copy()
         res.final_layout = st.final.copy()
@@ -1145,6 +1222,26 @@ def preset_pipeline(level: Int, target: Target) raises -> String:
             parts.append("basis")
         parts.append("fixpoint(cancel,commute,phase_fold,eject_z,fuse1q,max=10)")
         parts.append("check")
+    return _with_device_tail(parts^, level, target)
+
+
+def _with_device_tail(var parts: List[String], level: Int, target: Target) -> String:
+    """Join a preset, adding what only some targets need before its `check`:
+    `wrap_angles` for angle bounds, `post_layout` for real calibration data."""
+    var tail = List[String]()
+    if target.has_angle_bounds():
+        tail.append("wrap_angles")
+        tail.append("fuse1q")
+    if target.is_calibrated() and level >= 1:
+        tail.append("post_layout")
+    if len(tail) > 0:
+        var check = len(parts) > 0 and parts[len(parts) - 1] == "check"
+        if check:
+            _ = parts.pop()
+        for t in tail:
+            parts.append(t)
+        if check:
+            parts.append("check")
     var s = String()
     for i in range(len(parts)):
         if i > 0:
@@ -1155,6 +1252,13 @@ def preset_pipeline(level: Int, target: Target) raises -> String:
 
 def _better(a: CompileResult, b: CompileResult) -> Bool:
     """a strictly better than b: fewer 2q gates, then lower depth, then fewer gates."""
+    return _better_on(a, b, False)
+
+
+def _better_on(a: CompileResult, b: CompileResult, calibrated: Bool) -> Bool:
+    """`_better`, or higher estimated fidelity when the target is calibrated."""
+    if calibrated and a.est_fidelity != b.est_fidelity:
+        return a.est_fidelity > b.est_fidelity
     var a2 = a.circuit.num_2q_gates()
     var b2 = b.circuit.num_2q_gates()
     if a2 != b2:
@@ -1178,7 +1282,7 @@ def transpile(circuit: Circuit, target: Target, level: Int = 2, seed: Int = 7) r
     if level == 3:
         var pm2 = PassManager(preset_pipeline(2, target), seed)
         var r2 = pm2.run(circuit, target)
-        if _better(r2, r):
+        if _better_on(r2, r, target.is_calibrated()):
             r2.total_us += r.total_us
             return r2^
         r.total_us += r2.total_us
@@ -1277,12 +1381,7 @@ def preset_pipeline_ai(level: Int, target: Target) raises -> String:
             parts.append("basis")
         parts.append("fixpoint(cancel,commute,phase_fold,eject_z,fuse1q,max=10)")
         parts.append("check")
-    var s = String()
-    for i in range(len(parts)):
-        if i > 0:
-            s += ","
-        s += parts[i]
-    return s
+    return _with_device_tail(parts^, level, target)
 
 
 def transpile_ai(circuit: Circuit, target: Target, level: Int = 2, seed: Int = 7) raises -> CompileResult:
@@ -1298,7 +1397,7 @@ def transpile_ai(circuit: Circuit, target: Target, level: Int = 2, seed: Int = 7
     var r = pm.run(circuit, target)
     if level == 3:
         var r2 = transpile(circuit, target, 3, seed)
-        if _better(r2, r):
+        if _better_on(r2, r, target.is_calibrated()):
             r2.total_us += r.total_us
             return r2^
         r.total_us += r2.total_us

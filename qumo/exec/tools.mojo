@@ -17,6 +17,13 @@ from qumo.ai.tools import (
     ToolRegistry, ToolResult, ToolContext, tool_ok, arg_circuit, arg_int, arg_required, arg_params,
     write_warnings,
 )
+from qumo.ir.gates import op_from_name
+from qumo.exec.emulate import emulate
+from qumo.sim.density import density_evolve
+from qumo.compiler.pbc import to_pbc
+from qumo.qec.stim_text import from_stim
+from qumo.qec.lint import missing_detectors
+from qumo.sim.runner import SampleResult
 from qumo.exec.dispatch import sample_on
 from qumo.gpu.device import query_gpu, GPU_MIN_QUBITS, parse_gpu_precision
 from qumo.compiler.target import Target, parse_target
@@ -33,7 +40,43 @@ from qumo.qec.codes import NoiseParams, generate_code
 from qumo.qec.dem import detector_error_model
 
 
+def _float_list(v: JsonValue) raises -> List[Float64]:
+    var out = List[Float64]()
+    if v.is_defined() and not v.is_null():
+        for i in range(len(v)):
+            out.append(v.at(i).as_float())
+    return out^
+
+
+def _apply_device_data(args: JsonValue, mut t: Target) raises:
+    """`calibration` {error_1q, readout, t1_us, t2_us, edge_errors: [[a, b, e], ...]}
+    and `angle_bounds` {"rzz": [lo, hi]}."""
+    var cal = args.get("calibration")
+    if cal.is_defined() and not cal.is_null():
+        t.set_calibration(_float_list(cal.get("error_1q")), List[Float64](), _float_list(cal.get("readout")),
+                          _float_list(cal.get("t1_us")), _float_list(cal.get("t2_us")))
+        var edges = cal.get("edge_errors")
+        if edges.is_defined() and not edges.is_null():
+            for i in range(len(edges)):
+                var e = edges.at(i)
+                t.set_edge_error(e.at(0).as_int(), e.at(1).as_int(), e.at(2).as_float())
+    var bounds = args.get("angle_bounds")
+    if bounds.is_defined() and not bounds.is_null():
+        for name in bounds.keys():
+            var k = op_from_name(name)
+            if k < 0:
+                raise Error("QM-E610: unknown gate '" + name + "' in angle_bounds. Hint: use gate names such as rzz.")
+            var b = bounds.get(name)
+            t.set_angle_bounds(k, b.at(0).as_float(), b.at(1).as_float())
+
+
 def _target_from_args(args: JsonValue, n: Int) raises -> Target:
+    var t = _target_shape_from_args(args, n)
+    _apply_device_data(args, t)
+    return t^
+
+
+def _target_shape_from_args(args: JsonValue, n: Int) raises -> Target:
     var spec = args.get_string("target", "")
     if spec.byte_length() > 0:
         return parse_target(spec)
@@ -188,6 +231,87 @@ def _qec_memory_tool(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
     return tool_ok(r.to_json())
 
 
+def _write_counts(mut w: JsonWriter, r: SampleResult):
+    w.key("counts")
+    w.begin_object()
+    for k in r.sorted_keys():
+        w.kv_int(k, r.counts.get(k, 0))
+    w.end_object()
+    w.kv_string("method", r.method)
+
+
+def _emulate_tool(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
+    var warnings = List[String]()
+    var c = arg_circuit(args, warnings)
+    var t = _target_from_args(args, c.num_qubits)
+    var shots = arg_int(args, "shots", 1024, 1, 100000000)
+    var seed = arg_int(args, "seed", 1234, 0, 1 << 62)
+    var compiled = c.copy()
+    if args.get_bool("compile", False):
+        compiled = transpile(c, t, arg_int(args, "level", 2, 0, 3), seed).circuit.copy()
+    var r = emulate(compiled, t, shots, UInt64(seed))
+    var w = JsonWriter()
+    w.begin_object()
+    _write_counts(w, r)
+    w.kv_float("estimated_fidelity", t.estimate_fidelity(compiled))
+    w.kv_string("target", t.name)
+    w.end_object()
+    return tool_ok(w.finish())
+
+
+def _density_tool(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
+    var warnings = List[String]()
+    var c = arg_circuit(args, warnings)
+    var rho = density_evolve(c)
+    var w = JsonWriter()
+    w.begin_object()
+    w.kv_int("num_qubits", c.num_qubits)
+    w.kv_float("trace", rho.trace())
+    w.kv_float("purity", rho.purity())
+    w.key("probabilities")
+    w.begin_array()
+    for p in rho.probabilities():
+        w.number(p)
+    w.end_array()
+    var obs = args.get_string("observable", "")
+    if obs.byte_length() > 0:
+        w.kv_float("expectation", rho.expectation(parse_pauli_sum(obs)))
+    w.end_object()
+    return tool_ok(w.finish())
+
+
+def _to_pbc_tool(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
+    var warnings = List[String]()
+    var c = arg_circuit(args, warnings)
+    var w = JsonWriter()
+    to_pbc(c, args.get_bool("fix_clifford", True)).write_json(w)
+    return tool_ok(w.finish())
+
+
+def _stim_import_tool(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
+    var cc = from_stim(args.get_string("stim", ""))
+    var w = JsonWriter()
+    w.begin_object()
+    w.kv_int("num_qubits", cc.circuit.num_qubits)
+    w.kv_int("num_measurements", cc.circuit.num_measurements)
+    w.kv_int("num_detectors", cc.circuit.num_detectors)
+    w.kv_int("num_observables", cc.circuit.num_observables)
+    if args.get_bool("include_dem", False):
+        w.kv_string("dem", detector_error_model(cc.circuit).to_text())
+    if args.get_bool("include_qasm", False):
+        w.kv_string("qasm", to_qasm(cc.circuit))
+    w.key("missing_detectors")
+    w.begin_array()
+    for recs in missing_detectors(cc.circuit):
+        w.begin_array()
+        for r in recs:
+            w.integer(r)
+        w.end_array()
+    w.end_array()
+    w.end_object()
+    return tool_ok(w.finish())
+
+
 def _qec_dem_tool(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
     var code = args.get_string("code", "surface_z")
     var d = arg_int(args, "distance", 3, 2, 15)
@@ -279,7 +403,7 @@ def register_exec_tools(mut reg: ToolRegistry):
     reg.add(
         "qumo_transpile", "Compile for a target",
         "Optimize, map and route a circuit for ANY target (vendor-neutral): either a one-line spec 'target' like 'grid:4x4/sc_cz', 'heavy_hex:5/rz,sx,x,ecr', 'trapped_ion:11', 'neutral_atom:4x4', 'line:20/u,cx', or explicit 'edges' [[a,b],...] + 'basis' 'rz,sx,x,cz'. 'level' 0-3 picks a preset; 'ai': true runs the hybrid heuristic + AI preset 'ai_level' 1-3 (learned-policy routing, verified Clifford / linear / permutation / Pauli-network block resynthesis, kept only when cheaper; level 3 is a portfolio with O3); 'pipeline' runs a text pass spec, e.g. 'cancel,merge,fuse1q,route(sabre),basis,cancel'. Returns compiled OpenQASM 3, per-pass report, layouts, swap count and estimated fidelity.",
-        "{\"type\":\"object\",\"properties\":{" + _CIRC + ",\"target\":{\"type\":\"string\"},\"edges\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"integer\"}}},\"num_qubits\":{\"type\":\"integer\"},\"basis\":{\"type\":\"string\",\"default\":\"any\"},\"level\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":3,\"default\":2},\"pipeline\":{\"type\":\"string\"},\"ai\":{\"type\":\"boolean\",\"default\":false},\"ai_level\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":3,\"default\":2},\"seed\":{\"type\":\"integer\",\"default\":7},\"include_qasm\":{\"type\":\"boolean\",\"default\":true}},\"additionalProperties\":false}",
+        "{\"type\":\"object\",\"properties\":{" + _CIRC + ",\"target\":{\"type\":\"string\"},\"edges\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"integer\"}}},\"num_qubits\":{\"type\":\"integer\"},\"basis\":{\"type\":\"string\",\"default\":\"any\"},\"calibration\":{\"type\":\"object\",\"description\":\"Device data: error_1q, readout, t1_us, t2_us (per qubit), edge_errors [[a, b, e], ...]. Non-uniform data adds post_layout.\"},\"angle_bounds\":{\"type\":\"object\",\"description\":\"Gate name to [min, max], e.g. {\\\"rzz\\\": [0, 1.5708]}. Adds wrap_angles.\"},\"level\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":3,\"default\":2},\"pipeline\":{\"type\":\"string\"},\"ai\":{\"type\":\"boolean\",\"default\":false},\"ai_level\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":3,\"default\":2},\"seed\":{\"type\":\"integer\",\"default\":7},\"include_qasm\":{\"type\":\"boolean\",\"default\":true}},\"additionalProperties\":false}",
         _transpile_tool,
     )
     reg.add(
@@ -302,9 +426,33 @@ def register_exec_tools(mut reg: ToolRegistry):
     )
     reg.add(
         "qumo_qec_memory", "QEC memory experiment",
-        "Sinter-style logical error rate of a memory experiment: code 'surface_z' | 'surface_x' | 'repetition', distance d, rounds (default d), uniform circuit-level noise p (Stim SI1000-like parameters), decoder 'mwpm' (default: exact minimum-weight perfect matching by sparse blossom, PyMatching 2's algorithm; aliases 'matching', 'pymatching') | 'sparse_blossom' (same decoder) | 'mwpm_dense' (exact MWPM by all-pairs shortest paths + dense blossom; small codes, d <= 5) | 'uf' (union-find; fast, slightly lower threshold) | 'lookup' (lookup table; tiny codes, <= 64 detectors). Bit-packed Pauli-frame sampling; returns logical error rate, std error, Wilson interval, per-round rate, timing and the decoder that ran.",
-        "{\"type\":\"object\",\"properties\":{\"code\":{\"type\":\"string\",\"enum\":[\"surface_z\",\"surface_x\",\"repetition\"],\"default\":\"surface_z\"},\"distance\":{\"type\":\"integer\",\"default\":3},\"rounds\":{\"type\":\"integer\",\"default\":-1},\"p\":{\"type\":\"number\",\"default\":0.001},\"shots\":{\"type\":\"integer\",\"default\":100000},\"decoder\":{\"type\":\"string\",\"enum\":[\"mwpm\",\"sparse_blossom\",\"mwpm_dense\",\"uf\",\"lookup\"],\"default\":\"mwpm\"},\"seed\":{\"type\":\"integer\",\"default\":1},\"max_errors\":{\"type\":\"integer\",\"default\":-1}},\"additionalProperties\":false}",
+        "Sinter-style logical error rate of a memory experiment: code 'surface_z' | 'surface_x' | 'repetition', distance d, rounds (default d), uniform circuit-level noise p (Stim SI1000-like parameters), decoder 'mwpm' (default: exact minimum-weight perfect matching by sparse blossom, PyMatching 2's algorithm; aliases 'matching', 'pymatching') | 'sparse_blossom' (same decoder) | 'mwpm_correlated' (two-pass reweighting, opt-in: 1.3 to 2.2 times fewer logical errors at d >= 5, worse at d = 3, about 3 times slower) | 'mwpm_dense' (exact MWPM by all-pairs shortest paths + dense blossom; small codes, d <= 5) | 'uf' (union-find; fast, slightly lower threshold) | 'lookup' (lookup table; tiny codes, <= 64 detectors). Bit-packed Pauli-frame sampling; returns logical error rate, std error, Wilson interval, per-round rate, timing and the decoder that ran.",
+        "{\"type\":\"object\",\"properties\":{\"code\":{\"type\":\"string\",\"enum\":[\"surface_z\",\"surface_x\",\"repetition\"],\"default\":\"surface_z\"},\"distance\":{\"type\":\"integer\",\"default\":3},\"rounds\":{\"type\":\"integer\",\"default\":-1},\"p\":{\"type\":\"number\",\"default\":0.001},\"shots\":{\"type\":\"integer\",\"default\":100000},\"decoder\":{\"type\":\"string\",\"enum\":[\"mwpm\",\"sparse_blossom\",\"mwpm_correlated\",\"mwpm_dense\",\"uf\",\"lookup\"],\"default\":\"mwpm\"},\"seed\":{\"type\":\"integer\",\"default\":1},\"max_errors\":{\"type\":\"integer\",\"default\":-1}},\"additionalProperties\":false}",
         _qec_memory_tool,
+    )
+    reg.add(
+        "qumo_emulate", "Emulate on a device model",
+        "Sample a circuit under the noise of a target (per-qubit T1/T2, 1q and readout errors, per-edge 2q errors, gate durations) without any real device. The circuit must already fit the target (set compile=true to transpile first; QM-E615 otherwise). Takes 'target' or 'edges'+'basis' as qumo_transpile, plus 'calibration' {error_1q, readout, t1_us, t2_us, edge_errors: [[a, b, e], ...]}. Returns counts, the method that ran and the estimated fidelity.",
+        "{\"type\":\"object\",\"properties\":{" + _CIRC + ",\"target\":{\"type\":\"string\"},\"edges\":{\"type\":\"array\"},\"basis\":{\"type\":\"string\"},\"num_qubits\":{\"type\":\"integer\"},\"calibration\":{\"type\":\"object\"},\"angle_bounds\":{\"type\":\"object\"},\"compile\":{\"type\":\"boolean\",\"default\":false},\"level\":{\"type\":\"integer\",\"default\":2},\"shots\":{\"type\":\"integer\",\"default\":1024},\"seed\":{\"type\":\"integer\",\"default\":1234}},\"additionalProperties\":false}",
+        _emulate_tool,
+    )
+    reg.add(
+        "qumo_density", "Density matrix",
+        "Exact density-matrix simulation up to 15 qubits: noise is exact, not sampled, and Kraus channels work. Returns outcome probabilities, trace, purity and optionally the expectation of a Pauli sum. Measurements are non-selective; classical conditions raise QM-E411.",
+        "{\"type\":\"object\",\"properties\":{" + _CIRC + ",\"observable\":{\"type\":\"string\"}},\"additionalProperties\":false}",
+        _density_tool,
+    )
+    reg.add(
+        "qumo_to_pbc", "Pauli-based form",
+        "Litinski's Pauli-based form: commute every Clifford to the end, leaving time-ordered Pauli-product rotations and measurements in the input frame plus one final Clifford. Returns the operations with Pauli strings (highest qubit leftmost), angles in the exp(-i angle/2 P) convention (T = pi/4) and counts: rotations, pi8, arbitrary, measurements, max_weight, layers.",
+        "{\"type\":\"object\",\"properties\":{" + _CIRC + ",\"fix_clifford\":{\"type\":\"boolean\",\"default\":true}},\"additionalProperties\":false}",
+        _to_pbc_tool,
+    )
+    reg.add(
+        "qumo_stim_import", "Import Stim circuit",
+        "Parse Stim circuit text (REPEAT, rec[-k], DETECTOR, OBSERVABLE_INCLUDE, MPP, MX, MR, PAULI_CHANNEL_2, E, ...). Reports sizes and missing_detectors: deterministic measurement parities the circuit does not declare. include_dem adds the detector error model, include_qasm canonical OpenQASM 3.",
+        "{\"type\":\"object\",\"properties\":{\"stim\":{\"type\":\"string\"},\"include_dem\":{\"type\":\"boolean\",\"default\":false},\"include_qasm\":{\"type\":\"boolean\",\"default\":false}},\"required\":[\"stim\"],\"additionalProperties\":false}",
+        _stim_import_tool,
     )
     reg.add(
         "qumo_qec_dem", "Detector error model",

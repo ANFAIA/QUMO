@@ -248,3 +248,66 @@ def run_sampler(pub: SamplerPub) raises -> List[SampleResult]:
         else:
             out.append(sample(pub.circuit, pub.shots, pub.seed + UInt64(s)))
     return out^
+
+
+# ---------------------------------------------------------------------------
+# Splitting a PUB for a device limit
+# ---------------------------------------------------------------------------
+@fieldwise_init
+struct PubSlot(ImplicitlyCopyable, Writable):
+    """Where one parameter set of the original PUB went."""
+
+    var pub: Int
+    var index: Int
+
+    def write_to(self, mut w: Some[Writer]):
+        w.write("(", self.pub, ", ", self.index, ")")
+
+
+def _check_split(max_sets: Int) raises:
+    if max_sets < 1:
+        raise Error("QM-E420: split needs max_sets >= 1, got " + String(max_sets) + ". Hint: pass the device limit on parameter sets per job.")
+
+
+def split_pub(pub: SamplerPub, max_sets: Int, mut slots: List[PubSlot]) raises -> List[SamplerPub]:
+    """Split into PUBs of at most `max_sets` parameter sets (ProgramSet.split in
+    Braket). Results stay bit-identical: run_sampler seeds set s with seed + s, and
+    each part starts from the seed of its first original index. `slots[s]` says
+    where original set s went."""
+    _check_split(max_sets)
+    var out = List[SamplerPub]()
+    var total = pub.num_sets()
+    var start = 0
+    slots.clear()
+    while start < total:
+        var stop = min(start + max_sets, total)
+        var sets = List[List[Float64]]()
+        if len(pub.parameter_sets) > 0:
+            for s in range(start, stop):
+                sets.append(pub.parameter_sets[s].copy())
+        for s in range(start, stop):
+            slots.append(PubSlot(len(out), s - start))
+        out.append(SamplerPub(pub.circuit, pub.shots, sets, pub.seed + UInt64(start)))
+        start = stop
+    return out^
+
+
+def split_pub(pub: EstimatorPub, max_sets: Int, mut slots: List[PubSlot]) raises -> List[EstimatorPub]:
+    """As for SamplerPub. Shot estimation seeds set s with seed + 7919 s + o, so a
+    part starts at seed + 7919 start and matches the unsplit run bit for bit."""
+    _check_split(max_sets)
+    var out = List[EstimatorPub]()
+    var total = pub.num_sets()
+    var start = 0
+    slots.clear()
+    while start < total:
+        var stop = min(start + max_sets, total)
+        var sets = List[List[Float64]]()
+        if len(pub.parameter_sets) > 0:
+            for s in range(start, stop):
+                sets.append(pub.parameter_sets[s].copy())
+        for s in range(start, stop):
+            slots.append(PubSlot(len(out), s - start))
+        out.append(EstimatorPub(pub.circuit, pub.observables, sets, pub.precision, pub.seed + UInt64(start * 7919)))
+        start = stop
+    return out^

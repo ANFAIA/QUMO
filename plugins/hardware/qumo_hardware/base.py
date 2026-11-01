@@ -61,6 +61,20 @@ class TargetSpec:
     simulator: bool = False
     local: bool = False
     extras: dict[str, Any] = field(default_factory=dict)
+    angle_bounds: dict[str, tuple[float, float]] = field(default_factory=dict)
+
+    def calibration(self) -> dict | None:
+        """Device data in the form `qumo_py.transpile_calibrated` expects (None: nothing to pass)."""
+        cal: dict[str, Any] = {}
+        known = {k: float(v) for k, v in self.edge_errors.items() if v is not None}
+        if known:
+            cal["edge_errors"] = known
+        if self.readout_errors:
+            med = self.errors.get("readout", 0.0)
+            cal["readout"] = [float(med if v is None else v) for v in self.readout_errors]
+        if self.angle_bounds:
+            cal["angle_bounds"] = {k: (float(a), float(b)) for k, (a, b) in self.angle_bounds.items()}
+        return cal or None
 
     def qumo_edges(self) -> list[list[int]]:
         """Edges in the form `qumo_py.transpile` expects ([] = all-to-all)."""

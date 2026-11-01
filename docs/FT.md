@@ -92,6 +92,36 @@ Gadgets are plain `Circuit` templates, so every one of them is verified on its
 own (see Verification). `verify_steane_library` / `verify_iceberg_library`
 re-run the whole library; the MCP tool `qumo_ft_codes` reports it.
 
+### `reichardt` QEC cycles
+
+`QECPolicy("reichardt", threshold)` on Steane measures all six stabilizers with 3
+ancillas (arXiv:1804.06995 Fig. 5, `steane_reichardt_cycle`) and decodes each 3-bit
+syndrome to one data qubit, instead of teleporting into fresh logical blocks. A small
+program needs 11 qubits against 16 for `steane`. Every single X and Z data error is
+corrected (tested on the tableau). The table assumes no fault during extraction, as
+guppyft's does: the flags are measured and not read, so a flag-aware decoder would be
+an improvement, and this style's logical error rate has not been compared with
+guppyft on Selene.
+
+### Iceberg Pauli exponentials
+
+`LogicalProgram.pauli_exp(theta, "XZXX", qubits)` is guppyft 0.5's seven block-wide
+exponentials. Modulo the stabilizers each is one weight-2 rotation, derived for this
+layout (X_i = X_t X_i, Z_i = Z_b Z_i):
+
+| Logical | Physical | Sign |
+|---|---|---|
+| all X | RXX(t, b) | + |
+| all Z | RZZ(t, b) | + |
+| all Y | RYY(t, b) | + for k = 2 mod 4, - for k = 0 mod 4 |
+| X except I at i | RXX(b, d_i) | + |
+| Z except I at i | RZZ(t, d_i) | + |
+| X except Z at i | RYY(b, d_i) | - |
+| Z except X at i | RYY(t, d_i) | - |
+
+guppyft has the operations and no Iceberg gadgets, so there is nothing to compare
+with: `valid_clifford_implementation` verifies each at theta = pi/2 for k = 2, 4, 6.
+
 ## Runtime resource management, statically
 
 | Guppy FT (runtime `STATE`) | QUMO (`qumo.ft.implement.Engine`) |
@@ -175,6 +205,14 @@ exchanges with the target only when needed, so no T gate is ever
 conditioned. On the state vector the circuit reproduces the angle encoded in
 k to 1e-15 and theta within epsilon (`tests/test_ft_rz.mojo`).
 
+## Helix (`helix_code`, `helix_10_2_3_code`)
+
+The definitions of [[20,2,6]] and its inner [[10,2,3]] from arXiv:2609.03194 Table I,
+which lists a redundant generating set; these keep 18 and 8 independent generators.
+`validate()` checks commutation, independence and logical relations, and
+`css_distance()` the distances 6 and 3. Only the code: QUMO has no Helix architecture,
+which would need automorphism gates, fold-transversal S and a non-matching decoder.
+
 ## Verification (`qumo.ft.verify`)
 
 * `valid_clifford_implementation(semantic, impl, code, num_blocks, num_ancillas)`:
@@ -250,7 +288,7 @@ pairs are not fault tolerant, so a single 2-qubit fault can be a logical error.
   queueing at run time; the classical lane emulates classical logic with a
   qubit (one extra qubit, no noise).
 * Steane: transversal Clifford gates, one lookup decoder (no flag-aware or
-  correlated decoding); EC cycles are teleportation-based (as Guppy FT).
+  correlated decoding); EC cycles are teleportation-based, or `reichardt`.
   Non-Clifford gates only through injection (conditioned T is `QM-E726`).
 * Iceberg: error detection only (post-selection); within-block and
   cross-block rotations are not fault tolerant (as Guppy FT's Iceberg ops);
@@ -260,7 +298,9 @@ pairs are not fault tolerant, so a single 2-qubit fault can be a logical error.
   with epsilon = 0.1 and 2 attempts: 104 logical T, 92 physical qubits,
   3029 two-qubit gates, 2q depth 804), so encoded comparator programs are
   characterised by resource reports, not simulated.
-* State-vector emulation of encoded non-Clifford programs is limited to
-  ~26 physical qubits (one Steane data block + one magic block + lane).
+* State-vector emulation of encoded non-Clifford programs stops at 26 physical
+  qubits. Past that, `method="auto"` runs stabilizer branching, whose cost follows
+  the T gates (a 30-qubit encoded program in tests/test_ft_tier1.mojo); many T
+  gates reach its limit of 2^20 branches (QM-E412).
 * Non-CSS codes are supported by the code library and the verifier;
   architectures (encode / decode) are Steane and Iceberg.

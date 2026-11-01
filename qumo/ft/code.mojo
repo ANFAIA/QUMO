@@ -30,6 +30,7 @@ Error codes: QM-E720 (bad label), QM-E721 (invalid code definition),
 QM-E722 (unknown code name or bad code parameters).
 """
 
+from std.bit import pop_count, count_leading_zeros
 from qumo.ft.pauli import SymPauli, StabilizerGroup, group_from
 from qumo.ai.json import JsonWriter
 from qumo.qec.codes import surface_code_memory, repetition_code_memory, NoiseParams, CodeCircuit
@@ -160,6 +161,48 @@ struct StabilizerCode(Copyable, Writable):
             if not full.add(self.x_logicals[j]) or not full.add(self.z_logicals[j]):
                 raise Error("QM-E721: code '" + self.name + "': logical operators of qubit " + String(j) + " are in the span of the stabilizers/other logicals. Hint: logicals must be independent.")
 
+    def css_distance(self, max_weight: Int = 8) raises -> Int:
+        """Distance of a CSS code on up to 64 qubits: the lighter of the X-type and
+        Z-type logicals. Much faster than `min_distance`, which tries 3^w Paulis
+        per support: here a support fixes the logical, so Helix takes a moment.
+        -1 when no logical of weight <= max_weight exists."""
+        if not self.is_css() or self.n > 64:
+            raise Error("QM-E721: css_distance needs a CSS code on at most 64 qubits. Hint: use min_distance.")
+        var xs = List[UInt64]()
+        var zs = List[UInt64]()
+        for g in self.generators:
+            var m = UInt64(0)
+            var is_x = False
+            for q in range(self.n):
+                if g.x(q) == 1 or g.z(q) == 1:
+                    m |= UInt64(1) << UInt64(q)
+                    is_x = is_x or g.x(q) == 1
+            if is_x:
+                xs.append(m)
+            else:
+                zs.append(m)
+        for w in range(1, max_weight + 1):
+            var idx = List[Int]()
+            var v = UInt64(0)
+            for i in range(w):
+                idx.append(i)
+                v |= UInt64(1) << UInt64(i)
+            while True:
+                if _is_logical(v, zs, xs) or _is_logical(v, xs, zs):
+                    return w
+                var i = w - 1
+                while i >= 0 and idx[i] == self.n - w + i:
+                    i -= 1
+                if i < 0:
+                    break
+                idx[i] += 1
+                for j in range(i + 1, w):
+                    idx[j] = idx[j - 1] + 1
+                v = 0
+                for j in range(w):
+                    v |= UInt64(1) << UInt64(idx[j])
+        return -1
+
     def min_distance(self, max_weight: Int = 4) raises -> Int:
         """Brute-force distance: the smallest weight of a Pauli that commutes
         with every generator but is not in the stabilizer group (up to phase).
@@ -239,6 +282,26 @@ struct StabilizerCode(Copyable, Writable):
                 ", css=", self.is_css(), ")")
 
 
+def _is_logical(v: UInt64, checks: List[UInt64], same_type: List[UInt64]) -> Bool:
+    """A Pauli on support v commutes with `checks` and is outside the span of `same_type`."""
+    for c in checks:
+        if Int(pop_count(v & c)) % 2 != 0:
+            return False
+    var r = v
+    var basis = same_type.copy()
+    for i in range(len(basis)):
+        var b = basis[i]
+        if b == 0:
+            continue
+        var top = UInt64(1) << UInt64(63 - Int(count_leading_zeros(b)))
+        for j in range(i + 1, len(basis)):
+            if (basis[j] & top) != 0:
+                basis[j] ^= b
+        if (r & top) != 0:
+            r ^= b
+    return r != 0
+
+
 def _label(s: String, n: Int) raises -> SymPauli:
     var p = SymPauli.from_label(s)
     if p.n != n:
@@ -308,6 +371,30 @@ def five_qubit_code() raises -> StabilizerCode:
     var xl: List[String] = ["XXXXX"]
     var zl: List[String] = ["ZZZZZ"]
     return StabilizerCode.from_strings("five_qubit", 5, 1, 3, g, xl, zl, "Perfect [[5,1,3]] code (non-CSS).")
+
+
+def helix_10_2_3_code() raises -> StabilizerCode:
+    """The inner [[10,2,3]] code of Helix (arXiv:2609.03194, Table I). The table
+    lists 10 generators of rank 8; these are its first 8 independent ones."""
+    var g: List[String] = ["XIIXIIXXII", "IXIIXIIXXI", "XIXIIIIIXX", "IXIXIXIIIX",
+                           "IZZIIZIIZI", "IIZZIIZIIZ", "IIIZZZIZII", "ZIIIZIZIZI"]
+    var xl: List[String] = ["IIXXIXIIII", "XIIIIIXIIX"]
+    var zl: List[String] = ["IZIIZZIIII", "ZIIIIIIZZI"]
+    return StabilizerCode.from_strings("helix_10_2_3", 10, 2, 3, g, xl, zl, "Inner code of Helix, arXiv:2609.03194 Table I.")
+
+
+def helix_code() raises -> StabilizerCode:
+    """Helix [[20,2,6]] (arXiv:2609.03194, Table I): the code definition only.
+    The table lists 20 generators of rank 18; these are 18 independent ones."""
+    var g: List[String] = [
+        "XXXXIIIIIIIIIIIIIIII", "IIIIXXXXIIIIIIIIIIII", "IIIIIIIIXXXXIIIIIIII", "IIIIIIIIIIIIXXXXIIII",
+        "IIIIIIIIIIIIIIIIXXXX", "XIIXIIXXIIXXXIIXIIII", "IIIIXIIXXXIIIIXXXIIX", "IXXIIIIIXIIXXXIIIIXX",
+        "IIXXIXXIIIIIIXXIXXII", "ZZZZIIIIIIIIIIIIIIII", "IIIIZZZZIIIIIIIIIIII", "IIIIIIIIZZZZIIIIIIII",
+        "IIIIIIIIIIIIZZZZIIII", "IIIIIIIIIIIIIIIIZZZZ", "ZIIZIIZZIIZZZIIZIIII", "IIIIZIIZZZIIIIZZZIIZ",
+        "IZZIIIIIZIIZZZIIIIZZ", "IIZZIZZIIIIIIZZIZZII"]
+    var xl: List[String] = ["IIXXIIIIXIIXXIIXIIII", "XIIXIIXXIIIIIIIIIIXX"]
+    var zl: List[String] = ["ZIIZIIZZIIIIIIIIIIZZ", "IIZZIIIIZIIZZIIZIIII"]
+    return StabilizerCode.from_strings("helix", 20, 2, 6, g, xl, zl, "Helix, arXiv:2609.03194 Table I: definition only; QUMO has no Helix architecture.")
 
 
 def identity_code(k: Int) raises -> StabilizerCode:
@@ -399,7 +486,7 @@ def _suffix_int(name: String, prefix: String) raises -> Int:
 
 
 def code_by_name(name: String) raises -> StabilizerCode:
-    """steane, five_qubit, css_422, noncss_422, iceberg_<k>, surface_<d>, repetition_<d>, identity_<k>."""
+    """steane, five_qubit, css_422, noncss_422, helix, helix_10_2_3, iceberg_<k>, surface_<d>, repetition_<d>, identity_<k>."""
     var k = name.lower()
     if k == "steane" or k == "steane_713":
         return steane_code()
@@ -409,6 +496,10 @@ def code_by_name(name: String) raises -> StabilizerCode:
         return css_422_code()
     if k == "noncss_422":
         return noncss_422_code()
+    if k == "helix" or k == "helix_20_2_6":
+        return helix_code()
+    if k == "helix_10_2_3":
+        return helix_10_2_3_code()
     try:
         if k.startswith("iceberg_"):
             return iceberg_code(_suffix_int(k, "iceberg_"))

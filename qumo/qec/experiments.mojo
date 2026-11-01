@@ -42,6 +42,7 @@ from qumo.qec.decoders import (
     Decoder, MatchingGraph, UnionFindDecoder, MwpmDecoder, LookupTableDecoder, batch_fired,
 )
 from qumo.qec.sparse_blossom import SparseBlossomDecoder
+from qumo.qec.correlated import CorrelatedMatchingDecoder
 
 comptime WAVE_BATCHES = 64
 
@@ -223,6 +224,8 @@ def canonical_decoder_name(name: String) -> String:
         return "sparse_blossom"
     if k == "mwpm_dense" or k == "mwpm-dense" or k == "dense_mwpm" or k == "dense":
         return "mwpm_dense"
+    if k == "mwpm_correlated" or k == "correlated" or k == "pymatching-correlated":
+        return "mwpm_correlated"
     if k == "uf" or k == "union_find" or k == "unionfind":
         return "uf"
     if k == "lookup" or k == "lut" or k == "table":
@@ -247,6 +250,9 @@ def make_decoder_and_run(name: String, dem: DetectorErrorModel, prog: FrameProgr
         var g = MatchingGraph(dem)
         edges = g.num_edges()
         return sample_and_decode(prog, MwpmDecoder(g^), shots, seed, max_errors)
+    if k == "mwpm_correlated":
+        edges = MatchingGraph(dem).num_edges()
+        return sample_and_decode(prog, CorrelatedMatchingDecoder(dem), shots, seed, max_errors)
     if k == "uf":
         var g = MatchingGraph(dem)
         edges = g.num_edges()
@@ -254,7 +260,7 @@ def make_decoder_and_run(name: String, dem: DetectorErrorModel, prog: FrameProgr
     if k == "lookup":
         edges = 0
         return sample_and_decode(prog, LookupTableDecoder(dem, 2), shots, seed, max_errors)
-    raise Error("QM-E707: unknown decoder '" + name + "'. Hint: use 'mwpm' (sparse blossom, default), 'sparse_blossom', 'mwpm_dense', 'uf' or 'lookup', or call sample_and_decode() with your own Decoder.")
+    raise Error("QM-E707: unknown decoder '" + name + "'. Hint: use 'mwpm' (sparse blossom, default), 'sparse_blossom', 'mwpm_correlated', 'mwpm_dense', 'uf' or 'lookup', or call sample_and_decode() with your own Decoder.")
 
 
 def run_circuit_experiment(cc: CodeCircuit, shots: Int, decoder: String = "mwpm", seed: UInt64 = 1, max_errors: Int = -1) raises -> ExperimentResult:

@@ -1,6 +1,6 @@
 """Qiskit reference for examples/frameworks/qiskit/qaoa_maxcut.mojo (optional).
 
-Rebuilds the tutorial's p=2 QAOA circuit with qiskit's QAOAAnsatz on the
+Rebuilds the tutorial's p=2 QAOA circuit with qiskit's qaoa_ansatz on the
 5-node graph (0,1)(0,2)(0,4)(1,2)(2,3)(3,4) and evaluates the tutorial's
 objective <sum_(u,v) Z_u Z_v> with an exact Statevector at
 
@@ -9,9 +9,9 @@ objective <sum_(u,v) Z_u Z_v> with an exact Statevector at
   * optionally QUMO's optimum: --qumo-angles g0 g1 b0 b1 (QUMO convention).
 
 Angle conventions: QUMO's qaoa_maxcut_ansatz applies RZZ(gamma) per edge,
-i.e. exp(-i gamma/2 ZZ), and RX(2 beta); qiskit's QAOAAnsatz applies
+i.e. exp(-i gamma/2 ZZ), and RX(2 beta); qiskit's qaoa_ansatz applies
 exp(-i gamma ZZ) for the cost operator sum ZZ and RX(2 beta). Hence
-gamma_qiskit = gamma_qumo / 2 and beta_qiskit = beta_qumo. QAOAAnsatz orders
+gamma_qiskit = gamma_qumo / 2 and beta_qiskit = beta_qumo. qaoa_ansatz orders
 its parameters (beta[0], beta[1], gamma[0], gamma[1]).
 
 Run (QUMO repo root):
@@ -31,7 +31,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from _checks import CheckLog  # noqa: E402
 
 import qiskit  # noqa: E402
-from qiskit.circuit.library import QAOAAnsatz  # noqa: E402
+from qiskit.circuit.library import qaoa_ansatz  # noqa: E402
 from qiskit.quantum_info import SparsePauliOp, Statevector  # noqa: E402
 
 EDGES = [(0, 1), (0, 2), (0, 4), (1, 2), (2, 3), (3, 4)]
@@ -57,7 +57,7 @@ def cost_operator() -> SparsePauliOp:
 def sum_zz(qumo_angles: list[float]) -> float:
     g0, g1, b0, b1 = qumo_angles
     h = cost_operator()
-    ansatz = QAOAAnsatz(h, reps=2)
+    ansatz = qaoa_ansatz(h, reps=2)
     names = [p.name for p in ansatz.parameters]
     assert names == ["β[0]", "β[1]", "γ[0]", "γ[1]"], names
     bound = ansatz.assign_parameters([b0, b1, g0 / 2, g1 / 2])

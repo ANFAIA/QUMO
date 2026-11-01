@@ -67,13 +67,14 @@ struct LOp:
     comptime INJECT_TDG = 21
     comptime BARRIER = 22
     comptime CSET = 23  # classical assignment: clbit := cexprs[q0] (XOR form over logical clbits)
-    comptime NUM = 24
+    comptime PAULI_EXP = 24  # exp(-i angle/2 P): q0 = offset in pauli_args, q1 = letters
+    comptime NUM = 25
 
 
 def lop_name(k: Int) -> String:
     var names: List[String] = [
         "alloc", "free", "x", "y", "z", "h", "s", "sdg", "cx", "cz", "swap", "t", "tdg",
-        "rz", "rx", "rzz", "rxx", "measure", "qec_cycle", "prep_t", "inject_t", "inject_tdg", "barrier", "cset",
+        "rz", "rx", "rzz", "rxx", "measure", "qec_cycle", "prep_t", "inject_t", "inject_tdg", "barrier", "cset", "pauli_exp",
     ]
     if k >= 0 and k < len(names):
         return names[k]
@@ -83,7 +84,7 @@ def lop_name(k: Int) -> String:
 def lop_arity(k: Int) -> Int:
     if k == LOp.CX or k == LOp.CZ or k == LOp.SWAP or k == LOp.RZZ or k == LOp.RXX or k == LOp.INJECT_T or k == LOp.INJECT_TDG:
         return 2
-    if k == LOp.BARRIER or k == LOp.CSET:
+    if k == LOp.BARRIER or k == LOp.CSET or k == LOp.PAULI_EXP:
         return 0
     return 1
 
@@ -136,6 +137,7 @@ struct LogicalProgram(Copyable, Writable, Sized):
     var cond_table: List[Int]  # [count, bit0, val0, ...] per register condition
     var notes: List[String]  # compile notes (decompositions, approximations)
     var cexprs: List[CExpr]  # CSET payloads, over logical clbits
+    var pauli_args: List[Int]  # PAULI_EXP: qubit, letter pairs
 
     def __init__(out self, name: String = "logical"):
         self.name = name
@@ -145,6 +147,7 @@ struct LogicalProgram(Copyable, Writable, Sized):
         self.cond_table = List[Int]()
         self.notes = List[String]()
         self.cexprs = List[CExpr]()
+        self.pauli_args = List[Int]()
 
     def __len__(self) -> Int:
         return len(self.ops)
@@ -180,6 +183,21 @@ struct LogicalProgram(Copyable, Writable, Sized):
     def rxx(mut self, theta: Float64, a: Int, b: Int): self.gate(LOp.RXX, a, b, theta)
     def qec_cycle(mut self, q: Int): self.gate(LOp.QEC, q)
     def barrier(mut self): self.gate(LOp.BARRIER, -1)
+
+    def pauli_exp(mut self, theta: Float64, paulis: String, qubits: List[Int]) raises:
+        """exp(-i theta/2 P) with P = paulis[i] on logical qubit qubits[i]. On Iceberg
+        it must cover the block: all X, Y or Z, or one letter off (see gadgets)."""
+        if paulis.byte_length() != len(qubits) or len(qubits) == 0:
+            raise Error("QM-E724: pauli_exp needs one Pauli letter per qubit. Hint: pauli_exp(0.1, \"XXZ\", [0, 1, 2]).")
+        var offset = len(self.pauli_args)
+        var bs = paulis.as_bytes()
+        for i in range(len(qubits)):
+            var c = Int(bs[i])
+            if c != ord("X") and c != ord("Y") and c != ord("Z") and c != ord("I"):
+                raise Error("QM-E724: pauli_exp letter '" + chr(c) + "'. Hint: use I, X, Y or Z.")
+            self.pauli_args.append(qubits[i])
+            self.pauli_args.append(c)
+        self.ops.append(LogicalInstr.make(LOp.PAULI_EXP, offset, len(qubits), theta))
 
     def measure(mut self, q: Int, c: Int):
         """Destructive Z measurement; the decoded outcome goes to clbit c."""

@@ -480,6 +480,19 @@ def _describe(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
     raise Error("QM-E913: unknown topic '" + topic + "'. Hint: topic is one of gates, gate, errors, error, capabilities, passes, models.")
 
 
+def _draw(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
+    var warnings = List[String]()
+    var c = arg_circuit(args, warnings)
+    var text = c.draw(args.get_int("width", 80), args.get_string("style", "ascii"))
+    var w = JsonWriter()
+    w.begin_object()
+    w.kv_string("drawing", text)
+    w.kv_int("num_qubits", c.num_qubits)
+    w.kv_int("num_ops", len(c))
+    w.end_object()
+    return ToolResult(w.finish(), text, False)
+
+
 def _circuit_info(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
     var warnings = List[String]()
     var c = arg_circuit(args, warnings)
@@ -572,6 +585,12 @@ def register_core_tools(mut reg: ToolRegistry):
         "Analyze a circuit without simulating: qubits, clbits, op counts, depth, two-qubit gate count, T-count, Clifford/dynamic/noisy flags, parameters, memory estimate, recommended simulator and lint findings. Optionally include the instruction list (JSON) and canonical OpenQASM 3.",
         "{\"type\":\"object\",\"properties\":{" + _QASM_PROP + "," + _CIRCUIT_PROP + ",\"include_instructions\":{\"type\":\"boolean\",\"default\":false},\"include_qasm\":{\"type\":\"boolean\",\"default\":false},\"include_lint\":{\"type\":\"boolean\",\"default\":true}},\"additionalProperties\":false}",
         _circuit_info,
+    )
+    reg.add(
+        "qumo_draw", "Draw circuit",
+        "Text drawing of a circuit: one line per qubit, columns of gates, @ control, + CX target, x SWAP end, M>c3 measurement into bit 3, ?c0=1 classical condition; detectors, observables and barriers take a whole column. 'style' ascii or unicode; 'width' folds long circuits (0: never).",
+        "{\"type\":\"object\",\"properties\":{" + _QASM_PROP + "," + _CIRCUIT_PROP + ",\"width\":{\"type\":\"integer\",\"default\":80},\"style\":{\"type\":\"string\",\"enum\":[\"ascii\",\"unicode\"],\"default\":\"ascii\"}},\"additionalProperties\":false}",
+        _draw,
     )
     reg.add(
         "qumo_convert", "Convert circuit",

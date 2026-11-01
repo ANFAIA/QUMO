@@ -24,8 +24,8 @@ one-line spec such as "grid:5x5/sc_cz" or "heavy_hex:7/rz,sx,x,ecr".
 """
 
 from std.collections import Dict
-from std.math import sqrt
-from qumo.ir.gates import Op, op_name, op_from_name, op_arity, op_is_unitary
+from std.math import sqrt, pi
+from qumo.ir.gates import Op, op_name, op_from_name, op_arity, op_num_params, op_is_unitary
 from qumo.ir.circuit import Circuit
 from qumo.compiler.common import basis_str, fmt_num
 
@@ -118,6 +118,9 @@ struct Target(Copyable, Writable):
     var t2_us: List[Float64]
     var duration_ns: List[Float64]  # per opcode
     var edge_index: Dict[Int, Int]
+    var angle_bound: List[Bool]  # per opcode: the gate's first angle has a range
+    var angle_lo: List[Float64]
+    var angle_hi: List[Float64]
 
     def __init__(out self, num_qubits: Int, edges: List[Int], basis: List[Int],
                  name: String = "custom", full: Bool = False) raises:
@@ -140,6 +143,9 @@ struct Target(Copyable, Writable):
         self.t2_us = List[Float64](length=num_qubits, fill=0.0)
         self.duration_ns = List[Float64](length=Op.NUM_OPS, fill=0.0)
         self.edge_index = Dict[Int, Int]()
+        self.angle_bound = List[Bool](length=Op.NUM_OPS, fill=False)
+        self.angle_lo = List[Float64](length=Op.NUM_OPS, fill=0.0)
+        self.angle_hi = List[Float64](length=Op.NUM_OPS, fill=0.0)
         if self.full:
             return
         if len(edges) % 2 != 0:
@@ -433,6 +439,73 @@ struct Target(Copyable, Writable):
         t.basis = parse_basis(basis)
         return t^
 
+    def set_angle_bounds(mut self, kind: Int, lo: Float64, hi: Float64) raises:
+        """Accept gate `kind` only with its angle in [lo, hi] (see wrap_angles)."""
+        if op_num_params(kind) != 1 or not op_is_unitary(kind):
+            raise Error("QM-E621: angle bounds apply to one-parameter gates, not '" + op_name(kind) + "'. Hint: bound rz, rx, ry, p, rzz, rxx, ryy, cp or crx/cry/crz.")
+        if not (lo <= hi):
+            raise Error("QM-E621: empty angle interval [" + String(lo) + ", " + String(hi) + "] for '" + op_name(kind) + "'. Hint: write gate[min:max].")
+        self.angle_bound[kind] = True
+        self.angle_lo[kind] = lo
+        self.angle_hi[kind] = hi
+
+    def has_angle_bounds(self) -> Bool:
+        for b in self.angle_bound:
+            if b:
+                return True
+        return False
+
+    def set_calibration(mut self, error_1q: List[Float64], edge_errors: List[Float64],
+                        readout: List[Float64], t1_us: List[Float64] = List[Float64](),
+                        t2_us: List[Float64] = List[Float64]()) raises:
+        """Per-qubit and per-edge calibration data; `edge_errors` follows `edges`
+        (undirected pairs in their stored order, see `set_edge_error` for by-name).
+        Empty lists keep what the target has. Passes read it only through
+        `is_calibrated`, so a target stays neutral until it is given real data."""
+        var n = self.num_qubits
+        if len(error_1q) > 0:
+            if len(error_1q) != n:
+                raise Error("QM-E621: error_1q has " + String(len(error_1q)) + " values for " + String(n) + " qubits. Hint: one value per qubit.")
+            self.error_1q = error_1q.copy()
+        if len(edge_errors) > 0:
+            if len(edge_errors) != self.num_edges():
+                raise Error("QM-E621: edge_errors has " + String(len(edge_errors)) + " values for " + String(self.num_edges()) + " edges. Hint: one value per edge, or use set_edge_error(a, b, e).")
+            self.error_2q = edge_errors.copy()
+        if len(readout) > 0:
+            if len(readout) != n:
+                raise Error("QM-E621: readout has " + String(len(readout)) + " values for " + String(n) + " qubits. Hint: one value per qubit.")
+            self.readout_error = readout.copy()
+        if len(t1_us) > 0:
+            if len(t1_us) != n:
+                raise Error("QM-E621: t1_us needs one value per qubit. Hint: pass " + String(n) + " values.")
+            self.t1_us = t1_us.copy()
+        if len(t2_us) > 0:
+            if len(t2_us) != n:
+                raise Error("QM-E621: t2_us needs one value per qubit. Hint: pass " + String(n) + " values.")
+            self.t2_us = t2_us.copy()
+
+    def set_edge_error(mut self, a: Int, b: Int, e: Float64) raises:
+        """Calibrated error of the coupling between qubits a and b."""
+        var key = min(a, b) * self.num_qubits + max(a, b)
+        var i = self.edge_index.get(key, -1)
+        if i < 0:
+            raise Error("QM-E621: no coupling between qubits " + String(a) + " and " + String(b) + ". Hint: calibration edges must be edges of the target.")
+        self.error_2q[i] = e
+
+    def is_calibrated(self) -> Bool:
+        """True when errors differ between qubits or edges: only then does a
+        placement matter, and only then do presets add noise-aware passes."""
+        for i in range(1, len(self.error_1q)):
+            if self.error_1q[i] != self.error_1q[0]:
+                return True
+        for i in range(1, len(self.readout_error)):
+            if self.readout_error[i] != self.readout_error[0]:
+                return True
+        for i in range(1, len(self.error_2q)):
+            if self.error_2q[i] != self.error_2q[0]:
+                return True
+        return False
+
     def supports(self, kind: Int) -> Bool:
         """True when `kind` may appear in compiled output (non-unitary ops always may)."""
         if not op_is_unitary(kind):
@@ -612,7 +685,94 @@ def _parse_dims(s: String, mut a: Int, mut b: Int) raises:
         raise Error("bad dims")
 
 
+def _angle_value(text: String) raises -> Float64:
+    """`0`, `1.57`, `pi`, `-pi/2`, `3*pi/4`."""
+    var s = _lower_trim(text)
+    var sign = 1.0
+    if s.startswith("-"):
+        var rest = String(s[byte=1:])
+        s = rest^
+        sign = -1.0
+    var value = 1.0
+    var slash = s.find("/")
+    if slash >= 0:
+        value = 1.0 / Float64(String(s[byte=slash + 1:]))
+        var head = String(s[byte=0:slash])
+        s = head^
+    var star = s.find("*")
+    if star >= 0:
+        value *= Float64(String(s[byte=0:star]))
+        var tail = String(s[byte=star + 1:])
+        s = tail^
+    if s == "pi":
+        return sign * value * pi
+    return sign * value * Float64(s)
+
+
+def _split_bounds(spec: String, mut clean: String, mut names: List[String],
+                  mut los: List[Float64], mut his: List[Float64]) raises:
+    """Take `gate[lo:hi]` out of a basis list; `clean` keeps `gate`."""
+    clean = String("")
+    var i = 0
+    var bs = spec.as_bytes()
+    while i < len(bs):
+        if Int(bs[i]) != ord("["):
+            clean += String(unsafe_from_utf8=bs[i:i + 1])
+            i += 1
+            continue
+        var close = spec.find("]", i)
+        if close < 0:
+            raise Error("QM-E611: unclosed '[' in target spec '" + spec + "'. Hint: write gate[min:max], e.g. rzz[0:pi/2].")
+        var inner = String(spec[byte=i + 1:close])
+        var colon = inner.find(":")
+        if colon < 0:
+            raise Error("QM-E611: bad angle bounds '[" + inner + "]' in target spec '" + spec + "'. Hint: write gate[min:max], e.g. rzz[0:pi/2].")
+        # the gate name is what `clean` ends with
+        var start = clean.byte_length()
+        var cb = clean.as_bytes()
+        while start > 0 and Int(cb[start - 1]) != ord(",") and Int(cb[start - 1]) != ord("/"):
+            start -= 1
+        names.append(String(String(clean[byte=start:]).strip()))
+        try:
+            los.append(_angle_value(String(inner[byte=0:colon])))
+            his.append(_angle_value(String(inner[byte=colon + 1:])))
+        except:
+            raise Error("QM-E611: bad angle bounds '[" + inner + "]' in target spec '" + spec + "'. Hint: angles look like 0, 1.57, pi/2 or 3*pi/4.")
+        i = close + 1
+
+
+def parse_angle_bound(text: String, mut t: Target) raises:
+    """Apply one `gate[lo:hi]` to a target."""
+    var clean = String("")
+    var names = List[String]()
+    var los = List[Float64]()
+    var his = List[Float64]()
+    _split_bounds(text, clean, names, los, his)
+    for i in range(len(names)):
+        var k = op_from_name(_lower_trim(names[i]))
+        if k < 0:
+            raise Error("QM-E610: unknown gate '" + names[i] + "' in '" + text + "'. Hint: bounds follow a basis gate, e.g. rzz[0:pi/2].")
+        t.set_angle_bounds(k, los[i], his[i])
+
+
 def parse_target(spec: String) raises -> Target:
+    """One-line target spec; see `_parse_target`. A basis gate may carry the range
+    its angle must stay in: "heavy_hex:3/rz,sx,x,cz,rzz[0:pi/2]" (see wrap_angles)."""
+    var clean = String("")
+    var names = List[String]()
+    var los = List[Float64]()
+    var his = List[Float64]()
+    _split_bounds(spec, clean, names, los, his)
+    var t = _parse_target(clean)
+    for i in range(len(names)):
+        var k = op_from_name(_lower_trim(names[i]))
+        if k < 0:
+            raise Error("QM-E610: unknown gate '" + names[i] + "' in '" + spec + "'. Hint: bounds follow a basis gate, e.g. rzz[0:pi/2].")
+        t.set_angle_bounds(k, los[i], his[i])
+    return t^
+
+
+def _parse_target(spec: String) raises -> Target:
     """One-line target spec: "<topology>:<size>[/<basis>]".
 
     Topologies: all_to_all:N, line:N, ring:N, grid:RxC, torus:RxC, tree:N,

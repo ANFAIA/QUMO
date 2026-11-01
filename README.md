@@ -22,7 +22,7 @@ named by modality (superconducting heavy-hex / grid / iSWAP, trapped ion,
 neutral atom, abstract) and the benchmark harness weighs them equally — see
 [docs/BENCHPRESS_BIAS_REPORT.md](docs/BENCHPRESS_BIAS_REPORT.md).
 
-## Results so far (2026-10-13; Apple M5 unless noted)
+## Results so far (Apple M5 unless noted)
 
 | Area | Result |
 |---|---|
@@ -32,15 +32,17 @@ neutral atom, abstract) and the benchmark harness weighs them equally — see
 | State-vector simulation, GPU (fp32) | Apple M5 (Metal): 26-qubit layered circuit 0.42 s, 7.8× QUMO's own CPU simulator; 26-qubit QFT 0.14 s. NVIDIA/AMD: the current engine is cross-compiled and emulation-tested but not yet measured; on a Colab T4 the previous engine (one kernel per gate) ran 1.49 s against CUDA-Q's 0.17 s — [details](docs/GPU.md), [T4 vs M5](bench/results/cloud/t4_vs_m5/t4_vs_m5.md) |
 | QEC (surface-code memory) | Detector error model identical to Stim's; sparse-blossom MWPM exact on every tested syndrome and statistically equal to PyMatching, at or above PyMatching's single-thread speed (1.3–2× by cycle counts, d = 7–11); Pauli-frame sampling 3–4× Stim single-threaded — [details](docs/QEC.md) |
 | Variational | VQE on H₂ reaches the exact energy (error 1e-14); adjoint gradients 42× faster than parameter shift on 16 qubits / 96 params — [details](docs/ALGORITHMS.md) |
+| QEC decoding, 2026-11-01 | Correlated matching (opt-in) statistically equal to PyMatching at d = 3, 5, 7; 1.7× fewer logical errors than plain matching at d = 7, p = 0.005, and worse at d = 3 — [details](docs/QEC.md) |
+| Multi-controlled X, 2026-11-01 | CX count equal to or below Qiskit `noaux_v24` from 3 to 20 controls without ancillas; Qiskit `hp24` is ahead from 7 controls — [details](docs/ALGORITHMS.md) |
 
-Caveat: QUMO's compiler was tuned during the project on part of these benchmarks and the neutral harness was written by this project; see the disclosure sections of both reports.
+Caveats: QUMO's compiler was tuned during the project on part of these benchmarks and the neutral harness was written by this project; see the disclosure sections of both reports. Rows without a date were measured around 2026-10-13 with Mojo 1.1 and Qiskit 2.5.2, not rerun on Mojo 1.2 or against Qiskit 2.6; a Mojo 1.1 vs 1.2 run of the simulators and the compiler showed no regression beyond noise (worst case +4.3%).
 
 ## Requirements
 
 | | Minimum |
 |---|---|
 | OS / CPU | macOS 15+ on Apple silicon, or Linux x86-64 / aarch64 |
-| Toolchain | Mojo 1.1 + MAX 26.6 Mojo libs/runtime (installed into `.venv` by `make setup`, needs [uv](https://docs.astral.sh/uv/)) |
+| Toolchain | Mojo 1.2 + MAX 26.7 Mojo libs/runtime (installed into `.venv` by `make setup`, needs [uv](https://docs.astral.sh/uv/)) |
 | Python (optional) | 3.12 for the `qumo_py` extension and the benchmark harnesses (`bench/.venv`) |
 | GPU (optional) | NVIDIA (CUDA driver) or AMD (ROCm) on Linux; Apple silicon needs **Xcode + Metal Toolchain** — see [GPU support](#gpu-support) |
 
@@ -49,7 +51,7 @@ Caveat: QUMO's compiler was tuned during the project on part of these benchmarks
 ```bash
 git clone https://github.com/ANFAIA/QUMO.git
 cd QUMO          # every make target runs from the repository root
-make setup        # .venv with Mojo 1.1 + MAX runtime (uv pip install mojo max-mojo-libs max-core)
+make setup        # .venv with Mojo 1.2.0 + MAX 26.7.0 runtime (pinned in the Makefile)
 make setup-py     # optional: bench/.venv with the latest Qiskit, Aer, TKET, Cirq, Stim (examples, benchmarks, test-py)
 make test         # every Mojo test suite (tests/test_*.mojo); prints PASS/FAIL per suite
 make cli          # build/qumo     — CLI + MCP server
@@ -65,6 +67,7 @@ Run a single suite: `.venv/bin/mojo run -I . tests/test_sim.mojo`. Mojo dialect 
 ```bash
 build/qumo run examples/bell.qasm --shots 1000 --seed 7
 build/qumo validate examples/teleport.qasm --json
+build/qumo draw examples/teleport.qasm --unicode      # text drawing of a circuit
 build/qumo describe gates
 build/qumo tool list                                   # every agent tool
 build/qumo tool qumo_transpile '{"qasm":"OPENQASM 2.0; include \"qelib1.inc\"; qreg q[3]; h q[0]; cx q[0],q[2];","target":"trapped_ion:3"}'
@@ -146,6 +149,7 @@ xcrun metal --version                                         # must print a ver
 
 - **AI transpiler** ([docs/AI_TRANSPILER.md](docs/AI_TRANSPILER.md)): a native, hardware-neutral version of the techniques of [qiskit-ibm-transpiler](https://github.com/Qiskit/qiskit-ibm-transpiler) — block collection (Clifford, linear function, permutation, Pauli network), topology-aware resynthesis with exact search and learned policies, replacement only if better (always verified exactly), learned routing and a hybrid heuristic + AI pass manager (`transpile_ai`, `qumo_transpile` with `"ai": true`). Models are trained here with qiskit-gym on QUMO's own topologies (`training/`, `models/`); no IBM weights or services are used. Compile-time overhead: about 3x the default level. Against IBM's own qiskit-ibm-transpiler 0.18.0 (local mode, IBM-trained models, Torino/Fez heavy-hex, every output verified), QUMO-AI used about 12–29% fewer two-qubit gates at level 3 on every group that ran and compiled 1.7–12x faster; IBM's trained linear-function synthesis still wins at level 2 on SWAP-free linear-function circuits, and circuits of 100+ qubits are not yet covered ([bench/ai_vs_ibm](bench/ai_vs_ibm/README.md)).
 - **Fault tolerance** ([docs/FT.md](docs/FT.md)): `qumo.ft` brings the key ideas of Quantinuum's [Guppy FT](https://github.com/Quantinuum/guppyft) — write QEC-agnostic circuits and `encode` them with a Steane or Iceberg architecture (QEC-cycle policies, state factories, Pauli-frame feed-forward, magic-state T, comparator-based Rz), verify gadgets with the stabilizer tableau, emulate with noise (examples in `examples/ft`; MCP tools `qumo_ft_codes`, `qumo_ft_encode`, `qumo_ft_verify`).
+- **Framework parity** ([docs/FRAMEWORK_UPDATES.md](docs/FRAMEWORK_UPDATES.md)): tracks new features across Qiskit, TKET, Quantinuum, CUDA-Q, PennyLane, Cirq, Stim, Q#, Braket and Qibo, with status and source. Recent additions: multi-controlled gates, `box` and `switch`, calibration-aware layout, angle bounds, Pauli-based computation, density-matrix and Kraus noise, deduplicated trajectories, stabilizer branching, T-REX and M3 mitigation, correlated matching, Stim import, sliding-window decoding, Trim SQD, IQP and multi-product formulas.
 
 ## Examples
 
@@ -166,7 +170,7 @@ Run the whole benchmark on a Google Colab GPU (T4, L4, A100, H100, G4) or any RO
 qumo/
   ir/          circuit IR, gates (opcodes + metadata + matrices), Param, Pauli, OpenQASM 2/3
   compiler/    Target (data), text pass pipelines, routing (VF2 + SABRE), KAK, pauli_simp, phase folding
-  sim/         state vector (SIMD, threads, cache blocking + qubit reordering), stabilizer tableau, Pauli frames, RNG
+  sim/         state vector (SIMD, threads, cache blocking + qubit reordering), stabilizer tableau + branching, Pauli frames, density matrix, RNG
   gpu/         MAX GPU kernels, GPU state vector, host emulator for kernel tests (opt-in: -D QUMO_GPU)
   exec/        PUB primitives, HEFT orchestrator, resource estimation, auto dispatch, agent tools
   algorithms/  kernels (QFT, Grover, QPE, ansätze, Trotter, UCCSD), gradients, optimizers, VQE/QAOA
@@ -199,7 +203,8 @@ The benchmark venv needs `qiskit qiskit-aer qiskit-ibm-runtime pytket pytket-qis
 - [docs/ANALYSIS.md](docs/ANALYSIS.md) — deep analysis of the 8 frameworks and the synthesis
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — architecture and design decisions
 - Modules: [COMPILER](docs/COMPILER.md) · [SIMULATION](docs/SIMULATION.md) · [GPU](docs/GPU.md) · [QEC](docs/QEC.md) · [ALGORITHMS](docs/ALGORITHMS.md) · [QML](docs/QML.md) · [AI_TRANSPILER](docs/AI_TRANSPILER.md) · [FT](docs/FT.md) · [AI_NATIVE](docs/AI_NATIVE.md) · [HARDWARE_PLUGINS](docs/HARDWARE_PLUGINS.md) · [ERRORS](docs/ERRORS.md)
-- [docs/MOJO_GUIDE.md](docs/MOJO_GUIDE.md) — the exact Mojo 1.1 dialect QUMO uses
+- [docs/FRAMEWORK_UPDATES.md](docs/FRAMEWORK_UPDATES.md) — reviewed framework updates: done, deferred, skipped
+- [docs/MOJO_GUIDE.md](docs/MOJO_GUIDE.md) — the exact Mojo 1.2 dialect QUMO uses
 - Benchmarking: [bias audit of Benchpress](docs/BENCHPRESS_BIAS_REPORT.md) · [QUMO on Benchpress](docs/BENCHPRESS_RESULTS.md) · [neutral benchmark](docs/NEUTRAL_BENCHMARK_REPORT.md) · [cloud GPUs](docs/BENCHMARKING_ON_CLOUD_GPUS.md)
 - [llms.txt](llms.txt) — compact index for LLM agents
 

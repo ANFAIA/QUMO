@@ -555,6 +555,20 @@ def to_stim(circuit: Circuit, qubit_coords: List[Float64] = List[Float64](),
             else:
                 w.emit(nm, tg)
             continue
+        if k == Op.PAULI_CHANNEL_2:
+            var off = Int(g.p0.value())
+            var head = String("PAULI_CHANNEL_2(")
+            for i in range(15):
+                head += ("" if i == 0 else ", ") + _fmt(circuit.noise_table[off + i])
+            w.line(head + ") " + String(g.q0) + " " + String(g.q1))
+            continue
+        if k == Op.CORRELATED_ERROR:
+            var line = String("ELSE_CORRELATED_ERROR(" if g.q2 != 0 else "E(") + _fmt(g.p0.value()) + ")"
+            for i in range(g.q1):
+                var l = circuit.pauli_table[g.q0 + 2 * i + 1]
+                line += " " + ("X" if l == 1 else ("Y" if l == 2 else "Z")) + String(circuit.pauli_table[g.q0 + 2 * i])
+            w.line(line)
+            continue
         var name = _stim_name(k)
         if name == "":
             raise Error("QM-E701: '" + op_name(k) + "' has no Stim equivalent (non-Clifford). Hint: to_stim() exports Clifford+Pauli-noise circuits only.")

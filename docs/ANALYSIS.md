@@ -2,7 +2,7 @@
 
 > Goal: extract the best of **Qiskit, TKET, CUDA-Q, PennyLane, Cirq, Q#/QDK, Amazon Braket SDK and Qibo**, decide how to combine it, and rebuild it in **Mojo** as one stack that is efficient (speed and resource use) and **AI-native**.
 >
-> Versions reviewed (2026-10-12): Qiskit 2.5.2 / 2.6.0rc1, qiskit-ibm-runtime 0.50, Aer 0.17.2 · pytket 2.18.5, Guppy 1.1.3, HUGR 0.30, tket (Rust) 0.22 · CUDA-Q 0.16.0, CUDA-Q QEC 0.8.0, cuQuantum 26.06 · PennyLane 0.45.1 (0.46 beta), Catalyst 0.15 · Cirq 1.7.0, qsim 0.22 · QDK 1.33.0 (`microsoft/qdk`) · Braket SDK 1.127.3 · Qibo 0.3.5, Qibolab 0.2.17, Qibocal 0.2.6 · Stim/Sinter 1.16, PyMatching 2.4.
+> Versions reviewed (2026-11-01): Qiskit 2.6.1, qiskit-ibm-runtime 0.51, Aer 0.18.2 · pytket 2.18.5, guppylang 1.2.0, guppyft 0.5.1, hugr (Rust) 0.30 / hugr-py 0.18.8, tket (Rust) 0.22 / tket-py 0.15.13 · CUDA-Q 0.16.0, CUDA-Q QEC 0.8.1 (repo renamed `NVIDIA/cudaq-qec`), cuQuantum SDK 26.9 (CUDA-Q 0.16 ships 26.06), `cudaq-logical` 0.1, cuPauliProp, cuStabilizer · PennyLane 0.45.1 (0.46 beta), Catalyst 0.15 · Cirq 1.7.0, qsim 0.22 · QDK 1.33.1 (`microsoft/qdk`, package `qdk`; `qsharp` is retired) · Braket SDK 1.127.7 · Qibo 0.3.6, Qibolab 0.2.17, Qibocal 0.2.6 · Stim/Sinter 1.16, PyMatching 2.4. What QUMO took from them: [FRAMEWORK_UPDATES.md](FRAMEWORK_UPDATES.md).
 >
 > Performance figures quoted are vendor-reported unless stated otherwise (e.g. Benchpress is authored by IBM — see [BENCHPRESS_BIAS_REPORT.md](BENCHPRESS_BIAS_REPORT.md)).
 
@@ -134,11 +134,11 @@
 
 **IR**: Rust pipeline `parse → HIR → FIR → RCA → partial eval → RIR → QIR`; also compiles to WASM (playground, VS Code, linter, debugger).
 
-**Compiler**: **RCA (Runtime Capabilities Analysis)** + **partial evaluation** against a declared **target profile** (`Base`, `Adaptive_RI`, `Adaptive_RIF`, `Adaptive_RIFLA`, `Adaptive`, `Unrestricted`): the user (or the LLM) gets "this construct needs Adaptive_RIF" *at compile time*, not a hardware rejection after hours in a queue.
+**Compiler**: **RCA (Runtime Capabilities Analysis)** + **partial evaluation** against a declared **target profile** (`Base`, `Adaptive_RI`, `Adaptive_RIF`, `Adaptive` (the former `Adaptive_RIFLA`), `Unrestricted`): the user (or the LLM) gets "this construct needs Adaptive_RIF" *at compile time*, not a hardware rejection after hours in a queue.
 
 **Language**: `operation` vs `function`; **automatically generated functors** (`is Adj + Ctl` → `Adjoint Op`, `Controlled Op`); conjugation `within { U } apply { V }`; scoped qubits (`use q = Qubit()`), which must be released in |0⟩.
 
-**Execution / simulation**: `qdk` package (replaces `qsharp`); sparse simulator, stabilizer (thousands of qubits, branching for T), full-state (~25 qubits) and **GPU via wgpu/WebGPU** (cross-vendor: Metal, Vulkan, DX12).
+**Execution / simulation**: `qdk` package (replaces `qsharp`); sparse simulator, stabilizer (thousands of qubits, branching for T), density matrix through `run_qir`, CPU state vector (the noiseless full-state simulator was removed in 1.32) and **GPU via wgpu/WebGPU** (cross-vendor: Metal, Vulkan, DX12).
 
 **QEC / resources**: **resource estimator** (QRE v3: `Application`, `Architecture`, `ISA`; T factories, Pareto frontiers), no Azure account needed.
 
@@ -156,7 +156,7 @@
 
 **Execution**: durable asynchronous tasks (`AwsQuantumTask`, results in S3); **ProgramSets** (`product()`/`zip()` of circuits × parameters × observables in one task → amortises the $0.30/task fee and queue latency); Hybrid Jobs with queue priority; cost `Tracker`.
 
-**Simulation**: managed SV1 (34 qubits), DM1, TN1; modest local Python simulator.
+**Simulation**: managed SV1 (34 qubits), DM1 (TN1 retired in SDK 1.121); modest local Python simulator.
 
 **Weaknesses**: per-task fee + queue latency punish fine-grained loops; slow Hybrid Jobs container start-up; experimental dynamic circuits.
 
@@ -168,7 +168,7 @@
 
 **IR**: `Circuit` with a flat gate queue and lazy moments; **noise channels are gates** (`DepolarizingChannel`, `ThermalRelaxationChannel`, `ReadoutErrorChannel`, Kraus); measurement with collapse mid-circuit.
 
-**Compiler**: simple transpiler (Trivial/ReverseTraversal placers, ShortestPaths/Sabre routers, `Unroller(NativeGates)`), gate fusion for simulation.
+**Compiler**: transpiler with Trivial/ReverseTraversal placers, ShortestPaths/Sabre routers and `Unroller(NativeGates)`; 0.3.6 added an optimizer set (`InverseCancellation`, `ConsolidateBlocks`, measurement-aware cleanups) and Clifford+T through `pygridsynth`; gate fusion for simulation.
 
 **Execution**: swappable backends (`set_backend`: numpy, qibojit numba/cupy/cuQuantum, qibotn, qiboml, qibolab) — one change moves from GPU simulation to **your own hardware**. **Qibolab** models the platform (IQ/DC/acquisition channels, Qblox/QM/Keysight/RFSoC instruments) with pulse sequences and hardware-loop *sweepers*.
 
@@ -251,7 +251,7 @@ Scale: ★ basic · ★★ solid · ★★★ industry reference.
 | Simulator choice by circuit structure | Qibo/QDK (Clifford → stabilizer) | auto-dispatch: Clifford → tableau/frame, else statevector |
 | Static sampling vs. trajectories | CUDA-Q `sample` vs `run`, PennyLane mcm_method | `qumo.sim.runner.sample` decides and reports `method` |
 | OpenQASM 3 as wire format | Braket, IBM | `qumo.ir.qasm` (parser + emitter) |
-| Emulator from device calibration | Braket emulator, Cirq virtual engine | noise model from `Target`/calibration |
+| Emulator from device calibration | Braket emulator, Cirq virtual engine | `NoiseModel.from_target` + `emulate` (`qumo.exec.emulate`) |
 | Resource estimation before running | Q# QRE, PennyLane `specs`, Braket `Tracker` | `qumo.exec.resources` (logical, NISQ hardware, fault-tolerant) |
 
 ### 11.4 Error correction (experimentalist)

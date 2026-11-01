@@ -9,7 +9,7 @@ Both report a clbit written by several MEASUREs as the LAST one in program
 order (Qiskit/Aer semantics; static path: `terminal_measure_map`).
 """
 
-from std.math import cos, sin, atan2
+from std.math import cos, sin, atan2, sqrt
 from std.collections import Dict
 from std.bit import pop_count
 
@@ -18,6 +18,7 @@ from qumo.ir.gates import (
     op_is_controlled_1q, op_base_1q,
 )
 from qumo.ir.circuit import Circuit, Instruction
+from qumo.ir.kraus import KrausChannel
 from qumo.ir.pauli import PauliSum
 from qumo.sim.statevector import (
     StateVector, FPtr, LOGW, k1_range, kdiag_range, kx_range, kc1_range, kcx_range,
@@ -928,6 +929,54 @@ def _apply_pauli(mut sv: StateVector, which: Int, q: Int):
         sv.apply_diag_1q(1.0, 0.0, -1.0, 0.0, q)
 
 
+def _apply_kraus(mut sv: StateVector, ch: KrausChannel, q0: Int, q1: Int, mut rng: Rng):
+    """One unbiased quantum-trajectory step: pick K_k with probability ||K_k psi||^2."""
+    var u = rng.uniform()
+    var last = sv.copy()
+    for k in range(ch.count()):
+        var trial = sv.copy()
+        if ch.num_qubits == 1:
+            trial.apply_1q(M2(SIMD[DType.float64, 4](ch.re[k][0], ch.re[k][1], ch.re[k][2], ch.re[k][3]),
+                              SIMD[DType.float64, 4](ch.im[k][0], ch.im[k][1], ch.im[k][2], ch.im[k][3])), q0)
+        else:
+            var m = M4()
+            for r in range(4):
+                for c in range(4):
+                    m.re[4 * r + c] = ch.re[k][4 * r + c]
+                    m.im[4 * r + c] = ch.im[k][4 * r + c]
+            trial.apply_2q(m, q0, q1)
+        var w = trial.norm_sq()
+        if w > 0.0:
+            last = trial.copy()
+        if u < w or k == ch.count() - 1:
+            var norm = 1.0 / sqrt(last.norm_sq())
+            last.apply_scale(norm, 0.0)
+            sv = last^
+            return
+        u -= w
+
+
+def _apply_table_noise(mut sv: StateVector, c: Circuit, g: Instruction, mut rng: Rng, mut fired: Bool):
+    """PAULI_CHANNEL_2 and E; `fired` tracks the E / ELSE chain."""
+    if g.kind == Op.PAULI_CHANNEL_2:
+        var off = Int(g.p0.value())
+        var u = rng.uniform()
+        for i in range(15):
+            var p = c.noise_table[off + i]
+            if u < p:
+                _apply_pauli(sv, (i + 1) >> 2, g.q0)
+                _apply_pauli(sv, (i + 1) & 3, g.q1)
+                return
+            u -= p
+        return
+    if g.q2 == 0:
+        fired = False
+    if not fired and rng.uniform() < g.p0.value():
+        fired = True
+        for i in range(g.q1):
+            _apply_pauli(sv, c.pauli_table[g.q0 + 2 * i + 1], c.pauli_table[g.q0 + 2 * i])
+
+
 def _apply_noise(mut sv: StateVector, g: Instruction, mut rng: Rng, params: List[Float64]):
     var k = g.kind
     var p = g.p0.resolve(params)
@@ -1040,6 +1089,7 @@ def sample(circuit: Circuit, shots: Int, seed: UInt64 = 1234,
         var srng = rng.split(shot)
         sv.reset_to_zero()
         var creg = 0
+        var chain_fired = False
         var fz = Fuser(circuit.num_qubits)
         for g in circuit.ops:
             var k = g.kind
@@ -1066,9 +1116,18 @@ def sample(circuit: Circuit, shots: Int, seed: UInt64 = 1234,
                 fz.flush(sv, g.q0)
                 sv.reset_qubit(g.q0, srng)
             elif op_is_noise(k):
+                if k == Op.CORRELATED_ERROR:
+                    fz.flush_all(sv)
+                    _apply_table_noise(sv, circuit, g, srng, chain_fired)
+                    continue
                 fz.flush(sv, g.q0)
                 if op_arity(k) == 2:
                     fz.flush(sv, g.q1)
-                _apply_noise(sv, g, srng, params)
+                if k == Op.PAULI_CHANNEL_2:
+                    _apply_table_noise(sv, circuit, g, srng, chain_fired)
+                elif k == Op.KRAUS1 or k == Op.KRAUS2:
+                    _apply_kraus(sv, circuit.kraus[Int(g.p0.value())], g.q0, g.q1, srng)
+                else:
+                    _apply_noise(sv, g, srng, params)
         res.record(creg)
     return res^

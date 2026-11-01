@@ -65,6 +65,8 @@ struct FK:
     comptime DET = 14  # a = record offset, b = count, c = detector id
     comptime OBS = 15  # a = record offset, b = count, c = observable index
     comptime FEED = 16  # a = record, b = qubit, c = pauli (1=X, 2=Y, 3=Z)
+    comptime PC2 = 17  # a, b = qubits, c = offset in FrameProgram.table (15 thresholds)
+    comptime CORR = 18  # a = offset in FrameProgram.product, b = letters, c = 1 for ELSE
 
 
 @fieldwise_init
@@ -163,6 +165,8 @@ struct FrameProgram(Copyable):
     """A circuit lowered to frame primitives + its noiseless reference sample."""
 
     var ops: List[FrameOp]
+    var table: List[Float64]  # FK.PC2: 15 cumulative probabilities per channel
+    var product: List[Int]  # FK.CORR: qubit, letter pairs
     var records: List[Int]  # detector / observable record lists
     var num_qubits: Int
     var num_measurements: Int
@@ -174,6 +178,8 @@ struct FrameProgram(Copyable):
     def __init__(out self, circuit: Circuit, with_reference: Bool = True) raises:
         circuit.validate()
         self.ops = List[FrameOp]()
+        self.table = List[Float64]()
+        self.product = List[Int]()
         self.records = circuit.records.copy()
         self.num_qubits = circuit.num_qubits
         self.num_measurements = circuit.num_measurements
@@ -223,6 +229,26 @@ struct FrameProgram(Copyable):
                     var pz = g.p2.value()
                     var tot = px + py + pz
                     if tot > 0: self.ops.append(FrameOp.noise(FK.PC1, g.q0, -1, tot, px, py))
+                elif k == Op.PAULI_CHANNEL_2:
+                    var off = Int(g.p0.value())
+                    var tot = 0.0
+                    var at = len(self.table)
+                    for i in range(15):
+                        tot += circuit.noise_table[off + i]
+                        self.table.append(tot)
+                    if tot > 0:
+                        var fo = FrameOp.noise(FK.PC2, g.q0, g.q1, tot)
+                        fo.c = at
+                        self.ops.append(fo)
+                elif k == Op.CORRELATED_ERROR:
+                    var at = len(self.product)
+                    for i in range(2 * g.q1):
+                        self.product.append(circuit.pauli_table[g.q0 + i])
+                    var fo = FrameOp.noise(FK.CORR, at, g.q1, g.p0.value())
+                    fo.c = g.q2
+                    self.ops.append(fo)
+                else:
+                    raise Error("QM-E414: the Pauli-frame simulator takes Pauli noise only, found '" + op_name(k) + "'. Hint: use density_evolve() or sample().")
             elif k == Op.DETECTOR:
                 self.ops.append(FrameOp(FK.DET, g.q0, g.q1, g.q2, 0.0, 0.0, 0.0, 0.0))
             elif k == Op.OBSERVABLE:
@@ -282,6 +308,7 @@ struct FrameBuffers(Movable):
         var dp = self.dets.unsafe_ptr().as_unsafe_any_origin()
         var op_ = self.obs.unsafe_ptr().as_unsafe_any_origin()
         var rec_list = prog.records.unsafe_ptr()
+        var chain = List[UInt64](length=FW, fill=0)
         for q in range(prog.num_qubits):
             xp.unsafe_store(q * FW, Words(0))
             zp.unsafe_store(q * FW, _rand_words(rng))
@@ -334,6 +361,40 @@ struct FrameBuffers(Movable):
                 while pos < BATCH:
                     if k != FK.ZE: _flip(xp, a, pos)
                     if k != FK.XE: _flip(zp, a, pos)
+                    pos += 1 + _skip(rng, fo.lp)
+            elif k == FK.PC2:
+                var a = fo.a * FW
+                var b = fo.b * FW
+                var pos = _skip(rng, fo.lp)
+                while pos < BATCH:
+                    var u = rng.uniform() * fo.p
+                    var i = 0
+                    while i < 14 and u >= prog.table[fo.c + i]:
+                        i += 1
+                    # i + 1 = (first letter) * 4 + second letter, letters I, X, Y, Z
+                    var pa = (i + 1) >> 2
+                    var pb = (i + 1) & 3
+                    if pa == 1 or pa == 2: _flip(xp, a, pos)
+                    if pa >= 2: _flip(zp, a, pos)
+                    if pb == 1 or pb == 2: _flip(xp, b, pos)
+                    if pb >= 2: _flip(zp, b, pos)
+                    pos += 1 + _skip(rng, fo.lp)
+            elif k == FK.CORR:
+                # chain[] marks the shots where this E / ELSE chain already fired
+                if fo.c == 0:
+                    for w in range(FW):
+                        chain[w] = 0
+                var pos = _skip(rng, fo.lp)
+                while pos < BATCH:
+                    var w = pos >> 6
+                    var bit = UInt64(1) << UInt64(pos & 63)
+                    if (chain[w] & bit) == 0:
+                        chain[w] = chain[w] | bit
+                        for i in range(fo.b):
+                            var q = prog.product[fo.a + 2 * i] * FW
+                            var l = prog.product[fo.a + 2 * i + 1]
+                            if l == 1 or l == 2: _flip(xp, q, pos)
+                            if l >= 2: _flip(zp, q, pos)
                     pos += 1 + _skip(rng, fo.lp)
             elif k == FK.PC1:
                 var a = fo.a * FW

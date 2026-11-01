@@ -45,7 +45,7 @@ Per-device tuning of the tile engine (`GpuProfile`): see the struct below.
 """
 
 from std.sys.defines import is_defined, get_defined_int
-from std.sys import has_apple_gpu_accelerator, has_nvidia_gpu_accelerator, has_amd_gpu_accelerator
+from qumo.gpu.vendor import gpu_target_is_apple, gpu_target_is_nvidia, gpu_target_is_amd
 from std.os import getenv
 from max.gpu.host import DeviceContext, DeviceAttribute
 
@@ -57,9 +57,9 @@ from qumo.gpu.kernels import (
 from qumo.ai.json import JsonWriter
 
 comptime GPU_COMPILED = is_defined["QUMO_GPU"]()
-comptime GPU_IS_APPLE = has_apple_gpu_accelerator()
+comptime GPU_IS_APPLE = gpu_target_is_apple()
 # The target GPU has float64 (Metal has no double precision).
-comptime GPU_FP64_SUPPORTED = not has_apple_gpu_accelerator()
+comptime GPU_FP64_SUPPORTED = not gpu_target_is_apple()
 # -D QUMO_GPU_FP64: fp64 as the build default where the target has it (ignored
 # on Apple). -D QUMO_GPU_FP32 is the old opt-in for fp32, now the default:
 # accepted, no effect.
@@ -83,7 +83,7 @@ comptime GPU_PRECISION_ENV = "QUMO_GPU_PRECISION"
 #   * NVIDIA / AMD: not measured here (no device); 20 keeps the previous
 #     conservative heuristic (discrete memory, larger launch latency).
 # Override at build time with -D QUMO_GPU_MIN_QUBITS=<n>.
-comptime GPU_MIN_QUBITS = get_defined_int["QUMO_GPU_MIN_QUBITS", 16 if has_apple_gpu_accelerator() else 20]()
+comptime GPU_MIN_QUBITS = get_defined_int["QUMO_GPU_MIN_QUBITS", 16 if gpu_target_is_apple() else 20]()
 
 
 # Tile-engine geometry bounds (see qumo.gpu.kernels / tiles): a tile keeps the
@@ -501,11 +501,11 @@ def precision_name[dt: DType]() -> String:
 
 def gpu_vendor() -> String:
     """Vendor of the compile-time target accelerator ('none' without one)."""
-    comptime if has_apple_gpu_accelerator():
+    comptime if gpu_target_is_apple():
         return "apple"
-    elif has_nvidia_gpu_accelerator():
+    elif gpu_target_is_nvidia():
         return "nvidia"
-    elif has_amd_gpu_accelerator():
+    elif gpu_target_is_amd():
         return "amd"
     else:
         return "none"

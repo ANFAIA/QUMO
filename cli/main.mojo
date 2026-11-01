@@ -76,7 +76,7 @@ struct CliArgs(Copyable):
 
 
 def _is_flag(name: String) -> Bool:
-    return name == "json" or name == "pretty" or name == "help" or name == "quiet"
+    return name == "json" or name == "pretty" or name == "help" or name == "quiet" or name == "unicode"
 
 
 def parse_cli(args: List[String]) -> CliArgs:
@@ -375,6 +375,20 @@ def cmd_info(a: CliArgs) raises -> Int:
     return finish(a, r, human)
 
 
+def cmd_draw(a: CliArgs) raises -> Int:
+    var w = JsonWriter()
+    w.begin_object()
+    w.kv_string("qasm", read_source(a.pos(0, "file.qasm")))
+    w.kv_int("width", a.get_int("width", 80))
+    w.kv_string("style", "unicode" if a.has("unicode") else "ascii")
+    w.end_object()
+    var r = call_tool("qumo_draw", w^)
+    var human = String()
+    if not r.is_error:
+        human = parse_json(r.structured).get("drawing").as_string()
+    return finish(a, r, human)
+
+
 def cmd_describe(a: CliArgs) raises -> Int:
     var topic = a.positional[0] if len(a.positional) > 0 else String("capabilities")
     var w = JsonWriter()
@@ -484,11 +498,11 @@ def cmd_version(a: CliArgs) raises -> Int:
         w.kv_string("name", "qumo")
         w.kv_string("version", QUMO_VERSION)
         w.kv_string("mcp_protocol", MCP_PROTOCOL_VERSION)
-        w.kv_string("language", "Mojo 1.1")
+        w.kv_string("language", "Mojo 1.2")
         w.end_object()
         print(w.finish())
     else:
-        print("qumo", QUMO_VERSION, "(Mojo 1.1, MCP " + String(MCP_PROTOCOL_VERSION) + ")")
+        print("qumo", QUMO_VERSION, "(Mojo 1.2, MCP " + String(MCP_PROTOCOL_VERSION) + ")")
     return 0
 
 
@@ -522,6 +536,7 @@ def command_table() -> List[Command]:
     t.append(Command("expect", "Exact Pauli expectation value(s)", "qumo expect <file.qasm|-> \"0.5*Z0 Z1 - X0\" [more observables...] [--params ...] [--json]", cmd_expect))
     t.append(Command("validate", "Parse + lint OpenQASM with structured diagnostics", "qumo validate <file.qasm|-> [--json]", cmd_validate))
     t.append(Command("info", "Circuit summary: depth, gate counts, T-count, flags, lint", "qumo info <file.qasm|-> [--qasm] [--instructions] [--json]", cmd_info))
+    t.append(Command("draw", "Text drawing of a circuit", "qumo draw <file.qasm|-> [--width N] [--unicode] [--json]", cmd_draw))
     t.append(Command("describe", "Self-description: gates | gate <name> | errors | error <code> | capabilities | passes | models", "qumo describe [gates|gate <name>|errors|error <code>|capabilities|passes|models [model_dir]] [--json]", cmd_describe))
     t.append(Command("convert", "Re-emit canonical OpenQASM 3 (or circuit JSON)", "qumo convert <file.qasm|-> [--to qasm3|json] [-o out]", cmd_convert))
     t.append(Command("tool", "Call any registered MCP tool with JSON arguments", "qumo tool list | qumo tool <name> '<json-args>'|- [--pretty]", cmd_tool))

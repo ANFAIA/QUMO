@@ -315,6 +315,8 @@ struct GpuFrameSampler(Movable):
 
         max_words > 0 caps the words per launch (testing); 0 = memory budget.
         """
+        if circuit.has_table_noise():
+            raise Error("QM-E475: the GPU frame sampler has no kernel for PAULI_CHANNEL_2 or E. Hint: use the CPU frame sampler (qumo.sim.frame), which takes both.")
         self.prog = FrameProgram(circuit)
         self.emulated = emulate
         self.opi = List[Int32]()

@@ -78,7 +78,7 @@ def _gpu_ready(c: Circuit) -> Bool:
 
 def choose_method_cpu(c: Circuit, shots: Int = 1) -> String:
     """choose_method restricted to CPU simulators."""
-    if c.num_params() == 0 and c.is_clifford():
+    if c.num_params() == 0 and c.is_clifford() and not c.has_non_pauli_noise():
         if c.has_noise() and shots >= FRAME_MIN_SHOTS and not _has_conditions(c) and c.num_clbits <= 62:
             return "frame"
         if c.num_qubits >= STABILIZER_MIN_QUBITS or c.has_noise() or c.is_dynamic():
@@ -103,7 +103,7 @@ def sample_frame(c: Circuit, shots: Int, seed: UInt64) raises -> SampleResult:
 def frame_eligible_gpu(c: Circuit) -> Bool:
     """Clifford, measured, no parameters and no classical conditions: the GPU
     Pauli-frame sampler handles it (noise optional)."""
-    return c.num_params() == 0 and c.num_measurements > 0 and c.num_clbits <= 62 and c.is_clifford() and not _has_conditions(c)
+    return c.num_params() == 0 and c.num_measurements > 0 and c.num_clbits <= 62 and c.is_clifford() and not _has_conditions(c) and not c.has_table_noise() and not c.has_non_pauli_noise()
 
 
 def gpu_sample_route(c: Circuit, params: List[Float64]) -> Tuple[String, String]:

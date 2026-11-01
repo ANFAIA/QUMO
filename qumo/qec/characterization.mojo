@@ -36,6 +36,7 @@ from qumo.ir.gates import Op, op_arity, op_is_unitary, op_is_noise, op_is_annota
 from qumo.ir.circuit import Circuit, Instruction
 from qumo.sim.rng import Rng
 from qumo.sim.frame import FrameSimulator
+from qumo.compiler.target import Target
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +88,8 @@ struct NoiseModel(Copyable, Writable):
     var time_measure: Float64
     var time_reset: Float64
     var idle_noise: Bool
+    var edge_error_2q: Dict[Int, Float64]  # min(a, b) * num_qubits + max(a, b); others use gate_error_2q
+    var op_time: List[Float64]  # per opcode when set: replaces time_1q / time_2q, 0 = virtual gate, no noise
 
     def __init__(out self, num_qubits: Int):
         self.num_qubits = num_qubits
@@ -101,6 +104,58 @@ struct NoiseModel(Copyable, Writable):
         self.time_measure = 0.0
         self.time_reset = 0.0
         self.idle_noise = True
+        self.edge_error_2q = Dict[Int, Float64]()
+        self.op_time = List[Float64]()
+
+    @staticmethod
+    def from_target(t: Target) raises -> NoiseModel:
+        """Noise of a device description, in microseconds: per-qubit T1, T2 and 1q
+        and readout errors, per-edge 2q errors, per-opcode durations. A virtual
+        gate (duration 0) adds no noise. T2 is clipped to its physical bound 2 T1,
+        and readout stays symmetric: `Target` has one number per qubit."""
+        var n = t.num_qubits
+        var m = NoiseModel(n)
+        for q in range(n):
+            m.t1[q] = t.t1_us[q]
+            m.t2[q] = min(t.t2_us[q], 2.0 * t.t1_us[q]) if t.t1_us[q] > 0.0 else t.t2_us[q]
+            m.readout_p01[q] = min(t.readout_error[q], 0.5)
+            m.readout_p10[q] = min(t.readout_error[q], 0.5)
+            m.gate_error_1q[q] = min(t.error_1q[q], 0.5)
+        m.gate_error_2q = min(t.default_error_2q, 0.75)
+        for i in range(len(t.error_2q)):
+            m.edge_error_2q[t.edges[2 * i] * n + t.edges[2 * i + 1]] = min(t.error_2q[i], 0.75)
+        m.op_time = List[Float64](length=Op.NUM_OPS, fill=0.0)
+        for k in range(Op.NUM_OPS):
+            m.op_time[k] = t.duration_ns[k] / 1000.0
+        m.time_measure = t.duration_ns[Op.MEASURE] / 1000.0
+        m.time_reset = t.duration_ns[Op.RESET] / 1000.0
+        m.validate()
+        return m^
+
+    def restricted(self, qubits: List[Int]) -> NoiseModel:
+        """The model seen by a circuit that uses `qubits`, renumbered 0, 1, ..."""
+        var m = NoiseModel(len(qubits))
+        for i in range(len(qubits)):
+            var q = qubits[i]
+            m.t1[i] = self.t1[q]
+            m.t2[i] = self.t2[q]
+            m.readout_p01[i] = self.readout_p01[q]
+            m.readout_p10[i] = self.readout_p10[q]
+            m.gate_error_1q[i] = self.gate_error_1q[q]
+            for j in range(i + 1, len(qubits)):
+                var r = qubits[j]
+                var key = min(q, r) * self.num_qubits + max(q, r)
+                var e = self.edge_error_2q.get(key)
+                if e:
+                    m.edge_error_2q[i * len(qubits) + j] = e.value()
+        m.gate_error_2q = self.gate_error_2q
+        m.time_1q = self.time_1q
+        m.time_2q = self.time_2q
+        m.time_measure = self.time_measure
+        m.time_reset = self.time_reset
+        m.idle_noise = self.idle_noise
+        m.op_time = self.op_time.copy()
+        return m^
 
     @staticmethod
     def uniform(num_qubits: Int, t1: Float64, t2: Float64, error_1q: Float64, error_2q: Float64,
@@ -137,18 +192,20 @@ struct NoiseModel(Copyable, Writable):
     def idle_channel(self, q: Int, t: Float64) -> PauliProbs:
         return thermal_pauli_channel(t, self.t1[q], self.t2[q])
 
-    def depolarizing_1q(self, q: Int) -> Float64:
+    def depolarizing_1q(self, q: Int, duration: Float64 = -1.0) -> Float64:
         """DEPOLARIZE1 probability for the part of the 1q error not explained by relaxation."""
-        var th = self.idle_channel(q, self.time_1q)
+        var th = self.idle_channel(q, self.time_1q if duration < 0.0 else duration)
         var e_th = 2.0 * th.total() / 3.0
         var e = max(0.0, self.gate_error_1q[q] - e_th)
         return min(0.75, 1.5 * e)
 
-    def depolarizing_2q(self, a: Int, b: Int) -> Float64:
-        var ta = self.idle_channel(a, self.time_2q).total()
-        var tb = self.idle_channel(b, self.time_2q).total()
+    def depolarizing_2q(self, a: Int, b: Int, duration: Float64 = -1.0) -> Float64:
+        var t = self.time_2q if duration < 0.0 else duration
+        var ta = self.idle_channel(a, t).total()
+        var tb = self.idle_channel(b, t).total()
         var e_th = 0.8 * (1.0 - (1.0 - ta) * (1.0 - tb))
-        var e = max(0.0, self.gate_error_2q - e_th)
+        var error = self.edge_error_2q.get(min(a, b) * self.num_qubits + max(a, b), self.gate_error_2q)
+        var e = max(0.0, error - e_th)
         return min(15.0 / 16.0, 1.25 * e)
 
     def readout_flip(self, q: Int) -> Float64:
@@ -186,6 +243,8 @@ def apply_noise_model(circuit: Circuit, model: NoiseModel) raises -> Circuit:
             dur = model.time_measure
         elif k == Op.RESET:
             dur = model.time_reset
+        elif len(model.op_time) > 0:
+            dur = model.op_time[k]
         elif a == 1:
             dur = model.time_1q
         else:
@@ -207,15 +266,16 @@ def apply_noise_model(circuit: Circuit, model: NoiseModel) raises -> Circuit:
             out.ops[len(out.ops) - 1].cond_reg = g.cond_reg
         else:
             out.append(g)
-        if op_is_unitary(k) and k != Op.I:
+        var is_virtual = len(model.op_time) > 0 and dur == 0.0
+        if op_is_unitary(k) and k != Op.I and not is_virtual:
             for j in range(a):
                 _add_pauli_channel(out, model.idle_channel(g.qubit(j), dur), g.qubit(j))
             if a == 1:
-                var p1 = model.depolarizing_1q(g.q0)
+                var p1 = model.depolarizing_1q(g.q0, dur)
                 if p1 > 0.0:
                     out.depolarize1(p1, g.q0)
             elif a == 2:
-                var p2 = model.depolarizing_2q(g.q0, g.q1)
+                var p2 = model.depolarizing_2q(g.q0, g.q1, dur)
                 if p2 > 0.0:
                     out.depolarize2(p2, g.q0, g.q1)
         for j in range(a):

@@ -214,6 +214,90 @@ Measured (tests/examples):
   12-qubit Heisenberg chain with fields reaches 0.55% at Krylov dimension 8
   (examples/frameworks/qiskit/skqd_heisenberg.mojo).
 
+## Multi-controlled gates (`qumo.ir.mc`)
+
+`append_mcx`, `append_mcp`, `append_mcrz` and `controlled_by(circuit, controls)` work
+for any number of controls and any unitary gate, and the OpenQASM parser uses them
+for `ctrl(k) @` / `negctrl(k) @`. They expand to ordinary gates at build time, since
+`Instruction` holds three qubits. `mode`: `auto` keeps the cheapest the ancillas
+allow; idle qubits of a QASM register are borrowed as dirty ancillas. CX counts after
+{u, cx} against Qiskit 2.5.2 (`bench/crosscheck/tier1.py mcx`; unitaries equal to
+`MCXGate` for k <= 10, and states equal up to k = 20):
+
+| controls | QUMO no ancilla | Qiskit v24 | Qiskit hp24 | QUMO 1 clean | Qiskit kg24 | QUMO k-2 dirty | Qiskit i15 |
+|---|---|---|---|---|---|---|---|
+| 3 | 14 | 14 | 20 | 12 | 12 | 18 | 14 |
+| 5 | 62 | 84 | 88 | 24 | 24 | 34 | 34 |
+| 6 | 118 | 140 | 124 | 30 | 30 | 42 | 42 |
+| 7 | 198 | 220 | 180 | 36 | 36 | 50 | 50 |
+| 8 | 302 | 324 | 252 | 42 | 42 | 58 | 58 |
+| 10 | 558 | 580 | 452 | 54 | 54 | 74 | 74 |
+| 20 | 2798 | 2820 | 2316 | 114 | 114 | 154 | 154 |
+
+Without ancillas it ties v24 at 3 controls and beats it above (a Gray-code phase
+polynomial up to 5 controls), and Qiskit's hp24 wins from 7 controls on; hp24 and the `sp22` of
+Qiskit 2.6 are not ported. At 3 controls Qiskit's i15 falls back to its 14-CX gate,
+as `auto` does here through the no-ancilla path. The 1-clean construction follows Khattar and Gidney's conditionally clean
+ancillas. Multi-gate `sub` circuits are controlled gate by gate, so a hand-written
+`V (ctrl U) V^dag` can be much cheaper.
+
+## Time evolution: Suzuki and multi-product formulas
+
+`trotter(..., order)` takes order 1 and any even order: Suzuki's recursion gives
+5^(k-1) Strang steps per step at order 2k. Doubling the steps divides the state error
+by 2^order at orders 2, 4 and 6 (tested). `qumo.algorithms.mpf`:
+`mpf_coefficients(steps, order, symmetric, method)` solves the linear system of
+`qiskit-addon-mpf` (its documented 0.0416667, -1.0666667, 2.025 for k = 1, 2, 3) or,
+with `method="approx"`, bounds the L1 norm of the coefficients, which amplifies shot
+noise (-1, 1.9648...). `mpf_expectation` post-processes Trotter expectations: on a
+4-qubit Ising chain steps 2, 3, 4 give error 4.5e-6, against 2.2e-2 for 4 steps alone.
+
+## Lattice models
+
+`Graph.square_lattice(rows, cols, periodic)`, `Graph.triangular_lattice(rows, cols)`
+and `fermi_hubbard(graph, t, u, mu)` by Jordan-Wigner, up spins on qubits 0..L-1 and
+down spins after. The 2-site half-filled energy is (U - sqrt(U^2 + 16 t^2)) / 2 in the
+right sector, tested at four values of U.
+
+## Dynamical Lie algebras
+
+`lie_closure(generators, max_dim)` in `qumo.algorithms.qgeometry` closes a set of Pauli
+strings under commutators, the Qibo 0.3.6 API for Pauli generators. The open
+transverse-field chain has dimension n (2n - 1) for n = 2..8. Generators are Pauli
+strings only, not sums.
+
+## IQP (`qumo.algorithms.iqp`)
+
+`IqpModel` holds generators and shared weights, `append_iqp` the gates, and
+`iqp_expval(model, weights, ops, samples, seed, gradient)` the Monte Carlo estimator
+<Z_a> = E_z cos(sum_g 2 theta_g (a.g mod 2) (-1)^(z.g)), with no state vector.
+PennyLane's 2-qubit demo gives its exact 0.17317819, a random 12-qubit model agrees
+with the state vector within the reported errors, the gradient with a finite
+difference, and a 2000-qubit model runs. Not compared with PennyLane's own sampler:
+RNGs differ and PennyLane is not in `bench/.venv`.
+
+## Sample-based quantum diagonalisation (`sqd.mojo`)
+
+`partition_subsample` (disjoint batches), `recover_configurations` (Robledo-Moreno
+et al.'s modified ReLU), `sqd_iteration(..., policy)`. `policy="standard"` keeps the
+best batch. `policy="trim"` is Trim SQD from qiskit-addon-sqd 0.14: batches only
+screen, the heaviest strings of each go into one merged subspace, whose energy is
+the result, at `num_batches + 1` diagonalisations; `trim_ratio`,
+`max_strings_per_trim`, `carryover_*` have the addon's meaning. A 4-site Hubbard chain
+reaches the exact sector energy. Not compared with the addon itself. Whether
+screening helps depends on the system, as the addon says, so compare against
+`num_batches=1`.
+
+## T-REX (`mitigation.mojo`)
+
+`trex_expectation(run, circuit, h, shots, seed, num_twirls)` takes a closure for the
+device. A random X before each measurement with a classical flip turns any readout
+channel, asymmetric too, into a rescaling of each Pauli, and calibrating on |0...0>
+measures it. With p01 = 0.02 and p10 = 0.12 a value of 0.7925 reads 0.63 raw and
+0.785 +- 0.007 mitigated. Asymmetric readout cannot come from
+`apply_noise_model`, which symmetrises it, so the tests use a classical channel. Not
+compared with `qiskit_mitigation.TREX`, which needs `Executor`.
+
 ## Error codes (QM-E8xx)
 
 Every error starts with a stable code and ends with a `Hint:` where a fix is known.
@@ -257,6 +341,8 @@ Every error starts with a stable code and ends with a `Hint:` where a fix is kno
 
 * Gradients are exact-expectation (state-vector) gradients; shot-noise-aware
   parameter-shift on samplers belongs to `qumo.exec` primitives.
+* `sqd_iteration` and `recover_configurations` need bitstrings of 2 num_orbitals
+  qubits, alpha low; the Hamiltonian comes from the caller.
 * `qpe` repeats U 2^j times (no fast-forwarding of U^k); keep n_eval <= ~12.
 * `uccsd_ansatz` is first-order Trotterised UCCSD with spin-conserving
   excitations under Jordan-Wigner, interleaved spin orbitals only; no

@@ -195,6 +195,30 @@ def steane_flagged_syndromes(mut c: Circuit, off: Int, a0: Int, a1: Int, a2: Int
     c.measure(a2, clbase + 5)
 
 
+def steane_reichardt_cycle() -> Circuit:
+    """Dense syndrome extraction with 3 ancillas (qubits 7..9, 6 clbits), guppyft's
+    `reichardt` QEC style. Clbits: X_S1, Z_S2, Z_S3, Z_S1, X_S2, X_S3."""
+    var c = Circuit(10, 6, "steane_reichardt_cycle")
+    steane_flagged_syndromes(c, 0, 7, 8, 9, 0)
+    c.reset(7)
+    c.reset(8)
+    c.reset(9)
+    return c^
+
+
+def steane_syndrome_supports() -> List[List[Int]]:
+    """Data qubits of the three stabilizer supports the cycle measures."""
+    var rl: List[Int] = [0, 4, 1, 6, 3, 5, 2]
+    var a: List[Int] = [rl[0], rl[2], rl[4], rl[6]]
+    var b: List[Int] = [rl[3], rl[4], rl[5], rl[6]]
+    var c: List[Int] = [rl[1], rl[2], rl[5], rl[6]]
+    var out = List[List[Int]]()
+    out.append(a^)
+    out.append(b^)
+    out.append(c^)
+    return out^
+
+
 def steane_prep_t_ft() -> Circuit:
     """Flag-verified T|+>_L: |H> encoder, FT measurement of the logical H
     operator (cat ancilla, controlled-H alternating controls), flagged syndrome
@@ -254,9 +278,58 @@ def iceberg_rotation(n: Int, kind: String, slot: Int, slot2: Int, theta: Float64
         c.rxx(theta, 0, 2 + slot)
     elif kind == "rzz":
         c.rzz(theta, 2 + slot, 2 + slot2)
-    else:
+    elif kind == "rxx":
         c.rxx(theta, 2 + slot, 2 + slot2)
+    # exp(-i theta/2 P) of the block-wide Paulis of guppyft 0.5: each is a single
+    # weight-2 rotation modulo the stabilizers (X_i = X_t X_i, Z_i = Z_b Z_i)
+    elif kind == "all_x":
+        c.rxx(theta, 0, 1)
+    elif kind == "all_z":
+        c.rzz(theta, 0, 1)
+    elif kind == "all_y":
+        c.ryy(theta if (n - 2) % 4 == 2 else -theta, 0, 1)
+    elif kind == "x_except":
+        c.rxx(theta, 1, 2 + slot)
+    elif kind == "z_except":
+        c.rzz(theta, 0, 2 + slot)
+    elif kind == "x_z_at":
+        c.ryy(-theta, 1, 2 + slot)
+    else:  # z_x_at
+        c.ryy(-theta, 0, 2 + slot)
     return c^
+
+
+def iceberg_exp_kind(paulis: String) raises -> Tuple[String, Int]:
+    """Classify a Pauli string over a whole block: rotation kind and special slot.
+    `paulis[i]` acts on logical qubit i of the block."""
+    var bs = paulis.as_bytes()
+    var counts = List[Int](length=4, fill=0)
+    for b in bs:
+        var c = Int(b)
+        counts[0 if c == ord("I") else (1 if c == ord("X") else (2 if c == ord("Y") else 3))] += 1
+    var k = len(bs)
+
+    def slot_of(letter: Int) {imm bs, imm k} -> Int:
+        for i in range(k):
+            if Int(bs[i]) == letter:
+                return i
+        return -1
+
+    if counts[1] == k:
+        return (String("all_x"), -1)
+    if counts[2] == k:
+        return (String("all_y"), -1)
+    if counts[3] == k:
+        return (String("all_z"), -1)
+    if counts[1] == k - 1 and counts[0] == 1:
+        return (String("x_except"), slot_of(ord("I")))
+    if counts[3] == k - 1 and counts[0] == 1:
+        return (String("z_except"), slot_of(ord("I")))
+    if counts[1] == k - 1 and counts[3] == 1:
+        return (String("x_z_at"), slot_of(ord("Z")))
+    if counts[3] == k - 1 and counts[1] == 1:
+        return (String("z_x_at"), slot_of(ord("X")))
+    raise Error("QM-E724: no single Iceberg gadget for the Pauli exponential '" + paulis + "'. Hint: use XX..X, YY..Y, ZZ..Z, X..XIX..X, Z..ZIZ..Z, X..XZX..X or Z..ZXZ..Z over the whole block.")
 
 
 def iceberg_syndrome_cycle(n: Int) -> Circuit:

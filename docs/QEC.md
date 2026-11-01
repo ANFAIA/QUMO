@@ -287,6 +287,99 @@ stops after the first wave reaching `max_errors` (deterministic). Results:
   and `mitigate_counts(counts, cal)` (tensored inverse, quasi-probabilities),
   `expectation_z(probs, qubits)`.
 
+## Stim interoperability (`qumo.qec.stim_text`)
+
+`from_stim(text)` makes the stack usable on any Stim circuit: `REPEAT` unrolls,
+`rec[-k]` becomes an absolute record, coordinates are kept. Gates: every single-qubit
+and two-qubit Clifford name of Stim's reference that has a unitary, checked one by
+one against `stim.Tableau` (40 of 40). `MPP`, `MX`, `MY`, `MRX`, `MXX`, `MZZ`,
+`RX`, `RY` lower to a basis change, a CX ladder and `M`, as `stim.Circuit.decomposed()`
+does, so no simulator needed a new opcode. `M(p)` flips the record and not the qubit,
+which `X_ERROR` cannot do, so it measures a copy on one spare qubit. `to_stim` gives
+Stim text back, with MPP lowered.
+
+Two noise opcodes use side tables, since `Instruction` holds three qubits:
+`PAULI_CHANNEL_2` (`Circuit.noise_table`) and `E` / `ELSE_CORRELATED_ERROR`
+(`Circuit.pauli_table`). Frames, the tableau, trajectories and DEM extraction take
+them; the GPU frame sampler does not (dispatch stays on the CPU); DEMs take
+`PAULI_CHANNEL_2` with disjoint outcomes treated as independent across channels,
+Stim's `approximate_disjoint_errors`, and refuse `ELSE_CORRELATED_ERROR` (QM-E733).
+Both survive `to_qasm` (`#pragma qumo pauli_channel_2(...) q[0], q[1];`,
+`#pragma qumo correlated_error(p) x q[0], z q[1];`) and circuit JSON, like Kraus
+channels (`#pragma qumo kraus1 "name" (re, im, ...) q[0];`). The compiler refuses `E`
+(QM-E624): no pass reads its qubits, so compile first and add noise afterwards.
+
+Checked on generated rotated and unrotated surface, repetition and colour codes at
+d = 3, 5: 8620 DEM mechanisms through `from_stim`, largest relative difference from
+Stim 6e-16. Not imported (QM-E734): rec-controlled gates, `HERALDED_*`, sweep bits,
+`MPAD`, `SPP`.
+
+`parse_dem(text)` reads Stim's DEM format (`error`, `^` separators, `detector`,
+`logical_observable`, `shift_detectors`, `repeat`), and `sample_dem(dem, shots, seed)`
+samples detection events from a model with no circuit, by geometric skips. On a d = 5
+model with 1953 errors, marginals over 1e6 shots agree with
+`stim.DetectorErrorModel.compile_sampler()` within |z| = 3.2.
+
+## Detector lint (`qumo.qec.lint`)
+
+QM-E703 catches a declared detector that is not deterministic. `missing_detectors(c,
+unknown_input=False)` is the other direction: deterministic parities of measurements
+that nothing declares, as record lists. It reduces the null space of noiseless
+samples by the declared detectors and observables, with `shots = records + 96`, so
+a wrong answer has probability about 2^-64. `count_determined_measurements` counts
+the relations. Same numbers as Stim 1.16 at d = 3 and 5, with and without
+`unknown_input`, and with one detector deleted. As in Stim the returned basis is
+not unique: a diagnostic, not a detector solver. Clifford circuits only (QM-E737).
+
+## Correlated matching (`qumo.qec.correlated`, decoder `mwpm_correlated`)
+
+Fowler's two-pass reweighting as PyMatching 2.3 does it. Decode, expand each matched
+pair to its graph edges, lower the weights of edges that fire together with those
+(P(f | e) = joint / marginal), decode again, restore in reverse order. Opt-in:
+`mwpm` still means plain matching. Identical Stim syndromes, uniform circuit noise,
+rotated memory Z, rounds = d (`bench/crosscheck/tier1.py correlated`):
+
+| d | p | shots | PyMatching plain / correlated | QUMO plain / correlated | gain QUMO | gain PyMatching |
+|---|---|---|---|---|---|---|
+| 3 | 0.003 | 600000 | 3842 / 4117 | 3842 / 4117 | **0.933** | 0.933 |
+| 5 | 0.003 | 600000 | 1975 / 1443 | 1976 / 1440 | 1.372 | 1.369 |
+| 5 | 0.005 | 300000 | 4236 / 3260 | 4240 / 3262 | 1.300 | 1.299 |
+| 7 | 0.005 | 300000 | 3032 / 1805 | 3031 / 1811 | 1.674 | 1.680 |
+
+Use it at d >= 5. At d = 3 it is measurably **worse**, in both implementations, by
+a statistically clear margin; the upstream notes do not mention this. It costs about
+3 times the decoding time. Each thread gets its own weights, so a copy of this
+decoder copies the integer graph, while plain sparse blossom threads share it.
+
+## Sliding-window decoding (`qumo.qec.window`)
+
+`plan_windows(dem, rounds_of, window, step)` cuts a model into overlapping windows
+and `SlidingWindowDecoder[D]` runs any `Decoder` over them, committing only the first
+`step` rounds of each. `(rounds - window) % step == 0`, cudaq-qec's rule (QM-E736).
+The `Decoder` trait returns an observable mask and says nothing about edges, so each
+window's model adds virtual observables on the detectors a committed error touches
+past the commit region; with more of those than free mask bits a window has several
+decoders on the same syndrome. That needs deterministic decoders, which all of
+QUMO's are. Errors touching an already decided round are removed from later windows.
+
+| d = 5, 24 rounds, p = 0.004, 40000 shots | logical errors |
+|---|---|
+| plain sparse blossom | 1483 |
+| window 13, step 4 | 1483 |
+| window 7, step 2 | 1495 |
+| window 5, step 5 (no buffer) | 2835 |
+
+`window >= rounds` is the plain decoder, shot for shot (tested).
+
+## Readout mitigation past 24 qubits
+
+`qumo.qec.mthree.mitigate_counts_m3(counts, cal, hamming=3)` is M3: the assignment
+matrix restricted to observed strings within a Hamming distance, renormalised, solved
+by preconditioned BiCGSTAB. It has no 2^n allocation; 40 qubits and 1116 strings run
+in a test, and quasi-probabilities match `mthree` 3.0 to 5e-9 at 12 and 30 qubits.
+At full Hamming range on all strings it equals `mitigate_counts`. T-REX, which
+targets expectation values, is in [ALGORITHMS.md](ALGORITHMS.md).
+
 ## Plugging in an AI decoder (AlphaQubit-style)
 
 A neural decoder is just another `Decoder`:
@@ -469,11 +562,11 @@ d = 5/7 surface and repetition codes).
   by less than the rounding step can be ranked differently than with exact
   real weights. Edge weights come from `MatchingGraph`, i.e. log((1−p)/p)
   clamped to [1e−3, 50] nats — p > 0.5 edges are *not* turned into negative
-  weights as PyMatching does. Not ported from PyMatching: correlated
-  (two-pass) matching, per-shot edge reweighting, and `decode_to_edges_array`
-  (the explicit edge set of the correction — QUMO returns the matched
-  detection-event pairs with their observable masks). Events in an odd
-  component without a boundary are counted in `failures`.
+  weights as PyMatching does. `decode_to_edges` returns matched detection-event
+  pairs with their observable masks; `mwpm_correlated` expands those to edges by
+  shortest path, so with ties its path can differ from PyMatching's search flooder
+  (the error counts above stay within noise). Events in an odd component without
+  a boundary are counted in `failures`.
 * Single-thread throughput is on par with PyMatching 2 (see Benchmarks); the
   remaining cost is dominated by neighbour scans (~45 % of instructions) and
   the binary-heap event queue (~20 %); PyMatching's radix heap and 32-bit
@@ -482,8 +575,9 @@ d = 5/7 surface and repetition codes).
 * Lookup decoder ≤ 64 detectors; DEM ≤ 64 observables; APSP table ≤ 3000 nodes.
 * Frame simulation supports only single-clbit Pauli feedback; general
   feed-forward uses tableau trajectories (`sample_stabilizer`).
-* Noise channels are Pauli only (no leakage, no coherent errors, no
-  correlated crosstalk beyond DEPOLARIZE2); asymmetric readout is handled by
+* Stabilizer-side noise is Pauli only (no leakage, no coherent errors);
+  `PAULI_CHANNEL_2` and `E` give correlated crosstalk, and Kraus channels run on
+  the density matrix and on trajectories. Asymmetric readout is handled by
   mitigation, not by the circuit noise model.
 * Codes: repetition + rotated surface (Z/X memory). Color codes, lattice
   surgery, stability experiments are natural additions to `codes.mojo`.

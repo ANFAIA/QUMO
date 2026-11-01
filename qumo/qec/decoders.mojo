@@ -83,6 +83,7 @@ struct MatchingGraph(Copyable, Writable):
     var num_dropped: Int
     var num_conflicts: Int
     var num_undetectable: Int
+    var wmax_extra: Float64  # largest weight outside `ew` the integer scale must cover
     var _index: Dict[Int, Int]
 
     def __init__(out self, dem: DetectorErrorModel):
@@ -100,6 +101,7 @@ struct MatchingGraph(Copyable, Writable):
         self.num_dropped = 0
         self.num_conflicts = 0
         self.num_undetectable = 0
+        self.wmax_extra = 0.0
         self._index = Dict[Int, Int]()
         # pass 1: graph-like errors and Stim-style decomposed pieces
         for e in dem.errors:

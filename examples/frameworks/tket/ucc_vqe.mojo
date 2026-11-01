@@ -36,7 +36,7 @@ Checks:
 - the 4000-shot QWC estimate is within 4 standard errors of the exact energy.
 
 Run: .venv/bin/mojo run -I . examples/frameworks/tket/ucc_vqe.mojo
-example-meta: {"framework": "tket", "tier": "fast", "timeout": 60, "requires": [], "args": []}
+example-meta: {"framework": "tket", "tier": "fast", "timeout": 120, "requires": [], "args": []}
 """
 
 from std.math import sqrt

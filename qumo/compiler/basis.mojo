@@ -298,6 +298,19 @@ struct BasisCtx(Movable):
         self.basis_desc = String(gs)
 
 
+def first_inexpressible_1q(c: Circuit, gs: GateSet) raises -> Int:
+    """Index of the first 1q gate with no exact form in `gs`, or -1."""
+    for i in range(len(c.ops)):
+        var g = c.ops[i]
+        if not op_is_unitary(g.kind) or op_arity(g.kind) != 1 or gs.has(g.kind) or g.kind == Op.I or g.is_parametric():
+            continue
+        var tmp = List[Instruction]()
+        var ph = 0.0
+        if not synth_1q(inst_matrix_1q(g), g.q0, gs, tmp, ph):
+            return i
+    return -1
+
+
 def _translate(g: Instruction, mut ctx: BasisCtx, mut out: List[Instruction],
                mut phase: Float64, depth: Int, keep_1q: Bool) raises:
     """Rewrite g into the basis. keep_1q: leave 1q gates for a later fusion step."""

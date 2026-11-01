@@ -28,7 +28,7 @@ Error codes: QM-E729 (emulation request not supported: too wide for the state
 vector, invalid shots).
 """
 
-from std.math import sqrt
+from std.math import sqrt, pi
 
 from qumo.ir.circuit import Circuit, Instruction
 from qumo.ir.gates import Op, op_arity, op_is_unitary, op_is_noise, op_is_annotation, matrix_1q
@@ -36,6 +36,7 @@ from qumo.sim.stabilizer import TableauSimulator
 from qumo.sim.statevector import StateVector
 from qumo.sim.runner import apply_instruction, sample
 from qumo.sim.rng import Rng
+from qumo.sim.branching import BranchingSimulator
 from qumo.qec.codes import NoiseParams
 from qumo.ft.classical import CExpr
 from qumo.ft.logical import LogicalProgram, LOp
@@ -274,7 +275,10 @@ def run_physical(c: Circuit, outputs: List[Int], postselect: List[Int], shots: I
         raise Error("QM-E729: shots must be >= 1. Hint: e.g. 1000.")
     var m = method
     if m == "auto":
-        m = String("tableau") if c.is_clifford() else String("statevector")
+        if c.is_clifford():
+            m = String("tableau")
+        else:
+            m = String("statevector") if c.num_qubits <= 26 else String("branching")
     var res = LogicalCounts(len(outputs), m)
     var root = Rng(seed)
     if m == "tableau":
@@ -289,8 +293,18 @@ def run_physical(c: Circuit, outputs: List[Int], postselect: List[Int], shots: I
             if _accepted(sim.creg, postselect):
                 res.record(key_of(sim.creg, outputs))
         return res^
+    if m == "branching":
+        # wide near-Clifford programs: cost follows the T gates, not the qubits
+        for s in range(shots):
+            var rng = root.split(s)
+            var sim = BranchingSimulator(c.num_qubits, rng.next_u64())
+            sim.run(c, rng)
+            res.shots += 1
+            if _accepted(sim.frame.creg, postselect):
+                res.record(key_of(sim.frame.creg, outputs))
+        return res^
     if c.num_qubits > 26:
-        raise Error("QM-E729: " + String(c.num_qubits) + " physical qubits is too wide for state-vector trajectories (limit 26). Hint: use magic_prep='nonft' / fewer logical qubits, or emulate the Clifford part with method='tableau'.")
+        raise Error("QM-E729: " + String(c.num_qubits) + " physical qubits is too wide for state-vector trajectories (limit 26). Hint: method='auto' or 'branching' takes wide programs with few T gates; else use fewer logical qubits, or emulate the Clifford part with method='tableau'.")
     var sv = StateVector(c.num_qubits)
     var creg = List[UInt8](length=max(c.num_clbits, 1), fill=0)
     for s in range(shots):
@@ -359,6 +373,34 @@ def logical_to_circuit(lp: LogicalProgram) raises -> Circuit:
             continue
         if k == LOp.FREE:
             free.append(qmap[g.q0])
+            continue
+        if k == LOp.PAULI_EXP:
+            var ladder = List[Int]()
+            var letters = List[Int]()
+            for i in range(g.q1):
+                var q = qmap[lp.pauli_args[g.q0 + 2 * i]]
+                var l = lp.pauli_args[g.q0 + 2 * i + 1]
+                if l == ord("I"):
+                    continue
+                ladder.append(q)
+                letters.append(l)
+                if l == ord("X"):
+                    c.h(q)
+                elif l == ord("Y"):
+                    c.rx(pi / 2, q)
+            var last = ladder[len(ladder) - 1]
+            for i in range(len(ladder) - 1):
+                c.cx(ladder[i], last)
+            c.rz(g.angle, last)
+            var i = len(ladder) - 2
+            while i >= 0:
+                c.cx(ladder[i], last)
+                i -= 1
+            for j in range(len(ladder)):
+                if letters[j] == ord("X"):
+                    c.h(ladder[j])
+                elif letters[j] == ord("Y"):
+                    c.rx(-pi / 2, ladder[j])
             continue
         if k == LOp.QEC or k == LOp.BARRIER:
             continue

@@ -22,6 +22,7 @@ from qumo.ir.gates import (
 )
 from qumo.ir.circuit import Circuit, Instruction
 from qumo.ir.param import Param
+from qumo.ir.kraus import KrausChannel
 from qumo.ir.qasm import builtin_gate_table, format_param
 from qumo.ai.json import JsonWriter, JsonValue, JsonKind, parse_json
 from qumo.ai.diagnostics import error_catalog, error_ranges, range_index_of
@@ -351,7 +352,30 @@ def describe_capabilities_json(tools: List[String], commands: List[String] = Lis
     w.kv_string("memory", "16 * 2^n bytes (n=24: 256 MiB, n=28: 4 GiB, n=30: 16 GiB)")
     w.kv_int("max_qubits_default", 28)
     w.kv_string("selection", "static circuits: one evolution + sampling; mid-circuit measurement, reset, feed-forward or noise: per-shot trajectories")
-    w.kv_string_list("features", ["all QUMO gates", "measure", "reset", "single-bit feed-forward", "Pauli noise channels", "symbolic parameters", "exact Pauli expectation values", "SIMD + multithreaded kernels"])
+    w.kv_string_list("features", ["all QUMO gates", "measure", "reset", "single-bit feed-forward", "Pauli noise channels", "Kraus channels (trajectories)", "symbolic parameters", "exact Pauli expectation values", "SIMD + multithreaded kernels"])
+    w.end_object()
+    w.begin_object()
+    w.kv_string("name", "ptsbe")
+    w.kv_string_list("methods", ["statevector:ptsbe"])
+    w.kv_string("memory", "16 * 2^n bytes per trie level")
+    w.kv_string("selection", "opt-in, sample_ptsbe: static circuits with Pauli noise, one simulation per distinct error pattern; emulate() uses it")
+    w.kv_string_list("features", ["same distribution as trajectories", "cost follows distinct patterns, not shots"])
+    w.end_object()
+    w.begin_object()
+    w.kv_string("name", "density_matrix")
+    w.kv_string_list("methods", ["density_matrix"])
+    w.kv_string("memory", "16 * 4^n bytes (n=12: 256 MiB, n=15: 16 GiB, the limit)")
+    w.kv_int("max_qubits_default", 15)
+    w.kv_string("selection", "opt-in: density_evolve, sample_density, MCP qumo_density")
+    w.kv_string_list("features", ["exact noise", "Kraus channels", "reset", "non-selective measurement", "no classical conditions"])
+    w.end_object()
+    w.begin_object()
+    w.kv_string("name", "stabilizer_branching")
+    w.kv_string_list("methods", ["stabilizer:branching"])
+    w.kv_string("memory", "at most 2^20 branches")
+    w.kv_int("max_qubits_default", 512)
+    w.kv_string("selection", "opt-in: sample_branching; qumo.ft run_physical picks it past 26 qubits")
+    w.kv_string_list("features", ["cost follows non-Clifford gates, not qubits", "feed-forward", "Pauli noise"])
     w.end_object()
     w.end_array()
     w.key("qasm")
@@ -363,7 +387,9 @@ def describe_capabilities_json(tools: List[String], commands: List[String] = Lis
         "all QUMO gates and aliases (cnot, toffoli, u1/u2/u3, cu1/cphase, cu, cu3, csx, U, CX, phase, id)",
         "constant expressions: + - * / % ** pi tau euler sin cos tan arcsin arccos arctan exp ln sqrt abs floor ceil",
         "input float/angle parameters with affine expressions",
-        "gate definitions (inlined) and modifiers inv @, ctrl(n) @, negctrl @, pow(k) @",
+        "gate definitions (inlined) and modifiers inv @, ctrl(n) @, negctrl(n) @, pow(k) @ (any number of controls, any unitary gate)",
+        "box and box[duration] (a barrier on each side, duration ignored), @annotation lines (ignored, QM-W052)",
+        "switch on a bit register, an int mirroring one, or a constant: case lists, default, Qiskit's older 'case 0: {} break;'",
         "register broadcast, slices q[a:b] (inclusive), index sets q[{0,2}], negative indices, $n physical qubits",
         "measure q -> c; c = measure q; c[i] = measure q[j]; reset; barrier; gphase",
         "if (c[i]) / if (c[i] == v) / if (!c[i]) with else; QASM2 if (creg == v) for 1-bit registers",
@@ -372,7 +398,7 @@ def describe_capabilities_json(tools: List[String], commands: List[String] = Lis
     ])
     w.kv_string_list("unsupported", [
         "def/extern subroutines", "while loops", "classical arithmetic on runtime values",
-        "multi-bit register conditions", "opaque gates", "pulse-level cal/defcal", "box/delay timing (delay ignored)",
+        "opaque gates", "pulse-level cal/defcal", "delay timing (delay ignored)",
     ])
     w.end_object()
     w.key("error_codes")
@@ -574,12 +600,43 @@ def write_circuit_json(circuit: Circuit, mut w: JsonWriter):
             w.end_array()
             w.end_object()
             continue
+        if k == Op.CORRELATED_ERROR:
+            w.kv_float("probability", g.p0.offset)
+            w.kv_bool("else", g.q2 != 0)
+            w.key("paulis")
+            w.begin_array()
+            for j in range(g.q1):
+                w.begin_array()
+                w.integer(circuit.pauli_table[g.q0 + 2 * j])
+                w.integer(circuit.pauli_table[g.q0 + 2 * j + 1])
+                w.end_array()
+            w.end_array()
+            w.end_object()
+            continue
         var a = op_arity(k)
         if a > 0:
             w.key("qubits")
             w.begin_array()
             for j in range(a):
                 w.integer(g.qubit(j))
+            w.end_array()
+        if k == Op.PAULI_CHANNEL_2:
+            w.key("probabilities")
+            w.begin_array()
+            for j in range(15):
+                w.number(circuit.noise_table[Int(g.p0.offset) + j])
+            w.end_array()
+        if k == Op.KRAUS1 or k == Op.KRAUS2:
+            ref ch = circuit.kraus[Int(g.p0.offset)]
+            w.kv_string("channel", ch.name)
+            w.key("matrices")
+            w.begin_array()
+            for m in range(ch.count()):
+                w.begin_array()
+                for j in range(len(ch.re[m])):
+                    w.number(ch.re[m][j])
+                    w.number(ch.im[m][j])
+                w.end_array()
             w.end_array()
         var np = op_num_params(k)
         if np > 0:
@@ -639,6 +696,10 @@ def circuit_from_json(v: JsonValue) raises -> Circuit:
         elif nm == "tick": k = Op.TICK
         elif nm == "detector": k = Op.DETECTOR
         elif nm == "observable": k = Op.OBSERVABLE
+        elif nm == "correlated_error": k = Op.CORRELATED_ERROR
+        elif nm == "pauli_channel_2": k = Op.PAULI_CHANNEL_2
+        elif nm == "kraus1": k = Op.KRAUS1
+        elif nm == "kraus2": k = Op.KRAUS2
         else:
             var code = table.get(nm)
             if not code or code.value() < 0:
@@ -657,6 +718,15 @@ def circuit_from_json(v: JsonValue) raises -> Circuit:
         if k == Op.BARRIER or k == Op.TICK:
             c.add(k, -1)
             continue
+        if k == Op.CORRELATED_ERROR:
+            var eq = List[Int]()
+            var el = List[Int]()
+            var pv = g.get("paulis")
+            for j in range(len(pv)):
+                eq.append(pv.at(j).at(0).as_int())
+                el.append(pv.at(j).at(1).as_int())
+            c.correlated_error(g.get_float("probability", 0.0), eq, el, g.get_bool("else", False))
+            continue
         var qv = g.get("qubits")
         var a = op_arity(k)
         if len(qv) != a:
@@ -664,7 +734,25 @@ def circuit_from_json(v: JsonValue) raises -> Circuit:
         var qs = List[Int]()
         for j in range(a):
             qs.append(qv.at(j).as_int())
-        if k == Op.MEASURE:
+        if k == Op.PAULI_CHANNEL_2:
+            var probs = List[Float64]()
+            var pv = g.get("probabilities")
+            for j in range(len(pv)):
+                probs.append(pv.at(j).as_float())
+            c.pauli_channel_2(probs, qs[0], qs[1])
+        elif k == Op.KRAUS1 or k == Op.KRAUS2:
+            var ch = KrausChannel(g.get_string("channel", "kraus"), a)
+            var mv = g.get("matrices")
+            for m in range(len(mv)):
+                var re = List[Float64]()
+                var im = List[Float64]()
+                var row = mv.at(m)
+                for j in range(0, len(row), 2):
+                    re.append(row.at(j).as_float())
+                    im.append(row.at(j + 1).as_float())
+                ch.add(re^, im^)
+            c.apply_channel(ch, qs[0], qs[1] if a == 2 else -1)
+        elif k == Op.MEASURE:
             c.measure(qs[0], g.get_int("clbit", qs[0]))
         else:
             var pv = g.get("params")

@@ -85,6 +85,7 @@ struct TableauSimulator(Copyable):
     var rng: Rng
     var records: List[UInt8]  # measurement record (Stim `rec`), one entry per MEASURE
     var creg: List[UInt8]  # classical register
+    var chain_fired: Bool  # the current E / ELSE_CORRELATED_ERROR chain fired
 
     def __init__(out self, num_qubits: Int, seed: UInt64 = 0):
         self.n = num_qubits
@@ -96,6 +97,7 @@ struct TableauSimulator(Copyable):
         self.rng = Rng(seed)
         self.records = List[UInt8]()
         self.creg = List[UInt8]()
+        self.chain_fired = False
         self.reset_state()
 
     def reset_state(mut self):
@@ -537,6 +539,32 @@ struct TableauSimulator(Copyable):
                 self._pauli(r & 3, g.q0)
                 self._pauli(r >> 2, g.q1)
 
+    def apply_noise_in(mut self, circuit: Circuit, g: Instruction) raises:
+        """`apply_noise`, plus the channels stored in the circuit's side tables."""
+        var k = g.kind
+        if k == Op.PAULI_CHANNEL_2:
+            var off = Int(g.p0.value())
+            var u = self.rng.uniform()
+            for i in range(15):
+                var p = circuit.noise_table[off + i]
+                if u < p:
+                    # i + 1 = (first letter) * 4 + second letter
+                    self._pauli((i + 1) >> 2, g.q0)
+                    self._pauli((i + 1) & 3, g.q1)
+                    return
+                u -= p
+        elif k == Op.CORRELATED_ERROR:
+            if g.q2 == 0:
+                self.chain_fired = False
+            if not self.chain_fired and self.rng.uniform() < g.p0.value():
+                self.chain_fired = True
+                for i in range(g.q1):
+                    self._pauli(circuit.pauli_table[g.q0 + 2 * i + 1], circuit.pauli_table[g.q0 + 2 * i])
+        elif k == Op.KRAUS1 or k == Op.KRAUS2:
+            raise Error("QM-E414: the tableau simulator takes Pauli noise only. Hint: use density_evolve() or sample().")
+        else:
+            self.apply_noise(g)
+
     # ------------------------------------------------------------ circuits
     def run(mut self, circuit: Circuit, noisy: Bool = True, forced_zero: Bool = False) raises:
         """Execute one shot of `circuit` from the current state.
@@ -567,7 +595,7 @@ struct TableauSimulator(Copyable):
                 self.reset(g.q0)
             elif op_is_noise(k):
                 if noisy:
-                    self.apply_noise(g)
+                    self.apply_noise_in(circuit, g)
 
     def _condition_holds(self, circuit: Circuit, g: Instruction) -> Bool:
         """Single-bit (`c_if`) or register (`c_if_register`) classical condition."""

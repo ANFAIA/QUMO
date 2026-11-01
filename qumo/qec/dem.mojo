@@ -507,6 +507,51 @@ def detector_error_model(circuit: Circuit, decompose: Bool = True) raises -> Det
             var pz = fo.p - fo.px - fo.py
             var qs = pauli_channel_independent(fo.px, fo.py, pz)
             _add_1q(acc, sx[fo.a], sz[fo.a], qs[0], qs[1], qs[2], decompose)
+        elif k == FK.PC2:
+            # disjoint probabilities taken as independent (Stim's approximate_disjoint_errors)
+            var basis = List[List[Int]]()
+            basis.append(sx[fo.a].copy())
+            basis.append(sz[fo.a].copy())
+            basis.append(sx[fo.b].copy())
+            basis.append(sz[fo.b].copy())
+            var ch = _Channel(basis, D, decompose)
+            var prev = 0.0
+            var by_mask = List[Float64](length=16, fill=0.0)
+            for j in range(15):
+                var pj = prog.table[fo.c + j] - prev
+                prev = prog.table[fo.c + j]
+                var la = (j + 1) >> 2
+                var lb = (j + 1) & 3
+                var mask = 0
+                if la == 1 or la == 2: mask |= 1
+                if la >= 2: mask |= 2
+                if lb == 1 or lb == 2: mask |= 4
+                if lb >= 2: mask |= 8
+                by_mask[mask] = pj
+            # outcomes of one channel are disjoint: equal symptoms add
+            for m0 in range(1, 16):
+                if by_mask[m0] <= 0.0:
+                    continue
+                var total = by_mask[m0]
+                for m1 in range(m0 + 1, 16):
+                    if by_mask[m1] > 0.0 and ch.sigs[m0] == ch.sigs[m1]:
+                        total += by_mask[m1]
+                        by_mask[m1] = 0.0
+                acc.add(total, ch.pieces(m0))
+        elif k == FK.CORR:
+            if fo.c != 0:
+                raise Error("QM-E733: ELSE_CORRELATED_ERROR has no detector error model: its chance depends on the errors before it. Hint: sample it with the Pauli-frame simulator.")
+            var whole = List[Int]()
+            for j in range(fo.b):
+                var q = prog.product[fo.a + 2 * j]
+                var l = prog.product[fo.a + 2 * j + 1]
+                if l == 1 or l == 2:
+                    whole = _xor_sorted(whole, sx[q])
+                if l >= 2:
+                    whole = _xor_sorted(whole, sz[q])
+            var one = List[List[Int]]()
+            one.append(whole^)
+            acc.add(fo.p, one)
         elif k == FK.DEP2:
             var q = depolarize2_independent(fo.p)
             var basis = List[List[Int]]()

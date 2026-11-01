@@ -463,7 +463,7 @@ def detect_apple():
     if sys.platform != "darwin" or platform.machine() != "arm64":
         return []
     g = {"vendor": "apple", "index": 0, "source": "system_profiler"}
-    # Mojo target of this chip: "metal:N" (normalised by Mojo to apple-mN; M1-M5 in Mojo 1.1)
+    # Mojo target of this chip: "metal:N" (normalised by Mojo to apple-mN; M1-M5 in Mojo 1.2)
     chip = subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"], capture_output=True, text=True).stdout.strip()
     m = re.search(r"\bApple M(\d+)\b", chip)
     if m:
@@ -503,7 +503,7 @@ def mojo_versions(root, mojo):
     out = {"mojo_path": os.path.relpath(mojo, root) if mojo and mojo.startswith(root) else mojo}
     if mojo and os.path.exists(mojo):
         r = subprocess.run([mojo, "--version"], capture_output=True, text=True)
-        out["mojo_cli"] = tail(r.stdout, 1).strip() or None  # e.g. "Mojo 1.1.0 (8189361e)"
+        out["mojo_cli"] = tail(r.stdout, 1).strip() or None  # e.g. "Mojo 1.2.0 (2016d0cd)"
     for dist in ("mojo", "mojo_compiler", "max_core", "max_mojo_libs", "max"):
         hits = glob.glob(os.path.join(root, ".venv", "lib", "python*", "site-packages", f"{dist}-*.dist-info"))
         if hits:
@@ -667,7 +667,7 @@ VENDOR_HINTS = {  # name fragments -> vendor, used only when the vendor is not g
 }
 
 
-# GPUs that Mojo / MAX 26.6 support out of the box (mojolang.org/docs/requirements,
+# GPUs that Mojo / MAX 26.7 support out of the box (mojolang.org/docs/requirements,
 # Oct 2026). NVIDIA: Turing (sm_75) and newer with driver >= 580 (older drivers
 # work with MODULAR_NVPTX_COMPILER_PATH=<CUDA ptxas>). AMD: CDNA2-4, RDNA2-4.
 AMD_SUPPORTED = {"gfx90a", "gfx942", "gfx950", "gfx1030", "gfx1033", "gfx1100", "gfx1101", "gfx1102", "gfx1103",
@@ -701,7 +701,7 @@ def gpu_supported(gpu):
             return True, "Metal toolchain missing"
         m = re.match(r"metal:(\d+)", arch)
         if m and int(m.group(1)) > 5:
-            return True, f"{arch} is newer than Mojo 1.1's Apple targets (metal:1..metal:5)"
+            return True, f"{arch} is newer than Mojo 1.2's Apple targets (metal:1..metal:5)"
         return True, gpu.get("arch_note", "")
     return False, f"unknown vendor {v}"
 

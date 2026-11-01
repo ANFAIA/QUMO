@@ -21,12 +21,15 @@ from qumo.ir.gates import (
     op_num_params,
     op_is_unitary,
     op_is_noise,
+    op_is_pauli_noise,
     op_is_annotation,
     op_is_clifford,
     op_inverse_kind,
     op_is_controlled_1q,
 )
 from qumo.ir.param import Param
+from qumo.ir.draw import draw_circuit
+from qumo.ir.kraus import KrausChannel
 
 
 @fieldwise_init
@@ -114,6 +117,9 @@ struct Circuit(Copyable, Writable, Sized):
     var param_names: List[String]
     var records: List[Int]  # flat measurement-record targets of detectors/observables
     var cond_table: List[Int]  # register conditions: [count, bit0, val0, bit1, val1, ...]
+    var kraus: List[KrausChannel]  # side table of Op.KRAUS1 / Op.KRAUS2
+    var noise_table: List[Float64]  # 15 probabilities per Op.PAULI_CHANNEL_2
+    var pauli_table: List[Int]  # qubit, letter (1 X, 2 Y, 3 Z) pairs per Op.CORRELATED_ERROR
     var num_measurements: Int
     var num_detectors: Int
     var num_observables: Int
@@ -127,6 +133,9 @@ struct Circuit(Copyable, Writable, Sized):
         self.param_names = List[String]()
         self.records = List[Int]()
         self.cond_table = List[Int]()
+        self.kraus = List[KrausChannel]()
+        self.noise_table = List[Float64]()
+        self.pauli_table = List[Int]()
         self.num_measurements = 0
         self.num_detectors = 0
         self.num_observables = 0
@@ -140,6 +149,9 @@ struct Circuit(Copyable, Writable, Sized):
         var c = Circuit(self.num_qubits, self.num_clbits, self.name)
         c.param_names = self.param_names.copy()
         c.cond_table = self.cond_table.copy()
+        c.kraus = self.kraus.copy()
+        c.noise_table = self.noise_table.copy()
+        c.pauli_table = self.pauli_table.copy()
         c.global_phase = self.global_phase
         return c^
 
@@ -272,6 +284,37 @@ struct Circuit(Copyable, Writable, Sized):
     def pauli_channel_1(mut self, px: Float64, py: Float64, pz: Float64, q: Int):
         self.add(Op.PAULI_CHANNEL_1, q, p0=px, p1=py, p2=pz)
 
+    def pauli_channel_2(mut self, probs: List[Float64], a: Int, b: Int) raises:
+        """Disjoint two-qubit Pauli channel; `probs` in Stim's order IX, IY, IZ, XI,
+        XX, XY, XZ, YI, YX, YY, YZ, ZI, ZX, ZY, ZZ (first letter on qubit a)."""
+        if len(probs) != 15:
+            raise Error("QM-E732: pauli_channel_2 needs 15 probabilities, got " + String(len(probs)) + ". Hint: Stim's order: IX, IY, IZ, XI, XX, ..., ZZ.")
+        var offset = len(self.noise_table)
+        for p in probs:
+            self.noise_table.append(p)
+        self.add(Op.PAULI_CHANNEL_2, a, b, p0=Float64(offset))
+
+    def correlated_error(mut self, p: Float64, qubits: List[Int], letters: List[Int], else_branch: Bool = False) raises:
+        """Stim E / ELSE_CORRELATED_ERROR: with probability p, a Pauli product on
+        any number of qubits. `letters`: 1 X, 2 Y, 3 Z. An `else_branch` only fires
+        when no error of its chain fired."""
+        if len(qubits) != len(letters) or len(qubits) == 0:
+            raise Error("QM-E732: correlated_error needs one letter per qubit. Hint: e.g. qubits [0, 3], letters [1, 3] for X0 Z3.")
+        var offset = len(self.pauli_table)
+        for i in range(len(qubits)):
+            self.pauli_table.append(qubits[i])
+            self.pauli_table.append(letters[i])
+        self.add(Op.CORRELATED_ERROR, offset, len(qubits), 1 if else_branch else 0, p0=p)
+
+    def apply_channel(mut self, channel: KrausChannel, q0: Int, q1: Int = -1) raises:
+        """General noise channel on 1 or 2 qubits (density matrix, trajectories)."""
+        channel.validate()
+        if channel.num_qubits != (1 if q1 < 0 else 2):
+            raise Error("QM-E414: channel '" + channel.name + "' acts on " + String(channel.num_qubits) + " qubit(s). Hint: pass that many qubits.")
+        var index = len(self.kraus)
+        self.kraus.append(channel.copy())
+        self.add(Op.KRAUS1 if q1 < 0 else Op.KRAUS2, q0, q1, p0=Float64(index))
+
     # QEC annotations
     def detector(mut self, recs: List[Int]):
         """Detector over absolute measurement-record indices."""
@@ -307,9 +350,25 @@ struct Circuit(Copyable, Writable, Sized):
         for name in other.param_names:
             pmap.append(self.parameter(name).index)
         var rec_base = self.num_measurements
+        var kraus_base = len(self.kraus)
+        for c in other.kraus:
+            self.kraus.append(c.copy())
+        var noise_base = len(self.noise_table)
+        for p in other.noise_table:
+            self.noise_table.append(p)
+        var pauli_base = len(self.pauli_table)
+        for i in range(0, len(other.pauli_table), 2):
+            self.pauli_table.append(qmap[other.pauli_table[i]])
+            self.pauli_table.append(other.pauli_table[i + 1])
         for inst in other.ops:
             var n = inst.copy()
             var a = op_arity(n.kind)
+            if n.kind == Op.CORRELATED_ERROR:
+                n.q0 += pauli_base
+                self.ops.append(n)
+                continue
+            if n.kind == Op.PAULI_CHANNEL_2:
+                n.p0 = n.p0.value() + Float64(noise_base)
             if n.kind == Op.DETECTOR or n.kind == Op.OBSERVABLE:
                 var off = len(self.records)
                 for j in range(inst.q1):
@@ -341,6 +400,8 @@ struct Circuit(Copyable, Writable, Sized):
                     self.cond_table.append(other.cond_table[inst.cond_reg + 1 + 2 * j] + clbit_offset)
                     self.cond_table.append(other.cond_table[inst.cond_reg + 2 + 2 * j])
                 n.cond_reg = off
+            if n.kind == Op.KRAUS1 or n.kind == Op.KRAUS2:
+                n.p0 = n.p0.value() + Float64(kraus_base)
             if n.p0.index >= 0: n.p0.index = pmap[n.p0.index]
             if n.p1.index >= 0: n.p1.index = pmap[n.p1.index]
             if n.p2.index >= 0: n.p2.index = pmap[n.p2.index]
@@ -462,7 +523,7 @@ struct Circuit(Copyable, Writable, Sized):
                     out.cx(control, a)
                     out.cp(l / 2, control, b)
             else:
-                raise Error("QM-E202: controlled() does not support gate '" + op_name(k) + "'. Hint: run qumo.compiler basis translation to {u, cx} first.")
+                raise Error("QM-E202: controlled() does not support gate '" + op_name(k) + "'. Hint: use qumo.ir.mc.controlled_by, which takes any unitary gate and any number of controls.")
         return out^
 
     # ---------------------------------------------------------------- binding
@@ -554,6 +615,19 @@ struct Circuit(Copyable, Writable, Sized):
                 return True
         return False
 
+    def has_table_noise(self) -> Bool:
+        """PAULI_CHANNEL_2 or E: Pauli noise that only the CPU stabilizer stack takes."""
+        for g in self.ops:
+            if g.kind == Op.PAULI_CHANNEL_2 or g.kind == Op.CORRELATED_ERROR:
+                return True
+        return False
+
+    def has_non_pauli_noise(self) -> Bool:
+        for g in self.ops:
+            if op_is_noise(g.kind) and not op_is_pauli_noise(g.kind):
+                return True
+        return False
+
     def is_dynamic(self) -> Bool:
         """True when measurement/reset/conditionals occur before the final layer."""
         var measured = List[Bool](length=self.num_qubits, fill=False)
@@ -585,8 +659,17 @@ struct Circuit(Copyable, Writable, Sized):
                 raise Error("QM-E002: instruction #" + String(i) + " '" + op_name(g.kind) + "' repeats qubit " + String(g.q0) + ".")
             if a >= 3 and (g.q2 == g.q0 or g.q2 == g.q1):
                 raise Error("QM-E002: instruction #" + String(i) + " '" + op_name(g.kind) + "' repeats a qubit.")
+            if g.kind == Op.CORRELATED_ERROR:
+                for j in range(g.q1):
+                    var q = self.pauli_table[g.q0 + 2 * j]
+                    if q < 0 or q >= self.num_qubits:
+                        raise Error("QM-E001: instruction #" + String(i) + " '" + op_name(g.kind) + "' uses qubit " + String(q) + " but circuit has " + String(self.num_qubits) + " qubits (valid 0.." + String(self.num_qubits - 1) + ").")
             if g.cond >= self.num_clbits:
                 raise Error("QM-E003: instruction #" + String(i) + " conditions on clbit " + String(g.cond) + " beyond creg size " + String(self.num_clbits) + ".")
+
+    def draw(self, width: Int = 80, style: String = "ascii") raises -> String:
+        """Text drawing of the circuit (see qumo.ir.draw)."""
+        return draw_circuit(self, width, style)
 
     def write_to(self, mut w: Some[Writer]):
         w.write("circuit ", self.name, " qubits=", self.num_qubits, " clbits=", self.num_clbits)

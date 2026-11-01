@@ -15,6 +15,7 @@ Run all: `bench/.venv/bin/python examples/run_examples.py --only examples/framew
 | Example | Reproduces | Tier | Original |
 |---|---|---|---|
 | [`deutsch_jozsa_bernstein_vazirani.mojo`](braket/deutsch_jozsa_bernstein_vazirani.mojo) — Deutsch-Jozsa and Bernstein-Vazirani, exact, sampled and compiled (Braket algorithm library) | Amazon Braket algorithm library - Deutsch-Jozsa Algorithm and Bernstein-Vazirani Algorithm | fast | [source](https://github.com/amazon-braket/amazon-braket-algorithm-library/tree/main/notebooks/textbook) |
+| [`emulate_and_split.mojo`](braket/emulate_and_split.mojo) — Emulating a device from its target, and splitting a parameter sweep | Braket SDK - device emulators (1.112), ProgramSet.split (1.120) | fast | [source](https://github.com/amazon-braket/amazon-braket-sdk-python/tree/main/src/braket/emulation) |
 | [`noise_simulation.mojo`](braket/noise_simulation.mojo) — Noise simulation with Pauli channels: bit flip, phase flip, depolarizing (Amazon Braket example) | Amazon Braket - Simulating noise on Amazon Braket | fast | [source](https://github.com/amazon-braket/amazon-braket-examples/tree/main/examples/braket_features) |
 | [`simon_algorithm.mojo`](braket/simon_algorithm.mojo) — Simon's algorithm with a GF(2) solver (Amazon Braket example instance) | Amazon Braket - Simon's Algorithm | fast | [source](https://github.com/amazon-braket/amazon-braket-examples/tree/main/examples/advanced_circuits_algorithms/Simons_Algorithm) |
 | [`zne_mitigation.mojo`](braket/zne_mitigation.mojo) — Zero-noise extrapolation with unitary folding (Amazon Braket + Mitiq notebook) | Amazon Braket - Zero noise extrapolation with Mitiq (error_mitigation/on_mitiq) | fast | [source](https://github.com/amazon-braket/amazon-braket-examples/tree/main/examples/error_mitigation/on_mitiq) |
@@ -24,6 +25,7 @@ Run all: `bench/.venv/bin/python examples/run_examples.py --only examples/framew
 | Example | Reproduces | Tier | Original |
 |---|---|---|---|
 | [`quantum_walk.mojo`](cirq/quantum_walk.mojo) — Coined discrete-time quantum walk on a 128-site cycle | Cirq - Quantum walks | fast | [source](https://quantumai.google/cirq/experiments/quantum_walks) |
+| [`stim_interop_decoding.mojo`](cirq/stim_interop_decoding.mojo) — Stim text in, correlated matching, sliding windows, and the detector lint | Stim 1.16 and PyMatching 2.3 - missing_detectors, correlated matching (arXiv:1310.0863) | fast | [source](https://github.com/quantumlib/Stim/blob/main/doc/python_api_reference_vDev.md) |
 | [`textbook_algorithms.mojo`](cirq/textbook_algorithms.mojo) — Cirq textbook algorithms: teleportation, QFT, phase estimation, Grover | Cirq - Textbook algorithms in Cirq | fast | [source](https://quantumai.google/cirq/experiments/textbook_algorithms) |
 | [`variational_sweep.mojo`](cirq/variational_sweep.mojo) — Variational parameter sweep on a 3x3 Ising grid | Cirq - Quantum variational algorithm (3x3 Ising, rot_x / rot_z / rot_11 ansatz, grid sweep) | fast | [source](https://quantumai.google/cirq/experiments/variational_algorithm) |
 | [`xeb.mojo`](cirq/xeb.mojo) — Cross-entropy benchmarking of sqrt(iSWAP) under depolarizing noise | Cirq - Cross Entropy Benchmarking Theory | slow | [source](https://quantumai.google/cirq/noise/qcvv/xeb_theory) |
@@ -36,12 +38,20 @@ Run all: `bench/.venv/bin/python examples/run_examples.py --only examples/framew
 | [`hamiltonian_simulation.mojo`](cudaq/hamiltonian_simulation.mojo) — Heisenberg Trotter simulation vs exact evolution, plus the Hadamard test | CUDA-Q - Hamiltonian simulation (Heisenberg chain) and the Hadamard test | fast | [source](https://nvidia.github.io/cuda-quantum/0.14.0/applications/python/hamiltonian_simulation.html), [source 2](https://nvidia.github.io/cuda-quantum/0.14.0/applications/python/hadamard_test.html) |
 | [`parallel_observe_gradients.mojo`](cudaq/parallel_observe_gradients.mojo) — Batched observe over 10,000 parameter sets, HEFT placement, parallel gradients | CUDA-Q - Multi-GPU workflows (mqpu observe_async batching) and VQE parallel gradients | slow | [source](https://nvidia.github.io/cuda-quantum/0.14.0/using/examples/multi_gpu_workflows.html), [source 2](https://nvidia.github.io/cuda-quantum/0.14.0/applications/python/vqe_advanced.html) |
 | [`qaoa_nelder_mead.mojo`](cudaq/qaoa_nelder_mead.mojo) — QAOA MaxCut, observe then sample (CUDA-Q instance) | CUDA-Q - Max-Cut with QAOA | fast | [source](https://nvidia.github.io/cuda-quantum/0.14.0/applications/python/qaoa.html) |
+| [`trajectory_grouping.mojo`](cudaq/trajectory_grouping.mojo) — Pre-trajectory sampling and exact noise with the density matrix | CUDA-Q - PTSBE example, density-matrix-cpu target | fast | [source](https://nvidia.github.io/cuda-quantum/0.14.0/using/examples/ptsbe.html) |
+
+## PennyLane (Xanadu)
+
+| Example | Reproduces | Tier | Original |
+|---|---|---|---|
+| [`iqp_expval.mojo`](pennylane/iqp_expval.mojo) — IQP circuits: expectation values without a state vector | PennyLane 0.44 - qml.IQP, qml.qnn.iqp_expval (arXiv:2503.02934) | fast | [source](https://docs.pennylane.ai/en/stable/code/api/pennylane.qnn.iqp_expval.html) |
 
 ## Qibo
 
 | Example | Reproduces | Tier | Original |
 |---|---|---|---|
 | [`adiabatic_evolution.mojo`](qibo/adiabatic_evolution.mojo) — Adiabatic evolution H(s) = (1 - s) H0 + s H1 towards the TFIM ground state | Qibo - Adiabatic evolution (linear schedule, Trotter error) | fast | [source](https://qibo.science/qibo/stable/code-examples/tutorials/adiabatic/README.html) |
+| [`lie_algebra_and_lattices.mojo`](qibo/lie_algebra_and_lattices.mojo) — Dynamical Lie algebras and lattice models | Qibo 0.3.6 - lie_closure, FermiHubbard models | fast | [source](https://qibo.science/qibo/stable/api-reference/qibo.html) |
 | [`qft.mojo`](qibo/qft.mojo) — Quantum Fourier transform: exact, approximate, and large-n round trip | Qibo - Basic examples: "How to write a Quantum Fourier Transform?" | fast | [source](https://qibo.science/qibo/stable/code-examples/examples.html) |
 | [`vq_regressor.mojo`](qibo/vq_regressor.mojo) — One-qubit variational regressor for sin(2x): parameter shift and Adam | Qibo - Variational Quantum Regressor (re-uploading, parameter-shift rule) | fast | [source](https://qibo.science/qibo/stable/code-examples/tutorials/vqregressor/README.html) |
 
@@ -50,9 +60,15 @@ Run all: `bench/.venv/bin/python examples/run_examples.py --only examples/framew
 | Example | Reproduces | Tier | Original |
 |---|---|---|---|
 | [`chsh.mojo`](qiskit/chsh.mojo) — CHSH inequality with Estimator parameter broadcasting (Qiskit tutorial instance) | Qiskit - CHSH inequality | fast | [source](https://quantum.cloud.ibm.com/docs/tutorials/chsh-inequality) |
+| [`multi_controlled_gates.mojo`](qiskit/multi_controlled_gates.mojo) — Multi-controlled gates in OpenQASM 3 and from the builder API | Qiskit - synth_mcx_noaux_v24, synth_mcx_1_clean_kg24, synth_mcx_n_dirty_i15 and `ctrl(k) @` export | fast | [source](https://quantum.cloud.ibm.com/docs/en/api/qiskit/synthesis#multipliers) |
+| [`multi_product_formula.mojo`](qiskit/multi_product_formula.mojo) — Multi-product formulas and Suzuki product formulas | qiskit-addon-mpf - setup_static_lse and exact coefficients (Quantum 7, 1067) | fast | [source](https://qiskit.github.io/qiskit-addon-mpf/) |
+| [`noise_aware_compilation.mojo`](qiskit/noise_aware_compilation.mojo) — Calibration data reaches the compiler: noise-aware layout and angle bounds | Qiskit - VF2PostLayout, Target angle bounds and WrapAngles | fast | [source](https://quantum.cloud.ibm.com/docs/en/api/qiskit/qiskit.transpiler.passes.VF2PostLayout) |
+| [`pauli_based_computation.mojo`](qiskit/pauli_based_computation.mojo) — Pauli-based computation: Litinski's form of a Clifford+T circuit | Qiskit - LitinskiTransformation (arXiv:1808.02892) | fast | [source](https://quantum.cloud.ibm.com/docs/en/api/qiskit/qiskit.transpiler.passes.LitinskiTransformation) |
 | [`qaoa_maxcut.mojo`](qiskit/qaoa_maxcut.mojo) — QAOA MaxCut with Estimator training and Sampler readout (Qiskit tutorial instance) | Qiskit - Quantum approximate optimization algorithm (small-scale part) | fast | [source](https://quantum.cloud.ibm.com/docs/tutorials/quantum-approximate-optimization-algorithm) |
+| [`readout_mitigation.mojo`](qiskit/readout_mitigation.mojo) — T-REX and M3: readout mitigation past the 24-qubit dense limit | Qiskit - qiskit_mitigation.TREX and mthree (arXiv:2012.09738, PRX Quantum 2, 040326) | fast | [source](https://github.com/Qiskit/qiskit-addon-mthree) |
 | [`shor_order_finding.mojo`](qiskit/shor_order_finding.mojo) — Shor order finding: N = 15 (tutorial circuit) and N = 21 (generic permutation oracle) | Qiskit - Shor's algorithm | fast | [source](https://quantum.cloud.ibm.com/docs/tutorials/shors-algorithm) |
 | [`skqd_heisenberg.mojo`](qiskit/skqd_heisenberg.mojo) — Sample-based Krylov quantum diagonalization (SKQD) of a Heisenberg chain | Qiskit - Sample-based Krylov quantum diagonalization (method), on the CUDA-Q SKQD Heisenberg instance at 12 qubits | slow | [source](https://quantum.cloud.ibm.com/docs/tutorials/sample-based-krylov-quantum-diagonalization), [source 2](https://nvidia.github.io/cuda-quantum/0.14.0/applications/python/skqd.html) |
+| [`sqd_trim_hubbard.mojo`](qiskit/sqd_trim_hubbard.mojo) — Trim SQD on a Fermi-Hubbard chain, with configuration recovery in Mojo | qiskit-addon-sqd 0.14 - TrimPolicy, partition_subsample, configuration recovery | fast | [source](https://github.com/Qiskit/qiskit-addon-sqd/blob/main/qiskit_addon_sqd/trim.py) |
 
 ## Q# / Azure Quantum
 
@@ -62,6 +78,7 @@ Run all: `bench/.venv/bin/python examples/run_examples.py --only examples/framew
 | [`hidden_shift.mojo`](qsharp/hidden_shift.mojo) — Hidden shift of an inner-product bent function on 10 qubits (Q# sample) | Q# (Microsoft QDK) - Hidden shift sample | fast | [source](https://github.com/microsoft/qdk/blob/main/samples/algorithms/HiddenShift.qs) |
 | [`phase_estimation.mojo`](qsharp/phase_estimation.mojo) — Phase estimation: textbook QPE and iterative QPE (Q# samples) | Q# (Microsoft QDK) - Quantum phase estimation sample, and the iterative phase estimation notebook | fast | [source](https://github.com/microsoft/qdk/blob/main/samples/algorithms/PhaseEstimation.qs), [source 2](https://github.com/microsoft/qdk/tree/main/samples/notebooks) |
 | [`resource_estimation.mojo`](qsharp/resource_estimation.mojo) — Vendor-neutral resource estimation: logical counts, NISQ per modality, fault tolerant (Q# samples) | Q# (Microsoft QDK) - Resource estimation samples (ShorRE.qs, estimation-ising-2D.ipynb) | fast | [source](https://github.com/microsoft/qdk/blob/main/samples/estimation/ShorRE.qs), [source 2](https://github.com/microsoft/qdk/blob/main/samples/estimation/estimation-ising-2D.ipynb) |
+| [`stabilizer_branching.mojo`](qsharp/stabilizer_branching.mojo) — Stabilizer branching: near-Clifford circuits far past the state vector | QDK 1.32 - stabilizer branching simulator | fast | [source](https://github.com/microsoft/qdk/blob/main/samples/notebooks/stabilizer_branching.ipynb) |
 
 ## TKET (Quantinuum)
 

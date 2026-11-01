@@ -68,7 +68,7 @@ default builds never compile device code.
 
 from std.bit import pop_count
 from std.sys.defines import get_defined_int
-from std.sys import has_apple_gpu_accelerator, has_amd_gpu_accelerator
+from qumo.gpu.vendor import gpu_target_is_apple, gpu_target_is_amd
 from std.utils.static_tuple import StaticTuple
 from std.memory import unsafe_stack_allocation, AddressSpace
 from max.gpu import global_idx, thread_idx, block_idx
@@ -91,7 +91,7 @@ comptime SAMPLE_LOG2_BYTES = 14  # shared CDF per sampling block: 16 KiB
 # or static arrays for the default tile size and the worst-case run. Static
 # on Apple GPUs (dynamic measured 0-3% slower on the M5, whose 32 KiB per
 # threadgroup admits no larger tile anyway), dynamic elsewhere.
-comptime TILE_SMEM_DYNAMIC = get_defined_int["QUMO_GPU_TILE_SMEM_DYNAMIC", 0 if has_apple_gpu_accelerator() else 1]() == 1
+comptime TILE_SMEM_DYNAMIC = get_defined_int["QUMO_GPU_TILE_SMEM_DYNAMIC", 0 if gpu_target_is_apple() else 1]() == 1
 
 comptime GPtr[dt: DType] = Pointer[Scalar[dt], MutAnyOrigin]
 comptime I64Ptr = Pointer[Int64, MutAnyOrigin]
@@ -126,7 +126,7 @@ comptime DIAG_MAX_WIDTH = 6  # widest diagonal phase table (TK.DGT): 2^6 complex
 # circuits at 26 qubits, 20-25% fewer transposes), 3 elsewhere until measured
 # (16 fp32 values + indices per thread risk register spills on NVIDIA / AMD,
 # and fp64 at k = 10 would leave 64 threads per block).
-comptime REG_BITS = get_defined_int["QUMO_GPU_REG_BITS", 4 if has_apple_gpu_accelerator() else 3]()
+comptime REG_BITS = get_defined_int["QUMO_GPU_REG_BITS", 4 if gpu_target_is_apple() else 3]()
 comptime NREG = 1 << REG_BITS
 # Threads per gk_tile block = 2^(k - REG_BITS) for tile size k (runtime).
 # TILE_SAFE_THREADS launches on every target whatever the kernel's register
@@ -143,7 +143,7 @@ comptime TILE_SAFE_THREADS = 256
 # under it; with 256 the cap is the full register file). NVIDIA: none
 # (ptxas picks the register count freely; .maxntid 1024 would cap it at 64
 # registers), the host reads the result back instead (see above).
-comptime TILE_LAUNCH_BOUND = get_defined_int["QUMO_GPU_TILE_LAUNCH_BOUND", 256 if has_amd_gpu_accelerator() else 0]()
+comptime TILE_LAUNCH_BOUND = get_defined_int["QUMO_GPU_TILE_LAUNCH_BOUND", 256 if gpu_target_is_amd() else 0]()
 comptime RUN_MAX_OPS = 128  # ops per tile run (cached in shared memory)
 comptime RUN_MAX_MATS = 2048  # matrix values per tile run (cached in shared memory; room for phase tables)
 # Segment record, 2 x Int32 (a run's records are cached in shared memory:

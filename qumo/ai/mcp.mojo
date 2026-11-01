@@ -22,7 +22,8 @@ protocol failures are JSON-RPC errors (-32700 parse, -32600 invalid request,
 them in `qumo.ai.tools.default_registry()` - no protocol code changes.
 """
 
-from std.io.file_descriptor import FileDescriptor
+from std.ffi import c_int
+from std.io.file_descriptor import RawFileDescriptor
 
 from qumo.ai.json import JsonWriter, JsonValue, JsonKind, parse_json
 from qumo.ai.tools import ToolRegistry, ToolResult
@@ -243,14 +244,14 @@ struct LineReader(Movable):
     """Buffered newline splitter over a raw file descriptor (handles lines of
     any length and a final line without trailing newline)."""
 
-    var fd: FileDescriptor
+    var fd: RawFileDescriptor
     var buf: List[UInt8]
     var start: Int
     var end: Int
     var eof: Bool
 
     def __init__(out self, fd: Int = 0):
-        self.fd = FileDescriptor(fd)
+        self.fd = RawFileDescriptor(c_int(fd))
         self.buf = List[UInt8](length=1 << 16, fill=0)
         self.start = 0
         self.end = 0

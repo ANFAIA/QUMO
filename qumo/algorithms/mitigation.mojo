@@ -49,6 +49,9 @@ from std.math import exp, log, sqrt, floor
 from qumo.ir.circuit import Circuit, Instruction
 from qumo.ir.gates import Op, op_is_unitary, op_num_params, op_inverse_kind
 from qumo.ir.pauli import PauliSum
+from qumo.sim.rng import Rng
+from qumo.sim.runner import SampleResult
+from qumo.ir.pauli import PauliSum
 from qumo.sim.runner import sample
 from qumo.sim.rng import Rng
 from qumo.qec.characterization import NoiseModel, apply_noise_model
@@ -485,3 +488,124 @@ def zne_expectation(circuit: Circuit, h: PauliSum, noise: NoiseModel, scales: Li
     else:
         res.estimate = extrapolate(res.achieved_scales, res.values, method, asymptote)
     return res^
+
+
+# ---------------------------------------------------------------------------
+# T-REX: twirled readout error extinction (van den Berg et al., arXiv:2012.09738)
+# ---------------------------------------------------------------------------
+@fieldwise_init
+struct TrexResult(ImplicitlyCopyable, Writable):
+    var value: Float64  # mitigated expectation value
+    var raw: Float64  # same shots without the calibration division
+    var std: Float64  # standard error (shot noise, propagated through the division)
+    var calibration: Float64  # smallest |<Z...Z>| of the calibration, near 0 = not recoverable
+
+    def write_to(self, mut w: Some[Writer]):
+        w.write("TrexResult(value=", self.value, ", raw=", self.raw, ", std=", self.std, ")")
+
+
+def _setting(c: Circuit, gx: UInt64, gz: UInt64, mask: UInt64) -> Circuit:
+    """`c` with a basis change for the QWC group, X on `mask`, measure all."""
+    var n = c.num_qubits
+    var m = c.copy()
+    for q in range(n):
+        var b = UInt64(1) << UInt64(q)
+        if (gx & b) != 0:
+            if (gz & b) != 0:
+                m.sdg(q)
+            m.h(q)
+    for q in range(n):
+        if (mask & (UInt64(1) << UInt64(q))) != 0:
+            m.x(q)
+    for q in range(n):
+        m.measure(q, q)
+    return m^
+
+
+def _parity_mean(r: SampleResult, support: UInt64, mask: UInt64) -> Float64:
+    """<Z_support> of one twirled setting: flip the recorded bits back through `mask`."""
+    var s = 0
+    var odd_mask = _parity(mask & support)
+    for creg in r.memory:
+        var odd = _parity(UInt64(creg) & support) != odd_mask
+        s += -1 if odd else 1
+    return Float64(s) / Float64(max(len(r.memory), 1))
+
+
+def _parity(v: UInt64) -> Bool:
+    var x = v
+    var odd = False
+    while x != 0:
+        x &= x - 1
+        odd = not odd
+    return odd
+
+
+def trex_expectation[S: def(Circuit, Int, UInt64) raises -> SampleResult](
+    run: S, c: Circuit, h: PauliSum, shots: Int, seed: UInt64 = 1, num_twirls: Int = 32,
+    calibration_shots: Int = -1
+) raises -> TrexResult:
+    """<h> on the device behind `run(circuit, shots, seed)`, readout-mitigated.
+
+    Each measurement gets a random X with a classical flip of the result, so any
+    readout noise, asymmetric too, averages to a Pauli channel that only rescales
+    <Z_S>. The same twirl on |0...0> measures that factor, and each Pauli is
+    divided by it. Cost grows with the number of terms, not with 2^n, and only
+    the readout is corrected. `shots` is per QWC group, split over `num_twirls`."""
+    if c.num_qubits > 62:
+        raise Error("QM-E815: trex_expectation packs results into 62 bits. Hint: measure at most 62 qubits.")
+    if num_twirls < 1 or shots < num_twirls:
+        raise Error("QM-E815: trex_expectation needs num_twirls >= 1 and shots >= num_twirls, got " + String(num_twirls) + " and " + String(shots) + ". Hint: raise shots.")
+    var n = c.num_qubits
+    var rng = Rng(seed)
+    var per = shots // num_twirls
+    var cal_per = max((calibration_shots if calibration_shots > 0 else shots) // num_twirls, 1)
+    var value = 0.0
+    var raw = 0.0
+    var variance = 0.0
+    var cal_min = 1.0
+    var empty = Circuit(n, 0, "calibration")
+    var groups = h.group_qwc()
+    # masks shared by the groups and the calibration, so both see one twirl set
+    var masks = List[UInt64]()
+    for _ in range(num_twirls):
+        var m = UInt64(0)
+        for q in range(n):
+            if rng.below(2) == 1:
+                m |= UInt64(1) << UInt64(q)
+        masks.append(m)
+    var cal = List[SampleResult]()
+    for t in range(num_twirls):
+        cal.append(run(_setting(empty, 0, 0, masks[t]), cal_per, seed ^ UInt64(1000003 + t)))
+    for gi in range(len(groups)):
+        var gx = UInt64(0)
+        var gz = UInt64(0)
+        for ti in groups[gi]:
+            gx |= h.terms[ti].x
+            gz |= h.terms[ti].z & h.terms[ti].x
+        var results = List[SampleResult]()
+        for t in range(num_twirls):
+            results.append(run(_setting(c, gx, gz, masks[t]), per, seed ^ UInt64(gi * 7919 + t + 1)))
+        for ti in groups[gi]:
+            var term = h.terms[ti]
+            var support = term.x | term.z
+            if support == 0:
+                value += term.coeff
+                raw += term.coeff
+                continue
+            var mean = 0.0
+            var base = 0.0
+            for t in range(num_twirls):
+                mean += _parity_mean(results[t], support, masks[t])
+                base += _parity_mean(cal[t], support, masks[t])
+            mean /= Float64(num_twirls)
+            base /= Float64(num_twirls)
+            if abs(base) < 1e-3:
+                raise Error("QM-E815: T-REX calibration of a Pauli is " + String(base) + ", too close to 0 to divide by. Hint: raise calibration_shots, or the readout is too noisy for this weight.")
+            cal_min = min(cal_min, abs(base))
+            value += term.coeff * mean / base
+            raw += term.coeff * mean
+            var v = (1.0 - mean * mean) / Float64(per * num_twirls)
+            var vb = (1.0 - base * base) / Float64(cal_per * num_twirls)
+            variance += term.coeff * term.coeff * (v + (mean * mean / (base * base)) * vb) / (base * base)
+    return TrexResult(value, raw, sqrt(variance), cal_min)

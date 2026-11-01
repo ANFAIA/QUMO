@@ -7,6 +7,7 @@ from std.testing import assert_equal, assert_true, assert_false, assert_almost_e
 from qumo.ir.circuit import Circuit
 from qumo.ir.gates import Op, op_name, op_num_params, op_arity
 from qumo.ir.param import Param
+from qumo.ir.kraus import amplitude_damping
 from qumo.ir.qasm import parse_qasm, parse_qasm_with_warnings, to_qasm, format_angle, tokenize_qasm
 from qumo.sim.statevector import StateVector
 from qumo.sim.runner import evolve, sample
@@ -608,7 +609,13 @@ def test_errors() raises:
     expect_error("qubit[1] q; /* never closed", "QM-E502")
     expect_error("OPENQASM 4.0;", "QM-E503")
     expect_error("qubit[2] q;\nh q[0]\nx q[1];", "QM-E500", "(line 2, col 7)")
-    expect_error("input float t; qubit[2] q;\nctrl @ U(t, 0, 0) q[0], q[1];", "QM-E202", "(line 2")
+    # one symbolic angle has an affine phase and synthesises (see qumo.ir.mc);
+    # two distinct symbols in phi + lambda do not
+    expect_error("input float s; input float t; qubit[2] q;\nctrl @ U(0, s, t) q[0], q[1];", "QM-E202", "(line 2")
+    var cu = parse_qasm("input float t; qubit[2] q; ry(0.4) q[0]; ctrl @ U(t, 0, 0) q[0], q[1];")
+    var cry_ref = parse_qasm("input float t; qubit[2] q; ry(0.4) q[0]; cry(t) q[0], q[1];")
+    var t_val: List[Float64] = [0.7]
+    assert_same_state(cu, cry_ref, 1e-10, t_val)
     expect_error("qubit[1] q; gate g a { h a; }\ng(0.1) q[0];", "QM-E511")
     # caret snippet rendering
     try:
@@ -659,6 +666,108 @@ def test_speed() raises:
     print("  parse:", lines, "gates,", mb, "MB in", ps * 1e3, "ms ->", Float64(lines) / ps / 1e6, "Mgates/s;  emit:", Float64(t2 - t1) / 1e6, "ms,", text.byte_length(), "bytes")
 
 
+def run_bits(src: String) raises -> String:
+    """The single outcome of a deterministic program."""
+    var r = sample(parse_qasm(src), 16, 3)
+    assert_equal(len(r.counts), 1, "deterministic program")
+    for kv in r.counts.items():
+        return kv.key
+    return ""
+
+
+def switch_program(value: Int, form: String) -> String:
+    """Set the 2-bit register c to `value`, then branch on it into bits r."""
+    var s = String("OPENQASM 3.0; include \"stdgates.inc\"; bit[2] c; bit[3] r; int d; qubit[5] q;\n")
+    if value & 1 == 1:
+        s += "x q[0];\n"
+    if value & 2 == 2:
+        s += "x q[1];\n"
+    s += "c[0] = measure q[0]; c[1] = measure q[1];\n"
+    if form == "direct":
+        s += "switch (c) { case 0 { x q[2]; } case 1, 2 { x q[3]; } default { x q[4]; } }\n"
+    elif form == "cast":
+        s += "switch (int(c)) { case 0 { x q[2]; } case 1, 2 { x q[3]; } default { x q[4]; } }\n"
+    elif form == "qiskit":
+        s += "d = c;\nswitch (d) {\n  case 0 {\n    x q[2];\n  }\n  case 1, 2 {\n    x q[3];\n  }\n  default {\n    x q[4];\n  }\n}\n"
+    else:  # Qiskit SWITCH_CASE_V1
+        s += "d = c;\nswitch (d) {\n  case 0: {\n    x q[2];\n  }\n  break;\n  case 1:\n  case 2: {\n    x q[3];\n  }\n  break;\n  default: {\n    x q[4];\n  }\n  break;\n}\n"
+    s += "r[0] = measure q[2]; r[1] = measure q[3]; r[2] = measure q[4];\n"
+    return s^
+
+
+def test_switch() raises:
+    for form in ["direct", "cast", "qiskit", "v1"]:
+        for v in range(4):
+            var bits = run_bits(switch_program(v, form))
+            # leftmost = highest clbit: r2 r1 r0 c1 c0
+            var want = String("001") if v == 0 else (String("010") if v < 3 else String("100"))
+            want += "1" if v & 2 == 2 else "0"
+            want += "1" if v & 1 == 1 else "0"
+            assert_equal(bits, want, form + " value " + String(v))
+    # constant target: only the matching body, unconditional
+    var k = parse_qasm("OPENQASM 3.0; include \"stdgates.inc\"; const int n = 2; qubit[2] q; switch (n) { case 1 { x q[0]; } case 2 { h q[1]; } default { z q[0]; } }")
+    assert_equal(len(k), 1, "constant switch keeps one body")
+    assert_equal(k.ops[0].kind, Op.H, "constant switch picks case 2")
+    assert_true(k.ops[0].cond < 0, "constant switch is unconditional")
+    # default of a wide register stays small: complement as partial-bit conditions
+    var wide = parse_qasm("OPENQASM 3.0; include \"stdgates.inc\"; bit[30] c; qubit[1] q; switch (c) { case 5 { x q[0]; } default { z q[0]; } }")
+    assert_equal(len(wide), 31, "1 case + 30 partial-bit conditions")
+    expect_error("bit[2] c; qubit[1] q; switch (c) { case 0 { c[0] = measure q[0]; } }", "QM-E541")
+    expect_error("bit[2] c; qubit[1] q; switch (c) { case 0, 0 { x q[0]; } }", "QM-E541")
+    expect_error("bit[2] c; qubit[1] q; switch (c) { case 7 { x q[0]; } }", "QM-E541")
+    expect_error("bit[2] c; qubit[1] q; switch (c) { x q[0]; }", "QM-E500")
+    expect_error("int d; qubit[1] q; switch (d) { case 0 { x q[0]; } }", "QM-E541")
+    print("  switch (case lists, default, Qiskit dump forms, constant target)")
+
+
+def test_side_table_noise_roundtrip() raises:
+    var probs = List[Float64]()
+    for i in range(15):
+        probs.append(0.001 * Float64(i + 1))
+    var c = Circuit(3)
+    c.pauli_channel_2(probs, 0, 2)
+    c.correlated_error(0.25, [0, 2], [1, 3])
+    c.correlated_error(0.5, [1], [2], else_branch=True)
+    c.apply_channel(amplitude_damping(0.3), 1)
+    var text = to_qasm(c)
+    var back = parse_qasm(text)
+    assert_equal(to_qasm(back), text, "noise pragmas round trip")
+    assert_equal(len(back.noise_table), 15)
+    for i in range(15):
+        assert_equal(back.noise_table[i], probs[i], "probability survives")
+    assert_equal(len(back.pauli_table), len(c.pauli_table))
+    for i in range(len(c.pauli_table)):
+        assert_equal(back.pauli_table[i], c.pauli_table[i], "Pauli product survives")
+    assert_equal(back.ops[2].q2, 1, "else branch survives")
+    assert_equal(back.kraus[0].name, c.kraus[0].name)
+    assert_equal(back.kraus[0].count(), c.kraus[0].count())
+    for k in range(c.kraus[0].count()):
+        for j in range(4):
+            assert_equal(back.kraus[0].re[k][j], c.kraus[0].re[k][j], "Kraus matrix survives")
+    expect_error("qubit[2] q;\n#pragma qumo pauli_channel_2(0.1) q[0], q[1];\n", "QM-E560", "(line 2")
+    expect_error("qubit[2] q;\n#pragma qumo correlated_error(0.1) w q[0];\n", "QM-E560", "(line 2")
+    expect_error("qubit[1] q;\n#pragma qumo kraus1 \"k\" (1, 0, 0) q[0];\n", "QM-E560", "(line 2")
+    print("  PAULI_CHANNEL_2, E, Kraus pragmas round trip")
+
+
+def test_box_and_annotations() raises:
+    var c = parse_qasm("OPENQASM 3.0; include \"stdgates.inc\"; qubit[2] q; h q[0]; box { cx q[0], q[1]; t q[1]; } h q[1];")
+    assert_equal(c.count(Op.BARRIER), 2, "box = barrier on each side")
+    assert_equal(c.ops[1].kind, Op.BARRIER, "barrier before the box")
+    assert_equal(c.ops[4].kind, Op.BARRIER, "barrier after the box")
+    # Qiskit annotated box, modifier '@' on the next line is untouched
+    var w = List[String]()
+    var a = parse_qasm_with_warnings("OPENQASM 3.0;\ninclude \"stdgates.inc\";\nqubit[3] q;\n@qumo.demo 3 $ weird payload ^\n@other\nbox[100ns] {\n  ctrl @ x q[0], q[1];\n}\n", w)
+    assert_equal(a.count(Op.CX), 1, "annotated box body")
+    var joined = String("")
+    for x in w:
+        joined += x + "\n"
+    assert_true(joined.find("QM-W052") >= 0 and joined.find("QM-W053") >= 0, "annotation and duration warnings: " + joined)
+    expect_error("qubit[1] q; box h q[0];", "QM-E500")
+    expect_error("gate g a { box { h a; } } qubit[1] q; g q[0];", "QM-E504")
+    print("  box, box[dur], annotations")
+
+
 def main() raises:
     test_bell_qasm2_qasm3()
     test_registers_and_broadcast()
@@ -672,6 +781,9 @@ def main() raises:
     test_emitted_definitions_are_exact()
     test_unicode_and_comments()
     test_real_world_dialects()
+    test_switch()
+    test_box_and_annotations()
+    test_side_table_noise_roundtrip()
     test_errors()
     test_speed()
     print("test_qasm OK")

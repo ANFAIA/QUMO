@@ -466,14 +466,17 @@ def trotter(h: PauliSum, time: Float64, steps: Int, order: Int = 1, num_qubits: 
 
     order 1 (Lie-Trotter): (prod_k e^{-i c_k P_k dt})^steps, error O(t^2/steps).
     order 2 (Strang):      symmetric half steps, error O(t^3/steps^2).
+    order 2k (Suzuki):     S_2k(t) = S_(2k-2)(u t)^2 S_(2k-2)((1 - 4u) t) S_(2k-2)(u t)^2,
+                           u = 1 / (4 - 4^(1/(2k-1))); 5^(k-1) Strang steps per step,
+                           error O(t^(2k+1)/steps^(2k)).
     Layout: qubits 0..n-1 (n = num_qubits or h.num_qubits()). Params: none, or a
     symbolic total time named `param_name` (each slice uses param * 1/steps).
     Identity terms become a global phase (constant time only).
     """
     if steps < 1:
         raise Error("QM-E808: trotter() needs steps >= 1, got " + String(steps) + ".")
-    if order != 1 and order != 2:
-        raise Error("QM-E808: trotter() supports order 1 (Lie-Trotter) or 2 (Strang), got " + String(order) + ". Hint: compose two order-2 steps (Suzuki) for higher orders.")
+    if order != 1 and (order < 2 or order % 2 != 0):
+        raise Error("QM-E808: trotter() supports order 1 (Lie-Trotter) or an even order (Strang 2, Suzuki 4, 6, ...), got " + String(order) + ". Hint: Suzuki's recursion raises the order by 2.")
     var n = num_qubits if num_qubits > 0 else max(h.num_qubits(), 1)
     var c = Circuit(n, name="trotter")
     var tot = Param(time)
@@ -482,19 +485,36 @@ def trotter(h: PauliSum, time: Float64, steps: Int, order: Int = 1, num_qubits: 
     var dt = tot * (1.0 / Float64(steps))
     var half = tot * (0.5 / Float64(steps))
     var nt = len(h.terms)
+    var slices = suzuki_weights(max(order, 2))
     for _ in range(steps):
         if order == 1 or nt == 1:
             for t in h.terms:
                 append_pauli_exponential(c, t, dt)
         else:
-            for k in range(nt - 1):
-                append_pauli_exponential(c, h.terms[k], half)
-            append_pauli_exponential(c, h.terms[nt - 1], dt)
-            var k = nt - 2
-            while k >= 0:
-                append_pauli_exponential(c, h.terms[k], half)
-                k -= 1
+            for w in slices:
+                for k in range(nt - 1):
+                    append_pauli_exponential(c, h.terms[k], half * w)
+                append_pauli_exponential(c, h.terms[nt - 1], dt * w)
+                var k = nt - 2
+                while k >= 0:
+                    append_pauli_exponential(c, h.terms[k], half * w)
+                    k -= 1
     return c^
+
+
+def suzuki_weights(order: Int) -> List[Float64]:
+    """Time fraction of each Strang step in one Suzuki step of an even order."""
+    if order <= 2:
+        return [1.0]
+    var inner = suzuki_weights(order - 2)
+    var k = order // 2
+    var u = 1.0 / (4.0 - pow(4.0, 1.0 / Float64(2 * k - 1)))
+    var out = List[Float64](capacity=5 * len(inner))
+    for r in range(5):
+        var f = (1.0 - 4.0 * u) if r == 2 else u
+        for w in inner:
+            out.append(f * w)
+    return out^
 
 
 # ---------------------------------------------------------------------------

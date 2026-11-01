@@ -316,7 +316,62 @@ amplitudes of both sides were checked to agree to 1e-15 at 5 and 8 qubits.
 For A/B comparisons on a shared machine, alternate the two binaries
 back-to-back, repeat >= 3 times, report medians and the load average.
 
-## 6. Limitations
+## 6. Noise beyond per-shot trajectories
+
+`sample()` draws one Pauli error pattern per shot and evolves one state per shot.
+Three opt-in simulators cover what that cannot do cheaply:
+
+| | `sample_ptsbe` (`qumo.sim.ptsbe`) | `density_evolve` (`qumo.sim.density`) | `sample_branching` (`qumo.sim.branching`) |
+|---|---|---|---|
+| State | a state vector per distinct error pattern | rho on 2n qubits | one Clifford frame and a sparse amplitude list |
+| Noise | Pauli, exact | Pauli and Kraus, exact, no sampling | Pauli, per shot |
+| Limit | static circuits (QM-E409), 2^n | 15 qubits, 16 GiB (QM-E410) | 2^20 branches (QM-E412), 512 qubits |
+| Classical conditions | no | no (QM-E411) | yes |
+| Cost follows | distinct patterns | 4^n | non-Clifford rotations that do not commute |
+
+**Pattern grouping.** The chance of a Pauli pattern does not depend on the state, so
+all patterns can be drawn first and identical ones grouped, which CUDA-Q calls
+pre-trajectory sampling. Patterns sharing a prefix share its evolution (the
+simulation walks a trie), and the output has the distribution of `sample()`: against
+the exact density matrix, 200000 shots of a 6-qubit noisy GHZ differ by TV 0.0025
+with 699 patterns. `plan_trajectories` counts patterns without simulating.
+`max_trajectories` caps them and the result says it is biased. On a 16-qubit
+layered circuit with 20000 shots (`bench/crosscheck/tier1.py ptsbe`):
+
+| p | distinct patterns | error-free shots | speedup over `sample()` |
+|---|---|---|---|
+| 1e-4 | 203 | 19758 | 213x |
+| 1e-3 | 939 | 17403 | 94x |
+| 1e-2 | 9189 | 4757 | 5x |
+
+Nothing changes for callers of `sample()`. `qumo.exec.emulate` uses this path.
+
+**Density matrix.** Entry i + 2^n j of a 2n-qubit `StateVector` is rho_ij, so a gate
+is U on qubit q and conj(U) on q + n with the same kernels. A channel is one dense
+S = sum_k K_k (x) conj(K_k), so its cost does not grow with the number of Kraus
+operators. Measurements are non-selective: rho has no branch to follow, so
+classical conditions raise QM-E411, and `sample_density` needs terminal
+measurements. Six random 5-qubit noisy circuits match Aer's `density_matrix` to
+6e-16. `Circuit.apply_channel(KrausChannel, q0, q1=-1)` adds a channel;
+`amplitude_damping`, `phase_damping` and `thermal_relaxation` (rho_11 = exp(-t/T1),
+rho_01 = exp(-t/T2)) are in `qumo.ir.kraus`. `sample()` runs Kraus channels as
+unbiased quantum trajectories; stabilizer and frame simulators refuse them (QM-E414).
+
+**Stabilizer branching.** QDK 1.32's idea: the state is C sum_x a_x |x>. Clifford
+gates change C only, and a rotation exp(-i t/2 P) acts on the amplitudes through
+C^dag P C, at most doubling them. QDK's measurement keeps projected pairs, so a
+measurement can double the list too. Here the frame absorbs the projection with
+the column operations of the tableau measurement, so each pair collapses to one
+string and measuring never grows the list: 30 qubits of a T-rotated GHZ state stay
+at 2 branches to the last measurement. Every Pauli expectation matches the state
+vector on random Clifford + rotation circuits to 1e-9. 200 shots of 400 qubits with
+12 T take about 0.01 s. `qumo.ft.emulate.run_physical` picks it past 26 qubits.
+
+`qumo.exec.emulate.emulate(circuit, target, shots, seed)` is the device-level entry
+point: it checks conformance, builds `NoiseModel.from_target`, drops unused physical
+qubits and runs the cheapest exact sampler; `method` in the result says which.
+
+## 7. Limitations
 
 * 3-qubit gates (CCX, CSWAP, CCZ) are not blocked: each is one full-state
   pass. Transpile them to 1q/2q gates for large states.
@@ -336,7 +391,12 @@ back-to-back, repeat >= 3 times, report medians and the load average.
   (`build_plan`) but not this executor or its index-bit swaps: it has its own
   shared-memory tile scheduler (`qumo/gpu/tiles.mojo`, docs/GPU.md).
 
-## 7. Origins
+* The density matrix has no selective measurement; the state-vector path covers
+  feed-forward. `sample_density` refuses mid-circuit measurements.
+* `sample_ptsbe` takes neither Kraus channels, PAULI_CHANNEL_2 nor E (the sampler of
+  `sample()` does).
+
+## 8. Origins
 
 * **qsim** (Google): gate fusion and SIMD kernels with special in-register
   paths for low qubits.

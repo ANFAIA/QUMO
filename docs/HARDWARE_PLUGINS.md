@@ -178,7 +178,9 @@ readout errors, per-edge 2q errors, `max_shots`, `default_rep_delay`. Directiona
 gates set `directed_edges`. `--fractional` fetches the backend with
 `use_fractional_gates=True` and adds `rzz` and `rx` to the basis (Heron); QUMO
 then emits arbitrary-angle `rzz`, folded into IBM's allowed range [0, π/2] by
-`FoldRzzAngle` and checked with qiskit-ibm-runtime's rzz validator. If the
+`wrap_angles` from `TargetSpec.angle_bounds` inside QUMO's own compilation, and
+checked here against 0 <= angle <= pi/2, with no private IBM helper; `FoldRzzAngle`
+remains the fallback for a circuit compiled without those bounds. If the
 backend has no fractional gates, `--fractional` has no effect and the plan says
 so in a note (`--fractional ignored: ...`). Offline, the snapshot
 `fake_fractional` (5 qubits) has them; `backends --provider ibm` lists it.
@@ -405,7 +407,8 @@ pytket 2.18.5, pytket-quantinuum 0.59.3, pytket-qiskit 0.79.0, Python 3.12. The 
 local emulator needs pre-release quantum-pecos 0.8.0.dev8, which requires
 selene-sim < 0.3 while guppylang 1.2 requires >= 0.3.1: install `[helios]` and
 `[local-quantinuum]` in separate environments. qiskit-ibm-runtime must be >= 0.50.1
-(0.50.0 `FoldRzzAngle` emits a `GlobalPhaseGate`, invalid on IBM hardware).
+(0.50.0 `FoldRzzAngle` emits a `GlobalPhaseGate`, invalid on IBM hardware), which
+matters only on that fallback path.
 
 ```bash
 uv pip install --python bench/.venv/bin/python qnexus pytket-quantinuum          # IBM deps already in bench/.venv
