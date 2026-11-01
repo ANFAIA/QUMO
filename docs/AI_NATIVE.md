@@ -101,15 +101,16 @@ other QUMO modules plug their features into it.
   slices `q[0:2]`, index sets `q[{0,2}]` and negative indices.
 * `c = measure q;`, `c[0] = measure q[0];`, `measure q[0] -> c[0];`,
   `bit[2] c = measure q;`, `reset`, `barrier`.
-* Single-bit feed-forward: `if (c[0]) x q[1];`, `if (c[0] == 1) { ... } else { ... }`,
-  `if (!c[0])`, and QASM 2 `if (c==1)` on 1-bit registers.
+* Feed-forward on one bit: `if (c[0]) x q[1];`, `if (c[0] == 1) { ... } else { ... }`,
+  `if (!c[0])`; on a whole register of any size: `if (c == 5)`; on several bits:
+  `if (c[0] == 1 && c[2] == 0)`. The last two take no `else`.
 * `const` declarations, and `for` loops over constant ranges (inclusive, as in
   OpenQASM 3) or sets, unrolled at parse time.
 * `#pragma braket ...` and other foreign pragmas, `@annotations`, and
   `// /* */` comments are ignored. `delay` is ignored with warning QM-W051.
 
 Not supported (each is rejected with a QM-E504 hint): subroutines,
-`while`, runtime classical arithmetic, multi-bit conditions (QM-E541), and
+`while`, runtime classical arithmetic, `||` or nested conditions (QM-E541), and
 pulse-level `cal`/`defcal`.
 
 ### QUMO pragmas

@@ -352,7 +352,7 @@ def describe_capabilities_json(tools: List[String], commands: List[String] = Lis
     w.kv_string("memory", "16 * 2^n bytes (n=24: 256 MiB, n=28: 4 GiB, n=30: 16 GiB)")
     w.kv_int("max_qubits_default", 28)
     w.kv_string("selection", "static circuits: one evolution + sampling; mid-circuit measurement, reset, feed-forward or noise: per-shot trajectories")
-    w.kv_string_list("features", ["all QUMO gates", "measure", "reset", "single-bit feed-forward", "Pauli noise channels", "Kraus channels (trajectories)", "symbolic parameters", "exact Pauli expectation values", "SIMD + multithreaded kernels"])
+    w.kv_string_list("features", ["all QUMO gates", "measure", "reset", "feed-forward on a bit, a register or an && chain of bits", "Pauli noise channels", "Kraus channels (trajectories)", "symbolic parameters", "exact Pauli expectation values", "SIMD + multithreaded kernels"])
     w.end_object()
     w.begin_object()
     w.kv_string("name", "ptsbe")
@@ -392,7 +392,7 @@ def describe_capabilities_json(tools: List[String], commands: List[String] = Lis
         "switch on a bit register, an int mirroring one, or a constant: case lists, default, Qiskit's older 'case 0: {} break;'",
         "register broadcast, slices q[a:b] (inclusive), index sets q[{0,2}], negative indices, $n physical qubits",
         "measure q -> c; c = measure q; c[i] = measure q[j]; reset; barrier; gphase",
-        "if (c[i]) / if (c[i] == v) / if (!c[i]) with else; QASM2 if (creg == v) for 1-bit registers",
+        "if (c[i]) / if (c[i] == v) / if (!c[i]) with else; if (creg == v) on a whole register of any size; if (c[i] == v && c[j] == w), no else on the last two",
         "const declarations and for loops over constant ranges/sets (unrolled)",
         "#pragma qumo: noise channels, detector, observable, tick, param",
     ])
@@ -576,6 +576,49 @@ def write_param_json(mut w: JsonWriter, p: Param, names: List[String]):
     w.end_object()
 
 
+def _write_condition_json(mut w: JsonWriter, circuit: Circuit, g: Instruction):
+    """`condition`: {clbit, value} tests one bit; a register condition adds
+    `bits` and `values`, every one of which must hold."""
+    if g.cond < 0:
+        return
+    w.key("condition")
+    w.begin_object()
+    w.kv_int("clbit", g.cond)
+    w.kv_int("value", g.cond_val)
+    if g.cond_reg >= 0:
+        var n = circuit.cond_table[g.cond_reg]
+        w.key("bits")
+        w.begin_array()
+        for j in range(n):
+            w.integer(circuit.cond_table[g.cond_reg + 1 + 2 * j])
+        w.end_array()
+        w.key("values")
+        w.begin_array()
+        for j in range(n):
+            w.integer(circuit.cond_table[g.cond_reg + 2 + 2 * j])
+        w.end_array()
+    w.end_object()
+
+
+def _read_condition_json(mut c: Circuit, g: JsonValue) raises:
+    """Condition of the instruction just appended, as `_write_condition_json` wrote it."""
+    var cond = g.get("condition")
+    if not cond.is_object():
+        return
+    var bv = cond.get("bits")
+    if not bv.is_defined():
+        c.c_if(cond.get_int("clbit", 0), cond.get_int("value", 1))
+        return
+    var vv = cond.get("values")
+    var bits = List[Int]()
+    var vals = List[Int]()
+    for j in range(len(bv)):
+        bits.append(bv.at(j).as_int())
+    for j in range(len(vv)):
+        vals.append(vv.at(j).as_int())
+    c.c_if_register(bits, vals)
+
+
 def write_circuit_json(circuit: Circuit, mut w: JsonWriter):
     w.begin_object()
     w.kv_string("format", "qumo.circuit.v1")
@@ -611,6 +654,7 @@ def write_circuit_json(circuit: Circuit, mut w: JsonWriter):
                 w.integer(circuit.pauli_table[g.q0 + 2 * j + 1])
                 w.end_array()
             w.end_array()
+            _write_condition_json(w, circuit, g)
             w.end_object()
             continue
         var a = op_arity(k)
@@ -647,12 +691,7 @@ def write_circuit_json(circuit: Circuit, mut w: JsonWriter):
             w.end_array()
         if k == Op.MEASURE:
             w.kv_int("clbit", g.clbit)
-        if g.cond >= 0:
-            w.key("condition")
-            w.begin_object()
-            w.kv_int("clbit", g.cond)
-            w.kv_int("value", g.cond_val)
-            w.end_object()
+        _write_condition_json(w, circuit, g)
         w.end_object()
     w.end_array()
     w.end_object()
@@ -726,6 +765,7 @@ def circuit_from_json(v: JsonValue) raises -> Circuit:
                 eq.append(pv.at(j).at(0).as_int())
                 el.append(pv.at(j).at(1).as_int())
             c.correlated_error(g.get_float("probability", 0.0), eq, el, g.get_bool("else", False))
+            _read_condition_json(c, g)
             continue
         var qv = g.get("qubits")
         var a = op_arity(k)
@@ -778,9 +818,7 @@ def circuit_from_json(v: JsonValue) raises -> Circuit:
             while len(pp) < 3:
                 pp.append(Param(0.0))
             c.add(k, qs[0] if a > 0 else -1, qs[1] if a > 1 else -1, qs[2] if a > 2 else -1, pp[0], pp[1], pp[2])
-        var cond = g.get("condition")
-        if cond.is_object():
-            c.c_if(cond.get_int("clbit", 0), cond.get_int("value", 1))
+        _read_condition_json(c, g)
     c.validate()
     return c^
 

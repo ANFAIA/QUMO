@@ -2,8 +2,8 @@
 
 Design (best-of synthesis):
   * Flat, cache-friendly instruction list (struct-of-POD), like Qiskit's Rust
-    `CircuitData` - no Python objects per gate, no pointer-chasing DAG unless a
-    pass asks for one (`qumo.compiler.dag`).
+    `CircuitData` - no Python objects per gate and no pointer-chasing DAG;
+    compiler passes work on the list directly.
   * Symbolic affine parameters (`Param`) bound without allocation.
   * Stim-style measurement records + DETECTOR / OBSERVABLE annotations and
     noise channels live in the same IR, so the QEC stack and the algorithm
@@ -456,6 +456,8 @@ struct Circuit(Copyable, Writable, Sized):
         for g in self.ops:
             if op_is_annotation(g.kind):
                 continue
+            if g.cond >= 0:
+                raise Error("QM-E202: controlled() cannot control a classically-conditioned '" + op_name(g.kind) + "'. Hint: control the gates first, then add the condition.")
             if g.acts_on(control):
                 raise Error("QM-E203: control qubit " + String(control) + " is already used by the circuit.")
             var k = g.kind

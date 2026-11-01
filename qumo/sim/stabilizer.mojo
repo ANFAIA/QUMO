@@ -83,7 +83,7 @@ struct TableauSimulator(Copyable):
     var zs: List[UInt64]
     var signs: List[UInt8]
     var rng: Rng
-    var records: List[UInt8]  # measurement record (Stim `rec`), one entry per MEASURE
+    var records: List[UInt8]  # measurement record (Stim `rec`), one entry per MEASURE site (0 if skipped)
     var creg: List[UInt8]  # classical register
     var chain_fired: Bool  # the current E / ELSE_CORRELATED_ERROR chain fired
 
@@ -582,6 +582,8 @@ struct TableauSimulator(Copyable):
         for g in circuit.ops:
             if g.cond >= 0:
                 if not self._condition_holds(circuit, g):
+                    if g.kind == Op.MEASURE:
+                        self.records.append(0)  # records are indexed by measurement site
                     continue
             var k = g.kind
             if op_is_unitary(k):

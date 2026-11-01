@@ -373,6 +373,8 @@ struct BranchingSimulator(Movable):
             self.frame.creg.append(0)
         for g in c.ops:
             if g.cond >= 0 and not self.frame._condition_holds(c, g):
+                if g.kind == Op.MEASURE:
+                    self.frame.records.append(0)  # records are indexed by measurement site
                 continue
             var k = g.kind
             if op_is_unitary(k):
@@ -394,6 +396,7 @@ struct BranchingSimulator(Movable):
 
 def sample_branching(c: Circuit, shots: Int, seed: UInt64 = 1234) raises -> SampleResult:
     """Shot-by-shot sampling on the branching simulator (any qubit count up to 512)."""
+    c.validate()
     if c.num_measurements == 0:
         raise Error("QM-E402: circuit has no measurements. Hint: call measure_all() or use evolve()/expectation().")
     if c.num_clbits > 62:

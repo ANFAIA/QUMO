@@ -358,7 +358,7 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E533", "qasm", "Math domain error (division by zero, log/sqrt of invalid value).", "Check the expression.")
     _e(c, "QM-E534", "qasm", "Unknown function or wrong arity in an expression.", "Supported: sin cos tan arcsin arccos arctan exp ln sqrt abs floor ceil pow mod.")
     _e(c, "QM-E540", "qasm", "Measurement maps a different number of qubits and bits.", "Qubit and bit operands must have equal size.")
-    _e(c, "QM-E541", "qasm", "Unsupported condition (multi-bit register value, nested or compound if).", "QUMO conditions test one bit: if (c[i] == 1) ...")
+    _e(c, "QM-E541", "qasm", "Unsupported condition: nested if, '||', 'else' after a register or '&&' test, a body that writes a bit it still tests, or a switch on a copy of bits measured since.", "Conditions test a bit, a whole register or an '&&' chain of bits; keep writes to tested bits at the end of the body.")
     _e(c, "QM-E550", "qasm", "Invalid gate modifier (non-integer pow, bad ctrl count).", "Use inv @, ctrl(n) @, negctrl @ or pow(k) @ with integer k.")
     _e(c, "QM-E551", "qasm", "Gate definition expands recursively.", "Gates must not call themselves.")
     _e(c, "QM-E552", "qasm", "OpenQASM export cannot express a classical condition: a single-bit condition on a multi-bit register (OpenQASM 2), or a register condition that does not cover every clbit.", "Export OpenQASM 3 (to_qasm) for single-bit conditions; condition on single bits or on the whole register.")

@@ -391,8 +391,8 @@ Fix: Qubit and bit operands must have equal size.
 
 ### QM-E541
 
-**Unsupported condition (multi-bit register value, nested or compound if).**  
-Fix: QUMO conditions test one bit: if (c[i] == 1) ...
+**Unsupported condition: nested if, '||', 'else' after a register or '&&' test, a body that writes a bit it still tests, or a switch on a copy of bits measured since.**  
+Fix: Conditions test a bit, a whole register or an '&&' chain of bits; keep writes to tested bits at the end of the body.
 
 ### QM-E550
 

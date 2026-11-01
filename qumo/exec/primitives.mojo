@@ -176,7 +176,7 @@ def run_estimator(pub: EstimatorPub) raises -> EstimatorResult:
     var sd_ptr = List[Float64](length=nsets * nobs, fill=0.0)
     var evp = ev_ptr.unsafe_ptr().as_unsafe_any_origin()
     var sdp = sd_ptr.unsafe_ptr().as_unsafe_any_origin()
-    var failed = List[Int](length=1, fill=0)
+    var failed = List[String](length=nsets, fill=String(""))
     var fp = failed.unsafe_ptr().as_unsafe_any_origin()
     var circ_ptr = Pointer(to=pub.circuit).as_unsafe_any_origin()
     var obs_ptr = Pointer(to=pub.observables).as_unsafe_any_origin()
@@ -200,16 +200,17 @@ def run_estimator(pub: EstimatorPub) raises -> EstimatorResult:
                     _estimate_shots(circ_ptr[], obs_ptr[][o], params, shots, seed + UInt64(s * 7919 + o), ev, sd)
                     evp[unsafe_offset=s * nobs + o] = ev
                     sdp[unsafe_offset=s * nobs + o] = sd
-        except:
-            fp[unsafe_offset=0] = 1
+        except e:
+            fp[unsafe_offset=s] = String(e)
 
     if nsets > 1 and pub.circuit.num_qubits <= PAR_SETS_MAX_QUBITS:
         parallelize(one, nsets)
     else:
         for s in range(nsets):
             one(s)
-    if failed[0] != 0:
-        raise Error("QM-E403: estimator task failed for at least one parameter set.")
+    for s in range(nsets):
+        if failed[s].byte_length() > 0:
+            raise Error("QM-E403: estimator task failed for parameter set " + String(s) + ": " + failed[s])
     for s in range(nsets):
         for o in range(nobs):
             res.evs[s][o] = ev_ptr[s * nobs + o]

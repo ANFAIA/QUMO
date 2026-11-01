@@ -695,12 +695,14 @@ struct QasmParser(Movable):
     var consts: Dict[String, Param]
     var inputs: Dict[String, Int]
     var int_vars: Dict[String, List[Int]]  # `int x;` + `x = c;`: the bits x mirrors (for switch)
+    var int_var_at: Dict[String, Int]  # len(ops) at `x = c;`: x is stale once those bits are rewritten
     var scopes: List[Scope]
     var cond_bit: Int
     var cond_val: Int
     var cond_reg: Int  # offset into circs[0].cond_table for register conditions (-1 none)
     var cond_reg_bits: List[Int]
     var cond_reg_vals: List[Int]
+    var pragma_if: Bool  # parsing `#pragma qumo if (...) <pragma body>`
     var call_names: List[String]
     var call_lines: List[Int]
     var warnings: List[String]
@@ -723,12 +725,14 @@ struct QasmParser(Movable):
         self.consts = Dict[String, Param]()
         self.inputs = Dict[String, Int]()
         self.int_vars = Dict[String, List[Int]]()
+        self.int_var_at = Dict[String, Int]()
         self.scopes = List[Scope]()
         self.cond_bit = -1
         self.cond_val = 1
         self.cond_reg = -1
         self.cond_reg_bits = List[Int]()
         self.cond_reg_vals = List[Int]()
+        self.pragma_if = False
         self.call_names = List[String]()
         self.call_lines = List[Int]()
         self.warnings = List[String]()
@@ -838,6 +842,15 @@ struct QasmParser(Movable):
             inst.cond_val = self.cond_val
             inst.cond_reg = self.cond_reg
         self.circs[len(self.circs) - 1].ops.append(inst)
+
+    def condition_last(mut self):
+        """Attach the active `if` / `switch` condition to the op just appended
+        by a Circuit builder (the channels kept in side tables bypass `emit`)."""
+        if self.cond_bit >= 0 and len(self.circs) == 1:
+            ref g = self.circs[0].ops[len(self.circs[0].ops) - 1]
+            g.cond = self.cond_bit
+            g.cond_val = self.cond_val
+            g.cond_reg = self.cond_reg
 
     def add_phase(mut self, v: Float64):
         if self.cond_bit >= 0 and len(self.circs) == 1:
@@ -1363,7 +1376,7 @@ struct QasmParser(Movable):
               or self.is_word(t, "return") or self.is_word(t, "break") or self.is_word(t, "continue")
               or self.is_word(t, "end") or self.is_word(t, "array") or self.is_word(t, "duration")
               or self.is_word(t, "stretch") or self.is_word(t, "complex")):
-            raise self.err("QM-E504", "OpenQASM feature '" + self.text(t) + "' is not supported by QUMO", t, "QUMO supports the gate-level subset: declarations, gates, modifiers, measure, reset, barrier, box, if on one bit, switch, constant for loops")
+            raise self.err("QM-E504", "OpenQASM feature '" + self.text(t) + "' is not supported by QUMO", t, "QUMO supports the gate-level subset: declarations, gates, modifiers, measure, reset, barrier, box, if on bits or a register, switch, constant for loops")
         else:
             # assignment `c = measure q;` / `c[0] = measure q[0];`
             var nm = self.text(t)
@@ -1587,10 +1600,36 @@ struct QasmParser(Movable):
                 self.circs[0].c_if(self.cond_bit, self.cond_val)
                 self.circs[0].ops[len(self.circs[0].ops) - 1].cond_reg = self.cond_reg
 
+    def parse_bit_test(mut self) raises -> Tuple[Int, Int]:
+        """One `c[i]`, `!c[i]`, `c[i] == v` or `c[i] != v` of an `&&` chain."""
+        var neg = False
+        if self.is_punct(self.peek(), P.BANG):
+            _ = self.next()
+            neg = True
+        var bt = self.peek()
+        var bits = self.parse_bit_operand()
+        if len(bits) != 1:
+            raise self.err("QM-E541", "an '&&' condition tests single bits, not a " + String(len(bits)) + "-bit register", bt, "write if (c[0] == 1 && c[1] == 0)")
+        var val = 1
+        var ct = self.peek()
+        if self.is_punct(ct, P.EQEQ) or self.is_punct(ct, P.NEQ):
+            _ = self.next()
+            var vt = self.peek()
+            val = self.parse_const_int("condition value")
+            if val != 0 and val != 1:
+                raise self.err("QM-E541", "a single bit can only be compared with 0 or 1", vt, "write if (c[0] == 1)")
+            if self.is_punct(ct, P.NEQ):
+                val = 1 - val
+        if neg:
+            val = 1 - val
+        return (bits[0], val)
+
     def parse_condition(mut self) raises -> Tuple[Int, Int]:
-        """`(c[0])`, `(!c[0])`, `(c[0] == 1)`, and whole-register `(c == N)`
-        (OpenQASM 2 style, N of any size). Register conditions are recorded in
-        self.cond_reg_bits / cond_reg_vals; the returned pair is the first bit."""
+        """`(c[0])`, `(!c[0])`, `(c[0] == 1)`, whole-register `(c == N)` (OpenQASM
+        2 style, N of any size), and `(c[0] == 1 && c[1] == 0)`, which is how
+        to_qasm writes a condition on part of the classical bits. Register and
+        `&&` conditions are recorded in self.cond_reg_bits / cond_reg_vals; the
+        returned pair is the first bit."""
         var lp = self.expect_punct(P.LPAREN, "'(' after if")
         self.cond_reg_bits = List[Int]()
         self.cond_reg_vals = List[Int]()
@@ -1617,6 +1656,8 @@ struct QasmParser(Movable):
                 for i in range(len(bits)):
                     self.cond_reg_bits.append(bits[i])
                     self.cond_reg_vals.append(vbits[i])
+                if self.is_punct(self.peek(), P.ANDAND) or self.is_punct(self.peek(), P.OROR):
+                    raise self.err("QM-E541", "a whole-register test cannot be combined with other tests", self.peek(), "spell the bits out: if (c[0] == 1 && c[1] == 0)")
                 _ = self.expect_punct(P.RPAREN, "')' to close the condition")
                 _ = lp
                 return (bits[0], vbits[0])
@@ -1628,13 +1669,35 @@ struct QasmParser(Movable):
                 val = 1 - val
         elif len(bits) > 1:
             raise self.err("QM-E541", "condition on a " + String(len(bits)) + "-bit register is ambiguous", bt, "index one bit: if (" + self.text(bt) + "[0]) ... or compare the register: if (" + self.text(bt) + " == 3)")
-        if self.is_punct(self.peek(), P.ANDAND) or self.is_punct(self.peek(), P.OROR):
-            raise self.err("QM-E541", "compound conditions are not supported", self.peek(), "nest the operations or test one bit per if")
-        _ = self.expect_punct(P.RPAREN, "')' to close the condition")
-        _ = lp
         if negate:
             val = 1 - val
+        if self.is_punct(self.peek(), P.ANDAND):
+            self.cond_reg_bits.append(bits[0])
+            self.cond_reg_vals.append(val)
+            while self.is_punct(self.peek(), P.ANDAND):
+                _ = self.next()
+                var test = self.parse_bit_test()
+                self.cond_reg_bits.append(test[0])
+                self.cond_reg_vals.append(test[1])
+        if self.is_punct(self.peek(), P.OROR):
+            raise self.err("QM-E541", "'||' conditions are not supported", self.peek(), "nest the operations or test one bit per if")
+        _ = self.expect_punct(P.RPAREN, "')' to close the condition")
+        _ = lp
         return (bits[0], val)
+
+    def check_condition_kept(self, tested: List[Int], first: Int, t: Token) raises:
+        """Conditions are evaluated gate by gate, so a write to a tested bit
+        changes what the conditioned ops after it see. A write as the very last
+        conditioned op is harmless; anything later would give a wrong answer."""
+        ref ops = self.circs[0].ops
+        var written = False
+        for i in range(first, len(ops)):
+            if written and ops[i].cond >= 0:
+                raise self.err("QM-E541", "this 'if' writes a bit it tests, and the operations after that write would see the new value", t, "measure into another bit, or move the write to the end of the body")
+            if ops[i].kind == Op.MEASURE:
+                for b in tested:
+                    if ops[i].clbit == b:
+                        written = True
 
     def parse_if(mut self) raises:
         var it = self.next()
@@ -1644,14 +1707,21 @@ struct QasmParser(Movable):
         self.cond_bit = cv[0]
         self.cond_val = cv[1]
         self.cond_reg = -1
+        var tested: List[Int] = [cv[0]]
         if len(self.cond_reg_bits) > 0:
+            tested = self.cond_reg_bits.copy()
             ref c0 = self.circs[0]
             self.cond_reg = len(c0.cond_table)
             c0.cond_table.append(len(self.cond_reg_bits))
             for i in range(len(self.cond_reg_bits)):
                 c0.cond_table.append(self.cond_reg_bits[i])
                 c0.cond_table.append(self.cond_reg_vals[i])
-        self.parse_statement()
+        var first = len(self.circs[0].ops)
+        if self.pragma_if:
+            self.pragma_if = False
+            self.parse_pragma_body(it)
+        else:
+            self.parse_statement()
         if self.is_word(self.peek(), "else"):
             if self.cond_reg >= 0:
                 raise self.err("QM-E541", "'else' after a whole-register condition is not supported", self.peek(), "test single bits when an else branch is needed")
@@ -1661,10 +1731,13 @@ struct QasmParser(Movable):
         self.cond_bit = -1
         self.cond_val = 1
         self.cond_reg = -1
+        self.check_condition_kept(tested, first, it)
 
     def parse_int_assign(mut self) raises:
         """`x = c;` for an `int x;`: x mirrors the bits of c, for a later switch."""
         var t = self.next()
+        if self.cond_bit >= 0:
+            raise self.err("QM-E541", "assignment to '" + self.text(t) + "' under a condition is not supported", t, "assign it before the if")
         _ = self.expect_punct(P.EQ, "'=' in assignment")
         var rt = self.peek()
         var nm = self.text(rt)
@@ -1672,6 +1745,7 @@ struct QasmParser(Movable):
         if rt.kind != TK.IDENT or not ri or self.regs[ri.value()].is_qubit:
             raise self.err("QM-E504", "an integer variable can only mirror a bit register", rt, "write '" + self.text(t) + " = c;' and use it as the target of a switch")
         self.int_vars[self.text(t)] = self.parse_bit_operand()
+        self.int_var_at[self.text(t)] = len(self.circs[0].ops)
         _ = self.expect_punct(P.SEMI, "';'")
 
     def parse_box(mut self) raises:
@@ -1738,6 +1812,14 @@ struct QasmParser(Movable):
             bits = self.int_vars[nm].copy()
             if len(bits) == 0:
                 raise self.err("QM-E541", "switch on '" + nm + "' before it is assigned", t, "assign it first: '" + nm + " = c;'")
+            # `x = c` records no value, x reads c's bits at the switch: refuse
+            # the switch if they may differ from the copy the program asked for
+            ref ops = self.circs[0].ops
+            for i in range(self.int_var_at[nm], len(ops)):
+                if ops[i].kind == Op.MEASURE:
+                    for b in bits:
+                        if ops[i].clbit == b:
+                            raise self.err("QM-E541", "'" + nm + "' was assigned from bits that were measured again before this switch", t, "switch right after the assignment, or on the register itself")
         elif ri and not self.regs[ri.value()].is_qubit:
             bits = self.parse_bit_operand()
         else:
@@ -1965,6 +2047,14 @@ struct QasmParser(Movable):
 
     def parse_pragma(mut self) raises:
         var pt = self.next()
+        if self.is_word(self.peek(), "if"):
+            # `#pragma qumo if (...) <pragma body>`: the form to_qasm writes
+            self.pragma_if = True
+            self.parse_if()
+            return
+        self.parse_pragma_body(pt)
+
+    def parse_pragma_body(mut self, pt: Token) raises:
         var t = self.peek()
         if self.is_word(t, "detector") or self.is_word(t, "observable"):
             self.forbid_in_gate(t)
@@ -2029,6 +2119,7 @@ struct QasmParser(Movable):
             if len(pa) != 1 or len(pb) != 1:
                 raise self.err("QM-E560", "pauli_channel_2 takes two single qubits", t, "write q[0], q[1]")
             self.circs[self.top()].pauli_channel_2(probs, pa[0], pb[0])
+            self.condition_last()
             return
         if self.is_word(t, "correlated_error") or self.is_word(t, "else_correlated_error"):
             self.forbid_in_gate(t)
@@ -2055,7 +2146,15 @@ struct QasmParser(Movable):
                     continue
                 break
             _ = self.expect_punct(P.SEMI, "end of pragma line")
+            if is_else and self.cond_bit >= 0:
+                # an ELSE reads whether its chain fired: it must run under the
+                # same condition as the error before it, or the flag is stale
+                ref ops = self.circs[0].ops
+                var n = len(ops)
+                if n == 0 or ops[n - 1].kind != Op.CORRELATED_ERROR or ops[n - 1].cond != self.cond_bit or ops[n - 1].cond_val != self.cond_val or ops[n - 1].cond_reg != self.cond_reg:
+                    raise self.err("QM-E541", "else_correlated_error under a condition must follow an error under the same condition", t, "put the whole chain in the same if")
             self.circs[self.top()].correlated_error(ep[0], eq, el, is_else)
+            self.condition_last()
             return
         if self.is_word(t, "kraus1") or self.is_word(t, "kraus2"):
             self.forbid_in_gate(t)
@@ -2088,6 +2187,7 @@ struct QasmParser(Movable):
             if len(ka) != 1 or len(kb) != knq - 1:
                 raise self.err("QM-E560", "kraus takes single qubits", t, "write q[0] or q[0], q[1]")
             self.circs[self.top()].apply_channel(ch, ka[0], kb[0] if knq == 2 else -1)
+            self.condition_last()
             return
         if t.kind == TK.PUNCT and t.sub == P.SEMI:
             raise self.err("QM-E560", "empty qumo pragma", pt, "e.g. '#pragma qumo depolarize1(0.01) q[0];', '#pragma qumo detector 0, 1'")
@@ -2568,6 +2668,25 @@ def format_param(p: Param, names: List[String]) -> String:
     return s^
 
 
+def _condition_text(circuit: Circuit, g: Instruction) -> String:
+    """`if (...) ` of a conditioned instruction: `c == N` over the whole
+    register when that is what it tests, an `&&` chain over its bits otherwise."""
+    if g.cond < 0:
+        return String()
+    if g.cond_reg < 0:
+        return "if (c[" + String(g.cond) + "] == " + String(g.cond_val) + ") "
+    try:
+        return "if (c == " + register_condition_value(circuit, g) + ") "
+    except:
+        pass
+    var s = String("if (")
+    for i in range(circuit.cond_table[g.cond_reg]):
+        if i > 0:
+            s += " && "
+        s += "c[" + String(circuit.cond_table[g.cond_reg + 1 + 2 * i]) + "] == " + String(circuit.cond_table[g.cond_reg + 2 + 2 * i])
+    return s + ") "
+
+
 def _gate_definition(k: Int) -> String:
     """Exact OpenQASM 3 definitions for natives missing from stdgates.inc."""
     if k == Op.SXDG: return "gate sxdg a { inv @ sx a; }"
@@ -2614,15 +2733,7 @@ def to_qasm(circuit: Circuit) -> String:
         out += "gphase(" + format_angle(circuit.global_phase) + ");\n"
     for g in circuit.ops:
         var k = g.kind
-        var cond = String()
-        if g.cond >= 0:
-            if g.cond_reg >= 0:
-                try:
-                    cond = "if (c == " + register_condition_value(circuit, g) + ") "
-                except e:
-                    cond = "// QM-E552 (partial register condition dropped): "
-            else:
-                cond = "if (c[" + String(g.cond) + "] == " + String(g.cond_val) + ") "
+        var cond = _condition_text(circuit, g)
         if k == Op.DETECTOR or k == Op.OBSERVABLE:
             out += "#pragma qumo "
             out += "detector" if k == Op.DETECTOR else "observable(" + String(g.q2) + ")"
@@ -2644,7 +2755,7 @@ def to_qasm(circuit: Circuit) -> String:
             out += cond + "reset q[" + String(g.q0) + "];\n"
             continue
         if k == Op.PAULI_CHANNEL_2:
-            var pc2 = String("#pragma qumo pauli_channel_2(")
+            var pc2 = "#pragma qumo " + cond + "pauli_channel_2("
             var po = Int(g.p0.offset)
             for j in range(15):
                 pc2 += ", " if j > 0 else ""
@@ -2652,7 +2763,7 @@ def to_qasm(circuit: Circuit) -> String:
             out += pc2 + ") q[" + String(g.q0) + "], q[" + String(g.q1) + "];\n"
             continue
         if k == Op.CORRELATED_ERROR:
-            var er = String("#pragma qumo ")
+            var er = "#pragma qumo " + cond
             er += "else_correlated_error(" if g.q2 != 0 else "correlated_error("
             er += format_angle(g.p0.offset) + ")"
             for j in range(g.q1):
@@ -2664,7 +2775,7 @@ def to_qasm(circuit: Circuit) -> String:
             continue
         if k == Op.KRAUS1 or k == Op.KRAUS2:
             ref ch = circuit.kraus[Int(g.p0.offset)]
-            var kr = String("#pragma qumo ") + op_name(k) + " \"" + ch.name + "\" ("
+            var kr = "#pragma qumo " + cond + op_name(k) + " \"" + ch.name + "\" ("
             var first = True
             for m in range(ch.count()):
                 for j in range(len(ch.re[m])):
