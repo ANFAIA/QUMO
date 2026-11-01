@@ -1072,7 +1072,7 @@ def run_trajectory_ops(circuit: Circuit, lo: Int, hi: Int, params: List[Float64]
     """One trajectory through ops [lo, hi). `fz` keeps the 1q gates still
     pending when it returns, so a caller can resume at the next range."""
     for i in range(lo, hi):
-        var g = circuit.ops[i]
+        ref g = circuit.ops[i]
         var k = g.kind
         if g.cond >= 0 and not circuit.condition_holds(g, creg):
             continue
