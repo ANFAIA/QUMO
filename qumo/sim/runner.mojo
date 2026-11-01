@@ -157,6 +157,11 @@ struct Fuser(Movable):
         for q in range(len(self.has)):
             self.flush(sv, q)
 
+    def clear(mut self):
+        """Forget pending gates (start of a new shot)."""
+        for q in range(len(self.has)):
+            self.has[q] = False
+
 
 # ---------------------------------------------------------------------------
 # Execution plan + cache blocking
@@ -1060,6 +1065,52 @@ def terminal_measure_map(circuit: Circuit) -> TerminalMeasureMap:
     return TerminalMeasureMap(qs^, cs^)
 
 
+@always_inline
+def run_trajectory_ops(circuit: Circuit, lo: Int, hi: Int, params: List[Float64], mut sv: StateVector,
+                       mut fz: Fuser, mut srng: Rng, mut creg: Int, mut chain_fired: Bool):
+    """One trajectory through ops [lo, hi). `fz` keeps the 1q gates still
+    pending when it returns, so a caller can resume at the next range."""
+    for i in range(lo, hi):
+        var g = circuit.ops[i]
+        var k = g.kind
+        if g.cond >= 0 and not circuit.condition_holds(g, creg):
+            continue
+        if op_is_unitary(k):
+            var a = op_arity(k)
+            if a == 1 and g.cond < 0:
+                if k != Op.I:
+                    fz.push(gate_matrix_1q(g, params), g.q0)
+                continue
+            for j in range(a):
+                fz.flush(sv, g.qubit(j))
+            apply_instruction(sv, g, params)
+            continue
+        if k == Op.MEASURE:
+            fz.flush(sv, g.q0)
+            var b = sv.measure(g.q0, srng)
+            if b == 1:
+                creg |= 1 << g.clbit
+            else:
+                creg &= ~(1 << g.clbit)
+        elif k == Op.RESET:
+            fz.flush(sv, g.q0)
+            sv.reset_qubit(g.q0, srng)
+        elif op_is_noise(k):
+            if k == Op.CORRELATED_ERROR:
+                fz.flush_all(sv)
+                _apply_table_noise(sv, circuit, g, srng, chain_fired)
+                continue
+            fz.flush(sv, g.q0)
+            if op_arity(k) == 2:
+                fz.flush(sv, g.q1)
+            if k == Op.PAULI_CHANNEL_2:
+                _apply_table_noise(sv, circuit, g, srng, chain_fired)
+            elif k == Op.KRAUS1 or k == Op.KRAUS2:
+                _apply_kraus(sv, circuit.kraus[Int(g.p0.value())], g.q0, g.q1, srng)
+            else:
+                _apply_noise(sv, g, srng, params)
+
+
 def sample(circuit: Circuit, shots: Int, seed: UInt64 = 1234,
            params: List[Float64] = List[Float64]()) raises -> SampleResult:
     """Sample measurement outcomes. Picks static sampling or trajectories."""
@@ -1085,49 +1136,13 @@ def sample(circuit: Circuit, shots: Int, seed: UInt64 = 1234,
     # trajectories
     var res = SampleResult(circuit.num_clbits, shots, "statevector:trajectories")
     var sv = StateVector(circuit.num_qubits)
+    var nops = len(circuit.ops)
     for shot in range(shots):
         var srng = rng.split(shot)
         sv.reset_to_zero()
         var creg = 0
         var chain_fired = False
         var fz = Fuser(circuit.num_qubits)
-        for g in circuit.ops:
-            var k = g.kind
-            if g.cond >= 0 and not circuit.condition_holds(g, creg):
-                continue
-            if op_is_unitary(k):
-                var a = op_arity(k)
-                if a == 1 and g.cond < 0:
-                    if k != Op.I:
-                        fz.push(gate_matrix_1q(g, params), g.q0)
-                    continue
-                for j in range(a):
-                    fz.flush(sv, g.qubit(j))
-                apply_instruction(sv, g, params)
-                continue
-            if k == Op.MEASURE:
-                fz.flush(sv, g.q0)
-                var b = sv.measure(g.q0, srng)
-                if b == 1:
-                    creg |= 1 << g.clbit
-                else:
-                    creg &= ~(1 << g.clbit)
-            elif k == Op.RESET:
-                fz.flush(sv, g.q0)
-                sv.reset_qubit(g.q0, srng)
-            elif op_is_noise(k):
-                if k == Op.CORRELATED_ERROR:
-                    fz.flush_all(sv)
-                    _apply_table_noise(sv, circuit, g, srng, chain_fired)
-                    continue
-                fz.flush(sv, g.q0)
-                if op_arity(k) == 2:
-                    fz.flush(sv, g.q1)
-                if k == Op.PAULI_CHANNEL_2:
-                    _apply_table_noise(sv, circuit, g, srng, chain_fired)
-                elif k == Op.KRAUS1 or k == Op.KRAUS2:
-                    _apply_kraus(sv, circuit.kraus[Int(g.p0.value())], g.q0, g.q1, srng)
-                else:
-                    _apply_noise(sv, g, srng, params)
+        run_trajectory_ops(circuit, 0, nops, params, sv, fz, srng, creg, chain_fired)
         res.record(creg)
     return res^

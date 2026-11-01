@@ -223,6 +223,26 @@ Fix: Pass matrices with sum K^dag K = identity; run them on density_evolve() or 
 **Invalid cache-block size for execute_plan_reordered (need 1 <= nb <= num_qubits).**  
 Fix: Use execute_plan(), or pass nb in [1, num_qubits].
 
+### QM-E480
+
+**A shot of a Program passed its budget of loop iterations (max_iterations, default 65536 back-edges per shot).**  
+Fix: The loop may never exit; raise max_iterations if it is only long.
+
+### QM-E481
+
+**Division or remainder by zero, or an integer power with a negative exponent, while a shot of a Program ran. The message gives the shot and line.**  
+Fix: Guard the divisor with an if.
+
+### QM-E482
+
+**A float reached an integer or a gate angle as NaN, infinite or out of range of the target type.**  
+Fix: Guard the value, or use a wider integer.
+
+### QM-E484
+
+**An opcode that a Program block cannot run: blocks take unitary gates, measure, reset, noise, barrier and tick.**  
+Fix: Report it: every other walker of the instruction list would skip such an opcode in silence.
+
 ### QM-E450
 
 **Invalid physical error rate (out of [0, 1], or above the surface-code threshold for fault-tolerant estimates).**  
@@ -408,6 +428,26 @@ Fix: Gates must not call themselves.
 
 **OpenQASM export cannot express a classical condition: a single-bit condition on a multi-bit register (OpenQASM 2), or a register condition that does not cover every clbit.**  
 Fix: Export OpenQASM 3 (to_qasm) for single-bit conditions; condition on single bits or on the whole register.
+
+### QM-E580
+
+**Classical type error: a cast the OpenQASM table refuses, or operands that do not mix (int with uint, float with angle, shift of an int).**  
+Fix: Cast one operand explicitly; docs/CONTROL_FLOW.md has the rules.
+
+### QM-E581
+
+**A classical variable may be read before it is assigned, on some path through the program.**  
+Fix: Assign it on every path, for example where it is declared. Bits start at 0 and are exempt.
+
+### QM-E583
+
+**Malformed control flow: break or continue outside a loop, else or case without its opener, or a region left open.**  
+Fix: Check the nesting of the block.
+
+### QM-E586
+
+**Detector or observable in a program with runtime control flow: they index measurements as if each ran once, and no decoder takes a syndrome of varying length.**  
+Fix: Move the QEC circuit out of the loop.
 
 ### QM-E560
 
