@@ -2297,6 +2297,8 @@ struct QasmParser(Movable):
             raise self.err("QM-E570", "too many unrolled loop iterations", ft, "QUMO unrolls loops at parse time; keep the total below " + String(_MAX_UNROLL))
         var body = self.pos
         if len(values) == 0:
+            if self.body_mentions("bit"):
+                raise self.err("QM-E504", "a bit declared in a loop that never runs still takes a clbit", rt, "parse with parse_qasm_program or load_any, which keep the loop")
             self.skip_statement()
             return
         var nm = self.text(vt)
@@ -3372,6 +3374,18 @@ struct QasmParser(Movable):
         self.pos = save
         return found
 
+    def body_mentions(mut self, word: String) raises -> Bool:
+        """Does the statement at self.pos hold this word?"""
+        var save = self.pos
+        self.skip_statement()
+        var stop = self.pos
+        self.pos = save
+        for i in range(save, stop):
+            ref t = self.toks[i]
+            if t.kind == TK.IDENT and self.text(t) == word:
+                return True
+        return False
+
     def body_assigns(mut self, nm: String) raises -> Bool:
         """Does the statement at self.pos assign `nm`?"""
         var save = self.pos
@@ -3392,6 +3406,7 @@ struct QasmParser(Movable):
         var runtime = False
         var r = self.peek()
         var fits = True
+        var empty = False
         try:
             if self.is_punct(r, P.LBRACK):
                 _ = self.next()
@@ -3407,6 +3422,8 @@ struct QasmParser(Movable):
                 # empty ranges fit; otherwise the two ends bound every value
                 if step != 0 and ((step > 0 and a <= b) or (step < 0 and a >= b)):
                     fits = _value_fits(a, ty) and _value_fits(b, ty)
+                else:
+                    empty = True
             elif self.is_punct(r, P.LBRACE):
                 _ = self.next()
                 while True:
@@ -3421,7 +3438,8 @@ struct QasmParser(Movable):
         if runtime or not fits:
             return True
         self.skip_iterable()
-        var needs = self.body_has_jump() or self.body_assigns(nm)
+        # a bit in the body takes a clbit even if the loop never runs, as on the tape
+        var needs = self.body_has_jump() or self.body_assigns(nm) or (empty and self.body_mentions("bit"))
         self.pos = save
         return needs
 

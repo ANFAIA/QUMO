@@ -1145,6 +1145,10 @@ class Gen:
             self.emit("%s = %s;" % (nm, e))
         else:
             self.emit("%s %s = %s;" % (tn, nm, e))
+            if kind == "float":
+                # a folded constant out of range for a cast is refused at parse time,
+                # whether or not a shot reaches the cast: keep this one a variable
+                self.emit("%s = %s + 0.0;" % (nm, nm))
         self.vars[nm] = t
 
     def assign(self):

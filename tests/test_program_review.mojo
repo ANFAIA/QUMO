@@ -339,8 +339,12 @@ def test_e1_bit_in_a_loop_body() raises:
     assert_equal(_int("output int r = 0; for int k in [0:2] { if (r > 99) { break; } bit b; if (k == 0) { b = 1; } if (b == 1) { r += 1; } }"), 1)
     assert_true(_err("int k = 0; k = 0; while (k < 1) { k += 1; bit b; b = 1; } b = 1;").byte_length() > 0)
     assert_true(_err("if (c[0]) { bit b; } else { bit[2] b; b[1] = 1; }") == "")
-    # unrolled and region forms keep one classical bit per declaration
+    # unrolled and region forms keep one classical bit per declaration, even when
+    # the loop never runs (the oracle found that one)
     assert_equal(_run("for int k in [0:2] { bit b; b = 1; }").sample.num_clbits, 9)
+    assert_equal(_run("for int k in [1:0] { bit b; b = 1; }").sample.num_clbits, 9)
+    assert_equal(_run("for int k in [1:0] { if (c[0]) { break; } bit b; b = 1; }").sample.num_clbits, 9)
+    assert_equal(sample_program(load_any(H + "for int k in [1:0] { bit b; b = 1; }"), 2, 1).sample.num_clbits, 9)
 
 
 def test_e2_literal_wider_than_its_operand() raises:
