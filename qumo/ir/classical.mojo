@@ -659,10 +659,10 @@ def _common(a: CExpr, b: CExpr, mut ca: CExpr, mut cb: CExpr) raises -> CType:
     var la = a.is_literal()
     var lb = b.is_literal()
     # bit and bool hold plain non-negative values: an int takes them as they are
-    if a.ty().tag != ta.tag and tb.tag == CT.INT:
-        ta = int_type(max(tb.width, ta.width + 1))
-    elif b.ty().tag != tb.tag and ta.tag == CT.INT:
-        tb = int_type(max(ta.width, tb.width + 1))
+    if a.ty().tag != ta.tag and tb.tag == CT.INT and not lb:
+        ta = int_type(min(max(tb.width, ta.width + 1), 64))
+    elif b.ty().tag != tb.tag and ta.tag == CT.INT and not la:
+        tb = int_type(min(max(ta.width, tb.width + 1), 64))
     var common: CType
     if ta.tag == CT.FLOAT or tb.tag == CT.FLOAT:
         if ta.tag == CT.ANGLE and lb:
