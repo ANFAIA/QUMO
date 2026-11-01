@@ -4107,7 +4107,7 @@ def to_qasm(circuit: Circuit) -> String:
 def _ops_text(circuit: Circuit, lo: Int, hi: Int, names: List[String], mut out: String):
     """One line of OpenQASM per instruction of [lo, hi), appended to `out`."""
     for i in range(lo, hi):
-        var g = circuit.ops[i]
+        ref g = circuit.ops[i]
         var k = g.kind
         var cond = String()
         if g.cond >= 0:
