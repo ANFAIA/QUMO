@@ -608,14 +608,6 @@ def _run_shots[B: ShotBackend](p: Program, cfg: Cfg, shots: Int, seed: UInt64, f
     return res^
 
 
-def _huge_angle(g: Instruction) -> Bool:
-    """Past 2^53 every float is an integer multiple of pi/2 to `is_clifford`."""
-    for f in range(3):
-        if abs(g.param(f).offset) >= 1e6:
-            return True
-    return False
-
-
 def is_clifford_program(p: Program) -> Bool:
     """Every block holds Clifford gates with constant angles and Pauli noise."""
     for s in p.tape:
@@ -623,7 +615,7 @@ def is_clifford_program(p: Program) -> Bool:
             continue
         for i in range(s.a, s.b):
             ref g = p.body.ops[i]
-            if op_is_unitary(g.kind) and (g.is_parametric() or not g.is_clifford() or _huge_angle(g)):
+            if op_is_unitary(g.kind) and (g.is_parametric() or not g.is_clifford()):
                 return False
             if op_is_noise(g.kind) and not op_is_pauli_noise(g.kind):
                 return False

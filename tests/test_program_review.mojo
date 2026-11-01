@@ -7,12 +7,14 @@ commit a55628b they raise, or pass a wrong value.
 from std.math import pi
 from std.testing import assert_equal, assert_true, assert_raises
 
+from qumo.exec.dispatch import choose_method_cpu
 from qumo.ir.classical import CExpr, CN, CStore, ce_binary, ce_cast, ce_lnot, int_type
 from qumo.ir.gates import Op
 from qumo.ir.program import ProgramBuilder
 from qumo.ir.qasm import load_any, parse_qasm, parse_qasm_program, to_qasm
 from qumo.sim.program_runner import ProgramResult, sample_interpreted, sample_program
 from qumo.sim.runner import SampleResult
+from qumo.sim.stabilizer import quarter_turns, sample_stabilizer
 
 comptime H = "OPENQASM 3.0; qubit[2] q; bit[8] c; "
 
@@ -216,6 +218,26 @@ def test_a7_huge_angles_are_not_clifford() raises:
     # past 2^53 every float looks like a multiple of pi/2; auto must not pick the tableau
     var p = parse_qasm_program("qubit[1] q; bit[1] c; int k = 0; k = 1; rz(18446744073709551616) q[0]; c[0] = measure q[0];")
     assert_equal(sample_program(p, 5, 1).sample.method, "statevector:trajectories")
+
+
+def test_flat_huge_angles_are_not_clifford() raises:
+    # the ratio to pi/2 comes out whole for both, and neither is near a multiple of
+    # pi/2: 2^60 is 0.78 rad away and the other, with one fractional bit left in the
+    # ratio, 0.57 rad. On a dynamic circuit auto used to pick the tableau.
+    var angles: List[Float64] = [1152921504606846976.0, 4493496820199122.0]
+    for a in angles:
+        var text = "qubit[1] q; bit[2] c; h q[0]; rz(" + String(Int(a)) + ") q[0]; h q[0]; reset q[0]; x q[0]; h q[0]; rz(" + String(Int(a)) + ") q[0]; h q[0]; c[0] = measure q[0]; c[1] = measure q[0];"
+        var f = parse_qasm(text)
+        assert_true(not f.is_clifford())
+        assert_equal(choose_method_cpu(f, 100), "statevector")
+        with assert_raises(contains="QM-E701"):
+            _ = quarter_turns(a)
+        with assert_raises(contains="QM-E701"):
+            _ = sample_stabilizer(f, 10, 1)
+    # the limit is on the ratio: a whole number of quarter turns below it stays Clifford
+    assert_equal(quarter_turns(1000001.0 * pi / 2), 1)
+    assert_true(parse_qasm("qubit[1] q; rz(1500.0 * pi) q[0];").is_clifford())
+    assert_true(not parse_qasm("qubit[1] q; rz(1000000000.0 * pi) q[0];").is_clifford())
 
 
 def test_a7_typed_constants_in_integer_positions() raises:
@@ -433,6 +455,7 @@ def main() raises:
     test_a6_bool_and_bit_are_int_in_arithmetic()
     test_a7_exact_integers()
     test_a7_huge_angles_are_not_clifford()
+    test_flat_huge_angles_are_not_clifford()
     test_a7_typed_constants_in_integer_positions()
     test_a8_for_stepping_at_the_int64_ends()
     test_a9_typed_constants_in_gate_arguments()

@@ -65,7 +65,7 @@ equivalent).
 from std.math import atan2, sqrt, cos, sin, pi
 from std.memory import bitcast
 from std.bit import pop_count
-from qumo.ir.circuit import Circuit, Instruction
+from qumo.ir.circuit import Circuit, Instruction, QUARTER_TURN_LIMIT
 from qumo.ir.gates import Op, op_arity, matrix_2q
 from qumo.compiler.target import Target
 from qumo.compiler.common import GateSet, is_plain_gate, is_bound, inst_matrix_1q
@@ -627,7 +627,7 @@ def _quarter_turns(g: Instruction) -> Int:
         return -1
     var r = g.p0.value() / (pi / 2)
     var k = round(r)
-    if abs(r - k) > 1e-12:
+    if not (abs(r) < QUARTER_TURN_LIMIT) or abs(r - k) > 1e-12:
         return -1
     var ki = Int(k) % 4
     return ki + 4 if ki < 0 else ki

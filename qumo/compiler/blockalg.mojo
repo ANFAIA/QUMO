@@ -38,7 +38,7 @@ statevector, n <= 14) to fix it after an exact replacement.
 from std.math import pi, atan2, sqrt
 from std.bit import pop_count
 from qumo.ir.gates import Op, op_arity, op_inverse_kind, op_is_unitary, matrix_1q, matrix_2q, M2, M4
-from qumo.ir.circuit import Instruction
+from qumo.ir.circuit import Instruction, QUARTER_TURN_LIMIT
 from qumo.ir.param import Param
 from qumo.compiler.common import GateSet
 from qumo.compiler.kak import cx_cost
@@ -666,7 +666,7 @@ def _quarter_turns(g: Instruction) raises -> Int:
         raise Error("QM-E701: symbolic rotation '" + String(g) + "' is not Clifford. Hint: bind parameters or keep the gate out of Clifford blocks.")
     var r = g.p0.value() / (pi / 2)
     var k = round(r)
-    if abs(r - k) > 1e-9:
+    if not (abs(r) < QUARTER_TURN_LIMIT) or abs(r - k) > 1e-9:
         raise Error("QM-E701: gate '" + String(g) + "' is not Clifford. Hint: only rotations by multiples of pi/2 are Clifford.")
     return ((Int(k) % 4) + 4) % 4
 

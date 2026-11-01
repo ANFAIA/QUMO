@@ -31,6 +31,12 @@ from qumo.ir.param import Param
 from qumo.ir.draw import draw_circuit
 from qumo.ir.kraus import KrausChannel
 
+# Largest |theta / (pi/2)| read as a count of quarter turns. Past it the rounding of
+# the ratio alone is more than the 1e-9 tolerance of `quarter_turns`, so a ratio that
+# comes out whole no longer says the angle is near a multiple of pi/2: at 2^51, with
+# one fractional bit left, some such angles are 0.57 rad away from every one.
+comptime QUARTER_TURN_LIMIT = 4194304.0  # 2^22
+
 
 @fieldwise_init
 struct Instruction(ImplicitlyCopyable, Writable):
@@ -86,7 +92,7 @@ struct Instruction(ImplicitlyCopyable, Writable):
             if self.p0.is_symbolic():
                 return False
             var r = self.p0.value() / (pi / 2)
-            return abs(r - round(r)) < 1e-12
+            return abs(r) < QUARTER_TURN_LIMIT and abs(r - round(r)) < 1e-12
         return False
 
     def write_to(self, mut w: Some[Writer]):

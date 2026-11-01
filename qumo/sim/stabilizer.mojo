@@ -31,7 +31,7 @@ from std.bit import pop_count, count_trailing_zeros
 from std.math import pi
 
 from qumo.ir.gates import Op, op_name, op_arity, op_is_unitary, op_is_noise
-from qumo.ir.circuit import Circuit, Instruction
+from qumo.ir.circuit import Circuit, Instruction, QUARTER_TURN_LIMIT
 from qumo.ir.param import Param
 from qumo.ir.pauli import PauliTerm
 from qumo.sim.rng import Rng
@@ -73,6 +73,12 @@ def bound_instruction(g: Instruction, params: List[Float64]) -> Instruction:
 def quarter_turns(theta: Float64) raises -> Int:
     """Return k in 0..3 with theta = k * pi/2 (mod 2 pi); QM-E701 otherwise."""
     var r = theta / (pi / 2)
+    if not (abs(r) < QUARTER_TURN_LIMIT):
+        raise Error(
+            "QM-E701: rotation angle " + String(theta)
+            + " is too large to tell from a multiple of pi/2. Hint: use the"
+            " state-vector simulator (qumo.sim.runner), or reduce the angle."
+        )
     var k = Int(round(r))
     if abs(r - Float64(k)) > 1e-9:
         raise Error(
