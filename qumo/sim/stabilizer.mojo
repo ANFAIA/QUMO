@@ -32,6 +32,7 @@ from std.math import pi
 
 from qumo.ir.gates import Op, op_name, op_arity, op_is_unitary, op_is_noise
 from qumo.ir.circuit import Circuit, Instruction
+from qumo.ir.param import Param
 from qumo.ir.pauli import PauliTerm
 from qumo.sim.rng import Rng
 from qumo.sim.runner import SampleResult
@@ -55,6 +56,18 @@ def _phase_word(x1: UInt64, z1: UInt64, x2: UInt64, z2: UInt64) -> Int:
     var plus = (ax & by) | (ay & bz) | (az & bx)
     var minus = (ay & bx) | (az & by) | (ax & bz)
     return Int(pop_count(plus)) - Int(pop_count(minus))
+
+
+def bound_instruction(g: Instruction, params: List[Float64]) -> Instruction:
+    """`g` with its symbolic angles replaced by their values."""
+    var h = g
+    if g.p0.is_symbolic():
+        h.p0 = Param(g.p0.resolve(params))
+    if g.p1.is_symbolic():
+        h.p1 = Param(g.p1.resolve(params))
+    if g.p2.is_symbolic():
+        h.p2 = Param(g.p2.resolve(params))
+    return h
 
 
 def quarter_turns(theta: Float64) raises -> Int:
@@ -429,8 +442,10 @@ struct TableauSimulator(Copyable):
             self._col_x(pivot)
         return m
 
-    def reset(mut self, q: Int):
-        if self.measure(q, 0) == 1:
+    def reset(mut self, q: Int, forced: Int = -1):
+        """Measure, then flip to |0>. The outcome is random like any measurement's:
+        forcing it would also force a qubit entangled with this one."""
+        if self.measure(q, forced) == 1:
             self.x(q)
 
     # ------------------------------------------------------------ expectations
@@ -578,13 +593,24 @@ struct TableauSimulator(Copyable):
         if len(self.creg) < circuit.num_clbits:
             for _ in range(circuit.num_clbits - len(self.creg)):
                 self.creg.append(0)
+        self.run_range(circuit, 0, len(circuit.ops), noisy, forced_zero, List[Float64]())
+
+    def run_range(mut self, circuit: Circuit, lo: Int, hi: Int, noisy: Bool, forced_zero: Bool,
+                  params: List[Float64]) raises:
+        """Execute ops [lo, hi). A non-empty `params` binds symbolic gates when
+        they run: a program's runtime angles are known only then, and a value
+        that is not a Clifford angle raises QM-E701."""
         var forced = 0 if forced_zero else -1
-        for g in circuit.ops:
+        var bind = len(params) > 0
+        for i in range(lo, hi):
+            var g = circuit.ops[i]
             if g.cond >= 0:
                 if not self._condition_holds(circuit, g):
                     if g.kind == Op.MEASURE:
                         self.records.append(0)  # records are indexed by measurement site
                     continue
+            if bind:
+                g = bound_instruction(g, params)
             var k = g.kind
             if op_is_unitary(k):
                 self.apply_gate(g)
@@ -594,7 +620,7 @@ struct TableauSimulator(Copyable):
                 if g.clbit >= 0:
                     self.creg[g.clbit] = UInt8(m)
             elif k == Op.RESET:
-                self.reset(g.q0)
+                self.reset(g.q0, forced)
             elif op_is_noise(k):
                 if noisy:
                     self.apply_noise_in(circuit, g)

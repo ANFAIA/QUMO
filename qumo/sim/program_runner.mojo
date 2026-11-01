@@ -1,13 +1,26 @@
 """Shot-by-shot interpreter of a `Program`.
 
 The interpreter walks `cfg_of(p)`: blocks of quantum ops go to a backend, ASSIGN
-and branch conditions run on a `CStore` that is allocated once, so a shot
-allocates nothing. Backends are static generics over `ShotBackend`.
+and branch conditions run on a `CStore` that is allocated once per worker.
+Backends are static generics over `ShotBackend`:
+  * `SvBackend`, the state vector. Blocks run through `run_trajectory_ops`, the
+    loop of `sample`, in the same RNG order, and pending 1q gates survive block
+    boundaries. Long stretches of static unitary gates run from a `BlockPlan`,
+    built once by `build_plan`.
+  * `TableauBackend` and `BranchingBackend`, through `run_range`. They refuse
+    symbolic gates, so each runtime angle is bound as its gate runs; a value that
+    is not a Clifford angle raises QM-E701 on the tableau.
 
-A program without runtime regions is a plain circuit: `sample_program` hands it to
-`sample`, which is what makes `from_circuit` give identical counts. The state-vector
-backend runs blocks through the same `run_trajectory_ops` as `sample`, in the same
-RNG order, and keeps pending 1q gates across blocks (qumo.sim.runner.Fuser).
+`sample_program` picks the method. A program without runtime regions is a plain
+circuit and goes to `sample`, which is what makes `from_circuit` give identical
+counts. Otherwise a program of Clifford gates and Pauli noise goes to the tableau,
+and the rest to the state vector. 'gpu' runs on the CPU with QM-W020, because each
+shot branches on its own. 'density', 'ptsbe' and 'frame' raise QM-E483: each of them
+needs one fixed sequence of operations for all shots.
+
+Shots run in parallel up to PAR_SHOTS_MAX_QUBITS qubits, each on `rng.split(shot)`,
+so the counts do not depend on the number of workers; above that, shots run in
+series and the kernels in parallel.
 
 A shot counts the back-edges it takes; past `max_iterations` it raises QM-E480,
 which is how a classical infinite loop ends. Parameters are `input` values first
@@ -16,17 +29,25 @@ assigned.
 """
 
 from std.math import isnan, isinf
+from std.runtime import parallelism_level
 
-from qumo.ir.circuit import Circuit
+from max.algorithm import parallelize
+
+from qumo.ir.circuit import Circuit, Instruction
 from qumo.ir.classical import BitReader, CN, CT, CEval, CStore, angle_radians, eval_nodes, wrap_int
-from qumo.ir.program import BB, Cfg, FORR, Program, SK, TERM, check_program
+from qumo.ir.gates import Op, op_is_noise, op_is_pauli_noise, op_is_unitary
+from qumo.ir.program import BB, Cfg, FORR, Program, SK, TERM, check_program, slot_prefix
+from qumo.sim.branching import BranchingSimulator
 from qumo.sim.rng import Rng
 from qumo.sim.runner import (
-    Fuser, SampleResult, check_statevector_size, run_trajectory_ops, sample,
+    Fuser, KOp, PAR_SHOTS_MAX_QUBITS, SampleResult, build_plan, check_statevector_size, execute_plan,
+    run_trajectory_ops, sample,
 )
+from qumo.sim.stabilizer import TableauSimulator
 from qumo.sim.statevector import StateVector
 
 comptime DEFAULT_MAX_ITERATIONS = 65536
+comptime PLAN_MIN_GATES = 32  # a stretch of static gates this long runs from a plan
 
 
 struct ProgramResult(Copyable, Writable):
@@ -38,6 +59,7 @@ struct ProgramResult(Copyable, Writable):
     var out_int: List[Int]  # shots x outputs: value of output j in shot s at [s * n + j]
     var out_real: List[Float64]  # same shape; holds the float outputs
     var iterations: List[Int]  # back-edges per shot
+    var warnings: List[String]  # QM-Wxxx notes on how the run was done
 
     def __init__(out self, var sample: SampleResult):
         self.sample = sample^
@@ -46,6 +68,7 @@ struct ProgramResult(Copyable, Writable):
         self.out_int = List[Int]()
         self.out_real = List[Float64]()
         self.iterations = List[Int]()
+        self.warnings = List[String]()
 
     def _output(self, name: String) raises -> Int:
         for j in range(len(self.out_names)):
@@ -80,10 +103,84 @@ struct ProgramResult(Copyable, Writable):
         w.write(self.sample, " mean_iterations=", self.mean_iterations())
 
 
-trait ShotBackend(BitReader):
+@fieldwise_init
+struct _Span(ImplicitlyCopyable):
+    var lo: Int
+    var hi: Int
+    var plan: Int  # index in BlockPlan.plans, or -1: run op by op
+
+
+struct BlockPlan(Copyable):
+    """Each OPS block as spans: stretches of at least PLAN_MIN_GATES gates that
+    are unitary, unconditioned and free of runtime angles become one fused,
+    cache-blocked plan, built once and shared by all shots and workers."""
+
+    var spans: List[_Span]
+    var first: List[Int]  # by op index: the first span of the block that starts there
+    var plans: List[List[KOp]]
+
+    def __init__(out self):
+        self.spans = List[_Span]()
+        self.first = List[Int]()
+        self.plans = List[List[KOp]]()
+
+    def __init__(out self, p: Program, params: List[Float64]) raises:
+        self.spans = List[_Span]()
+        self.plans = List[List[KOp]]()
+        ref c = p.body
+        self.first = List[Int](length=len(c.ops) + 1, fill=-1)
+        var runtime = List[Bool](length=c.num_params(), fill=False)
+        for i in range(c.num_params()):
+            runtime[i] = c.param_names[i].startswith(slot_prefix())
+        for s in p.tape:
+            if s.kind != SK.OPS:
+                continue
+            self.first[s.a] = len(self.spans)
+            var i = s.a
+            while i < s.b:
+                var j = i
+                var gates = 0
+                while j < s.b and _plannable(c.ops[j], runtime):
+                    if op_is_unitary(c.ops[j].kind):
+                        gates += 1
+                    j += 1
+                if gates >= PLAN_MIN_GATES:
+                    var sub = c.empty_like()
+                    for k in range(i, j):
+                        sub.ops.append(c.ops[k])
+                    self.spans.append(_Span(i, j, len(self.plans)))
+                    self.plans.append(build_plan(sub, params))
+                    i = j
+                    continue
+                var e = max(j, i + 1)
+                var at = len(self.spans) - 1
+                if at >= self.first[s.a] and self.spans[at].plan < 0:
+                    self.spans[at].hi = e
+                else:
+                    self.spans.append(_Span(i, e, -1))
+                i = e
+
+
+def _plannable(g: Instruction, runtime: List[Bool]) -> Bool:
+    if g.kind == Op.BARRIER or g.kind == Op.TICK:
+        return True
+    if g.cond >= 0 or not op_is_unitary(g.kind):
+        return False
+    return not ((g.p0.index >= 0 and runtime[g.p0.index]) or (g.p1.index >= 0 and runtime[g.p1.index]) or (g.p2.index >= 0 and runtime[g.p2.index]))
+
+
+trait ShotBackend(BitReader, Movable, Deinitable):
     """One simulator as the interpreter sees it."""
 
-    def begin_shot(mut self, shot: Int):
+    @staticmethod
+    def make(p: Program, root: Rng, plan: BlockPlan) raises -> Self:
+        ...
+
+    @staticmethod
+    def method() -> String:
+        ...
+
+    def begin_shot(mut self, shot: Int) raises:
         ...
 
     def run_block(mut self, p: Program, lo: Int, hi: Int, params: List[Float64]) raises:
@@ -97,7 +194,7 @@ trait ShotBackend(BitReader):
         ...
 
 
-struct SvBackend(ShotBackend, Movable):
+struct SvBackend(ShotBackend):
     """State vector, with the trajectory loop of `sample`."""
 
     var sv: StateVector
@@ -106,16 +203,26 @@ struct SvBackend(ShotBackend, Movable):
     var rng: Rng
     var creg: Int
     var chain_fired: Bool
+    var plan: BlockPlan
 
-    def __init__(out self, n: Int, root: Rng):
+    def __init__(out self, n: Int, root: Rng, plan: BlockPlan):
         self.sv = StateVector(n)
         self.fz = Fuser(n)
         self.root = root.copy()
         self.rng = root.copy()
         self.creg = 0
         self.chain_fired = False
+        self.plan = plan.copy()
 
-    def begin_shot(mut self, shot: Int):
+    @staticmethod
+    def make(p: Program, root: Rng, plan: BlockPlan) raises -> Self:
+        return SvBackend(p.num_qubits(), root, plan)
+
+    @staticmethod
+    def method() -> String:
+        return "statevector:trajectories"
+
+    def begin_shot(mut self, shot: Int) raises:
         self.rng = self.root.split(shot)
         self.sv.reset_to_zero()
         self.fz.clear()
@@ -123,7 +230,17 @@ struct SvBackend(ShotBackend, Movable):
         self.chain_fired = False
 
     def run_block(mut self, p: Program, lo: Int, hi: Int, params: List[Float64]) raises:
-        run_trajectory_ops(p.body, lo, hi, params, self.sv, self.fz, self.rng, self.creg, self.chain_fired)
+        var at = self.plan.first[lo]
+        var pos = lo
+        while pos < hi:
+            var sp = self.plan.spans[at]
+            at += 1
+            if sp.plan >= 0:
+                self.fz.flush_all(self.sv)
+                execute_plan(self.sv, self.plan.plans[sp.plan])
+            else:
+                run_trajectory_ops(p.body, sp.lo, sp.hi, params, self.sv, self.fz, self.rng, self.creg, self.chain_fired)
+            pos = sp.hi
 
     def get_bit(self, c: Int) -> Int:
         return (self.creg >> c) & 1
@@ -136,6 +253,98 @@ struct SvBackend(ShotBackend, Movable):
 
     def packed_bits(self, n: Int) -> Int:
         return self.creg
+
+
+struct TableauBackend(ShotBackend):
+    """Clifford programs of any width."""
+
+    var sim: TableauSimulator
+    var root: Rng
+    var nc: Int
+
+    def __init__(out self, n: Int, nc: Int, root: Rng):
+        self.sim = TableauSimulator(n, 0)
+        self.root = root.copy()
+        self.nc = nc
+        self.sim.creg = List[UInt8](length=nc, fill=0)
+
+    @staticmethod
+    def make(p: Program, root: Rng, plan: BlockPlan) raises -> Self:
+        return TableauBackend(p.num_qubits(), p.num_clbits(), root)
+
+    @staticmethod
+    def method() -> String:
+        return "stabilizer:tableau"
+
+    def begin_shot(mut self, shot: Int) raises:
+        self.sim.reset_state()
+        self.sim.rng = self.root.split(shot)
+        self.sim.chain_fired = False
+        for _ in range(self.nc):
+            self.sim.creg.append(0)
+
+    def run_block(mut self, p: Program, lo: Int, hi: Int, params: List[Float64]) raises:
+        self.sim.run_range(p.body, lo, hi, True, False, params)
+
+    def get_bit(self, c: Int) -> Int:
+        return Int(self.sim.creg[c])
+
+    def set_bit(mut self, c: Int, v: Int):
+        self.sim.creg[c] = UInt8(1 if v != 0 else 0)
+
+    def packed_bits(self, n: Int) -> Int:
+        var out = 0
+        for b in range(n):
+            if self.sim.creg[b] != 0:
+                out |= 1 << b
+        return out
+
+
+struct BranchingBackend(ShotBackend):
+    """Near-Clifford programs past the state-vector limit."""
+
+    var sim: BranchingSimulator
+    var root: Rng
+    var rng: Rng
+    var n: Int
+    var nc: Int
+
+    def __init__(out self, n: Int, nc: Int, root: Rng) raises:
+        self.sim = BranchingSimulator(n, 0)
+        self.root = root.copy()
+        self.rng = root.copy()
+        self.n = n
+        self.nc = nc
+
+    @staticmethod
+    def make(p: Program, root: Rng, plan: BlockPlan) raises -> Self:
+        return BranchingBackend(p.num_qubits(), p.num_clbits(), root)
+
+    @staticmethod
+    def method() -> String:
+        return "stabilizer:branching"
+
+    def begin_shot(mut self, shot: Int) raises:
+        self.rng = self.root.split(shot)
+        var fresh = BranchingSimulator(self.n, self.rng.next_u64())
+        self.sim = fresh^
+        self.sim.frame.creg = List[UInt8](length=self.nc, fill=0)
+
+    def run_block(mut self, p: Program, lo: Int, hi: Int, params: List[Float64]) raises:
+        self.sim.run_range(p.body, lo, hi, self.rng, True, params)
+
+    def get_bit(self, c: Int) -> Int:
+        return Int(self.sim.frame.creg[c])
+
+    def set_bit(mut self, c: Int, v: Int):
+        self.sim.frame.creg[c] = UInt8(1 if v != 0 else 0)
+
+    def packed_bits(self, n: Int) -> Int:
+        var out = 0
+        for b in range(n):
+            if self.sim.frame.creg[b] != 0:
+                out |= 1 << b
+        return out
 
 
 def _eval_error(status: Int, shot: Int, line: Int) -> Error:
@@ -305,53 +514,138 @@ def _output_vars(p: Program) -> List[Int]:
     return out^
 
 
-def _record_outputs(p: Program, outs: List[Int], st: CStore, mut res: ProgramResult):
+def _run_shots[B: ShotBackend](p: Program, cfg: Cfg, shots: Int, seed: UInt64, full: List[Float64],
+                               plan: BlockPlan, max_iterations: Int, workers: Int) raises -> ProgramResult:
+    """All shots, in chunks of consecutive shots. Each chunk owns a backend and a
+    store and writes to its own slots of the shared arrays, so the outcome is the
+    same for any number of workers; the first failing shot is the one reported."""
+    var outs = _output_vars(p)
+    var nout = len(outs)
+    var nc = p.num_clbits()
+    var cregs = List[Int](length=shots, fill=0)
+    var iters = List[Int](length=shots, fill=0)
+    var ints = List[Int](length=shots * nout, fill=0)
+    var reals = List[Float64](length=shots * nout, fill=0.0)
+    var chunks = 1 if workers <= 1 else min(shots, workers * 4)
+    chunks = max(chunks, 1)
+    var errors = List[String](length=chunks, fill=String(""))
+    var cp = cregs.unsafe_ptr().as_unsafe_any_origin()
+    var ip = iters.unsafe_ptr().as_unsafe_any_origin()
+    var vi = ints.unsafe_ptr().as_unsafe_any_origin()
+    var vr = reals.unsafe_ptr().as_unsafe_any_origin()
+    var ep = errors.unsafe_ptr().as_unsafe_any_origin()
+    var prog = Pointer(to=p).as_unsafe_any_origin()
+    var graph = Pointer(to=cfg).as_unsafe_any_origin()
+    var fullp = Pointer(to=full).as_unsafe_any_origin()
+    var planp = Pointer(to=plan).as_unsafe_any_origin()
+    var outp = Pointer(to=outs).as_unsafe_any_origin()
+    var root = Rng(seed)
+
+    def chunk(c: Int) {imm cp, imm ip, imm vi, imm vr, imm ep, imm prog, imm graph, imm fullp, imm planp, imm outp, imm root, imm shots, imm chunks, imm nout, imm nc, imm max_iterations}:
+        try:
+            var b = B.make(prog[], root, planp[])
+            var st = CStore(prog[].num_store, len(prog[].nodes) + 1, fullp[].copy())
+            for shot in range(c * shots // chunks, (c + 1) * shots // chunks):
+                b.begin_shot(shot)
+                ip[unsafe_offset=shot] = run_shot(prog[], graph[], b, st, shot, max_iterations)
+                cp[unsafe_offset=shot] = b.packed_bits(nc)
+                for j in range(nout):
+                    ref cv = prog[].vars[outp[][j]]
+                    if cv.ty.tag == CT.FLOAT:
+                        vr[unsafe_offset=shot * nout + j] = st.reals[cv.store]
+                    else:
+                        vi[unsafe_offset=shot * nout + j] = st.ints[cv.store]
+        except e:
+            ep[unsafe_offset=c] = String(e)
+
+    if chunks > 1:
+        parallelize(chunk, chunks)
+    else:
+        chunk(0)
+    _ = len(cregs)
+    _ = len(iters)
+    _ = len(ints)
+    _ = len(reals)
+    _ = len(outs)
+    _ = root.s0
+    for c in range(chunks):
+        if errors[c].byte_length() > 0:
+            raise Error(errors[c])
+    var res = ProgramResult(SampleResult(nc, shots, B.method()))
     for v in outs:
-        ref cv = p.vars[v]
-        if cv.ty.tag == CT.FLOAT:
-            res.out_int.append(0)
-            res.out_real.append(st.reals[cv.store])
-        else:
-            res.out_int.append(st.ints[cv.store])
-            res.out_real.append(0.0)
-
-
-def _new_result(p: Program, shots: Int, method: String) -> ProgramResult:
-    var res = ProgramResult(SampleResult(p.num_clbits(), shots, method))
-    for v in _output_vars(p):
         res.out_names.append(p.vars[v].name)
         res.out_is_real.append(p.vars[v].ty.tag == CT.FLOAT)
+    for s in range(shots):
+        res.sample.record(cregs[s])
+    res.iterations = iters^
+    res.out_int = ints^
+    res.out_real = reals^
     return res^
+
+
+def is_clifford_program(p: Program) -> Bool:
+    """Every block holds Clifford gates with constant angles and Pauli noise."""
+    for s in p.tape:
+        if s.kind != SK.OPS:
+            continue
+        for i in range(s.a, s.b):
+            ref g = p.body.ops[i]
+            if op_is_unitary(g.kind) and (g.is_parametric() or not g.is_clifford()):
+                return False
+            if op_is_noise(g.kind) and not op_is_pauli_noise(g.kind):
+                return False
+    return True
+
+
+def _method_for(p: Program, method: String) raises -> String:
+    """Which backend runs `p`: 'statevector', 'tableau' or 'branching'."""
+    if method == "density" or method == "ptsbe" or method == "frame":
+        raise Error("QM-E483: method '" + method + "' cannot run a program: it needs one fixed sequence of operations for all shots. Hint: use 'auto', 'statevector', 'tableau' or 'branching'.")
+    if method == "auto" or method == "gpu":
+        return "tableau" if is_clifford_program(p) else "statevector"
+    if method == "stabilizer":
+        return "tableau"
+    if method == "statevector" or method == "tableau" or method == "branching":
+        return method
+    raise Error("QM-E483: unknown method '" + method + "'. Hint: use 'auto', 'statevector', 'tableau' or 'branching'.")
 
 
 def sample_interpreted(p: Program, shots: Int, seed: UInt64 = 1234,
                        params: List[Float64] = List[Float64](),
-                       max_iterations: Int = DEFAULT_MAX_ITERATIONS) raises -> ProgramResult:
-    """Run every shot through the interpreter, even for a plain circuit."""
+                       max_iterations: Int = DEFAULT_MAX_ITERATIONS,
+                       method: String = "statevector", workers: Int = 0) raises -> ProgramResult:
+    """Run every shot through the interpreter, even for a plain circuit. `workers`
+    0 picks parallel shots up to PAR_SHOTS_MAX_QUBITS qubits; 1 runs in series."""
     var cfg = check_program(p)
-    check_statevector_size(p.num_qubits())
     if p.num_clbits() > 62:
         raise Error("QM-E406: the sampler packs classical registers into 62 bits; program has " + String(p.num_clbits()) + " clbits. Hint: measure fewer bits or split the register.")
     var full = shot_params(p, params)
-    var res = _new_result(p, shots, "statevector:trajectories")
-    var outs = _output_vars(p)
-    var st = CStore(p.num_store, len(p.nodes) + 1, full^)
-    var b = SvBackend(p.num_qubits(), Rng(seed))
-    for shot in range(shots):
-        b.begin_shot(shot)
-        res.iterations.append(run_shot(p, cfg, b, st, shot, max_iterations))
-        res.sample.record(b.packed_bits(p.num_clbits()))
-        _record_outputs(p, outs, st, res)
-    return res^
+    var m = _method_for(p, method)
+    var w = workers
+    if w <= 0:
+        w = parallelism_level() if m != "statevector" or p.num_qubits() <= PAR_SHOTS_MAX_QUBITS else 1
+    if m == "tableau":
+        return _run_shots[TableauBackend](p, cfg, shots, seed, full, BlockPlan(), max_iterations, w)
+    if m == "branching":
+        return _run_shots[BranchingBackend](p, cfg, shots, seed, full, BlockPlan(), max_iterations, w)
+    check_statevector_size(p.num_qubits())
+    return _run_shots[SvBackend](p, cfg, shots, seed, full, BlockPlan(p, full), max_iterations, w)
 
 
 def sample_program(p: Program, shots: Int, seed: UInt64 = 1234,
                    params: List[Float64] = List[Float64](),
-                   max_iterations: Int = DEFAULT_MAX_ITERATIONS) raises -> ProgramResult:
-    """Sample a program. A plain circuit takes the path of `sample`."""
-    var c = p.try_flatten()
-    if c:
-        var res = ProgramResult(sample(c.value(), shots, seed, params))
-        res.iterations = List[Int](length=shots, fill=0)
-        return res^
-    return sample_interpreted(p, shots, seed, params, max_iterations)
+                   max_iterations: Int = DEFAULT_MAX_ITERATIONS,
+                   method: String = "auto") raises -> ProgramResult:
+    """Sample a program with the method named in the module docstring. Any method
+    other than 'auto' is taken at its word, and `result.warnings` tells what ran."""
+    var chosen = _method_for(p, method)
+    if (method == "auto" or method == "statevector") and not p.has_runtime_region():
+        var c = p.try_flatten()
+        if c:
+            var res = ProgramResult(sample(c.value(), shots, seed, params))
+            res.iterations = List[Int](length=shots, fill=0)
+            return res^
+    var res = sample_interpreted(p, shots, seed, params, max_iterations, chosen)
+    if method == "gpu":
+        res.warnings.append("QM-W020: device 'gpu' requested but a program branches shot by shot, which the GPU samplers do not run: ran on the CPU (" + res.sample.method + ").")
+    return res^

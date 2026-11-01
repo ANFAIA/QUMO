@@ -901,6 +901,7 @@ def evolve_into(mut sv: StateVector, circuit: Circuit, params: List[Float64]) ra
 
 
 comptime MAX_SV_QUBITS = 32
+comptime PAR_SHOTS_MAX_QUBITS = 14  # above, shots run in series and kernels in parallel
 
 
 def check_statevector_size(n: Int) raises:

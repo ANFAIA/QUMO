@@ -327,6 +327,7 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E480", "simulation", "A shot of a Program passed its budget of loop iterations (max_iterations, default 65536 back-edges per shot).", "The loop may never exit; raise max_iterations if it is only long.")
     _e(c, "QM-E481", "simulation", "Division or remainder by zero, or an integer power with a negative exponent, while a shot of a Program ran. The message gives the shot and line.", "Guard the divisor with an if.")
     _e(c, "QM-E482", "simulation", "A float reached an integer or a gate angle as NaN, infinite or out of range of the target type.", "Guard the value, or use a wider integer.")
+    _e(c, "QM-E483", "simulation", "A simulation method that cannot run a Program ('density', 'ptsbe', 'frame': they need one fixed sequence of operations for all shots), or an unknown method name.", "Use 'auto', 'statevector', 'tableau' or 'branching'.")
     _e(c, "QM-E484", "simulation", "An opcode that a Program block cannot run: blocks take unitary gates, measure, reset, noise, barrier and tick.", "Report it: every other walker of the instruction list would skip such an opcode in silence.")
     _e(c, "QM-E450", "simulation", "Invalid physical error rate (out of [0, 1], or above the surface-code threshold for fault-tolerant estimates).", "Probabilities must lie in [0, 1]; fault-tolerant estimation needs p < 1e-2.")
     _e(c, "QM-E460", "execution", "No devices available in the execution pool.", "Add Device.cpu() at least.")

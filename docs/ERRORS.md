@@ -238,6 +238,11 @@ Fix: Guard the divisor with an if.
 **A float reached an integer or a gate angle as NaN, infinite or out of range of the target type.**  
 Fix: Guard the value, or use a wider integer.
 
+### QM-E483
+
+**A simulation method that cannot run a Program ('density', 'ptsbe', 'frame': they need one fixed sequence of operations for all shots), or an unknown method name.**  
+Fix: Use 'auto', 'statevector', 'tableau' or 'branching'.
+
 ### QM-E484
 
 **An opcode that a Program block cannot run: blocks take unitary gates, measure, reset, noise, barrier and tick.**  
@@ -439,10 +444,20 @@ Fix: Cast one operand explicitly; docs/CONTROL_FLOW.md has the rules.
 **A classical variable may be read before it is assigned, on some path through the program.**  
 Fix: Assign it on every path, for example where it is declared. Bits start at 0 and are exempt.
 
+### QM-E582
+
+**Classical type not representable: a width outside 1..64, float[32], or a mutable angle without a width.**  
+Fix: float is binary64; write angle[n] for a variable.
+
 ### QM-E583
 
 **Malformed control flow: break or continue outside a loop, else or case without its opener, or a region left open.**  
 Fix: Check the nesting of the block.
+
+### QM-E584
+
+**A value known only at run time where a constant is needed: qubit index, size, modifier, const initializer.**  
+Fix: Use a constant, or a for loop that can unroll.
 
 ### QM-E586
 

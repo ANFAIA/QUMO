@@ -23,7 +23,7 @@ from std.math import pi, cos, sin, sqrt
 from qumo.ir.gates import Op, op_name, op_arity, op_is_unitary, op_is_noise, op_is_annotation
 from qumo.ir.circuit import Circuit, Instruction
 from qumo.sim.rng import Rng
-from qumo.sim.stabilizer import TableauSimulator
+from qumo.sim.stabilizer import TableauSimulator, bound_instruction
 from qumo.sim.runner import SampleResult
 from qumo.compiler.common import GateSet
 from qumo.compiler.basis import expand_rule
@@ -371,11 +371,19 @@ struct BranchingSimulator(Movable):
         var n_clbits = c.num_clbits
         while len(self.frame.creg) < n_clbits:
             self.frame.creg.append(0)
-        for g in c.ops:
+        self.run_range(c, 0, len(c.ops), rng, noisy, List[Float64]())
+
+    def run_range(mut self, c: Circuit, lo: Int, hi: Int, mut rng: Rng, noisy: Bool, params: List[Float64]) raises:
+        """Execute ops [lo, hi); a non-empty `params` binds symbolic gates as they run."""
+        var bind = len(params) > 0
+        for i in range(lo, hi):
+            var g = c.ops[i]
             if g.cond >= 0 and not self.frame._condition_holds(c, g):
                 if g.kind == Op.MEASURE:
                     self.frame.records.append(0)  # records are indexed by measurement site
                 continue
+            if bind:
+                g = bound_instruction(g, params)
             var k = g.kind
             if op_is_unitary(k):
                 if g.is_parametric():
