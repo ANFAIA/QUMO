@@ -108,7 +108,7 @@ struct ProgramCompileResult(Copyable, Writable):
     var target_name: String
     var restored_swaps: Int  # SWAPs added to return to region layouts
     var blocks_checked: Int  # blocks proved equal to their source by dense_equiv
-    var blocks_unchecked: Int  # with measurement, reset or noise, or too wide for it
+    var blocks_unchecked: Int  # with a reset, noise or a conditional gate, or over 10 wires
 
     def __init__(out self, var program: Program):
         self.program = program^
