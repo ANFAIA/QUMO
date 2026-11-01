@@ -47,7 +47,8 @@ from qumo.ir.kraus import KrausChannel
 from qumo.ir.param import Param
 from qumo.ir.classical import (
     CExpr, CN, CF, CT, CType, CNode, type_name, bit_type, bool_type, int_type, uint_type, float_type,
-    angle_type, ce_binary, ce_bool, ce_bnot, ce_cast, ce_function, ce_lnot, ce_logical, ce_neg, angle_radians,
+    angle_type, ce_binary, ce_bool, ce_bnot, ce_cast, ce_explicit_cast, ce_function, ce_lnot, ce_logical, ce_neg,
+    angle_radians,
 )
 from qumo.ir.program import CReg, FORR, Program, SK, TapeBuilder, check_program, slot_prefix
 
@@ -462,6 +463,15 @@ def tokenize_qasm(src: String) raises -> List[Token]:
                 except:
                     raise _lex_error(src, "QM-E501", "malformed number", i, line, "write numbers like 0.5, 1e-3 or 3")
                 _push(toks, TK.FLOAT, 0, i, j, line, v)
+            elif j - i > 18:
+                # past 64 bits iv wrapped: the token's value comes from the digits
+                var digits = String(unsafe_from_utf8=bs[i:j]).replace("_", "")
+                var v: Float64
+                try:
+                    v = Float64(digits)
+                except:
+                    raise _lex_error(src, "QM-E501", "malformed number", i, line, "write numbers like 0.5, 1e-3 or 3")
+                _push(toks, TK.INT, 0, i, j, line, v)
             else:
                 _push(toks, TK.INT, 0, i, j, line, Float64(iv))
             i = j
@@ -698,6 +708,7 @@ struct Scope(Copyable):
     var qnames: List[String]  # qubit bindings: gate arguments
     var qubits: List[Int]
     var closed: Bool  # gate scope: outer locals invisible
+    var exprs: List[CExpr]  # typed values of `names`, for loop variables; else empty
 
     def __init__(out self, closed: Bool):
         self.names = List[String]()
@@ -705,10 +716,34 @@ struct Scope(Copyable):
         self.qnames = List[String]()
         self.qubits = List[Int]()
         self.closed = closed
+        self.exprs = List[CExpr]()
 
 
 comptime _MAX_GATE_DEPTH = 64
 comptime _MAX_UNROLL = 1000000
+
+
+struct NK:
+    """What a name of a program scope stands for."""
+
+    comptime VAR = 0  # index: variable id
+    comptime CONST = 1  # index: into const_vals, a folded declaration or a loop value
+    comptime REG = 2  # index: into regs, a bit register declared in a block
+
+
+@fieldwise_init
+struct _Name(Copyable):
+    var name: String
+    var kind: Int
+    var index: Int
+
+
+@fieldwise_init
+struct _LoopName(Copyable):
+    """A loop variable counts as declared first in the body of its loop."""
+
+    var name: String
+    var depth: Int  # block depth of the body
 
 
 struct QasmParser(Movable):
@@ -745,14 +780,15 @@ struct QasmParser(Movable):
     var prog: Program
     var tb: TapeBuilder
     var reassigned: Dict[String, Bool]  # names assigned after their declaration
-    var const_exprs: Dict[String, CExpr]  # typed values of folded declarations
+    var const_exprs: Dict[String, CExpr]  # typed values of global declarations (both parsers)
     var input_types: Dict[String, CType]  # `input` of a type other than float
-    var var_names: List[String]  # visible variables, innermost last
-    var var_ids: List[Int]
-    var scope_marks: List[Int]  # len(var_names) at each open scope
-    var const_marks: List[Int]  # len(scope_consts) at each open scope
-    var scope_consts: List[String]
+    var names: List[_Name]  # visible names of program scopes, innermost last
+    var scope_marks: List[Int]  # len(names) at each open block
+    var const_vals: List[CExpr]  # values of NK.CONST names
+    var scoped_regs: Dict[Int, Int]  # token of a block's `bit` declaration -> its register
     var temp_count: Int
+    var block_depth: Int  # open `{`, in both parsers
+    var loop_names: List[_LoopName]
 
     def __init__(out self, src: String, name: String) raises:
         self.src = src
@@ -789,12 +825,13 @@ struct QasmParser(Movable):
         self.reassigned = Dict[String, Bool]()
         self.const_exprs = Dict[String, CExpr]()
         self.input_types = Dict[String, CType]()
-        self.var_names = List[String]()
-        self.var_ids = List[Int]()
+        self.names = List[_Name]()
         self.scope_marks = List[Int]()
-        self.const_marks = List[Int]()
-        self.scope_consts = List[String]()
+        self.const_vals = List[CExpr]()
+        self.scoped_regs = Dict[Int, Int]()
         self.temp_count = 0
+        self.block_depth = 0
+        self.loop_names = List[_LoopName]()
 
     # ------------------------------------------------------------ tokens
     def peek(self, k: Int = 0) -> Token:
@@ -936,6 +973,8 @@ struct QasmParser(Movable):
     # ------------------------------------------------------------ names
     def known_value_names(self) -> List[String]:
         var out = List[String]()
+        for e in self.names:
+            out.append(e.name)
         for s in self.scopes:
             for nm in s.names:
                 out.append(nm)
@@ -958,13 +997,19 @@ struct QasmParser(Movable):
 
     def check_new_name(self, t: Token) raises:
         var nm = self.text(t)
+        for l in self.loop_names:
+            if l.name == nm and l.depth == self.block_depth:
+                raise self.err("QM-E522", "'" + nm + "' is the loop variable, declared first in this body", t, "pick another name, or declare it in an inner block")
+        if self.program_mode:
+            var inner = len(self.scope_marks) > 0
+            var lo = self.scope_marks[len(self.scope_marks) - 1] if inner else 0
+            for i in range(lo, len(self.names)):
+                if self.names[i].name == nm:
+                    raise self.err("QM-E522", "'" + nm + "' is already declared in this scope", t, "pick another name, or declare it in an inner block")
+            if inner:
+                return  # a block may shadow what lies outside it
         if nm in self.reg_index or nm in self.inputs or nm in self.consts:
             raise self.err("QM-E522", "name '" + nm + "' is already declared", t, "pick a unique name for each register, input and constant")
-        if self.program_mode:
-            var lo = self.scope_marks[len(self.scope_marks) - 1] if len(self.scope_marks) > 0 else 0
-            for i in range(lo, len(self.var_names)):
-                if self.var_names[i] == nm:
-                    raise self.err("QM-E522", "variable '" + nm + "' is already declared in this scope", t, "pick another name, or declare it in an inner block")
 
     # ------------------------------------------------------------ expressions
     def lookup_value(self, t: Token) raises -> Param:
@@ -987,7 +1032,11 @@ struct QasmParser(Movable):
             if self.scopes[s].closed:
                 break
             s -= 1
-        if self.program_mode and self.find_var(nm) >= 0:
+        var k = self.find_name(nm) if self.program_mode and self.depth == 0 else -1
+        if k >= 0:
+            ref e = self.names[k]
+            if e.kind == NK.CONST:
+                return Param(_const_radians(self.const_vals[e.index]))
             raise self.err("QM-E584", "'" + nm + "' changes at run time, and a constant is needed here", t, "qubit indices, sizes and modifiers are fixed at parse time; use a constant, or a for loop that can unroll")
         var c = self.consts.get(nm)
         if c:
@@ -1165,12 +1214,45 @@ struct QasmParser(Movable):
             hint = "did you mean " + _quote_list(sug) + "? " + hint
         raise self.err("QM-E534", "unknown function '" + nm + "'", f, hint)
 
+    def literal_ahead(self, at: Int) -> Bool:
+        """The token at offset `at` ends a constant: no operator follows it."""
+        var n = self.peek(at)
+        if n.kind != TK.PUNCT:
+            return n.kind == TK.IDENT or n.kind == TK.EOF
+        return n.sub == P.COMMA or n.sub == P.RPAREN or n.sub == P.RBRACK or n.sub == P.COLON or n.sub == P.RBRACE or n.sub == P.LBRACE or n.sub == P.SEMI
+
     def parse_const_int(mut self, what: String) raises -> Int:
         var t = self.peek()
+        # a plain literal stays exact: the float path rounds above 2^53
+        var neg = self.is_punct(t, P.MINUS)
+        var lit = self.peek(1) if neg else t
+        if lit.kind == TK.INT and self.literal_ahead(2 if neg else 1):
+            var value = self.parse_c_literal(lit)
+            if value.root().ty.tag == CT.UINT and not (neg and value.const_int() == -9223372036854775807 - 1):
+                raise self.err("QM-E580", what + " does not fit a 64-bit int", lit, "use a smaller value")
+            _ = self.next()
+            if neg:
+                _ = self.next()
+            return 0 - value.const_int() if neg else value.const_int()
+        if (self.program_mode or len(self.const_exprs) > 0 or len(self.scopes) > 0) and self.reads_typed():
+            # typed constants compute in their types, exactly
+            var e = self.parse_cexpr()
+            if not e.is_const():
+                raise self.err("QM-E584", what + " must be a constant", t, "use a constant, or a for loop that can unroll")
+            if e.ty().tag != CT.FLOAT:
+                if e.ty().tag == CT.UINT and e.const_int() < 0:
+                    raise self.err("QM-E580", what + " does not fit a 64-bit int", t, "use a smaller value")
+                return e.const_int()
+            var x = e.const_float()
+            if x != floor(x) or abs(x) >= 9007199254740992.0:
+                raise self.err("QM-E530", what + " must be an integer, got " + String(x), t, "use an integer constant")
+            return Int(x)
         var p = self.parse_expr()
         var v = self.need_const(p, t, what)
         if v != floor(v):
             raise self.err("QM-E530", what + " must be an integer, got " + String(v), t, "use an integer constant")
+        if abs(v) >= 9007199254740992.0:
+            raise self.err("QM-E580", what + " is too large to compute exactly", t, "write it as one integer literal")
         return Int(v)
 
     # ------------------------------------------------------------ operands
@@ -1255,7 +1337,7 @@ struct QasmParser(Movable):
                 in_gate = True
                 break
             s -= 1
-        var ri = self.reg_index.get(nm)
+        var ri = self.find_register(nm)
         if not ri:
             if in_gate:
                 raise self.err("QM-E520", "'" + nm + "' is not an argument of this gate", t, "gate bodies may only use their own qubit arguments")
@@ -1298,7 +1380,7 @@ struct QasmParser(Movable):
             raise self.err("QM-E500", "expected a classical bit operand, found " + self.describe(t), t, "write c[0] or c")
         _ = self.next()
         var nm = self.text(t)
-        var ri = self.reg_index.get(nm)
+        var ri = self.find_register(nm)
         if not ri:
             var cands = List[String]()
             for r in self.regs:
@@ -1350,11 +1432,13 @@ struct QasmParser(Movable):
             if t.sub == P.LBRACE:
                 _ = self.next()
                 self.push_scope()
+                self.block_depth += 1
                 while not self.is_punct(self.peek(), P.RBRACE):
                     if self.peek().kind == TK.EOF:
                         raise self.err("QM-E500", "missing '}' to close block", t, "every '{' needs a matching '}'")
                     self.parse_statement()
                 _ = self.next()
+                self.block_depth -= 1
                 self.pop_scope()
                 return
             raise self.err("QM-E500", "unexpected " + self.describe(t) + " at start of statement", t, "statements start with a declaration, a gate name, measure, reset, barrier, if or for")
@@ -1469,15 +1553,18 @@ struct QasmParser(Movable):
         else:
             # assignment `c = measure q;` / `c[0] = measure q[0];`
             var nm = self.text(t)
-            var ri = self.reg_index.get(nm)
+            var k = self.find_name(nm) if self.program_mode else -1
+            var ri = self.find_register(nm)
             if ri and not self.regs[ri.value()].is_qubit:
                 self.forbid_in_gate(t)
                 self.parse_measure_assign()
             elif ri:
                 raise self.err("QM-E500", "statement starts with qubit register '" + nm + "'", t, "a gate name is missing, e.g. 'h " + nm + "[0];'")
-            elif self.program_mode and self.find_var(nm) >= 0:
+            elif k >= 0 and self.names[k].kind == NK.VAR:
                 self.forbid_in_gate(t)
                 self.parse_var_assign()
+            elif k >= 0 or self.is_loop_name(nm):
+                raise self.err("QM-E504", "assignment to '" + nm + "', a constant here", t, "drop 'const', or assign to a variable; a loop variable that changes needs parse_qasm_program or load_any")
             elif nm in self.int_vars:
                 self.parse_int_assign()
             elif nm in self.consts or nm in self.inputs:
@@ -1501,6 +1588,8 @@ struct QasmParser(Movable):
 
     def parse_reg_decl(mut self, is_qubit: Bool) raises:
         var kw = self.next()
+        if is_qubit and self.block_depth > 0:
+            raise self.err("QM-E504", "qubits are declared at global scope", kw, "move the declaration out of the block")
         var old_style = self.is_word(kw, "qreg") or self.is_word(kw, "creg")
         var size = 1
         var have_size = False
@@ -1537,8 +1626,12 @@ struct QasmParser(Movable):
         if not init_measure and not init_value:
             _ = self.expect_punct(P.SEMI, "';'")
         var nm = self.text(nt)
+        var scoped = self.program_mode and not is_qubit and len(self.scope_marks) > 0
+        var known = self.scoped_regs.get(kw.start) if scoped else None
         var offset: Int
-        if is_qubit:
+        if known:
+            offset = self.regs[known.value()].offset  # the same declaration, on a later pass of an unrolled loop
+        elif is_qubit:
             offset = self.circs[0].num_qubits
             for ref c in self.circs:
                 c.num_qubits = offset + size
@@ -1546,8 +1639,17 @@ struct QasmParser(Movable):
             offset = self.circs[0].num_clbits
             for ref c in self.circs:
                 c.num_clbits = offset + size
-        self.reg_index[nm] = len(self.regs)
-        self.regs.append(Register(nm, offset, size, is_qubit))
+        if scoped:
+            if not known:
+                self.scoped_regs[kw.start] = len(self.regs)
+                self.regs.append(Register(nm, offset, size, False))
+            self.names.append(_Name(nm, NK.REG, self.scoped_regs[kw.start]))
+            if not init_measure and not init_value:
+                # a block's bit starts at 0 each time it is entered
+                self.assign_bits(offset, size, nm, CExpr.literal_int(0), kw)
+        else:
+            self.reg_index[nm] = len(self.regs)
+            self.regs.append(Register(nm, offset, size, is_qubit))
         if init_measure:
             _ = self.next()  # '='
             var mt = self.next()  # 'measure'
@@ -1605,9 +1707,22 @@ struct QasmParser(Movable):
             self.prog.user_params.append(p.index)
 
     def parse_classical_decl(mut self, is_const: Bool) raises:
-        var tt = self.skip_type()
-        if self.is_word(tt, "bit") or self.is_word(tt, "qubit"):
-            raise self.err("QM-E504", "'const' registers are not supported", tt, "declare 'bit[n] c;' without const")
+        var first = self.peek()
+        if self.is_word(first, "bit") or self.is_word(first, "qubit"):
+            raise self.err("QM-E504", "'const' registers are not supported", first, "declare 'bit[n] c;' without const")
+        # a type the classical table covers decides the value, as in a program;
+        # a designator it refuses (float[32]) keeps the legacy untyped constant
+        var ty = float_type()
+        var typed = True
+        var save = self.pos
+        try:
+            ty = self.parse_ctype(False)
+        except:
+            typed = False
+            self.pos = save
+        var tt = first
+        if not typed:
+            tt = self.skip_type()
         var nt = self.expect_ident("variable name")
         self.check_new_name(nt)
         if not self.is_punct(self.peek(), P.EQ):
@@ -1617,14 +1732,34 @@ struct QasmParser(Movable):
                 self.int_vars[self.text(nt)] = List[Int]()
                 return
             raise self.err("QM-E504", "classical variables need an initializer", self.peek(), "write 'const float x = 0.5;' (QUMO folds classical values at parse time)")
-        _ = self.next()
+        var eq = self.next()
+        var nm = self.text(nt)
+        if typed:
+            var start = self.pos
+            var ok = False
+            var value = CExpr()
+            try:
+                var e = self.parse_cexpr()
+                if self.is_punct(self.peek(), P.SEMI):
+                    value = ce_cast(e, ty)
+                    ok = value.is_const()
+            except err:
+                var msg = String(err)
+                if msg.startswith("QM-E580") or msg.startswith("QM-E533") or msg.startswith("QM-E482"):
+                    raise self.relocate(msg, eq)
+            if ok:
+                _ = self.next()
+                self.const_exprs[nm] = value.copy()
+                self.consts[nm] = Param(_const_radians(value))
+                return
+            self.pos = start  # depends on an input: an affine Param, below
         var v = self.parse_expr()
         _ = self.expect_punct(P.SEMI, "';'")
         if self.is_word(tt, "int") or self.is_word(tt, "uint"):
             if not v.is_symbolic():
                 v = Param(Float64(Int(v.offset)))
         _ = is_const
-        self.consts[self.text(nt)] = v
+        self.consts[nm] = v
 
     def parse_gate_def(mut self) raises:
         var gt = self.next()
@@ -2050,7 +2185,7 @@ struct QasmParser(Movable):
             return
         if self.is_word(t, "if"):
             _ = self.next()
-            self.skip_balanced(P.LPAREN, P.RPAREN, t)
+            self.skip_balanced(P.LPAREN, P.RPAREN, self.peek())
             self.skip_statement()
             if self.is_word(self.peek(), "else"):
                 _ = self.next()
@@ -2058,7 +2193,13 @@ struct QasmParser(Movable):
             return
         if self.is_word(t, "while") or self.is_word(t, "switch"):
             _ = self.next()
-            self.skip_balanced(P.LPAREN, P.RPAREN, t)
+            self.skip_balanced(P.LPAREN, P.RPAREN, self.peek())
+            self.skip_statement()
+            return
+        if self.is_word(t, "box"):
+            _ = self.next()
+            if self.is_punct(self.peek(), P.LBRACK):
+                self.skip_balanced(P.LBRACK, P.RBRACK, self.peek())
             self.skip_statement()
             return
         if self.is_word(t, "for"):
@@ -2092,9 +2233,16 @@ struct QasmParser(Movable):
         var ft = self.next()
         # optional loop-variable type
         var loop_ty = int_type(64, True)
+        var typed = self.depth == 0
         if not self.is_word(self.peek(1), "in"):
-            if self.program_mode and self.depth == 0:
-                loop_ty = self.parse_ctype(False)
+            if self.depth == 0:
+                var save = self.pos
+                try:
+                    loop_ty = self.parse_ctype(True)
+                except:
+                    self.pos = save
+                    _ = self.skip_type()
+                    typed = False
             else:
                 _ = self.skip_type()
         var vt = self.expect_ident("loop variable")
@@ -2102,7 +2250,10 @@ struct QasmParser(Movable):
         if not self.is_word(it, "in"):
             raise self.err("QM-E500", "expected 'in' in for loop, found " + self.describe(it), it, "write 'for uint i in [0:3] { ... }' (ranges are inclusive)")
         _ = self.next()
-        if self.program_mode and self.depth == 0 and self.for_needs_region():
+        if self.program_mode and self.depth == 0 and not (typed and (loop_ty.tag == CT.INT or loop_ty.tag == CT.UINT)):
+            raise self.err("QM-E580", "a loop counts in int or uint, not " + type_name(loop_ty), vt, "write 'for int i in ...'")
+        typed = typed and (loop_ty.tag == CT.INT or loop_ty.tag == CT.UINT or loop_ty.tag == CT.FLOAT)
+        if self.program_mode and self.depth == 0 and self.for_needs_region(loop_ty, self.text(vt)):
             self.parse_for_region(loop_ty, vt)
             return
         var values = List[Int]()
@@ -2123,9 +2274,11 @@ struct QasmParser(Movable):
             var i = a
             while (step > 0 and i <= b) or (step < 0 and i >= b):
                 values.append(i)
-                i += step
                 if len(values) > _MAX_UNROLL:
                     raise self.err("QM-E570", "for loop has more than " + String(_MAX_UNROLL) + " iterations", rt, "QUMO unrolls loops at parse time; reduce the range")
+                if _last_step(i, step, b):
+                    break
+                i += step
         elif self.is_punct(rt, P.LBRACE):
             _ = self.next()
             values.append(self.parse_const_int("set element"))
@@ -2135,6 +2288,10 @@ struct QasmParser(Movable):
             _ = self.expect_punct(P.RBRACE, "'}' to close the set")
         else:
             raise self.err("QM-E570", "for loops need a constant range [a:b] or set {a, b}", rt, "write 'for uint i in [0:3] { ... }' (ranges are inclusive)")
+        if not self.program_mode and typed and self.depth == 0:
+            for v in values:
+                if not _value_fits(v, loop_ty):
+                    raise self.err("QM-E504", "value " + String(v) + " does not fit the loop variable's type", rt, "the variable wraps while the loop counts: parse with parse_qasm_program or load_any")
         self.unrolled += len(values)
         if self.unrolled > _MAX_UNROLL:
             raise self.err("QM-E570", "too many unrolled loop iterations", ft, "QUMO unrolls loops at parse time; keep the total below " + String(_MAX_UNROLL))
@@ -2143,14 +2300,30 @@ struct QasmParser(Movable):
             self.skip_statement()
             return
         var nm = self.text(vt)
+        var named = self.depth == 0
+        if named:
+            self.loop_names.append(_LoopName(nm, self.block_depth + (1 if self.is_punct(self.peek(), P.LBRACE) else 0)))
         for v in values:
+            self.pos = body
+            if self.program_mode and self.depth == 0:
+                self.push_scope()
+                self.names.append(_Name(nm, NK.CONST, len(self.const_vals)))
+                self.const_vals.append(_loop_value(v, loop_ty))
+                self.parse_statement()
+                self.pop_scope()
+                continue
             var sc = Scope(False)
             sc.names.append(nm)
             sc.values.append(Param(Float64(v)))
+            if named and typed:
+                var value = _loop_value(v, loop_ty)
+                sc.values[0] = Param(_const_radians(value))
+                sc.exprs.append(value^)
             self.scopes.append(sc^)
-            self.pos = body
             self.parse_statement()
             _ = self.scopes.pop()
+        if named:
+            _ = self.loop_names.pop()
 
     def parse_delay(mut self) raises:
         var dt = self.next()
@@ -2398,10 +2571,11 @@ struct QasmParser(Movable):
         if self.is_punct(self.peek(), P.LPAREN):
             _ = self.next()
             if not self.is_punct(self.peek(), P.RPAREN):
-                ps.append(self.parse_gate_arg() if self.program_mode else self.parse_expr())
+                var classical = self.program_mode or len(self.const_exprs) > 0 or len(self.scopes) > 0
+                ps.append(self.parse_gate_arg() if classical else self.parse_expr())
                 while self.is_punct(self.peek(), P.COMMA):
                     _ = self.next()
-                    ps.append(self.parse_gate_arg() if self.program_mode else self.parse_expr())
+                    ps.append(self.parse_gate_arg() if classical else self.parse_expr())
             _ = self.expect_punct(P.RPAREN, "')' to close the parameter list")
         var flat = List[Int](capacity=4)
         var lens = List[Int](capacity=4)
@@ -2636,38 +2810,51 @@ struct QasmParser(Movable):
 
     def push_scope(mut self):
         if self.program_mode:
-            self.scope_marks.append(len(self.var_names))
-            self.const_marks.append(len(self.scope_consts))
+            self.scope_marks.append(len(self.names))
 
     def pop_scope(mut self):
         if not self.program_mode:
             return
         var m = self.scope_marks.pop()
-        while len(self.var_names) > m:
-            _ = self.var_names.pop()
-            _ = self.var_ids.pop()
-        var k = self.const_marks.pop()
-        while len(self.scope_consts) > k:
-            var nm = self.scope_consts.pop()
-            try:
-                _ = self.consts.pop(nm)
-                _ = self.const_exprs.pop(nm)
-            except:
-                pass
+        while len(self.names) > m:
+            _ = self.names.pop()
 
-    def find_var(self, nm: String) -> Int:
-        """Id of the innermost visible variable named `nm`, or -1."""
-        var i = len(self.var_names) - 1
+    def find_name(self, nm: String) -> Int:
+        """Index in `names` of the innermost declaration of `nm`, or -1."""
+        var i = len(self.names) - 1
         while i >= 0:
-            if self.var_names[i] == nm:
-                return self.var_ids[i]
+            if self.names[i].name == nm:
+                return i
             i -= 1
         return -1
 
+    def find_var(self, nm: String) -> Int:
+        """Id of the variable `nm` names here, or -1."""
+        var k = self.find_name(nm)
+        if k >= 0 and self.names[k].kind == NK.VAR:
+            return self.names[k].index
+        return -1
+
+    def find_register(self, nm: String) -> Optional[Int]:
+        """The register `nm` names here: a name of a program scope hides the
+        registers of the global scope."""
+        if self.program_mode and self.depth == 0:
+            var k = self.find_name(nm)
+            if k >= 0:
+                if self.names[k].kind == NK.REG:
+                    return self.names[k].index
+                return None
+        return self.reg_index.get(nm)
+
+    def is_loop_name(self, nm: String) -> Bool:
+        for l in self.loop_names:
+            if l.name == nm:
+                return True
+        return False
+
     def declare_var(mut self, nm: String, ty: CType, is_output: Bool) -> Int:
         var v = self.prog.add_var(nm, ty, is_output)
-        self.var_names.append(nm)
-        self.var_ids.append(v)
+        self.names.append(_Name(nm, NK.VAR, v))
         return v
 
     def prescan(mut self):
@@ -2680,7 +2867,18 @@ struct QasmParser(Movable):
             if t.kind != TK.IDENT or not (self.is_punct(n, P.EQ) or self.is_punct(n, P.OPASSIGN)):
                 continue
             var prev = self.toks[i - 1]
-            var declared = (prev.kind == TK.IDENT and not self.is_word(prev, "else")) or self.is_punct(prev, P.RBRACK)
+            var declared = prev.kind == TK.IDENT and not self.is_word(prev, "else")
+            if self.is_punct(prev, P.RBRACK):
+                # `int[8] x = 1;` declares; `for int i in [0:2] x = 1;` does not
+                var k = i - 2
+                var open = 1
+                while k > 0 and open > 0:
+                    if self.is_punct(self.toks[k], P.RBRACK):
+                        open += 1
+                    elif self.is_punct(self.toks[k], P.LBRACK):
+                        open -= 1
+                    k -= 1
+                declared = not self.is_word(self.toks[k], "in")
             if not declared:
                 self.reassigned[self.text(t)] = True
 
@@ -2916,7 +3114,10 @@ struct QasmParser(Movable):
             _ = self.expect_punct(P.LPAREN, "'(' after the type")
             var e = self.parse_cexpr()
             _ = self.expect_punct(P.RPAREN, "')'")
-            return self.cast_at(e, ty, t)
+            try:
+                return ce_explicit_cast(e, ty)
+            except err:
+                raise self.relocate(String(err), t)
         if self.is_punct(nx, P.LPAREN):
             return self.parse_c_call(t)
         _ = self.next()
@@ -2930,10 +3131,22 @@ struct QasmParser(Movable):
             return CExpr.literal_bool(True)
         if nm == "false":
             return CExpr.literal_bool(False)
+        var k = self.find_name(nm) if self.program_mode and self.depth == 0 else -1
+        if k >= 0:
+            ref e = self.names[k]
+            if e.kind == NK.VAR:
+                ref cv = self.prog.vars[e.index]
+                return CExpr.variable(cv.store, cv.ty)
+            if e.kind == NK.CONST:
+                return self.const_vals[e.index].copy()
+            self.pos -= 1
+            return self.parse_c_bits(t)
         var s = len(self.scopes) - 1
         while s >= 0:
             for i in range(len(self.scopes[s].names)):
                 if self.scopes[s].names[i] == nm:
+                    if len(self.scopes[s].exprs) > i:
+                        return self.scopes[s].exprs[i].copy()
                     var q = self.scopes[s].values[i]
                     if q.is_symbolic():
                         raise self.err("QM-E584", "gate parameter '" + nm + "' cannot be read as a classical value", t, "gate bodies take affine angles only")
@@ -2943,10 +3156,6 @@ struct QasmParser(Movable):
             if self.scopes[s].closed:
                 break
             s -= 1
-        var v = self.find_var(nm)
-        if v >= 0:
-            ref cv = self.prog.vars[v]
-            return CExpr.variable(cv.store, cv.ty)
         var ce = self.const_exprs.get(nm)
         if ce:
             return ce.value().copy()
@@ -2958,19 +3167,26 @@ struct QasmParser(Movable):
             return CExpr.input(ip.value())
         var cp = self.consts.get(nm)
         if cp:
+            if cp.value().is_symbolic():
+                raise self.err("QM-E584", "'" + nm + "' depends on an input, and a value is needed here", t, "use the input directly")
             return CExpr.literal_float(cp.value().offset)
+        if nm in self.int_vars:
+            raise self.err("QM-E504", "reading '" + nm + "' in an expression needs a value at run time", t, "parse with parse_qasm_program or load_any")
         var ri = self.reg_index.get(nm)
         if ri:
             if self.regs[ri.value()].is_qubit:
                 raise self.err("QM-E520", "'" + nm + "' is a qubit register, not a classical value", t, "measure it into a bit register first")
             self.pos -= 1
-            var bits = self.parse_bit_operand()
-            for i in range(1, len(bits)):
-                if bits[i] != bits[0] + i:
-                    raise self.err("QM-E504", "an expression reads consecutive ascending bits", t, "read the bits one by one")
-            return CExpr.bits(bits[0], len(bits))
+            return self.parse_c_bits(t)
         _ = self.lookup_value(t)  # raises the undeclared-identifier error
         return CExpr.literal_int(0)
+
+    def parse_c_bits(mut self, t: Token) raises -> CExpr:
+        var bits = self.parse_bit_operand()
+        for i in range(1, len(bits)):
+            if bits[i] != bits[0] + i:
+                raise self.err("QM-E504", "an expression reads consecutive ascending bits", t, "read the bits one by one")
+        return CExpr.bits(bits[0], len(bits))
 
     def parse_c_call(mut self, f: Token) raises -> CExpr:
         var nm = self.text(f)
@@ -3028,22 +3244,18 @@ struct QasmParser(Movable):
         var e = self.parse_cexpr()
         _ = self.expect_punct(P.SEMI, "';'")
         var value = self.cast_at(e, ty, eq)
-        # a variable of an outer scope hides constants, so this one stays a variable
-        if value.is_const() and not is_output and (is_const or nm not in self.reassigned) and self.find_var(nm) < 0:
-            self.const_exprs[nm] = value.copy()
-            self.consts[nm] = Param(self.const_radians(value))
-            self.scope_consts.append(nm)
+        if value.is_const() and not is_output and (is_const or nm not in self.reassigned):
+            if len(self.scope_marks) > 0:
+                self.names.append(_Name(nm, NK.CONST, len(self.const_vals)))
+                self.const_vals.append(value^)
+            else:
+                self.consts[nm] = Param(_const_radians(value))
+                self.const_exprs[nm] = value^
             return
         if is_const and not value.is_const():
             raise self.err("QM-E584", "'" + nm + "' is const but its value is only known at run time", nt, "drop 'const'")
         var v = self.declare_var(nm, ty, is_output)
         self.tb.assign(v, self.prog.add_expr(value), self.ops_end(), nt.line)
-
-    def const_radians(self, e: CExpr) -> Float64:
-        """The value of a constant as parse_expr and gates read it."""
-        if e.ty().tag == CT.ANGLE:
-            return angle_radians(e.const_int(), e.ty().width)
-        return e.const_float()
 
     def parse_var_assign(mut self) raises:
         """`x = e;`, `x += e;`."""
@@ -3160,31 +3372,58 @@ struct QasmParser(Movable):
         self.pos = save
         return found
 
-    def for_needs_region(mut self) raises -> Bool:
-        """With the iterable next: a FOR stays on the tape when its bounds are
-        known only at run time or its body jumps; otherwise it unrolls."""
+    def body_assigns(mut self, nm: String) raises -> Bool:
+        """Does the statement at self.pos assign `nm`?"""
+        var save = self.pos
+        self.skip_statement()
+        var stop = self.pos
+        self.pos = save
+        for i in range(save, stop):
+            ref t = self.toks[i]
+            if t.kind == TK.IDENT and (self.is_punct(self.toks[i + 1], P.EQ) or self.is_punct(self.toks[i + 1], P.OPASSIGN)) and self.text(t) == nm:
+                return True
+        return False
+
+    def for_needs_region(mut self, ty: CType, nm: String) raises -> Bool:
+        """With the iterable next: a FOR stays on the tape when its bounds are known
+        only at run time, its values do not fit the variable's type, or its body
+        jumps or assigns the variable. Otherwise it unrolls, to the same effect."""
         var save = self.pos
         var runtime = False
         var r = self.peek()
+        var fits = True
         try:
             if self.is_punct(r, P.LBRACK):
                 _ = self.next()
-                _ = self.parse_const_int("range start")
+                var a = self.parse_const_int("range start")
                 _ = self.expect_punct(P.COLON, "':' in range")
-                _ = self.parse_const_int("range bound")
+                var b = self.parse_const_int("range bound")
+                var step = 1
                 if self.is_punct(self.peek(), P.COLON):
                     _ = self.next()
-                    _ = self.parse_const_int("range stop")
-                self.pos = save
+                    step = b
+                    b = self.parse_const_int("range stop")
+                _ = self.expect_punct(P.RBRACK, "']'")
+                # empty ranges fit; otherwise the two ends bound every value
+                if step != 0 and ((step > 0 and a <= b) or (step < 0 and a >= b)):
+                    fits = _value_fits(a, ty) and _value_fits(b, ty)
+            elif self.is_punct(r, P.LBRACE):
+                _ = self.next()
+                while True:
+                    fits = _value_fits(self.parse_const_int("set element"), ty) and fits
+                    if not self.is_punct(self.peek(), P.COMMA):
+                        break
+                    _ = self.next()
+            self.pos = save
         except:
             runtime = True  # the classical parser reports what is really wrong
             self.pos = save
-        if runtime:
+        if runtime or not fits:
             return True
         self.skip_iterable()
-        var jump = self.body_has_jump()
+        var needs = self.body_has_jump() or self.body_assigns(nm)
         self.pos = save
-        return jump
+        return needs
 
     def skip_iterable(mut self) raises:
         var r = self.peek()
@@ -3209,11 +3448,18 @@ struct QasmParser(Movable):
             _ = self.expect_punct(P.COLON, "':' in range", "write [start:stop] or [start:step:stop] (inclusive)")
             var b = self.parse_cexpr()
             var step = CExpr.literal_int(1)
+            var has_step = False
             if self.is_punct(self.peek(), P.COLON):
                 _ = self.next()
                 step = b^
                 b = self.parse_cexpr()
+                has_step = True
             _ = self.expect_punct(P.RBRACK, "']' to close the range")
+            if step.ty().tag == CT.FLOAT:
+                raise self.err("QM-E570", "range step must be an integer, got " + type_name(step.ty()), rt, "write [0:2:10]")
+            if a.ty().tag == CT.FLOAT or b.ty().tag == CT.FLOAT:
+                raise self.err("QM-E570", "range " + ("start" if a.ty().tag == CT.FLOAT else "stop") + " must be an integer, got a float", rt, "write [0:3], or cast the bound with int(x)")
+            _ = has_step
             if step.is_const() and step.const_int() == 0:
                 raise self.err("QM-E570", "range step must be non-zero", rt, "write [0:2:10]")
             starts = self.prog.add_expr(self.cast_at(a, i64, rt))
@@ -3222,10 +3468,10 @@ struct QasmParser(Movable):
         else:
             _ = self.next()
             var vals = List[Int]()
-            vals.append(self.parse_const_int("set element"))
+            vals.append(self.parse_exact_int("set element"))
             while self.is_punct(self.peek(), P.COMMA):
                 _ = self.next()
-                vals.append(self.parse_const_int("set element"))
+                vals.append(self.parse_exact_int("set element"))
             _ = self.expect_punct(P.RBRACE, "'}' to close the set")
             set_off = len(self.prog.case_vals)
             self.prog.case_vals.append(len(vals))
@@ -3237,12 +3483,12 @@ struct QasmParser(Movable):
         self.prog.for_ranges.append(self.prog.num_store)
         self.prog.num_store += 3
         self.prog.for_ranges.append(set_off)
-        if ty.tag != CT.INT and ty.tag != CT.UINT:
-            raise self.err("QM-E580", "a loop that stays on the tape counts in int or uint, not " + type_name(ty), vt, "write 'for int i in ...'")
         self.push_scope()
         var v = self.declare_var(self.text(vt), ty, False)
         self.tb.begin(SK.FOR, v, off, self.ops_end(), vt.line)
+        self.loop_names.append(_LoopName(self.text(vt), self.block_depth + (1 if self.is_punct(self.peek(), P.LBRACE) else 0)))
         self.parse_statement()
+        _ = self.loop_names.pop()
         self.tb.end(self.ops_end(), vt.line)
         self.pop_scope()
 
@@ -3251,6 +3497,9 @@ struct QasmParser(Movable):
         _ = self.expect_punct(P.LPAREN, "'(' after switch")
         var e = self.parse_cexpr()
         _ = self.expect_punct(P.RPAREN, "')'")
+        if e.ty().tag == CT.FLOAT:
+            raise self.err("QM-E580", "switch takes an integer or bits, not a float", st, "cast the target: switch (int(x))")
+        var unsigned_target = not e.ty().is_signed()
         self.tb.begin(SK.SWITCH, self.prog.add_expr(self.cast_at(e, int_type(64), st)), -1, self.ops_end(), st.line)
         var lb = self.expect_punct(P.LBRACE, "'{' to open the switch")
         var seen = List[Int]()
@@ -3261,19 +3510,21 @@ struct QasmParser(Movable):
                 raise self.err("QM-E500", "missing '}' to close the switch", lb, "every '{' needs a matching '}'")
             var vs = List[Int]()
             var is_default = False
+            var has_label = False
             while self.is_word(self.peek(), "case") or self.is_word(self.peek(), "default"):
                 if self.is_word(self.peek(), "default"):
                     _ = self.next()
                     is_default = True
                 else:
                     _ = self.next()
-                    vs.append(self.parse_const_int("case value"))
+                    self.parse_case_value(vs, unsigned_target)
                     while self.is_punct(self.peek(), P.COMMA):
                         _ = self.next()
-                        vs.append(self.parse_const_int("case value"))
+                        self.parse_case_value(vs, unsigned_target)
+                    has_label = True
                 if self.is_punct(self.peek(), P.COLON):
                     _ = self.next()
-            if len(vs) == 0 and not is_default:
+            if not has_label and not is_default:
                 raise self.err("QM-E500", "expected 'case' or 'default', found " + self.describe(c), c, "write 'case 0 { ... }' or 'default { ... }'")
             if not self.is_punct(self.peek(), P.LBRACE):
                 raise self.err("QM-E500", "expected '{' to open the case, found " + self.describe(self.peek()), self.peek(), "write 'case 0 { ... }'")
@@ -3298,6 +3549,27 @@ struct QasmParser(Movable):
                 _ = self.expect_punct(P.SEMI, "';'")
         _ = self.next()
         self.tb.end(self.ops_end(), st.line)
+
+    def parse_exact_int(mut self, what: String) raises -> Int:
+        """A constant integer, exact to its 64 bits (held by its bits at or above
+        2^63), which the float path of parse_const_int cannot promise."""
+        var t = self.peek()
+        var e = self.parse_cexpr()
+        if not e.is_const() or e.ty().tag == CT.FLOAT:
+            raise self.err("QM-E584", what + " must be a constant integer", t, "use an integer literal or a const")
+        return e.const_int()
+
+    def parse_case_value(mut self, mut vs: List[Int], unsigned_target: Bool) raises:
+        """One case label, exact to its 64 bits. A value of the other sign could only
+        match by accident of its bits (-1 is not 2^64 - 1), so it is refused."""
+        var t = self.peek()
+        var e = self.parse_cexpr()
+        if not e.is_const() or e.ty().tag == CT.FLOAT:
+            raise self.err("QM-E584", "case value must be a constant integer", t, "use an integer literal or a const")
+        var v = e.const_int()
+        if (unsigned_target and e.ty().is_signed() and v < 0) or (not unsigned_target and e.ty().tag == CT.UINT and v < 0):
+            raise self.err("QM-E580", "this case value has the wrong sign for the switch target, so it can never match", t, "drop the case, or cast the target")
+        vs.append(v)
 
     def slot_for(mut self, v: Int) -> Int:
         """The parameter slot that mirrors variable `v`, in every open circuit."""
@@ -3398,24 +3670,71 @@ struct QasmParser(Movable):
             return True
         return False
 
+    def reads_typed(self) -> Bool:
+        """Does the expression at self.pos name a typed constant? Its meaning is then
+        the classical table's, in both parsers; a literal-only expression keeps the
+        constant path's (`rz(1/2)` is 0.5, as it always was here)."""
+        var open = 0
+        var i = self.pos
+        while i < len(self.toks):
+            ref t = self.toks[i]
+            if t.kind == TK.EOF:
+                return False
+            if t.kind == TK.PUNCT:
+                if t.sub == P.LPAREN:
+                    open += 1
+                elif t.sub == P.RPAREN:
+                    if open == 0:
+                        return False
+                    open -= 1
+                elif open == 0 and (t.sub == P.COMMA or t.sub == P.RBRACK or t.sub == P.COLON or t.sub == P.SEMI or t.sub == P.LBRACE or t.sub == P.RBRACE):
+                    return False
+            elif t.kind == TK.IDENT:
+                var nm = self.text(t)
+                if self.program_mode:
+                    var k = self.find_name(nm)
+                    if k >= 0:
+                        if self.names[k].kind == NK.CONST:
+                            return True
+                        i += 1
+                        continue
+                if nm in self.const_exprs or nm in self.input_types:
+                    return True
+                var s = len(self.scopes) - 1
+                while s >= 0:
+                    for j in range(len(self.scopes[s].exprs)):
+                        if self.scopes[s].names[j] == nm:
+                            return True
+                    if self.scopes[s].closed:
+                        break
+                    s -= 1
+            i += 1
+        return False
+
     def parse_gate_arg(mut self) raises -> Param:
-        """A gate angle. Whatever the constant path takes keeps its exact value;
-        otherwise an affine expression becomes a `Param` on a slot and anything
-        else goes to a temporary, assigned just before the gate."""
+        """A gate angle. Without typed constants, whatever the constant path takes
+        keeps its exact value. Otherwise the classical parser decides: an affine
+        expression becomes a `Param`, and in a program anything else goes to a
+        temporary assigned just before the gate."""
         if self.depth > 0:
             return self.parse_expr()
-        var save = self.pos
-        try:
-            var value = self.parse_expr()
-            if self.is_punct(self.peek(), P.COMMA) or self.is_punct(self.peek(), P.RPAREN):
-                return value
-        except:
-            pass
-        self.pos = save  # not a constant expression: the classical parser reports errors
+        if not self.reads_typed():
+            if not self.program_mode:
+                return self.parse_expr()
+            var save = self.pos
+            try:
+                var value = self.parse_expr()
+                if self.is_punct(self.peek(), P.COMMA) or self.is_punct(self.peek(), P.RPAREN):
+                    return value
+            except:
+                pass
+            self.pos = save  # not a constant expression: the classical parser reports errors
         var t = self.peek()
         var e = self.parse_cexpr()
+        if e.is_const():
+            return Param(_const_radians(e))
         var ty = e.ty()
-        if ty.tag == CT.ANGLE:
+        if ty.tag == CT.ANGLE and self.program_mode:
             var root = e.root()
             if root.op == CN.VAR:
                 return Param.symbol(self.slot_for(self.var_of_store(root.x)))
@@ -3436,6 +3755,8 @@ struct QasmParser(Movable):
             if kind == 2:
                 return Param(offset, index, coeff)
             return Param(offset, self.slot_for(self.var_of_store(index)), coeff)
+        if not self.program_mode:
+            raise self.err("QM-E504", "this angle needs a value at run time", t, "parse with parse_qasm_program or load_any")
         var tmp = self.temp_var(float_type())
         self.tb.assign(tmp, self.prog.add_expr(e), self.ops_end(), t.line)
         return Param.symbol(self.slot_for(tmp))
@@ -3468,6 +3789,37 @@ struct QasmParser(Movable):
         except e:
             raise Error(String(e))
         return c^
+
+
+def _const_radians(e: CExpr) -> Float64:
+    """A constant as parse_expr and gates read it: an angle in radians."""
+    if e.ty().tag == CT.ANGLE:
+        return angle_radians(e.const_int(), e.ty().width)
+    return e.const_float()
+
+
+def _value_fits(v: Int, ty: CType) -> Bool:
+    """The int64 `v` is representable in the loop type `ty`."""
+    if ty.tag == CT.FLOAT or ty.width >= 64 and ty.tag == CT.INT:
+        return True
+    if ty.tag == CT.INT:
+        return v >= -(1 << (ty.width - 1)) and v < (1 << (ty.width - 1))
+    return v >= 0 and (ty.width >= 63 or v < (1 << ty.width))
+
+
+def _loop_value(v: Int, ty: CType) -> CExpr:
+    """What a loop variable of type `ty` holds on the pass with value `v`."""
+    if ty.tag == CT.FLOAT:
+        return CExpr.typed_const(ty, 0, Float64(v))
+    return CExpr.typed_const(ty, v)
+
+
+def _last_step(i: Int, step: Int, stop: Int) -> Bool:
+    """Is `i` the last value of the range? Compares distances, so that the value
+    after it need not exist in 64 bits."""
+    var room = UInt64(stop) - UInt64(i) if step > 0 else UInt64(i) - UInt64(stop)
+    var stride = UInt64(step) if step > 0 else UInt64(0) - UInt64(step)
+    return stride > room
 
 
 def _switch_cover(values: List[List[Int]], bit: Int, mut cube: List[Int], mut out: List[List[Int]]):
@@ -3890,6 +4242,11 @@ def _float_text(v: Float64) -> String:
     return s^
 
 
+def _check_finite(v: Float64) raises:
+    if isnan(v) or isinf(v):
+        raise Error("QM-E552: the constant " + String(v) + " has no OpenQASM literal. Hint: compute it at run time, or fix the expression that overflowed.")
+
+
 struct _PNames(Movable):
     """What the expression printer needs to name things."""
 
@@ -3903,12 +4260,13 @@ struct _PNames(Movable):
         self.num_clbits = 0
 
 
-def _const_text(n: CNode, plain: Bool) -> String:
+def _const_text(n: CNode, plain: Bool) raises -> String:
     """A constant; `plain` drops the type, for where the context restores it."""
     var t = n.ty
     if t.tag == CT.BOOL:
         return "true" if n.i != 0 else "false"
     if t.tag == CT.FLOAT:
+        _check_finite(n.f)
         return _float_text(n.f)
     var body: String
     if t.tag == CT.ANGLE:
@@ -3933,7 +4291,7 @@ def _is_soft_cast(p: Program, n: Int) -> Bool:
     return g.ty.tag == CT.UINT and (src.tag == CT.BIT or src.tag == CT.BOOL) and src.width == g.ty.width
 
 
-def _child(p: Program, n: Int, names: _PNames, want: Int, plain: Bool) -> String:
+def _child(p: Program, n: Int, names: _PNames, want: Int, plain: Bool) raises -> String:
     var t = _node_text(p, n, names, plain)
     if t[1] < want:
         return "(" + t[0] + ")"
@@ -3948,12 +4306,14 @@ def _bits_text(first: Int, count: Int, names: _PNames) -> String:
     return "c[" + String(first) + ":" + String(first + count - 1) + "]"
 
 
-def _node_text(p: Program, n: Int, names: _PNames, plain: Bool = False) -> Tuple[String, Int]:
+def _node_text(p: Program, n: Int, names: _PNames, plain: Bool = False) raises -> Tuple[String, Int]:
     """Text of node `n` and the precedence of its outermost operator."""
     ref g = p.nodes[n]
     var op = g.op
     if op == CN.CONST:
-        return (_const_text(g, plain), _PR_ATOM)
+        var text = _const_text(g, plain)
+        # a negative constant is a sign and a number: it binds like a unary minus
+        return (text, _PR_UNARY if text.startswith("-") else _PR_ATOM)
     if op == CN.VAR:
         return (names.stores[g.x], _PR_ATOM)
     if op == CN.INPUT:
@@ -3963,7 +4323,11 @@ def _node_text(p: Program, n: Int, names: _PNames, plain: Bool = False) -> Tuple
     if op == CN.CAST:
         if _is_soft_cast(p, n):
             return _node_text(p, g.x, names, plain)
-        return (type_name(g.ty) + "(" + _node_text(p, g.x, names, True)[0] + ")", _PR_ATOM)
+        var inner = _node_text(p, g.x, names, True)[0]
+        # the table has no bit -> float, so that step stays written
+        if g.ty.tag == CT.FLOAT and _is_soft_cast(p, g.x) and p.nodes[p.nodes[g.x].x].ty.tag == CT.BIT:
+            inner = type_name(p.nodes[g.x].ty) + "(" + inner + ")"
+        return (type_name(g.ty) + "(" + inner + ")", _PR_ATOM)
     if op == CN.NEG or op == CN.LNOT or op == CN.BNOT:
         var mark = String("-" if op == CN.NEG else ("!" if op == CN.LNOT else "~"))
         return (mark + _child(p, g.x, names, _PR_UNARY, False), _PR_UNARY)
@@ -3993,11 +4357,7 @@ def _node_text(p: Program, n: Int, names: _PNames, plain: Bool = False) -> Tuple
     return (_child(p, g.x, names, lwant, lp) + " " + _op_text(op) + " " + _child(p, g.y, names, rwant, rp), pr)
 
 
-def _expr_text(p: Program, e: Int, names: _PNames) -> String:
-    return _node_text(p, p.expr_root[e], names, True)[0]
-
-
-def _value_text(p: Program, e: Int, ty: CType, names: _PNames) -> String:
+def _value_text(p: Program, e: Int, ty: CType, names: _PNames) raises -> String:
     """An expression where the context casts to `ty`: its outer cast is implied."""
     var root = p.expr_root[e]
     ref g = p.nodes[root]
@@ -4025,10 +4385,11 @@ def _pad(depth: Int) -> String:
     return s^
 
 
-def to_qasm(p: Program) -> String:
+def to_qasm(p: Program) raises -> String:
     """OpenQASM 3 text of a program (a fixed point of parse_qasm_program + to_qasm).
     Registers merge into `q` and `c` as for a Circuit, and declarations move to
-    the top; names get a suffix where scopes shadowed each other."""
+    the top; names get a suffix where scopes shadowed each other. A constant that
+    is NaN or infinite has no literal: QM-E552."""
     var flat = p.try_flatten()
     if flat:
         return to_qasm(flat.value())
@@ -4070,6 +4431,7 @@ def to_qasm(p: Program) -> String:
         out += "gphase(" + format_angle(c.global_phase) + ");\n"
     var depth = 0
     var first_case = List[Bool]()  # one entry per open switch
+    var unsigned_case = List[Bool]()
     for i in range(len(p.tape)):
         var s = p.tape[i]
         var k = s.kind
@@ -4113,6 +4475,8 @@ def to_qasm(p: Program) -> String:
             out += _pad(depth) + "switch (" + _value_text(p, s.a, int_type(64), names) + ") {\n"
             depth += 2
             first_case.append(True)
+            ref root = p.nodes[p.expr_root[s.a]]
+            unsigned_case.append(root.op == CN.CAST and not p.nodes[root.x].ty.is_signed())
         elif k == SK.CASE:
             if first_case[len(first_case) - 1]:
                 first_case[len(first_case) - 1] = False
@@ -4122,8 +4486,10 @@ def to_qasm(p: Program) -> String:
                 out += _pad(depth - 1) + "default {\n"
             else:
                 var vals = String()
+                var unsigned_target = unsigned_case[len(unsigned_case) - 1]
                 for j in range(s.a, s.b):
-                    vals += (", " if j > s.a else "") + String(p.case_vals[j])
+                    var v = p.case_vals[j]
+                    vals += (", " if j > s.a else "") + (String(UInt64(v)) if unsigned_target else String(v))
                 out += _pad(depth - 1) + "case " + vals + " {\n"
         elif k == SK.BREAK:
             out += _pad(depth) + "break;\n"
@@ -4132,6 +4498,7 @@ def to_qasm(p: Program) -> String:
         else:  # END
             var op = p.tape[s.end].kind
             if op == SK.SWITCH:
+                _ = unsigned_case.pop()
                 if not first_case.pop():
                     out += _pad(depth - 1) + "}\n"
                 depth -= 2

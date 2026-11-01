@@ -21,6 +21,8 @@ an ASSIGN ends the block, so `apply_instruction(sv, g, params)` is unchanged.
 Bits stay in each simulator; `bit` variables are clbits.
 """
 
+from std.math import isinf, isnan
+
 from qumo.ir.circuit import Circuit, Instruction
 from qumo.ir.gates import Op, op_name, op_is_unitary, op_is_noise
 from qumo.ir.param import Param
@@ -361,11 +363,13 @@ struct Cfg(Copyable):
     var blocks: List[BB]
     var sw_keys: List[Int]  # SWITCH case values
     var sw_bb: List[Int]  # the block of each key; one more entry holds the default
+    var slot_ops: List[List[Int]]  # by tape index: the ops of an OPS block with runtime angles
 
     def __init__(out self):
         self.blocks = List[BB]()
         self.sw_keys = List[Int]()
         self.sw_bb = List[Int]()
+        self.slot_ops = List[List[Int]]()
 
 
 comptime _AT = 0  # the block that starts at a tape position
@@ -383,9 +387,20 @@ def cfg_of(p: Program) -> Cfg:
     var latch = List[Int](length=n + 1, fill=-1)
     var scale = n + 2
     var lo = 0
+    var mirrored = List[Bool](length=p.body.num_params(), fill=False)
+    for v in p.vars:
+        if v.slot >= 0:
+            mirrored[v.slot] = True
     for i in range(n):
         var s = p.tape[i]
         var k = s.kind
+        var reads = List[Int]()
+        if k == SK.OPS:
+            for j in range(s.a, s.b):
+                ref g = p.body.ops[j]
+                if (g.p0.index >= 0 and mirrored[g.p0.index]) or (g.p1.index >= 0 and mirrored[g.p1.index]) or (g.p2.index >= 0 and mirrored[g.p2.index]):
+                    reads.append(j)
+        cfg.slot_ops.append(reads^)
         if k == SK.OPS or k == SK.ASSIGN:
             continue
         var close = True
@@ -478,11 +493,34 @@ def _reads(p: Program, expr: Int, mut out: List[Int]):
             out.append(p.nodes[i].x)
 
 
-def _block_reads(p: Program, b: BB, i: Int, mut out: List[Int]):
+def slot_stores(p: Program) -> List[Int]:
+    """By parameter index: the storage of the variable that slot mirrors, or -1."""
+    var out = List[Int](length=p.body.num_params(), fill=-1)
+    for v in p.vars:
+        if v.slot >= 0:
+            out[v.slot] = v.store
+    return out^
+
+
+def _gate_reads(p: Program, lo: Int, hi: Int, slots: List[Int], mut out: List[Int]):
+    """Variables the gates of ops [lo, hi) read through their parameter slots."""
+    for i in range(lo, hi):
+        ref g = p.body.ops[i]
+        if g.p0.index >= 0 and slots[g.p0.index] >= 0:
+            out.append(slots[g.p0.index])
+        if g.p1.index >= 0 and slots[g.p1.index] >= 0:
+            out.append(slots[g.p1.index])
+        if g.p2.index >= 0 and slots[g.p2.index] >= 0:
+            out.append(slots[g.p2.index])
+
+
+def _block_reads(p: Program, b: BB, i: Int, slots: List[Int], mut out: List[Int]):
     """Reads of tape statement i, or of the terminator when i = b.hi."""
     if i < b.hi:
         if p.tape[i].kind == SK.ASSIGN:
             _reads(p, p.tape[i].b, out)
+        elif p.tape[i].kind == SK.OPS:
+            _gate_reads(p, p.tape[i].a, p.tape[i].b, slots, out)
         return
     if b.init >= 0:
         var off = p.tape[b.init].b
@@ -519,6 +557,7 @@ def _check_assigned(p: Program, cfg: Cfg) raises:
         inn.append(List[Bool](length=ns, fill=b != 0))
     var reachable = List[Bool](length=nb, fill=False)
     reachable[0] = True
+    var slots = slot_stores(p)
     var changed = True
     while changed:
         changed = False
@@ -540,8 +579,12 @@ def _check_assigned(p: Program, cfg: Cfg) raises:
                 if not reachable[t]:
                     reachable[t] = True
                     changed = True
+                # a FOR assigns its variable on the edge into the body, not on exit
+                var into_body = -1
+                if bb.term == TERM.BR and bb.cond < 0 and t == bb.t0:
+                    into_body = p.vars[p.tape[-1 - bb.cond].a].store
                 for v in range(ns):
-                    if inn[t][v] and not cur[v]:
+                    if inn[t][v] and not cur[v] and v != into_body:
                         inn[t][v] = False
                         changed = True
     for b in range(nb):
@@ -551,7 +594,7 @@ def _check_assigned(p: Program, cfg: Cfg) raises:
         var cur = inn[b].copy()
         for i in range(bb.lo, bb.hi + 1):
             var reads = List[Int]()
-            _block_reads(p, bb, i, reads)
+            _block_reads(p, bb, i, slots, reads)
             for r in reads:
                 if not cur[r]:
                     _raise_unassigned(p, r, bb.line if i == bb.hi else p.tape[i].line)
@@ -570,8 +613,6 @@ def _apply_defs(p: Program, b: BB, mut cur: List[Bool]):
         ref s = p.tape[i]
         if s.kind == SK.ASSIGN and p.vars[s.a].ty.tag != CT.BIT:
             cur[p.vars[s.a].store] = True
-    if b.init >= 0:
-        cur[p.vars[p.tape[b.init].a].store] = True
 
 
 def _raise_unassigned(p: Program, store: Int, line: Int) raises:
@@ -596,7 +637,12 @@ def check_program(p: Program) raises -> Cfg:
         if s.kind != SK.OPS:
             continue
         for i in range(s.a, s.b):
-            var k = p.body.ops[i].kind
+            ref g = p.body.ops[i]
+            var k = g.kind
+            for f in range(3):
+                var q = g.param(f)
+                if isnan(q.offset) or isinf(q.offset) or isnan(q.coeff):
+                    raise Error("QM-E482: gate '" + op_name(k) + "' has a constant angle that is NaN or infinite (line " + String(s.line) + "). Hint: check the expression that overflowed.")
             if k == Op.DETECTOR or k == Op.OBSERVABLE:
                 if runtime:
                     raise Error("QM-E586: " + op_name(k) + " in a program with runtime control flow. Hint: detectors index measurements as if each ran once, and no decoder takes a syndrome of varying length; move the QEC circuit out of the loop.")

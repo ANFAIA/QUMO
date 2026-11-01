@@ -14,12 +14,16 @@ the scan jumps: `SC_AND` and `SC_OR` skip the right operand.
 
 The rules the OpenQASM 3 specification leaves open, fixed here (and in
 docs/CONTROL_FLOW.md):
-  * `/` and `%` truncate toward zero; `%` has the sign of the dividend; dividing
-    by zero raises QM-E481 at run time, QM-E533 when both operands are constant.
+  * `/` and `%` truncate toward zero, literals included; `%` has the sign of the
+    dividend; dividing by zero raises QM-E481 at run time, QM-E533 when the divisor
+    is constant. An expression folds to what it would compute at run time.
   * Shifts apply to bit, uint and angle; shifting by the width or more gives 0.
   * `int` with `uint` is QM-E580, except for literals.
-  * A literal takes the type of the other operand when it fits, otherwise that
-    operand widens to the smallest width that holds the literal.
+  * `bool` and `bit` promote to a 64-bit `int` in arithmetic, as in C99, so
+    `true + 1` is 2, or to the `uint` next to them.
+  * A literal takes the type of the other operand when it fits. A literal too wide
+    for it is QM-E580 in arithmetic and bitwise operators; a comparison widens the
+    operand, so it stays exact, and a shift count is free.
   * Float to int truncates; NaN, infinity or out of range raises QM-E482.
   * `angle` to int, uint or float is refused, as in the specification's cast
     table. As a gate argument an angle[n] with bits v is 2 pi v / 2^n radians.
@@ -193,6 +197,15 @@ struct CStore(Movable):
         self.tf = List[Float64](length=num_nodes, fill=0.0)
         self.params = params^
 
+    def begin_shot(mut self, base: List[Float64]):
+        """Nothing survives from the shot before: variables back to zero, and the
+        parameters to `base` (input values, runtime-angle slots at zero)."""
+        for i in range(len(self.ints)):
+            self.ints[i] = 0
+            self.reals[i] = 0.0
+        for i in range(len(base)):
+            self.params[i] = base[i]
+
 
 @always_inline
 def wrap_int(v: Int, ty: CType) -> Int:
@@ -263,7 +276,11 @@ def _float_to_angle(x: Float64, width: Int, mut out: Int) -> Bool:
     var turns = x / (2.0 * pi)
     var frac = turns - floor(turns)
     var scale = _two_pow(width)
-    var v = floor(frac * scale + 0.5)
+    var t = frac * scale
+    var v = floor(t)
+    var d = t - v
+    if d > 0.5 or (d == 0.5 and v / 2.0 != floor(v / 2.0)):
+        v += 1.0
     out = 0 if v >= scale else Int(UInt64(v))
     return True
 
@@ -457,7 +474,10 @@ def eval_nodes[B: BitReader](nodes: List[CNode], lo: Int, root: Int, mut st: CSt
                 var a = st.ti[n.x]
                 st.ti[pc] = wrap_int(0 - a if a < 0 else a, ty)
             else:
-                st.tf[pc] = _fn_real(n.i, st.tf[n.x], st.tf[n.y] if n.y >= 0 else 0.0)
+                var d = st.tf[n.y] if n.y >= 0 else 0.0
+                if n.i == CF.MOD and d == 0.0:
+                    return CEval.DIV_ZERO
+                st.tf[pc] = _fn_real(n.i, st.tf[n.x], d)
         pc += 1
     return CEval.OK
 
@@ -619,18 +639,31 @@ def ce_cast(a: CExpr, ty: CType) raises -> CExpr:
     return r^
 
 
+def ce_explicit_cast(a: CExpr, ty: CType) raises -> CExpr:
+    """A cast written in the source: `bit[m](x)` also needs x to have m bits."""
+    var src = a.ty()
+    if ty.tag == CT.BIT and src.tag != CT.FLOAT:
+        var fits = src.width == ty.width
+        if a.is_literal():
+            fits = a.const_int() >= 0 and _fits(a.const_int(), src.tag == CT.UINT, uint_type(ty.width))
+        if not fits:
+            raise Error("QM-E580: bit[" + String(ty.width) + "] takes a value of " + String(ty.width) + " bits, not " + type_name(src) + ". Hint: cast through uint[" + String(ty.width) + "] first.")
+    return ce_cast(a, ty)
+
+
 def ce_bool(a: CExpr) raises -> CExpr:
     """`a` as a condition."""
     return ce_cast(a, bool_type())
 
 
 def _fits(v: Int, literal_unsigned: Bool, ty: CType) -> Bool:
-    """The integer literal `v` is representable in `ty`."""
+    """The integer literal `v` is representable in `ty`. An unsigned literal is at
+    or above 2^63 and held by its bits, so `v` is negative as an Int."""
+    if literal_unsigned:
+        return ty.tag != CT.INT and ty.width >= 64
     if ty.tag == CT.INT:
-        if literal_unsigned:
-            return False
         return ty.width >= 64 or (v >= -(1 << (ty.width - 1)) and v < (1 << (ty.width - 1)))
-    if v < 0 and not literal_unsigned:
+    if v < 0:
         return False
     return ty.width >= 63 or v < (1 << ty.width)
 
@@ -645,24 +678,35 @@ def _width_for(v: Int, unsigned_: Bool, signed_target: Bool) -> Int:
     return w
 
 
-def _uintish(t: CType) -> CType:
-    """bool and bit[n] count as uint in arithmetic and comparisons."""
-    if t.tag == CT.BOOL or t.tag == CT.BIT:
-        return uint_type(t.width)
+comptime _ARITH = 0
+comptime _BITWISE = 1
+comptime _COMPARE = 2
+
+
+def _is_bitlike(t: CType) -> Bool:
+    return t.tag == CT.BOOL or t.tag == CT.BIT
+
+
+def _promoted(t: CType, mode: Int) -> CType:
+    """bool and bit[n]: a 64-bit int in arithmetic, unsigned bits otherwise."""
+    if _is_bitlike(t):
+        return int_type(64) if mode == _ARITH else uint_type(t.width)
     return t
 
 
-def _common(a: CExpr, b: CExpr, mut ca: CExpr, mut cb: CExpr) raises -> CType:
+def _common(a: CExpr, b: CExpr, mut ca: CExpr, mut cb: CExpr, mode: Int) raises -> CType:
     """Bring two numeric operands to one type; `ca` and `cb` receive them cast."""
-    var ta = _uintish(a.ty())
-    var tb = _uintish(b.ty())
+    var oa = a.ty()
+    var ob = b.ty()
+    var ta = _promoted(oa, mode)
+    var tb = _promoted(ob, mode)
     var la = a.is_literal()
     var lb = b.is_literal()
-    # bit and bool hold plain non-negative values: an int takes them as they are
-    if a.ty().tag != ta.tag and tb.tag == CT.INT and not lb:
-        ta = int_type(min(max(tb.width, ta.width + 1), 64))
-    elif b.ty().tag != tb.tag and ta.tag == CT.INT and not la:
-        tb = int_type(min(max(ta.width, tb.width + 1), 64))
+    # bit and bool hold plain non-negative values, which either kind of integer takes
+    if _is_bitlike(oa) and not lb and (tb.tag == CT.UINT or (tb.tag == CT.INT and mode != _ARITH)):
+        ta = uint_type(max(tb.width, oa.width)) if tb.tag == CT.UINT else int_type(min(max(tb.width, oa.width + 1), 64))
+    elif _is_bitlike(ob) and not la and (ta.tag == CT.UINT or (ta.tag == CT.INT and mode != _ARITH)):
+        tb = uint_type(max(ta.width, ob.width)) if ta.tag == CT.UINT else int_type(min(max(ta.width, ob.width + 1), 64))
     var common: CType
     if ta.tag == CT.FLOAT or tb.tag == CT.FLOAT:
         if ta.tag == CT.ANGLE and lb:
@@ -684,6 +728,8 @@ def _common(a: CExpr, b: CExpr, mut ca: CExpr, mut cb: CExpr) raises -> CType:
                 raise Error("QM-E580: the negative literal " + String(lit.i) + " does not mix with " + type_name(t) + ". Hint: cast one side.")
             if t.tag == CT.INT and us:
                 raise Error("QM-E580: an unsigned literal above the int range does not mix with " + type_name(t) + ". Hint: cast one side.")
+            if mode != _COMPARE:
+                raise Error("QM-E580: the literal does not fit " + type_name(t) + ". Hint: cast the operand to a wider type.")
             t.width = max(t.width, _width_for(lit.i, us, t.tag == CT.INT))
             t.bare = False
         common = t
@@ -720,13 +766,6 @@ def ce_binary(op: Int, a: CExpr, b: CExpr) raises -> CExpr:
     var tb = b.ty()
     var ca = CExpr()
     var cb = CExpr()
-    if a.is_literal() and b.is_literal() and ta.tag == CT.INT and tb.tag == CT.INT:
-        var x = a.const_int()
-        var y = b.const_int()
-        if op == CN.DIV and y != 0 and x % y != 0:
-            return CExpr.literal_float(Float64(x) / Float64(y))
-        if op == CN.POW and y < 0:
-            return CExpr.literal_float(Float64(x) ** Float64(y))
     if op == CN.SHL or op == CN.SHR:
         if a.is_literal() and ta.tag == CT.INT and a.const_int() >= 0:
             return ce_binary(op, CExpr.literal_uint(a.const_int()), b)
@@ -742,27 +781,33 @@ def ce_binary(op: Int, a: CExpr, b: CExpr) raises -> CExpr:
             if ta.width != tb.width:
                 raise Error("QM-E580: bit registers of different widths in a bitwise operator. Hint: cast one to the other's width.")
             return _pair(op, ta, a, b)
-        var t = _common(a, b, ca, cb)
+        var t = _common(a, b, ca, cb, _BITWISE)
         return _pair(op, t, ca, cb)
     if op >= CN.EQ and op <= CN.GE:
         if ta.tag == CT.BOOL and tb.tag == CT.BOOL:
             if op != CN.EQ and op != CN.NE:
                 raise Error("QM-E580: bool values are compared with == and != only. Hint: cast to uint.")
             return _pair(op, bool_type(), a, b)
-        _ = _common(a, b, ca, cb)
+        _ = _common(a, b, ca, cb, _COMPARE)
         return _pair(op, bool_type(), ca, cb)
     # arithmetic
     if ta.tag == CT.ANGLE or tb.tag == CT.ANGLE:
         return _angle_arith(op, a, b)
     if op == CN.POW:
         if ta.tag == CT.FLOAT or tb.tag == CT.FLOAT:
-            var t = _common(a, b, ca, cb)
+            var t = _common(a, b, ca, cb, _ARITH)
             return _pair(op, t, ca, cb)
         # the exponent keeps its own type: its sign is read at run time
-        var base = _to_common(a, _uintish(ta))
+        var base = _to_common(a, _promoted(ta, _ARITH))
         return _pair(op, base.ty(), base, _exponent(b))
-    var t = _common(a, b, ca, cb)
+    var t = _common(a, b, ca, cb, _ARITH)
+    if (op == CN.DIV or op == CN.MOD) and _is_zero(cb):
+        raise Error("QM-E533: division by a constant zero. Hint: check the divisor.")
     return _pair(op, t, ca, cb)
+
+
+def _is_zero(e: CExpr) -> Bool:
+    return e.is_const() and e.root().f == 0.0 and e.root().i == 0
 
 
 def _to_shift_count(b: CExpr) raises -> CExpr:
@@ -772,7 +817,7 @@ def _to_shift_count(b: CExpr) raises -> CExpr:
 
 
 def _exponent(b: CExpr) raises -> CExpr:
-    if b.ty().tag == CT.BOOL or b.ty().tag == CT.BIT:
+    if _is_bitlike(b.ty()):
         return ce_cast(b, uint_type(b.ty().width))
     return b.copy()
 
@@ -798,6 +843,8 @@ def _angle_arith(op: Int, a: CExpr, b: CExpr) raises -> CExpr:
             raise Error("QM-E580: an angle multiplies by a uint, not " + type_name(ts) + ". Hint: cast it to uint[" + String(angle.width) + "].")
         return _pair(op, angle, ang, _angle_scale(scale, angle))
     if op == CN.DIV and ta.tag == CT.ANGLE:
+        if _is_zero(b):
+            raise Error("QM-E533: division by a constant zero. Hint: check the divisor.")
         if tb.tag == CT.ANGLE:
             if ta != tb:
                 raise Error("QM-E580: angles of different widths do not divide. Hint: cast one side.")
@@ -818,7 +865,7 @@ def _angle_scale(s: CExpr, angle: CType) raises -> CExpr:
 
 
 def ce_neg(a: CExpr) raises -> CExpr:
-    var t = _uintish(a.ty())
+    var t = _promoted(a.ty(), _ARITH)
     if a.is_literal():
         var n = a.root()
         if t.tag == CT.FLOAT:

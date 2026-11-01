@@ -366,8 +366,9 @@ def _eval[B: ShotBackend](p: Program, e: Int, mut st: CStore, b: B, shot: Int, l
     return root
 
 
-def _store[B: ShotBackend](p: Program, var_id: Int, root: Int, mut st: CStore, mut b: B, shot: Int, line: Int) raises:
-    """var = value of node `root`, keeping the angle slot in step."""
+def _store[B: ShotBackend](p: Program, var_id: Int, root: Int, mut st: CStore, mut b: B) raises:
+    """var = value of node `root`, keeping the angle slot in step. A slot may hold
+    NaN: that is an error only for a gate that reads it, see `run_shot`."""
     ref v = p.vars[var_id]
     var tag = v.ty.tag
     if tag == CT.BIT:
@@ -383,8 +384,6 @@ def _store[B: ShotBackend](p: Program, var_id: Int, root: Int, mut st: CStore, m
         var a: Float64
         if tag == CT.FLOAT:
             a = st.tf[root]
-            if isnan(a) or isinf(a):
-                raise _eval_error(CEval.FLOAT_RANGE, shot, line)
         elif tag == CT.ANGLE:
             a = angle_radians(st.ti[root], v.ty.width)
         elif tag == CT.INT:
@@ -413,7 +412,7 @@ def _for_init[B: ShotBackend](p: Program, at: Int, mut st: CStore, b: B, shot: I
     st.ints[store + 2] = st.ti[r2]
 
 
-def _for_test[B: ShotBackend](p: Program, at: Int, mut st: CStore, mut b: B, shot: Int) raises -> Bool:
+def _for_test[B: ShotBackend](p: Program, at: Int, mut st: CStore, mut b: B) raises -> Bool:
     """True while the loop has a next value, which goes to the loop variable."""
     ref s = p.tape[at]
     var off = s.b
@@ -428,24 +427,48 @@ def _for_test[B: ShotBackend](p: Program, at: Int, mut st: CStore, mut b: B, sho
     else:
         var step = st.ints[store + 1]
         var stop = st.ints[store + 2]
-        if (step > 0 and cur > stop) or (step < 0 and cur < stop):
+        if step == 0 or (step > 0 and cur > stop) or (step < 0 and cur < stop):
             return False
         value = cur
     var ty = p.vars[s.a].ty
     # the loop variable goes through a node slot, like any assignment
     var tmp = len(st.ti) - 1
     st.ti[tmp] = wrap_int(value, ty)
-    _store(p, s.a, tmp, st, b, shot, s.line)
+    _store(p, s.a, tmp, st, b)
     return True
 
 
 def _for_step(p: Program, at: Int, mut st: CStore):
+    """Advance a FOR. The next value may not exist in 64 bits, so the distance to
+    the bound is compared first; step 0 then marks a finished loop (a zero step in
+    the source is refused at the start of the loop)."""
     var off = p.tape[at].b
     var store = p.for_ranges[off + FORR.STORE]
     if p.for_ranges[off + FORR.SET] >= 0:
         st.ints[store] += 1
+        return
+    var cur = st.ints[store]
+    var step = st.ints[store + 1]
+    var stop = st.ints[store + 2]
+    var room = UInt64(stop) - UInt64(cur) if step > 0 else UInt64(cur) - UInt64(stop)
+    var stride = UInt64(step) if step > 0 else UInt64(0) - UInt64(step)
+    if stride > room:
+        st.ints[store + 1] = 0
     else:
-        st.ints[store] += st.ints[store + 1]
+        st.ints[store] = cur + step
+
+
+def _check_angles(p: Program, ops: List[Int], st: CStore, shot: Int, line: Int) raises:
+    """These gates are about to run: an angle that came out NaN or infinite stops
+    here. A variable may hold one until a gate reads it."""
+    for i in ops:
+        ref g = p.body.ops[i]
+        for f in range(3):
+            var q = g.param(f)
+            if q.index >= 0:
+                var v = q.resolve(st.params)
+                if isnan(v) or isinf(v):
+                    raise _eval_error(CEval.FLOAT_RANGE, shot, line)
 
 
 def run_shot[B: ShotBackend](p: Program, cfg: Cfg, mut b: B, mut st: CStore, shot: Int, max_iterations: Int) raises -> Int:
@@ -457,10 +480,11 @@ def run_shot[B: ShotBackend](p: Program, cfg: Cfg, mut b: B, mut st: CStore, sho
         for i in range(bb.lo, bb.hi):
             ref s = p.tape[i]
             if s.kind == SK.OPS:
+                _check_angles(p, cfg.slot_ops[i], st, shot, s.line)
                 b.run_block(p, s.a, s.b, st.params)
             else:
                 var root = _eval(p, s.b, st, b, shot, s.line)
-                _store(p, s.a, root, st, b, shot, s.line)
+                _store(p, s.a, root, st, b)
         if bb.init >= 0:
             _for_init(p, bb.init, st, b, shot)
         if bb.step >= 0:
@@ -478,7 +502,7 @@ def run_shot[B: ShotBackend](p: Program, cfg: Cfg, mut b: B, mut st: CStore, sho
                 var root = _eval(p, bb.cond, st, b, shot, bb.line)
                 take = st.ti[root] != 0
             else:
-                take = _for_test(p, -1 - bb.cond, st, b, shot)
+                take = _for_test(p, -1 - bb.cond, st, b)
             at = bb.t0 if take else bb.t1
         elif term == TERM.SWITCH:
             var root = _eval(p, bb.cond, st, b, shot, bb.line)
@@ -547,6 +571,7 @@ def _run_shots[B: ShotBackend](p: Program, cfg: Cfg, shots: Int, seed: UInt64, f
             var st = CStore(prog[].num_store, len(prog[].nodes) + 1, fullp[].copy())
             for shot in range(c * shots // chunks, (c + 1) * shots // chunks):
                 b.begin_shot(shot)
+                st.begin_shot(fullp[])
                 ip[unsafe_offset=shot] = run_shot(prog[], graph[], b, st, shot, max_iterations)
                 cp[unsafe_offset=shot] = b.packed_bits(nc)
                 for j in range(nout):
@@ -583,6 +608,14 @@ def _run_shots[B: ShotBackend](p: Program, cfg: Cfg, shots: Int, seed: UInt64, f
     return res^
 
 
+def _huge_angle(g: Instruction) -> Bool:
+    """Past 2^53 every float is an integer multiple of pi/2 to `is_clifford`."""
+    for f in range(3):
+        if abs(g.param(f).offset) >= 1e6:
+            return True
+    return False
+
+
 def is_clifford_program(p: Program) -> Bool:
     """Every block holds Clifford gates with constant angles and Pauli noise."""
     for s in p.tape:
@@ -590,7 +623,7 @@ def is_clifford_program(p: Program) -> Bool:
             continue
         for i in range(s.a, s.b):
             ref g = p.body.ops[i]
-            if op_is_unitary(g.kind) and (g.is_parametric() or not g.is_clifford()):
+            if op_is_unitary(g.kind) and (g.is_parametric() or not g.is_clifford() or _huge_angle(g)):
                 return False
             if op_is_noise(g.kind) and not op_is_pauli_noise(g.kind):
                 return False

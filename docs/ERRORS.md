@@ -431,8 +431,8 @@ Fix: Gates must not call themselves.
 
 ### QM-E552
 
-**OpenQASM export cannot express a classical condition: a single-bit condition on a multi-bit register (OpenQASM 2), or a register condition that does not cover every clbit.**  
-Fix: Export OpenQASM 3 (to_qasm) for single-bit conditions; condition on single bits or on the whole register.
+**OpenQASM export cannot express something: a single-bit condition on a multi-bit register (OpenQASM 2), a register condition that does not cover every clbit, or a constant that is NaN or infinite.**  
+Fix: Export OpenQASM 3 (to_qasm) for single-bit conditions; condition on single bits or on the whole register; compute a non-finite value at run time.
 
 ### QM-E580
 

@@ -73,9 +73,8 @@ def test_division() raises:
     assert_equal(_ti(ce_binary(CN.DIV, seven, _lit(-2))), -3)
     assert_equal(_ti(ce_binary(CN.MOD, minus, _lit(3))), -1)
     assert_equal(_ti(ce_binary(CN.MOD, seven, _lit(-3))), 1)
-    # two literals keep the meaning they have in every constant the flat parser
-    # folds; an exact quotient stays an integer
-    assert_almost_equal(ce_binary(CN.DIV, _lit(1), _lit(2)).const_float(), 0.5)
+    # two literals follow the same rule: folding equals what the run would compute
+    assert_equal(_ti(ce_binary(CN.DIV, _lit(1), _lit(2))), 0)
     assert_equal(_ti(ce_binary(CN.DIV, _lit(6), _lit(2))), 3)
     assert_equal(_ti(ce_binary(CN.MOD, _lit(-7), _lit(3))), -1)
     with assert_raises(contains="QM-E533"):
@@ -200,7 +199,8 @@ def test_functions_and_power() raises:
     assert_almost_equal(ce_function(CF.SQRT, _lit(2)).const_float(), sqrt(2.0))
     assert_equal(_ti(ce_function(CF.POPCOUNT, CExpr.typed_const(uint_type(8), 0x13))), 3)
     assert_equal(_ti(ce_function(CF.ABS, CExpr.typed_const(int_type(8), -3))), 3)
-    assert_almost_equal(ce_binary(CN.POW, _lit(2), _lit(-1)).const_float(), 0.5)
+    with assert_raises(contains="QM-E533"):
+        _ = ce_binary(CN.POW, _lit(2), _lit(-1))
     with assert_raises(contains="QM-E533"):
         _ = ce_binary(CN.POW, CExpr.typed_const(int_type(32), 2), _lit(-1))
 

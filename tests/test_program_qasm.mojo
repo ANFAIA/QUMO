@@ -136,8 +136,8 @@ def test_values_and_precedence() raises:
     assert_equal(_int("output int r; float f; f = 2.9; r = int(f);", "r"), 2)
     assert_equal(_int("output uint r; r = popcount(bit[8](255));", "r"), 8)
     assert_true(abs(_real("output float r; float x; x = 2.0; r = sqrt(x) * 3 / 2 + 1;", "r") - 3.121320343559643) < 1e-12)
-    # literals divide exactly, as in a constant angle
-    assert_true(abs(_real("output float r; r = 1/2;", "r") - 0.5) < 1e-15)
+    # literals divide as integers, as a variable would
+    assert_true(abs(_real("output float r; r = 1/2;", "r")) < 1e-15)
     assert_equal(_int("output int r; const int a = 7; r = a / 2;", "r"), 3)
     # a long literal stays exact
     assert_equal(_int("output int r; r = 9007199254740993;", "r"), 9007199254740993)
