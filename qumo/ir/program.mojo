@@ -623,6 +623,50 @@ def _raise_unassigned(p: Program, store: Int, line: Int) raises:
     raise Error("QM-E581: " + name + " may be read before it is assigned (line " + String(line) + "). Hint: assign it on every path, for example where it is declared.")
 
 
+def _can_leave(p: Program, at: Int) -> Bool:
+    """Can the body of the WHILE at tape index `at` end it? A `break` can, and so can
+    anything that writes a variable or a bit its condition reads."""
+    ref head = p.tape[at]
+    var stores = List[Int]()
+    _reads(p, head.a, stores)
+    var bits = List[Bool](length=p.num_clbits(), fill=False)
+    for i in range(p.expr_lo[head.a], p.expr_root[head.a] + 1):
+        ref n = p.nodes[i]
+        if n.op == CN.BITS:
+            for j in range(n.y):
+                bits[n.x + j] = True
+    for j in range(at + 1, head.end):
+        ref s = p.tape[j]
+        if s.kind == SK.BREAK and s.end == at:
+            return True
+        if s.kind == SK.OPS:
+            for i in range(s.a, s.b):
+                ref g = p.body.ops[i]
+                if g.kind == Op.MEASURE and bits[g.clbit]:
+                    return True
+        elif s.kind == SK.ASSIGN or s.kind == SK.FOR:
+            ref v = p.vars[s.a]
+            if v.ty.tag == CT.BIT:
+                for b in range(v.store, v.store + v.ty.width):
+                    if bits[b]:
+                        return True
+            else:
+                for r in stores:
+                    if r == v.store:
+                        return True
+    return False
+
+
+def stuck_loops(p: Program) -> List[Int]:
+    """Tape index of every WHILE that never runs or never ends: nothing in its
+    body writes what the condition reads, and no `break` leaves it."""
+    var out = List[Int]()
+    for i in range(len(p.tape)):
+        if p.tape[i].kind == SK.WHILE and not _can_leave(p, i):
+            out.append(i)
+    return out^
+
+
 def is_block_op(k: Int) -> Bool:
     """Opcodes the program interpreter runs inside a block; anything else is
     QM-E484, because a walker that meets an unknown opcode skips it."""

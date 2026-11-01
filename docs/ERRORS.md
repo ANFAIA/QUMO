@@ -49,7 +49,7 @@ Machine-readable catalog: `qumo describe errors --json`, or the MCP tool
 | `QM-E9xx` | interface | JSON, MCP tools, CLI and device selection (qumo.ai, qumo.exec.tools, cli); QM-E999 = uncategorized |
 | `QM-E95x` | hardware | Hardware plugins (Python package plugins/hardware: IBM Quantum via Qiskit Runtime, Quantinuum via pytket/qnexus) |
 | `QM-E96x` | benchmark | Benchmark harness (bench/run_benchmarks.py, Python) |
-| `QM-W0xx` | warning | Warnings: lint findings QM-W001..W019 (qumo.ai.diagnostics.lint), execution notes QM-W020..W049, OpenQASM parser warnings QM-W050..W059 |
+| `QM-W0xx` | warning | Warnings: lint findings QM-W001..W019 (qumo.ai.diagnostics.lint), execution notes QM-W020..W049, OpenQASM parser warnings QM-W050..W053, Program lint QM-W054 |
 
 A code belongs to the narrowest range that contains it (QM-E472 is in QM-E47x, not QM-E4xx).
 
@@ -336,8 +336,8 @@ Fix: Use 'OPENQASM 3.0;' or 'OPENQASM 2.0;'.
 
 ### QM-E504
 
-**OpenQASM feature outside QUMO's supported subset (subroutines, while, classical assignment, ...).**  
-Fix: Use the gate-level subset; see 'qumo describe capabilities'.
+**OpenQASM feature outside QUMO's supported subset, or one a Circuit cannot hold: subroutines, or, in parse_qasm, while and classical assignment.**  
+Fix: Parse with parse_qasm_program or load_any for while and classical variables; see 'qumo describe capabilities' for the rest.
 
 ### QM-E510
 
@@ -459,10 +459,20 @@ Fix: Check the nesting of the block.
 **A value known only at run time where a constant is needed: qubit index, size, modifier, const initializer.**  
 Fix: Use a constant, or a for loop that can unroll.
 
+### QM-E585
+
+**A Program with classical variables or runtime control flow was given to an operation that needs one Circuit: exact state vector, expectation value, density matrix, OpenQASM 2, resource estimates, device emulation, encoding.**  
+Fix: Sample it with qumo_run_qasm, or keep the part you need in a straight-line circuit.
+
 ### QM-E586
 
 **Detector or observable in a program with runtime control flow: they index measurements as if each ran once, and no decoder takes a syndrome of varying length.**  
 Fix: Move the QEC circuit out of the loop.
+
+### QM-E587
+
+**Program JSON (qumo.program.v1) that cannot be read: a wrong format, a missing field, or an index outside its table.**  
+Fix: Pass the output of program_to_json or qumo_convert with to='json'; docs/CONTROL_FLOW.md has the format.
 
 ### QM-E560
 
@@ -1138,3 +1148,8 @@ Fix: Annotations carry no meaning in QUMO; the annotated statement still runs.
 
 **OpenQASM box duration is ignored.**  
 Fix: QUMO circuits have no timing model; the box still keeps its gates together.
+
+### QM-W054
+
+**The body of a while loop cannot change its condition and has no break: the loop never runs, or runs until QM-E480.**  
+Fix: Assign a variable the condition reads, measure into a bit it reads, or add a break.

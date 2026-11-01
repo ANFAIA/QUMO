@@ -221,6 +221,8 @@ def cmd_run(a: CliArgs) raises -> Int:
     w.kv_int("seed", a.get_int("seed", 1234))
     if a.has("max-qubits"):
         w.kv_int("max_qubits", a.get_int("max-qubits", 28))
+    if a.has("max-iterations"):
+        w.kv_int("max_iterations", a.get_int("max-iterations", 65536))
     if explicit:
         w.kv_string("device", a.get("device", "auto"))
         w.kv_string("precision", a.get("precision", "auto"))
@@ -248,6 +250,14 @@ def cmd_run(a: CliArgs) raises -> Int:
             for _ in range(Int(round(p * 40.0))):
                 bar += "#"
             human += "\n  " + rpad(counts.key_at(i), width) + "  " + lpad(String(c), 8) + "  " + fmt_fixed(p, 4) + "  " + bar
+        if v.has("iterations"):
+            var it = v.get("iterations")
+            human += "\n  loop iterations per shot: mean " + fmt_fixed(it.get("mean").as_float(), 3) + ", max " + String(it.get("max").as_int())
+            var outs = v.get("outputs")
+            var names = outs.keys()
+            for i in range(len(names)):
+                var o = outs.at(i)
+                human += "\n  output " + names[i] + ": mean " + fmt_fixed(o.get("mean").as_float(), 6) + ", range " + String(o.get("min").as_float()) + " to " + String(o.get("max").as_float())
         var ws = v.get("warnings")
         for i in range(len(ws)):
             human += "\n  note[" + ws.at(i).get("code").as_string() + "]: " + ws.at(i).get("message").as_string()
@@ -440,6 +450,8 @@ def cmd_convert(a: CliArgs) raises -> Int:
     var text: String
     if v.has("qasm"):
         text = v.get("qasm").as_string()
+    elif v.has("program"):
+        text = v.get("program").to_pretty_json() + "\n"
     else:
         text = v.get("circuit").to_pretty_json() + "\n"
     if a.has("output"):
@@ -531,14 +543,14 @@ struct Command(Copyable):
 
 def command_table() -> List[Command]:
     var t = List[Command]()
-    t.append(Command("run", "Sample measurement counts (seeded, deterministic)", "qumo run <file.qasm|-> [--shots N] [--seed S] [--params '[0.1]'|'{\"theta\":0.1}'] [--max-qubits N] [--device auto|cpu|gpu] [--precision auto|fp32|fp64] [--json]\n\n--device / --precision run through the MCP tool qumo_run_device: 'gpu' needs a build made with -D QUMO_GPU (make cli-gpu); --precision applies to GPU state vectors (auto = QUMO_GPU_PRECISION or the build default, fp32; fp64 on NVIDIA / AMD only).", cmd_run))
+    t.append(Command("run", "Sample measurement counts (seeded, deterministic)", "qumo run <file.qasm|-> [--shots N] [--seed S] [--params '[0.1]'|'{\"theta\":0.1}'] [--max-qubits N] [--max-iterations N] [--device auto|cpu|gpu] [--precision auto|fp32|fp64] [--json]\n\n--max-iterations bounds the loop back-edges of one shot (default 65536); past it the run stops with QM-E480. --device / --precision run through the MCP tool qumo_run_device: 'gpu' needs a build made with -D QUMO_GPU (make cli-gpu); --precision applies to GPU state vectors (auto = QUMO_GPU_PRECISION or the build default, fp32; fp64 on NVIDIA / AMD only).", cmd_run))
     t.append(Command("statevector", "Print the exact final state vector", "qumo statevector <file.qasm|-> [--max-amplitudes N] [--params ...] [--json]", cmd_statevector))
     t.append(Command("expect", "Exact Pauli expectation value(s)", "qumo expect <file.qasm|-> \"0.5*Z0 Z1 - X0\" [more observables...] [--params ...] [--json]", cmd_expect))
-    t.append(Command("validate", "Parse + lint OpenQASM with structured diagnostics", "qumo validate <file.qasm|-> [--json]", cmd_validate))
-    t.append(Command("info", "Circuit summary: depth, gate counts, T-count, flags, lint", "qumo info <file.qasm|-> [--qasm] [--instructions] [--json]", cmd_info))
-    t.append(Command("draw", "Text drawing of a circuit", "qumo draw <file.qasm|-> [--width N] [--unicode] [--json]", cmd_draw))
+    t.append(Command("validate", "Parse + lint OpenQASM, programs included, with structured diagnostics", "qumo validate <file.qasm|-> [--json]", cmd_validate))
+    t.append(Command("info", "Circuit or program summary: depth, gate counts, T-count, flags, lint", "qumo info <file.qasm|-> [--qasm] [--instructions] [--json]", cmd_info))
+    t.append(Command("draw", "Text drawing of a circuit, or of a program by blocks", "qumo draw <file.qasm|-> [--width N] [--unicode] [--json]", cmd_draw))
     t.append(Command("describe", "Self-description: gates | gate <name> | errors | error <code> | capabilities | passes | models", "qumo describe [gates|gate <name>|errors|error <code>|capabilities|passes|models [model_dir]] [--json]", cmd_describe))
-    t.append(Command("convert", "Re-emit canonical OpenQASM 3 (or circuit JSON)", "qumo convert <file.qasm|-> [--to qasm3|json] [-o out]", cmd_convert))
+    t.append(Command("convert", "Re-emit canonical OpenQASM 3 (or circuit or program JSON)", "qumo convert <file.qasm|-> [--to qasm3|json] [-o out]", cmd_convert))
     t.append(Command("tool", "Call any registered MCP tool with JSON arguments", "qumo tool list | qumo tool <name> '<json-args>'|- [--pretty]", cmd_tool))
     t.append(Command("mcp", "Run the MCP server on stdio (JSON-RPC 2.0, MCP 2025-06-18)", "qumo mcp", cmd_mcp))
     t.append(Command("version", "Print version", "qumo version [--json]", cmd_version))

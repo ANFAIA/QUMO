@@ -759,14 +759,15 @@ def _parse_value(text: String, bs: Span[Byte, _], mut pos: Int, mut arena: JsonA
             pos += 1
         if pos >= n or not _is_digit(Int(bs[pos])):
             raise _json_error(text, pos, "invalid number", "numbers look like -12, 0.5 or 1e-3")
-        var iv = 0
+        var iv = UInt64(0)  # 19 digits fit; more are not read as an integer
         var digits = 0
         if Int(bs[pos]) == 0x30:
             pos += 1
             digits = 1
         else:
             while pos < n and _is_digit(Int(bs[pos])):
-                iv = iv * 10 + (Int(bs[pos]) - 0x30)
+                if digits < 19:
+                    iv = iv * 10 + UInt64(Int(bs[pos]) - 0x30)
                 digits += 1
                 pos += 1
         var is_int = True
@@ -787,8 +788,9 @@ def _parse_value(text: String, bs: Span[Byte, _], mut pos: Int, mut arena: JsonA
             while pos < n and _is_digit(Int(bs[pos])):
                 pos += 1
         var node = _new_node(arena, JsonKind.NUMBER)
-        if is_int and digits <= 18:
-            var v = -iv if neg else iv
+        var top = UInt64(9223372036854775808) if neg else UInt64(9223372036854775807)
+        if is_int and digits <= 19 and iv <= top:
+            var v = Int(UInt64(0) - iv) if neg else Int(iv)
             arena.nodes[node].ival = v
             arena.nodes[node].is_int = True
             arena.nodes[node].num = Float64(v)

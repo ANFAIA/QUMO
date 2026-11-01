@@ -50,7 +50,7 @@ from qumo.ir.classical import (
     angle_type, ce_binary, ce_bool, ce_bnot, ce_cast, ce_explicit_cast, ce_function, ce_lnot, ce_logical, ce_neg,
     angle_radians,
 )
-from qumo.ir.program import CReg, FORR, Program, SK, TapeBuilder, check_program, slot_prefix
+from qumo.ir.program import CReg, FORR, Program, SK, Stmt, TapeBuilder, check_program, slot_prefix
 
 
 # ===========================================================================
@@ -3906,6 +3906,31 @@ def load_any(source: String, name: String = "qasm") raises -> Program:
         raise Error(flat_error)
 
 
+def load_any_with_warnings(source: String, mut warnings: List[String], name: String = "qasm") raises -> Program:
+    """`load_any`; the warnings of the parser whose result stands are appended."""
+    var flat_warnings = List[String]()
+    var flat_error: String
+    try:
+        var c = parse_qasm_with_warnings(source, flat_warnings, name)
+        warnings.extend(flat_warnings^)
+        return Program.from_circuit(c)
+    except e:
+        flat_error = String(e)
+    var p = QasmParser(source, name)
+    p.program_mode = True
+    p.prescan()
+    try:
+        p.parse_program()
+        var out = p.finish_program()
+        warnings.extend(p.warnings.copy())
+        return out^
+    except e:
+        if flat_error.startswith("QM-E504") or flat_error.startswith("QM-E541"):
+            raise e^
+    warnings.extend(flat_warnings^)
+    raise Error(flat_error)
+
+
 def load_qasm(path: String) raises -> Circuit:
     var text: String
     try:
@@ -4473,21 +4498,7 @@ def to_qasm(p: Program) raises -> String:
             out += _pad(depth) + "while (" + _value_text(p, s.a, bool_type(), names) + ") {\n"
             depth += 1
         elif k == SK.FOR:
-            ref v = p.vars[s.a]
-            var head = _pad(depth) + "for " + type_name(v.ty) + " " + vnames[s.a] + " in "
-            var set_off = p.for_ranges[s.b + FORR.SET]
-            if set_off >= 0:
-                head += "{"
-                for j in range(p.case_vals[set_off]):
-                    head += (", " if j > 0 else "") + String(p.case_vals[set_off + 1 + j])
-                head += "}"
-            else:
-                var i64 = int_type(64)
-                var a = _value_text(p, p.for_ranges[s.b + FORR.START], i64, names)
-                var st = _value_text(p, p.for_ranges[s.b + FORR.STEP], i64, names)
-                var b = _value_text(p, p.for_ranges[s.b + FORR.STOP], i64, names)
-                head += "[" + a + ":" + ("" if st == "1" else st + ":") + b + "]"
-            out += head + " {\n"
+            out += _pad(depth) + _for_head(p, s, vnames[s.a], names) + " {\n"
             depth += 1
         elif k == SK.SWITCH:
             out += _pad(depth) + "switch (" + _value_text(p, s.a, int_type(64), names) + ") {\n"
@@ -4524,4 +4535,98 @@ def to_qasm(p: Program) raises -> String:
             else:
                 depth -= 1
                 out += _pad(depth) + "}\n"
+    return out^
+
+
+def _for_head(p: Program, s: Stmt, name: String, names: _PNames) raises -> String:
+    """`for int i in [0:2]`, without the brace."""
+    var head = "for " + type_name(p.vars[s.a].ty) + " " + name + " in "
+    var set_off = p.for_ranges[s.b + FORR.SET]
+    if set_off >= 0:
+        head += "{"
+        for j in range(p.case_vals[set_off]):
+            head += (", " if j > 0 else "") + String(p.case_vals[set_off + 1 + j])
+        return head + "}"
+    var i64 = int_type(64)
+    var a = _value_text(p, p.for_ranges[s.b + FORR.START], i64, names)
+    var st = _value_text(p, p.for_ranges[s.b + FORR.STEP], i64, names)
+    var b = _value_text(p, p.for_ranges[s.b + FORR.STOP], i64, names)
+    return head + "[" + a + ":" + ("" if st == "1" else st + ":") + b + "]"
+
+
+def draw_program(p: Program, width: Int = 80, style: String = "ascii") raises -> String:
+    """Text drawing by blocks: each block as `Circuit.draw` draws it, under headers
+    in OpenQASM and indented by region. A program without runtime regions is a
+    circuit and draws as one. A gate with a runtime angle shows the variable."""
+    var flat = p.try_flatten()
+    if flat:
+        return flat.value().draw(width, style)
+    var names = _PNames(p.num_store)
+    names.num_clbits = p.num_clbits()
+    var shell = p.body.copy()
+    shell.ops.clear()
+    names.params = shell.param_names.copy()
+    var out = String()
+    for ref v in p.vars:
+        if v.ty.tag == CT.BIT:
+            continue
+        names.stores[v.store] = v.name
+        if v.slot >= 0:
+            names.params[v.slot] = v.name
+    shell.param_names = names.params.copy()
+    var is_loop = _for_vars(p)
+    for i in range(len(p.vars)):
+        ref v = p.vars[i]
+        if v.ty.tag != CT.BIT and not is_loop[i]:
+            out += ("output " if v.is_output else "") + type_name(v.ty) + " " + v.name + ";\n"
+    var depth = 0
+    for s in p.tape:
+        var k = s.kind
+        if k == SK.OPS:
+            if s.b == s.a:
+                continue
+            var block = shell.copy()
+            for j in range(s.a, s.b):
+                block.ops.append(p.body.ops[j])
+            var pad = _pad(depth)
+            var fold = max(width - 2 * depth, 20) if width > 0 else 0
+            for line in block.draw(fold, style).split("\n"):
+                if line.byte_length() > 0:
+                    out += pad + line + "\n"
+        elif k == SK.ASSIGN:
+            ref v = p.vars[s.a]
+            var target = v.name if v.ty.tag != CT.BIT else _bits_text(v.store, v.ty.width, names)
+            out += _pad(depth) + target + " = " + _value_text(p, s.b, v.ty, names) + ";\n"
+        elif k == SK.IF:
+            out += _pad(depth) + "if (" + _value_text(p, s.a, bool_type(), names) + ") {\n"
+            depth += 1
+        elif k == SK.ELSE:
+            out += _pad(depth - 1) + "} else {\n"
+        elif k == SK.WHILE:
+            out += _pad(depth) + "while (" + _value_text(p, s.a, bool_type(), names) + ") {\n"
+            depth += 1
+        elif k == SK.FOR:
+            out += _pad(depth) + _for_head(p, s, p.vars[s.a].name, names) + " {\n"
+            depth += 1
+        elif k == SK.SWITCH:
+            out += _pad(depth) + "switch (" + _value_text(p, s.a, int_type(64), names) + ") {\n"
+            depth += 2
+        elif k == SK.CASE:
+            if s.a < 0:
+                out += _pad(depth - 1) + "default:\n"
+            else:
+                ref root = p.nodes[p.expr_root[p.tape[p.tape[s.end].end].a]]
+                var unsigned_target = root.op == CN.CAST and not p.nodes[root.x].ty.is_signed()
+                var vals = String()
+                for j in range(s.a, s.b):
+                    var v = p.case_vals[j]
+                    vals += (", " if j > s.a else "") + (String(UInt64(v)) if unsigned_target else String(v))
+                out += _pad(depth - 1) + "case " + vals + ":\n"
+        elif k == SK.BREAK:
+            out += _pad(depth) + "break;\n"
+        elif k == SK.CONTINUE:
+            out += _pad(depth) + "continue;\n"
+        else:  # END
+            depth -= 2 if p.tape[s.end].kind == SK.SWITCH else 1
+            out += _pad(depth) + "}\n"
     return out^

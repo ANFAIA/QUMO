@@ -11,9 +11,11 @@ order, sorted maps) to keep agent transcripts diffable and cacheable.
 
 Circuit JSON (`format: "qumo.circuit.v1"`) round-trips through
 `circuit_from_json`, giving agents a structured alternative to QASM text.
+Program JSON (`format: "qumo.program.v1"`) wraps it, with the circuit as the
+arena of quantum ops, and round-trips through `program_from_json`.
 """
 
-from std.math import pi
+from std.math import isinf, isnan, pi
 
 from qumo.ir.gates import (
     Op, op_name, op_arity, op_num_params, op_is_unitary, op_is_noise, op_is_annotation,
@@ -23,6 +25,8 @@ from qumo.ir.gates import (
 from qumo.ir.circuit import Circuit, Instruction
 from qumo.ir.param import Param
 from qumo.ir.kraus import KrausChannel
+from qumo.ir.classical import CF, CN, CNode, CT, CType, type_name
+from qumo.ir.program import CReg, CVar, FORR, Program, SK, Stmt, TapeBuilder, check_program
 from qumo.ir.qasm import builtin_gate_table, format_param
 from qumo.ai.json import JsonWriter, JsonValue, JsonKind, parse_json
 from qumo.ai.diagnostics import error_catalog, error_ranges, range_index_of
@@ -395,10 +399,12 @@ def describe_capabilities_json(tools: List[String], commands: List[String] = Lis
         "if (c[i]) / if (c[i] == v) / if (!c[i]) with else; if (creg == v) on a whole register of any size; if (c[i] == v && c[j] == w), no else on the last two",
         "const declarations and for loops over constant ranges/sets (unrolled)",
         "#pragma qumo: noise channels, detector, observable, tick, param",
+        "programs (parse_qasm_program, load_any): while, break, continue, for and switch at run time, classical variables bit, bool, int[n], uint[n], float, angle[n], assignment, conditions on any value, runtime gate angles",
     ])
     w.kv_string_list("unsupported", [
-        "def/extern subroutines", "while loops", "classical arithmetic on runtime values",
+        "def/extern subroutines", "hexadecimal, octal and binary integer literals",
         "opaque gates", "pulse-level cal/defcal", "delay timing (delay ignored)",
+        "programs on hardware: the plugins refuse them", "detectors in a program with runtime regions (QM-E586)",
     ])
     w.end_object()
     w.key("error_codes")
@@ -564,6 +570,24 @@ def describe_models_json(model_dir: String = "") -> String:
 # ---------------------------------------------------------------------------
 # Circuits
 # ---------------------------------------------------------------------------
+def _kv_number(mut w: JsonWriter, key: StringSlice, v: Float64):
+    """JSON has no NaN or infinity, and an affine coefficient that overflowed is one."""
+    if isnan(v) or isinf(v):
+        w.kv_string(key, "nan" if isnan(v) else ("inf" if v > 0.0 else "-inf"))
+    else:
+        w.kv_float(key, v)
+
+
+def _read_number(v: JsonValue, key: String, default: Float64) raises -> Float64:
+    """Inverse of `_kv_number`."""
+    var x = v.get(key)
+    if x.is_string():
+        var s = x.as_string()
+        if s == "nan" or s == "inf" or s == "-inf":
+            return Float64(s)
+    return v.get_float(key, default)
+
+
 def write_param_json(mut w: JsonWriter, p: Param, names: List[String]):
     if not p.is_symbolic():
         w.number(p.offset)
@@ -571,8 +595,8 @@ def write_param_json(mut w: JsonWriter, p: Param, names: List[String]):
     w.begin_object()
     w.kv_string("expr", format_param(p, names))
     w.kv_string("param", names[p.index] if p.index < len(names) else "$" + String(p.index))
-    w.kv_float("coeff", p.coeff)
-    w.kv_float("offset", p.offset)
+    _kv_number(w, "coeff", p.coeff)
+    _kv_number(w, "offset", p.offset)
     w.end_object()
 
 
@@ -812,7 +836,7 @@ def circuit_from_json(v: JsonValue) raises -> Circuit:
                             idx = t
                     if idx < 0:
                         raise Error("QM-E913: " + path + ".params[" + String(j) + "]: unknown parameter '" + pn + "'. Hint: list it in circuit.params.")
-                    pp.append(Param(x.get_float("offset", 0.0), idx, x.get_float("coeff", 1.0)))
+                    pp.append(Param(_read_number(x, "offset", 0.0), idx, _read_number(x, "coeff", 1.0)))
                 else:
                     raise _path_err(path + ".params[" + String(j) + "]", "expected a number or parameter object", "e.g. 0.5 or {\"param\": \"theta\", \"coeff\": 2.0, \"offset\": 0.0}")
             while len(pp) < 3:
@@ -821,6 +845,380 @@ def circuit_from_json(v: JsonValue) raises -> Circuit:
         _read_condition_json(c, g)
     c.validate()
     return c^
+
+
+# ---------------------------------------------------------------------------
+# Programs
+# ---------------------------------------------------------------------------
+comptime _PROGRAM_FORMAT = "qumo.program.v1"
+comptime _MAX_STORE = 16777216  # a table this large is a bad file, not a program
+
+
+def _node_names() -> List[String]:
+    """Index = CN code."""
+    return ["const", "var", "input", "bits", "neg", "lnot", "bnot", "add", "sub", "mul", "div", "mod", "pow",
+            "shl", "shr", "and", "or", "xor", "eq", "ne", "lt", "le", "gt", "ge", "cast", "fn",
+            "sc_and", "sc_or", "sc_end"]
+
+
+def _stmt_names() -> List[String]:
+    """Index = SK code."""
+    return ["ops", "assign", "if", "else", "while", "for", "switch", "case", "break", "continue", "end"]
+
+
+def write_program_json(p: Program, mut w: JsonWriter):
+    var ops = _node_names()
+    var kinds = _stmt_names()
+    w.begin_object()
+    w.kv_string("format", _PROGRAM_FORMAT)
+    w.key("circuit")
+    write_circuit_json(p.body, w)
+    w.kv_int("num_store", p.num_store)
+    w.kv_int_list("user_params", p.user_params)
+    w.key("registers")
+    w.begin_array()
+    for r in p.cregs:
+        w.begin_object()
+        w.kv_string("name", r.name)
+        w.kv_int("first", r.first)
+        w.kv_int("width", r.width)
+        w.end_object()
+    w.end_array()
+    w.key("variables")
+    w.begin_array()
+    for v in p.vars:
+        w.begin_object()
+        w.kv_string("name", v.name)
+        w.kv_string("type", type_name(v.ty))
+        w.kv_int("store", v.store)
+        w.kv_int("slot", v.slot)
+        w.kv_bool("output", v.is_output)
+        w.end_object()
+    w.end_array()
+    w.key("nodes")
+    w.begin_array()
+    for n in p.nodes:
+        w.begin_object()
+        w.kv_string("op", ops[n.op])
+        w.kv_string("type", type_name(n.ty))
+        if n.x != 0: w.kv_int("x", n.x)
+        if n.y != 0: w.kv_int("y", n.y)
+        if n.i != 0: w.kv_int("i", n.i)
+        if String(n.f) != "0.0":
+            _kv_number(w, "f", n.f)
+        w.end_object()
+    w.end_array()
+    w.key("expressions")
+    w.begin_array()
+    for i in range(len(p.expr_lo)):
+        w.begin_array()
+        w.integer(p.expr_lo[i])
+        w.integer(p.expr_root[i])
+        w.end_array()
+    w.end_array()
+    w.kv_int_list("for_ranges", p.for_ranges)
+    w.kv_int_list("case_values", p.case_vals)
+    w.key("statements")
+    w.begin_array()
+    for s in p.tape:
+        w.begin_object()
+        w.kv_string("kind", kinds[s.kind])
+        if s.kind == SK.OPS or s.kind == SK.ASSIGN or s.kind == SK.FOR or s.kind == SK.CASE:
+            w.kv_int("a", s.a)
+            w.kv_int("b", s.b)
+        elif s.kind == SK.IF or s.kind == SK.WHILE or s.kind == SK.SWITCH:
+            w.kv_int("a", s.a)
+        if s.line != 0:
+            w.kv_int("line", s.line)
+        w.end_object()
+    w.end_array()
+    w.end_object()
+
+
+def program_to_json(p: Program) -> String:
+    var w = JsonWriter()
+    write_program_json(p, w)
+    return w.finish()
+
+
+def _bad_program(msg: String) -> Error:
+    return Error("QM-E587: " + msg + ". Hint: pass the output of program_to_json or qumo_convert with to='json'.")
+
+
+def _json_int(v: JsonValue, what: String) raises -> Int:
+    if not v.is_number():
+        raise _bad_program(what + " must be an integer, got " + v.kind_name())
+    try:
+        return v.as_int()
+    except:
+        raise _bad_program(what + " must be an integer")
+
+
+def _json_int_or(v: JsonValue, key: String, default: Int, what: String) raises -> Int:
+    var x = v.get(key)
+    if not x.is_defined():
+        return default
+    return _json_int(x, what + "." + key)
+
+
+def _json_ints(v: JsonValue, key: String) raises -> List[Int]:
+    var a = v.get(key)
+    if not a.is_defined():
+        return List[Int]()
+    if not a.is_array():
+        raise _bad_program(key + " must be an array")
+    var out = List[Int](capacity=len(a))
+    for i in range(len(a)):
+        out.append(_json_int(a.at(i), key + "[" + String(i) + "]"))
+    return out^
+
+
+def _json_string(v: JsonValue, key: String, what: String) raises -> String:
+    var x = v.get(key)
+    if not x.is_string():
+        raise _bad_program(what + "." + key + " must be a string")
+    return x.as_string()
+
+
+def _json_array(v: JsonValue, key: String) raises -> JsonValue:
+    var a = v.get(key)
+    if not a.is_array():
+        raise _bad_program("'" + key + "' must be an array")
+    return a^
+
+
+def _json_float(v: JsonValue, what: String) raises -> Float64:
+    try:
+        return _read_number(v, "f", 0.0)
+    except:
+        raise _bad_program(what + ".f must be a number, 'nan', 'inf' or '-inf'")
+
+
+def _type_from_name(s: String, what: String) raises -> CType:
+    """Inverse of `type_name`."""
+    if s == "bool": return CType(CT.BOOL, 1, False)
+    if s == "float": return CType(CT.FLOAT, 64, True)
+    if s == "float[64]": return CType(CT.FLOAT, 64, False)
+    if s == "bit": return CType(CT.BIT, 1, False)
+    if s == "int": return CType(CT.INT, 64, True)
+    if s == "uint": return CType(CT.UINT, 64, True)
+    var open = s.find("[")
+    if open > 0 and s.endswith("]"):
+        var nm = String(s[byte=0:open])
+        var width: Int
+        try:
+            width = Int(String(s[byte=open + 1:s.byte_length() - 1]))
+        except:
+            raise _bad_program(what + ": bad type '" + s + "'")
+        var tag = CT.BIT if nm == "bit" else (CT.INT if nm == "int" else (CT.UINT if nm == "uint" else (CT.ANGLE if nm == "angle" else -1)))
+        if tag >= 0 and width >= 1 and width <= 64:
+            return CType(tag, width, False)
+    raise _bad_program(what + ": bad type '" + s + "'")
+
+
+def _is_float(t: CType) -> Bool:
+    return t.tag == CT.FLOAT
+
+
+def _check_operand(p: Program, pc: Int, at: Int, lo: Int, float_: Bool) raises:
+    """Node `at` is an operand of node `pc` in an expression starting at `lo`."""
+    if at < lo or at >= pc:
+        raise _bad_program("nodes[" + String(pc) + "] has an operand outside its expression")
+    if _is_float(p.nodes[at].ty) != float_:
+        raise _bad_program("nodes[" + String(pc) + "] has an operand of the wrong kind")
+
+
+def _check_expression(p: Program, lo: Int, root: Int) raises:
+    """What `eval_nodes` takes on trust: operands before their node, in tables."""
+    var pc = lo
+    while pc <= root:
+        ref n = p.nodes[pc]
+        var op = n.op
+        var fl = _is_float(n.ty)
+        if op == CN.CONST:
+            pass
+        elif op == CN.VAR:
+            if n.x < 0 or n.x >= p.num_store:
+                raise _bad_program("nodes[" + String(pc) + "] reads a variable outside the store")
+        elif op == CN.INPUT:
+            if n.x < 0 or n.x >= p.body.num_params() or not fl:
+                raise _bad_program("nodes[" + String(pc) + "] reads a parameter outside the circuit")
+        elif op == CN.BITS:
+            if n.x < 0 or n.y < 1 or n.y > 64 or n.x + n.y > p.num_clbits() or fl:
+                raise _bad_program("nodes[" + String(pc) + "] reads bits outside the circuit")
+        elif op == CN.CAST:
+            if n.x < lo or n.x >= pc:
+                raise _bad_program("nodes[" + String(pc) + "] has an operand outside its expression")
+        elif op == CN.NEG:
+            _check_operand(p, pc, n.x, lo, fl)
+        elif op == CN.LNOT or op == CN.BNOT or op == CN.SC_END:
+            _check_operand(p, pc, n.x, lo, False)
+        elif op == CN.ADD or op == CN.SUB or op == CN.MUL or op == CN.DIV or op == CN.MOD or op == CN.POW:
+            _check_operand(p, pc, n.x, lo, fl)
+            _check_operand(p, pc, n.y, lo, fl)
+        elif op == CN.SHL or op == CN.SHR or op == CN.AND or op == CN.OR or op == CN.XOR:
+            _check_operand(p, pc, n.x, lo, False)
+            _check_operand(p, pc, n.y, lo, False)
+        elif op >= CN.EQ and op <= CN.GE:
+            if n.x < lo or n.x >= pc:
+                raise _bad_program("nodes[" + String(pc) + "] has an operand outside its expression")
+            _check_operand(p, pc, n.y, lo, _is_float(p.nodes[n.x].ty))
+        elif op == CN.SC_AND or op == CN.SC_OR:
+            _check_operand(p, pc, n.x, lo, False)
+            if n.y <= pc or n.y > root or p.nodes[n.y].op != CN.SC_END:
+                raise _bad_program("nodes[" + String(pc) + "] skips to a node that does not end it")
+        elif op == CN.FN:
+            if n.i < 0 or n.i > CF.POPCOUNT:
+                raise _bad_program("nodes[" + String(pc) + "] calls an unknown function")
+            var on_ints = n.i == CF.POPCOUNT or (n.i == CF.ABS and not fl)
+            _check_operand(p, pc, n.x, lo, not on_ints)
+            if n.y != -1:
+                _check_operand(p, pc, n.y, lo, not on_ints)
+            elif n.i == CF.MOD:
+                raise _bad_program("nodes[" + String(pc) + "] calls mod with one operand")
+        pc += 1
+
+
+def _check_tables(p: Program) raises:
+    """Every index in the classical tables of a program read from a file. Nothing
+    runs on trust in the file: a bad index here would be a crash in a shot."""
+    var nv = p.num_store
+    if nv < 0 or nv > _MAX_STORE:
+        raise _bad_program("num_store is out of range")
+    for i in p.user_params:
+        if i < 0 or i >= p.body.num_params():
+            raise _bad_program("user_params names a parameter outside the circuit")
+    for r in p.cregs:
+        if r.first < 0 or r.width < 0 or r.first + r.width > p.num_clbits():
+            raise _bad_program("register '" + r.name + "' lies outside the circuit")
+    for v in p.vars:
+        if v.ty.tag == CT.BIT:
+            if v.store < 0 or v.store + v.ty.width > p.num_clbits():
+                raise _bad_program("variable '" + v.name + "' lies outside the circuit")
+        elif v.store < 0 or v.store >= nv:
+            raise _bad_program("variable '" + v.name + "' lies outside the store")
+        if v.slot < -1 or v.slot >= p.body.num_params():
+            raise _bad_program("variable '" + v.name + "' has a slot outside the circuit")
+    if len(p.expr_lo) != len(p.expr_root):
+        raise _bad_program("expressions must be [lo, root] pairs")
+    for e in range(len(p.expr_lo)):
+        var lo = p.expr_lo[e]
+        var root = p.expr_root[e]
+        if lo < 0 or root < lo or root >= len(p.nodes):
+            raise _bad_program("expressions[" + String(e) + "] lies outside the nodes")
+        _check_expression(p, lo, root)
+
+
+def _check_statement(p: Program, s: Stmt, at: Int) raises:
+    var ne = len(p.expr_lo)
+    var what = "statements[" + String(at) + "]"
+    if s.kind == SK.OPS:
+        if s.a < 0 or s.b < s.a or s.b > len(p.body.ops):
+            raise _bad_program(what + " lies outside the circuit")
+    elif s.kind == SK.ASSIGN:
+        if s.a < 0 or s.a >= len(p.vars) or s.b < 0 or s.b >= ne:
+            raise _bad_program(what + " names a variable or expression that does not exist")
+    elif s.kind == SK.IF or s.kind == SK.WHILE or s.kind == SK.SWITCH:
+        if s.a < 0 or s.a >= ne:
+            raise _bad_program(what + " names an expression that does not exist")
+    elif s.kind == SK.CASE:
+        if s.a != -1 and (s.a < 0 or s.b < s.a or s.b > len(p.case_vals)):
+            raise _bad_program(what + " lies outside case_values")
+    elif s.kind == SK.FOR:
+        if s.a < 0 or s.a >= len(p.vars) or s.b < 0 or s.b + FORR.SIZE > len(p.for_ranges):
+            raise _bad_program(what + " names a variable or range that does not exist")
+        var store = p.for_ranges[s.b + FORR.STORE]
+        if store < 0 or store + 3 > p.num_store:
+            raise _bad_program(what + " keeps its state outside the store")
+        var set_at = p.for_ranges[s.b + FORR.SET]
+        if set_at >= 0:
+            if set_at >= len(p.case_vals) or p.case_vals[set_at] < 0 or set_at + 1 + p.case_vals[set_at] > len(p.case_vals):
+                raise _bad_program(what + " has a set outside case_values")
+        else:
+            for f in range(FORR.START, FORR.STOP + 1):
+                var e = p.for_ranges[s.b + f]
+                if e < 0 or e >= ne:
+                    raise _bad_program(what + " names an expression that does not exist")
+
+
+def program_from_json(v: JsonValue) raises -> Program:
+    """Inverse of `program_to_json`. Every index is checked, and the control-flow
+    links are built again from the statements (QM-E583 when they do not nest)."""
+    if not v.is_object():
+        raise _bad_program("a program is an object")
+    if v.get_string("format", "") != _PROGRAM_FORMAT:
+        raise _bad_program("format must be '" + _PROGRAM_FORMAT + "'")
+    var p = Program(circuit_from_json(v.get("circuit")))
+    p.num_store = _json_int_or(v, "num_store", 0, "program")
+    p.user_params = _json_ints(v, "user_params")
+    var regs = _json_array(v, "registers")
+    for i in range(len(regs)):
+        var r = regs.at(i)
+        var what = "registers[" + String(i) + "]"
+        p.cregs.append(CReg(_json_string(r, "name", what), _json_int_or(r, "first", -1, what), _json_int_or(r, "width", -1, what)))
+    var vars = _json_array(v, "variables")
+    for i in range(len(vars)):
+        var x = vars.at(i)
+        var what = "variables[" + String(i) + "]"
+        p.vars.append(CVar(_json_string(x, "name", what), _type_from_name(_json_string(x, "type", what), what),
+                           _json_int_or(x, "store", -1, what), _json_int_or(x, "slot", -1, what), x.get_bool("output", False)))
+    var names = _node_names()
+    var nodes = _json_array(v, "nodes")
+    for i in range(len(nodes)):
+        var x = nodes.at(i)
+        var what = "nodes[" + String(i) + "]"
+        var nm = _json_string(x, "op", what)
+        var op = -1
+        for k in range(len(names)):
+            if names[k] == nm:
+                op = k
+        if op < 0:
+            raise _bad_program(what + ": unknown op '" + nm + "'")
+        p.nodes.append(CNode(op, _type_from_name(_json_string(x, "type", what), what), _json_int_or(x, "x", 0, what),
+                             _json_int_or(x, "y", 0, what), _json_int_or(x, "i", 0, what), _json_float(x, what)))
+    var exprs = _json_array(v, "expressions")
+    for i in range(len(exprs)):
+        var what = "expressions[" + String(i) + "]"
+        var e = exprs.at(i)
+        if not e.is_array() or len(e) != 2:
+            raise _bad_program(what + " must be [lo, root]")
+        p.expr_lo.append(_json_int(e.at(0), what))
+        p.expr_root.append(_json_int(e.at(1), what))
+    p.for_ranges = _json_ints(v, "for_ranges")
+    p.case_vals = _json_ints(v, "case_values")
+    _check_tables(p)
+    var kinds = _stmt_names()
+    var stmts = _json_array(v, "statements")
+    var t = TapeBuilder()
+    for i in range(len(stmts)):
+        var x = stmts.at(i)
+        var what = "statements[" + String(i) + "]"
+        var nm = _json_string(x, "kind", what)
+        var kind = -1
+        for k in range(len(kinds)):
+            if kinds[k] == nm:
+                kind = k
+        if kind < 0:
+            raise _bad_program(what + ": unknown kind '" + nm + "'")
+        var s = Stmt(kind, _json_int_or(x, "a", -1, what), _json_int_or(x, "b", -1, what), -1, -1, _json_int_or(x, "line", 0, what))
+        _check_statement(p, s, i)
+        if kind == SK.OPS or kind == SK.ASSIGN:
+            t.tape.append(s)
+        elif kind == SK.IF or kind == SK.WHILE or kind == SK.FOR or kind == SK.SWITCH:
+            t.begin(kind, s.a, s.b, 0, s.line)
+        elif kind == SK.ELSE:
+            t.else_(0, s.line)
+        elif kind == SK.CASE:
+            t.case_(s.a, s.b, 0, s.line)
+        elif kind == SK.BREAK or kind == SK.CONTINUE:
+            t.jump(kind, 0, s.line)
+        else:
+            t.end(0, s.line)
+    if len(t.open) != 0:
+        raise Error("QM-E583: a region of the program is left open. Hint: every if, while, for and switch needs its end.")
+    p.tape = t.tape.copy()
+    _ = check_program(p)
+    return p^
 
 
 def write_circuit_summary(circuit: Circuit, mut w: JsonWriter):

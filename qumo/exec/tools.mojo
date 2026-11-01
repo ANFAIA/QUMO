@@ -11,12 +11,14 @@ from std.time import perf_counter_ns
 
 from qumo.ir.circuit import Circuit
 from qumo.ir.pauli import parse_pauli_sum
+from qumo.ir.program import Program
 from qumo.ir.qasm import to_qasm
 from qumo.ai.json import JsonWriter, JsonValue
 from qumo.ai.tools import (
-    ToolRegistry, ToolResult, ToolContext, tool_ok, arg_circuit, arg_int, arg_required, arg_params,
-    write_warnings,
+    ToolRegistry, ToolResult, ToolContext, tool_ok, arg_circuit, arg_int, arg_max_iterations, arg_program,
+    arg_program_params, arg_required, arg_params, write_program_outputs, write_warnings,
 )
+from qumo.ai.describe import write_program_json
 from qumo.ir.gates import op_from_name
 from qumo.exec.emulate import emulate
 from qumo.sim.density import density_evolve
@@ -28,6 +30,8 @@ from qumo.exec.dispatch import sample_on
 from qumo.gpu.device import query_gpu, GPU_MIN_QUBITS, parse_gpu_precision
 from qumo.compiler.target import Target, parse_target
 from qumo.compiler.pass_manager import transpile, compile_spec, transpile_ai, CompileResult
+from qumo.compiler.program_compile import ProgramCompileResult, compile_program, compile_spec_program
+from qumo.sim.program_runner import is_clifford_program, sample_program
 from qumo.exec.resources import (
     estimate_resources, estimate_hardware, estimate_fault_tolerant, HardwareProfile,
 )
@@ -97,9 +101,47 @@ def _ms(t0: Int, t1: Int) -> Float64:
     return Float64(t1 - t0) / 1e6
 
 
+def _transpile_program(p: Program, args: JsonValue) raises -> ToolResult:
+    """Compile a program with runtime regions: blocks one by one on one layout, and
+    `verify_program` before anything is returned."""
+    var t = _target_from_args(args, p.num_qubits())
+    var level = arg_int(args, "level", 2, 0, 3)
+    var seed = arg_int(args, "seed", 7, 0, 1 << 62)
+    var spec = args.get_string("pipeline", "")
+    var ai = args.get_bool("ai", False)
+    if ai and spec.byte_length() > 0:
+        raise Error("QM-E913: 'ai' and 'pipeline' are mutually exclusive. Hint: drop one of them.")
+    var t0 = perf_counter_ns()
+    var r = compile_spec_program(p, t, spec, seed) if spec.byte_length() > 0 else compile_program(p, t, level, seed, ai)
+    var t1 = perf_counter_ns()
+    var w = JsonWriter()
+    w.begin_object()
+    w.kv_raw("target", t.describe())
+    w.kv_string("pipeline", r.pipeline)
+    w.kv_int("num_qubits", r.program.num_qubits())
+    w.kv_string("metrics", String(r.metrics))
+    w.kv_int("restored_swaps", r.restored_swaps)
+    w.kv_int("blocks_checked", r.blocks_checked)
+    w.kv_int("blocks_unchecked", r.blocks_unchecked)
+    w.kv_int_list("initial_layout", r.initial_layout)
+    w.kv_int_list("final_layout", r.final_layout)
+    if args.get_bool("include_qasm", True):
+        w.kv_string("qasm", to_qasm(r.program))
+    if args.get_bool("include_program", False):
+        w.key("program")
+        write_program_json(r.program, w)
+    w.kv_float("compile_ms", _ms(t0, t1))
+    w.end_object()
+    return tool_ok(w.finish())
+
+
 def _transpile_tool(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
     var warnings = List[String]()
-    var c = arg_circuit(args, warnings)
+    var p = arg_program(args, warnings)
+    var flat = p.try_flatten()
+    if not flat:
+        return _transpile_program(p, args)
+    var c = flat.take()
     var t = _target_from_args(args, c.num_qubits)
     var level = arg_int(args, "level", 2, 0, 3)
     var seed = arg_int(args, "seed", 7, 0, 1 << 62)
@@ -347,10 +389,55 @@ def precision_of_method(method: String) -> String:
     return "exact"
 
 
+def _run_device_program(p: Program, args: JsonValue, var warnings: List[String], t0: Int) raises -> ToolResult:
+    """A program branches shot by shot, so 'gpu' runs on the CPU with QM-W020."""
+    var shots = arg_int(args, "shots", 1024, 1, 10000000)
+    var seed = arg_int(args, "seed", 1234, 0, 9223372036854775807)
+    var device = args.get_string("device", "auto")
+    if device != "auto" and device != "cpu" and device != "gpu":
+        raise Error("QM-E940: unknown device '" + device + "'. Hint: use 'auto', 'cpu' or 'gpu'.")
+    var precision = parse_gpu_precision(args.get_string("precision", "auto"))  # QM-E941
+    var max_q = arg_int(args, "max_qubits", 30, 1, 40)
+    if p.num_qubits() > max_q and not is_clifford_program(p):
+        raise Error("QM-E930: program has " + String(p.num_qubits()) + " qubits; dense state-vector simulation is limited to max_qubits=" + String(max_q) + ". Hint: raise 'max_qubits' if the device has the memory (16*2^n bytes).")
+    var r = sample_program(p, shots, UInt64(seed), arg_program_params(args, p), arg_max_iterations(args), "gpu" if device == "gpu" else "auto")
+    var t1 = perf_counter_ns()
+    var used = precision_of_method(r.sample.method)
+    if precision != "auto" and used != precision:
+        warnings.append("QM-W021: precision '" + precision + "' applies to GPU state-vector runs; this run used " + r.sample.method + " (" + used + "). Hint: a program runs on the CPU, in fp64 on the state vector.")
+    var w = JsonWriter()
+    w.begin_object()
+    w.key("counts")
+    w.begin_object()
+    for k in r.sample.sorted_keys():
+        w.kv_int(k, r.sample.counts.get(k, 0))
+    w.end_object()
+    w.kv_int("shots", shots)
+    w.kv_int("seed", seed)
+    w.kv_string("device", device)
+    w.kv_string("device_used", "cpu")
+    w.kv_string("method", r.sample.method)
+    w.kv_string("precision", precision)
+    w.kv_string("precision_used", used)
+    w.kv_int("num_qubits", p.num_qubits())
+    w.kv_string("most_frequent", r.sample.most_frequent())
+    w.kv_string("bit_order", "leftmost character = highest classical bit c[n-1]")
+    write_program_outputs(w, r)
+    warnings.extend(r.warnings.copy())
+    write_warnings(w, warnings)
+    w.kv_float("total_ms", _ms(t0, t1))
+    w.end_object()
+    return tool_ok(w.finish())
+
+
 def _run_device_tool(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
     var t0 = perf_counter_ns()
     var warnings = List[String]()
-    var c = arg_circuit(args, warnings)
+    var p = arg_program(args, warnings)
+    var flat = p.try_flatten()
+    if not flat:
+        return _run_device_program(p, args, warnings^, t0)
+    var c = flat.take()
     var shots = arg_int(args, "shots", 1024, 1, 10000000)
     var seed = arg_int(args, "seed", 1234, 0, 9223372036854775807)
     var device = args.get_string("device", "auto")
@@ -397,13 +484,14 @@ def _run_device_tool(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
 
 
 comptime _CIRC = "\"qasm\":{\"type\":\"string\",\"description\":\"OpenQASM 2 or 3 program\"},\"circuit\":{\"type\":\"object\",\"description\":\"qumo.circuit.v1 JSON\"}"
+comptime _PROG = "\"program\":{\"type\":\"object\",\"description\":\"qumo.program.v1 JSON\"}"
 
 
 def register_exec_tools(mut reg: ToolRegistry):
     reg.add(
         "qumo_transpile", "Compile for a target",
-        "Optimize, map and route a circuit for ANY target (vendor-neutral): either a one-line spec 'target' like 'grid:4x4/sc_cz', 'heavy_hex:5/rz,sx,x,ecr', 'trapped_ion:11', 'neutral_atom:4x4', 'line:20/u,cx', or explicit 'edges' [[a,b],...] + 'basis' 'rz,sx,x,cz'. 'level' 0-3 picks a preset; 'ai': true runs the hybrid heuristic + AI preset 'ai_level' 1-3 (learned-policy routing, verified Clifford / linear / permutation / Pauli-network block resynthesis, kept only when cheaper; level 3 is a portfolio with O3); 'pipeline' runs a text pass spec, e.g. 'cancel,merge,fuse1q,route(sabre),basis,cancel'. Returns compiled OpenQASM 3, per-pass report, layouts, swap count and estimated fidelity.",
-        "{\"type\":\"object\",\"properties\":{" + _CIRC + ",\"target\":{\"type\":\"string\"},\"edges\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"integer\"}}},\"num_qubits\":{\"type\":\"integer\"},\"basis\":{\"type\":\"string\",\"default\":\"any\"},\"calibration\":{\"type\":\"object\",\"description\":\"Device data: error_1q, readout, t1_us, t2_us (per qubit), edge_errors [[a, b, e], ...]. Non-uniform data adds post_layout.\"},\"angle_bounds\":{\"type\":\"object\",\"description\":\"Gate name to [min, max], e.g. {\\\"rzz\\\": [0, 1.5708]}. Adds wrap_angles.\"},\"level\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":3,\"default\":2},\"pipeline\":{\"type\":\"string\"},\"ai\":{\"type\":\"boolean\",\"default\":false},\"ai_level\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":3,\"default\":2},\"seed\":{\"type\":\"integer\",\"default\":7},\"include_qasm\":{\"type\":\"boolean\",\"default\":true}},\"additionalProperties\":false}",
+        "Optimize, map and route a circuit for ANY target (vendor-neutral): either a one-line spec 'target' like 'grid:4x4/sc_cz', 'heavy_hex:5/rz,sx,x,ecr', 'trapped_ion:11', 'neutral_atom:4x4', 'line:20/u,cx', or explicit 'edges' [[a,b],...] + 'basis' 'rz,sx,x,cz'. 'level' 0-3 picks a preset; 'ai': true runs the hybrid heuristic + AI preset 'ai_level' 1-3 (learned-policy routing, verified Clifford / linear / permutation / Pauli-network block resynthesis, kept only when cheaper; level 3 is a portfolio with O3); 'pipeline' runs a text pass spec, e.g. 'cancel,merge,fuse1q,route(sabre),basis,cancel'. Returns compiled OpenQASM 3, per-pass report, layouts, swap count and estimated fidelity. A program with runtime control flow compiles block by block on one layout (preset 'level' or 'pipeline'; 'ai' is QM-E630) and is verified: it returns compiled OpenQASM 3, cost per loop, restored SWAPs and how many blocks were checked.",
+        "{\"type\":\"object\",\"properties\":{" + _CIRC + "," + _PROG + ",\"include_program\":{\"type\":\"boolean\",\"default\":false,\"description\":\"Add the compiled program as qumo.program.v1 JSON\"},\"target\":{\"type\":\"string\"},\"edges\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"integer\"}}},\"num_qubits\":{\"type\":\"integer\"},\"basis\":{\"type\":\"string\",\"default\":\"any\"},\"calibration\":{\"type\":\"object\",\"description\":\"Device data: error_1q, readout, t1_us, t2_us (per qubit), edge_errors [[a, b, e], ...]. Non-uniform data adds post_layout.\"},\"angle_bounds\":{\"type\":\"object\",\"description\":\"Gate name to [min, max], e.g. {\\\"rzz\\\": [0, 1.5708]}. Adds wrap_angles.\"},\"level\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":3,\"default\":2},\"pipeline\":{\"type\":\"string\"},\"ai\":{\"type\":\"boolean\",\"default\":false},\"ai_level\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":3,\"default\":2},\"seed\":{\"type\":\"integer\",\"default\":7},\"include_qasm\":{\"type\":\"boolean\",\"default\":true}},\"additionalProperties\":false}",
         _transpile_tool,
     )
     reg.add(
@@ -469,6 +557,6 @@ def register_exec_tools(mut reg: ToolRegistry):
     reg.add(
         "qumo_run_device", "Run circuit on a device",
         "Like qumo_run_qasm but with an explicit simulator device (vendor-neutral: NVIDIA CUDA, AMD ROCm or Apple Metal through MAX). 'auto' (default) = qumo_run_qasm's dispatch: noisy Clifford circuits without feed-forward -> CPU Pauli frames, other wide/noisy/dynamic Clifford circuits -> stabilizer tableau, static non-Clifford circuits with >= " + String(GPU_MIN_QUBITS) + " qubits -> GPU state vector when this build has GPU support (-D QUMO_GPU) and a usable device (CPU on any GPU failure), everything else -> CPU state vector. 'cpu' = the same choice restricted to CPU simulators. 'gpu' = Clifford circuits without parameters or classical feed-forward (noise, mid-circuit measurement and reset allowed) -> GPU Pauli frames ('gpu:pauli_frame'); other static, noiseless circuits -> GPU state vector in 'precision' ('gpu:statevector:fp32' or 'gpu:statevector:fp64'); dynamic or noisy non-Clifford circuits, builds without -D QUMO_GPU, or no usable device -> run on the CPU as with 'cpu' plus warning QM-W020 giving the reason. 'precision' (GPU state vector only): 'auto' (default: QUMO_GPU_PRECISION when set, else the build default, fp32 on every GPU as in CUDA-Q), 'fp32', or 'fp64' (NVIDIA/AMD; error QM-E472 on Apple GPUs, which have no fp64); CPU simulators are fp64 (warning QM-W021 when a requested precision did not apply). Returns counts, 'method' (the simulator that ran), 'device_used', 'precision_used' and structured 'warnings'.",
-        "{\"type\":\"object\",\"properties\":{" + _CIRC + ",\"shots\":{\"type\":\"integer\",\"minimum\":1,\"default\":1024},\"seed\":{\"type\":\"integer\",\"minimum\":0,\"default\":1234},\"params\":{\"description\":\"Values for 'input float' parameters: array in declaration order or object name->value\"},\"device\":{\"type\":\"string\",\"enum\":[\"auto\",\"cpu\",\"gpu\"],\"default\":\"auto\"},\"precision\":{\"type\":\"string\",\"enum\":[\"auto\",\"fp32\",\"fp64\"],\"default\":\"auto\",\"description\":\"GPU state-vector precision: auto = QUMO_GPU_PRECISION or the build default (fp32)\"},\"max_qubits\":{\"type\":\"integer\",\"default\":30}},\"additionalProperties\":false}",
+        "{\"type\":\"object\",\"properties\":{" + _CIRC + "," + _PROG + ",\"max_iterations\":{\"type\":\"integer\",\"minimum\":1,\"default\":65536,\"description\":\"Loop back-edges allowed per shot; past it the run stops with QM-E480\"},\"shots\":{\"type\":\"integer\",\"minimum\":1,\"default\":1024},\"seed\":{\"type\":\"integer\",\"minimum\":0,\"default\":1234},\"params\":{\"description\":\"Values for 'input float' parameters: array in declaration order or object name->value\"},\"device\":{\"type\":\"string\",\"enum\":[\"auto\",\"cpu\",\"gpu\"],\"default\":\"auto\"},\"precision\":{\"type\":\"string\",\"enum\":[\"auto\",\"fp32\",\"fp64\"],\"default\":\"auto\",\"description\":\"GPU state-vector precision: auto = QUMO_GPU_PRECISION or the build default (fp32)\"},\"max_qubits\":{\"type\":\"integer\",\"default\":30}},\"additionalProperties\":false}",
         _run_device_tool,
     )

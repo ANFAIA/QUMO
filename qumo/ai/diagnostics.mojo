@@ -31,6 +31,7 @@ uncategorized), W0xx warnings (lint, execution notes, parser).
 from std.math import pi
 
 from qumo.ir.circuit import Circuit, Instruction
+from qumo.ir.program import Program, stuck_loops
 from qumo.ir.gates import (
     Op, op_name, op_arity, op_num_params, op_is_unitary, op_is_noise,
     op_is_annotation, op_is_self_inverse, op_inverse_kind, op_is_symmetric,
@@ -267,7 +268,7 @@ def error_ranges() -> List[ErrorRange]:
        "Raised by the Python package `qumo_hardware`, not by the Mojo core. This block mirrors `CATALOG` in plugins/hardware/qumo_hardware/errors.py (tests/test_mcp.mojo checks that every code used there is listed here). See [HARDWARE_PLUGINS.md](HARDWARE_PLUGINS.md#error-codes); `python -m qumo_hardware errors --json` prints the plugin's own catalogue. Messages never contain credentials.")
     _r(r, "QM-E96x", "benchmark", "Benchmark harness", "Benchmark harness (bench/run_benchmarks.py, Python)", 960, 969,
        "Raised by the Python benchmark harness, not by the Mojo core. Reported in the result JSON (`suites.<name>.reason`) and on stderr; a suite failure never aborts the run. See [BENCHMARKING_ON_CLOUD_GPUS.md](BENCHMARKING_ON_CLOUD_GPUS.md).")
-    _r(r, "QM-W0xx", "warning", "Warnings", "Warnings: lint findings QM-W001..W019 (qumo.ai.diagnostics.lint), execution notes QM-W020..W049, OpenQASM parser warnings QM-W050..W059", 0, 99)
+    _r(r, "QM-W0xx", "warning", "Warnings", "Warnings: lint findings QM-W001..W019 (qumo.ai.diagnostics.lint), execution notes QM-W020..W049, OpenQASM parser warnings QM-W050..W053, Program lint QM-W054", 0, 99)
     return r^
 
 
@@ -347,7 +348,7 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E501", "qasm", "Unexpected character in OpenQASM source.", "Remove it or check for a missing quote/comment marker.")
     _e(c, "QM-E502", "qasm", "Unterminated string literal or block comment.", "Close strings on the same line and comments with */.")
     _e(c, "QM-E503", "qasm", "Unsupported OpenQASM version.", "Use 'OPENQASM 3.0;' or 'OPENQASM 2.0;'.")
-    _e(c, "QM-E504", "qasm", "OpenQASM feature outside QUMO's supported subset (subroutines, while, classical assignment, ...).", "Use the gate-level subset; see 'qumo describe capabilities'.")
+    _e(c, "QM-E504", "qasm", "OpenQASM feature outside QUMO's supported subset, or one a Circuit cannot hold: subroutines, or, in parse_qasm, while and classical assignment.", "Parse with parse_qasm_program or load_any for while and classical variables; see 'qumo describe capabilities' for the rest.")
     _e(c, "QM-E510", "qasm", "Unknown gate name.", "Check the suggestions, run 'qumo describe gates', or define it with 'gate name(params) a, b { ... }'.")
     _e(c, "QM-E511", "qasm", "Wrong number of gate parameters.", "Match the gate signature, e.g. rz(theta) q[0];")
     _e(c, "QM-E512", "qasm", "Wrong number of qubit operands (including ctrl @ controls).", "Match the gate arity; controls of ctrl @ come first.")
@@ -372,7 +373,9 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E582", "qasm", "Classical type not representable: a width outside 1..64, float[32], or a mutable angle without a width.", "float is binary64; write angle[n] for a variable.")
     _e(c, "QM-E583", "qasm", "Malformed control flow: break or continue outside a loop, else or case without its opener, or a region left open.", "Check the nesting of the block.")
     _e(c, "QM-E584", "qasm", "A value known only at run time where a constant is needed: qubit index, size, modifier, const initializer.", "Use a constant, or a for loop that can unroll.")
+    _e(c, "QM-E585", "qasm", "A Program with classical variables or runtime control flow was given to an operation that needs one Circuit: exact state vector, expectation value, density matrix, OpenQASM 2, resource estimates, device emulation, encoding.", "Sample it with qumo_run_qasm, or keep the part you need in a straight-line circuit.")
     _e(c, "QM-E586", "qasm", "Detector or observable in a program with runtime control flow: they index measurements as if each ran once, and no decoder takes a syndrome of varying length.", "Move the QEC circuit out of the loop.")
+    _e(c, "QM-E587", "qasm", "Program JSON (qumo.program.v1) that cannot be read: a wrong format, a missing field, or an index outside its table.", "Pass the output of program_to_json or qumo_convert with to='json'; docs/CONTROL_FLOW.md has the format.")
     _e(c, "QM-E560", "qasm", "Invalid '#pragma qumo' directive.", "See docs/AI_NATIVE.md for detector/observable/tick/param pragmas.")
     _e(c, "QM-E570", "qasm", "Invalid or too large for-loop range.", "Use constant inclusive ranges [a:b] / [a:step:b] or sets {a, b}.")
     # compiler
@@ -492,7 +495,7 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E968", "benchmark", "A benchmark binary (e.g. a GPU runtime error) or a baseline worker crashed or produced no result.", "Rerun the recorded command; for GPU errors add `MODULAR_DEBUG=device-sync-mode`.")
     _e(c, "QM-E969", "benchmark", "A test, `gpu-check` target or correctness check reported FAIL.", "Rerun the failing file: `.venv/bin/mojo run -I . <file>`.")
     _e(c, "QM-E999", "internal", "Uncategorized internal error (no QUMO code in the message).", "Report it with the input that triggered it.")
-    # warnings: lint (W001-W019), execution notes (W020-W049), OpenQASM parser (W050-W059)
+    # warnings: lint (W001-W019), execution notes (W020-W049), OpenQASM parser (W050-W053), Program lint (W054)
     _e(c, "QM-W001", "lint", "Qubits are declared but never used.", "Shrink the register to save simulation memory (2x per qubit).")
     _e(c, "QM-W002", "lint", "A gate acts on a qubit after it was measured (no reset): the circuit becomes dynamic.", "Intended for mid-circuit measurement; otherwise move measurements to the end.")
     _e(c, "QM-W003", "lint", "A qubit is measured without any prior operation (always 0).", "Check the qubit index of the measurement.")
@@ -512,6 +515,7 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-W051", "qasm", "OpenQASM delay is ignored.", "Model idle noise with '#pragma qumo depolarize1(p) q[i];'.")
     _e(c, "QM-W052", "qasm", "OpenQASM annotation is ignored.", "Annotations carry no meaning in QUMO; the annotated statement still runs.")
     _e(c, "QM-W053", "qasm", "OpenQASM box duration is ignored.", "QUMO circuits have no timing model; the box still keeps its gates together.")
+    _e(c, "QM-W054", "qasm", "The body of a while loop cannot change its condition and has no break: the loop never runs, or runs until QM-E480.", "Assign a variable the condition reads, measure into a bit it reads, or add a break.")
     return c^
 
 
@@ -554,6 +558,19 @@ def _cancels(a: Instruction, b: Instruction) -> Bool:
     if p.is_symbolic() or q.is_symbolic():
         return p.index == q.index and p.coeff == -q.coeff and p.offset == -q.offset
     return p.offset == -q.offset
+
+
+def lint_program(p: Program) -> List[Diagnostic]:
+    """Static checks for a program with runtime regions. The checks of `lint` read
+    the ops as one pass from start to end, which a loop or a branch is not, so they
+    do not apply here."""
+    var out = List[Diagnostic]()
+    for at in stuck_loops(p):
+        var d = Diagnostic.make("QM-W054", "warning", "the body of the while loop on line " + String(p.tape[at].line) + " cannot change its condition, and no break leaves it: it never runs, or runs until QM-E480", "assign a variable the condition reads, measure into a bit it reads, or add a break")
+        d.line = p.tape[at].line
+        d.col = 1
+        out.append(d^)
+    return out^
 
 
 def lint(circuit: Circuit) -> List[Diagnostic]:

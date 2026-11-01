@@ -27,7 +27,7 @@ docs/CONTROL_FLOW.md):
   * Float to int truncates; NaN, infinity or out of range raises QM-E482.
   * `angle` to int, uint or float is refused, as in the specification's cast
     table. As a gate argument an angle[n] with bits v is 2 pi v / 2^n radians.
-  * Float to angle[n] rounds to the nearest step, a tie going up, modulo a turn.
+  * Float to angle[n] rounds to the nearest step, a tie to the even step, modulo a turn.
 """
 
 from std.bit import pop_count
