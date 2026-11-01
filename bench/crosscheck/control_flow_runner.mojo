@@ -2,13 +2,16 @@
 
 For each `x.qasm` it writes `x.qasm.out`: one line per distinct joint outcome,
 `count bitstring value value ...`, in the order of the program's outputs, or a
-line starting with `error` when the program raises.
+line starting with `error` when the program raises. With a target and a level,
+each program is compiled first, so the oracle judges the compiled program.
 """
 
 from std.collections import Dict
 from std.os import listdir
 from std.sys import argv
 
+from qumo.compiler.program_compile import compact_qubits, compile_program
+from qumo.compiler.target import parse_target
 from qumo.ir.qasm import load_any
 from qumo.sim.program_runner import sample_program
 from qumo.sim.runner import bitstring
@@ -29,6 +32,8 @@ def main() raises:
             with open(path, "r") as f:
                 text = f.read()
             var p = load_any(text)
+            if len(args) > 4:
+                p = compact_qubits(compile_program(p, parse_target(String(args[4])), Int(String(args[5]))).program)
             var r = sample_program(p, shots, seed)
             var n = len(r.out_names)
             var rows = Dict[String, Int]()

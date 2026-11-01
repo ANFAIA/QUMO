@@ -987,14 +987,14 @@ struct QasmParser(Movable):
             if self.scopes[s].closed:
                 break
             s -= 1
+        if self.program_mode and self.find_var(nm) >= 0:
+            raise self.err("QM-E584", "'" + nm + "' changes at run time, and a constant is needed here", t, "qubit indices, sizes and modifiers are fixed at parse time; use a constant, or a for loop that can unroll")
         var c = self.consts.get(nm)
         if c:
             return c.value()
         var ip = self.inputs.get(nm)
         if ip:
             return Param.symbol(ip.value())
-        if self.program_mode and self.find_var(nm) >= 0:
-            raise self.err("QM-E584", "'" + nm + "' changes at run time, and a constant is needed here", t, "qubit indices, sizes and modifiers are fixed at parse time; use a constant, or a for loop that can unroll")
         if nm in self.reg_index:
             if self.program_mode:
                 raise self.err("QM-E584", "register '" + nm + "' changes at run time, and a constant is needed here", t, "qubit indices, sizes and modifiers are fixed at parse time")
@@ -2398,10 +2398,10 @@ struct QasmParser(Movable):
         if self.is_punct(self.peek(), P.LPAREN):
             _ = self.next()
             if not self.is_punct(self.peek(), P.RPAREN):
-                ps.append(self.parse_gate_arg())
+                ps.append(self.parse_gate_arg() if self.program_mode else self.parse_expr())
                 while self.is_punct(self.peek(), P.COMMA):
                     _ = self.next()
-                    ps.append(self.parse_gate_arg())
+                    ps.append(self.parse_gate_arg() if self.program_mode else self.parse_expr())
             _ = self.expect_punct(P.RPAREN, "')' to close the parameter list")
         var flat = List[Int](capacity=4)
         var lens = List[Int](capacity=4)
@@ -3028,12 +3028,13 @@ struct QasmParser(Movable):
         var e = self.parse_cexpr()
         _ = self.expect_punct(P.SEMI, "';'")
         var value = self.cast_at(e, ty, eq)
-        if value.is_const() and not is_output and (is_const or nm not in self.reassigned):
+        # a variable of an outer scope hides constants, so this one stays a variable
+        if value.is_const() and not is_output and (is_const or nm not in self.reassigned) and self.find_var(nm) < 0:
             self.const_exprs[nm] = value.copy()
             self.consts[nm] = Param(self.const_radians(value))
             self.scope_consts.append(nm)
             return
-        if is_const:
+        if is_const and not value.is_const():
             raise self.err("QM-E584", "'" + nm + "' is const but its value is only known at run time", nt, "drop 'const'")
         var v = self.declare_var(nm, ty, is_output)
         self.tb.assign(v, self.prog.add_expr(value), self.ops_end(), nt.line)
@@ -3052,6 +3053,8 @@ struct QasmParser(Movable):
         if not (self.is_punct(op, P.EQ) or self.is_punct(op, P.OPASSIGN)):
             raise self.err("QM-E500", "expected '=' after variable '" + self.text(t) + "', found " + self.describe(op), op, "write 'x = 1;'")
         _ = self.next()
+        if self.is_word(self.peek(), "measure"):
+            raise self.err("QM-E504", "only bit registers take a measurement directly", self.peek(), "measure into a bit register, then assign")
         var ty = self.prog.vars[v].ty
         var store = self.prog.vars[v].store
         var e = self.parse_cexpr()
@@ -3173,11 +3176,8 @@ struct QasmParser(Movable):
                     _ = self.next()
                     _ = self.parse_const_int("range stop")
                 self.pos = save
-        except e:
-            var msg = String(e)
-            if not (msg.startswith("QM-E584") or msg.startswith("QM-E530")):
-                raise e^
-            runtime = True
+        except:
+            runtime = True  # the classical parser reports what is really wrong
             self.pos = save
         if runtime:
             return True
@@ -3237,6 +3237,8 @@ struct QasmParser(Movable):
         self.prog.for_ranges.append(self.prog.num_store)
         self.prog.num_store += 3
         self.prog.for_ranges.append(set_off)
+        if ty.tag != CT.INT and ty.tag != CT.UINT:
+            raise self.err("QM-E580", "a loop that stays on the tape counts in int or uint, not " + type_name(ty), vt, "write 'for int i in ...'")
         self.push_scope()
         var v = self.declare_var(self.text(vt), ty, False)
         self.tb.begin(SK.FOR, v, off, self.ops_end(), vt.line)
@@ -3400,13 +3402,16 @@ struct QasmParser(Movable):
         """A gate angle. Whatever the constant path takes keeps its exact value;
         otherwise an affine expression becomes a `Param` on a slot and anything
         else goes to a temporary, assigned just before the gate."""
-        if not self.program_mode or self.depth > 0:
+        if self.depth > 0:
             return self.parse_expr()
         var save = self.pos
         try:
-            return self.parse_expr()
+            var value = self.parse_expr()
+            if self.is_punct(self.peek(), P.COMMA) or self.is_punct(self.peek(), P.RPAREN):
+                return value
         except:
-            self.pos = save  # not a constant expression: the classical parser reports errors
+            pass
+        self.pos = save  # not a constant expression: the classical parser reports errors
         var t = self.peek()
         var e = self.parse_cexpr()
         var ty = e.ty()
@@ -3660,8 +3665,6 @@ def format_param(p: Param, names: List[String]) -> String:
 def _condition_text(circuit: Circuit, g: Instruction) -> String:
     """`if (...) ` of a conditioned instruction: `c == N` over the whole
     register when that is what it tests, an `&&` chain over its bits otherwise."""
-    if g.cond < 0:
-        return String()
     if g.cond_reg < 0:
         return "if (c[" + String(g.cond) + "] == " + String(g.cond_val) + ") "
     try:
@@ -3727,17 +3730,18 @@ def to_qasm(circuit: Circuit) -> String:
         out += "bit[" + String(circuit.num_clbits) + "] c;\n"
     if circuit.global_phase != 0.0:
         out += "gphase(" + format_angle(circuit.global_phase) + ");\n"
-    out += _ops_text(circuit, 0, len(circuit.ops), names)
+    _ops_text(circuit, 0, len(circuit.ops), names, out)
     return out^
 
 
-def _ops_text(circuit: Circuit, lo: Int, hi: Int, names: List[String]) -> String:
-    """One line of OpenQASM per instruction of [lo, hi)."""
-    var out = String()
+def _ops_text(circuit: Circuit, lo: Int, hi: Int, names: List[String], mut out: String):
+    """One line of OpenQASM per instruction of [lo, hi), appended to `out`."""
     for i in range(lo, hi):
         var g = circuit.ops[i]
         var k = g.kind
-        var cond = _condition_text(circuit, g)
+        var cond = String()
+        if g.cond >= 0:
+            cond = _condition_text(circuit, g)
         if k == Op.DETECTOR or k == Op.OBSERVABLE:
             out += "#pragma qumo "
             out += "detector" if k == Op.DETECTOR else "observable(" + String(g.q2) + ")"
@@ -3810,7 +3814,6 @@ def _ops_text(circuit: Circuit, lo: Int, hi: Int, names: List[String]) -> String
             line += String(g.qubit(j)) + "]"
         line += ";\n"
         out += line
-    return out^
 
 
 # ---------------------------------------------------------------------------
@@ -4071,7 +4074,8 @@ def to_qasm(p: Program) -> String:
         var s = p.tape[i]
         var k = s.kind
         if k == SK.OPS:
-            var text = _ops_text(c, s.a, s.b, names.params)
+            var text = String()
+            _ops_text(c, s.a, s.b, names.params, text)
             var pad = _pad(depth)
             for line in text.split("\n"):
                 if line.byte_length() > 0:

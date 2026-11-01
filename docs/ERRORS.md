@@ -586,6 +586,26 @@ Fix: Compile first, then add noise.
 **A constant angle cannot be brought into the target's angle bounds.**  
 Fix: A Pauli rotation needs an interval covering [0, pi/2] up to a period; widen the bounds or drop them.
 
+### QM-E630
+
+**A Program cannot use the AI presets, synthesis passes or the learned router: they need a whole circuit.**  
+Fix: Use a preset level or a pipeline without them.
+
+### QM-E631
+
+**A compiled Program failed verification: a different control structure, two layouts meeting on a control-flow edge, or a block that does not equal its source.**  
+Fix: Report the program; run a lower optimization level meanwhile.
+
+### QM-E632
+
+**No SWAP network was found to bring a region of a Program back to its entry layout.**  
+Fix: Report the program; check that the target's coupling graph is what you meant.
+
+### QM-E633
+
+**A gate with target angle bounds takes an angle known only at run time, which cannot be wrapped into the bounds.**  
+Fix: Use a gate without bounds, or drop the bounds.
+
 ## QM-E7xx — Stabilizer simulation and QEC
 
 See [QEC.md](QEC.md).

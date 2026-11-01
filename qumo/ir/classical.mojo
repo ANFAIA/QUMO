@@ -225,8 +225,8 @@ def _srem(a: Int, b: Int) -> Int:
 def _ipow(a: Int, e: Int, ty: CType) -> Int:
     var out = 1
     var base = a
-    var k = e
-    while k > 0:
+    var k = UInt64(e)  # a uint exponent can use all 64 bits
+    while k != 0:
         if (k & 1) != 0:
             out = wrap_int(out * base, ty)
         base = wrap_int(base * base, ty)
@@ -728,6 +728,8 @@ def ce_binary(op: Int, a: CExpr, b: CExpr) raises -> CExpr:
         if op == CN.POW and y < 0:
             return CExpr.literal_float(Float64(x) ** Float64(y))
     if op == CN.SHL or op == CN.SHR:
+        if a.is_literal() and ta.tag == CT.INT and a.const_int() >= 0:
+            return ce_binary(op, CExpr.literal_uint(a.const_int()), b)
         if ta.tag == CT.INT or ta.tag == CT.FLOAT or ta.tag == CT.BOOL:
             raise Error("QM-E580: shifts apply to bit, uint and angle, not " + type_name(ta) + ". Hint: cast to uint[n] first.")
         if not (tb.tag == CT.UINT or tb.tag == CT.BIT or (b.is_literal() and tb.tag == CT.INT and b.const_int() >= 0)):

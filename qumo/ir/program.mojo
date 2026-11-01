@@ -142,7 +142,7 @@ struct Program(Copyable, Writable):
 
     def try_flatten(self) -> Optional[Circuit]:
         """The plain circuit of a program without runtime regions, else None."""
-        if self.has_runtime_region() or len(self.vars) > len(self.cregs):
+        if self.has_runtime_region():
             return None
         for v in self.vars:
             if v.is_output and v.ty.tag != CT.BIT:
@@ -685,6 +685,9 @@ struct ProgramBuilder(Movable):
 
     def begin_for(mut self, var_id: Int, start: CExpr, step: CExpr, stop: CExpr) raises:
         """for var in [start:step:stop], inclusive as in OpenQASM."""
+        var tag = self.p.vars[var_id].ty.tag
+        if tag != CT.INT and tag != CT.UINT:
+            raise Error("QM-E580: a for loop counts in int or uint. Hint: declare the loop variable with one of them.")
         var off = len(self.p.for_ranges)
         self.p.for_ranges.append(self.p.add_expr(ce_cast(start, int_type(64))))
         self.p.for_ranges.append(self.p.add_expr(ce_cast(step, int_type(64))))

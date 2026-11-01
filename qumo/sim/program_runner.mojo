@@ -34,9 +34,9 @@ from std.runtime import parallelism_level
 from max.algorithm import parallelize
 
 from qumo.ir.circuit import Circuit, Instruction
-from qumo.ir.classical import BitReader, CN, CT, CEval, CStore, angle_radians, eval_nodes, wrap_int
+from qumo.ir.classical import BitReader, CT, CEval, CStore, angle_radians, eval_nodes, wrap_int
 from qumo.ir.gates import Op, op_is_noise, op_is_pauli_noise, op_is_unitary
-from qumo.ir.program import BB, Cfg, FORR, Program, SK, TERM, check_program, slot_prefix
+from qumo.ir.program import Cfg, FORR, Program, SK, TERM, check_program, slot_prefix
 from qumo.sim.branching import BranchingSimulator
 from qumo.sim.rng import Rng
 from qumo.sim.runner import (
@@ -113,7 +113,7 @@ struct _Span(ImplicitlyCopyable):
 struct BlockPlan(Copyable):
     """Each OPS block as spans: stretches of at least PLAN_MIN_GATES gates that
     are unitary, unconditioned and free of runtime angles become one fused,
-    cache-blocked plan, built once and shared by all shots and workers."""
+    cache-blocked plan, built once per run; each worker holds a copy."""
 
     var spans: List[_Span]
     var first: List[Int]  # by op index: the first span of the block that starts there

@@ -153,6 +153,11 @@ def test_folding_and_scope() raises:
     assert_true(_error_of("int i = 1; i = 0; qubit[2] q; h q[i];").startswith("QM-E584"))
     assert_true(_error_of("qubit[2] q; bit[2] c; x q[c];").startswith("QM-E5"))
     assert_true(_error_of("qubit[2] q; bit[1] c; for int i in [0:1] { h q[i]; if (c[0]) break; }").startswith("QM-E584"))
+    # names resolve to the innermost declaration, on the constant path too
+    assert_true(_error_of("const int i = 1; qubit[2] q; bit[1] c; for int i in [0:1] { if (c[0]) break; h q[i]; }").startswith("QM-E584"))
+    assert_equal(_int("output int r; int x; x = 1; if (x == 1) { const int x = 5; r = x; } else { r = 0; }", "r"), 5)
+    assert_true(_error_of("bit[1] c; for float f in [0:1] { if (c[0]) break; }").startswith("QM-E580"))
+    assert_true(_error_of("qubit[1] q; int x; x = 1; x = measure q[0];").startswith("QM-E504"))
     # a loop that cannot run ahead of time keeps its index at run time, but a
     # loop without a jump still unrolls and indexes qubits
     var u = _run("qubit[3] q; bit[3] c; for int i in [0:2] { x q[i]; c[i] = measure q[i]; }", 5)
@@ -212,6 +217,10 @@ def test_gate_arguments() raises:
     # an angle[n] argument is its fraction of a turn
     var w = _run("qubit[1] q; bit[1] c; angle[3] a; a = pi / 2; a = a + a; rx(a) q[0]; c[0] = measure q[0];", 30)
     assert_equal(w.sample.counts.get("1", 0), 30)
+    # operators the constant path stops at
+    var sh = _run("qubit[1] q; bit[1] c; uint k; k = 1; rx(float(k << 1) * pi / 2) q[0]; rx((1 << 0) * pi) q[0]; c[0] = measure q[0];", 30)
+    assert_equal(sh.sample.counts.get("0", 0), 30)
+    assert_equal(_int("output int r; r = 0; for int i in [0:(1 << 2)] { r = r + 1; if (r == 9) break; }", "r"), 5)
     # the temporary is assigned where the gate is: a later change does not count
     var x = _run("qubit[1] q; bit[1] c; int k; k = 2; for int i in [1:k] { rx(pi / k) q[0]; } k = 0; c[0] = measure q[0];", 30)
     assert_equal(x.sample.counts.get("1", 0), 30)

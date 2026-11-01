@@ -22,7 +22,10 @@ its mean by t only with probability exp(-2 N t^2). A program passes when
 with n programs in the run (a family-wise false-alarm rate of 1e-6).
 
 Usage: bench/.venv/bin/python bench/crosscheck/control_flow.py [--programs 200]
-       [--shots 20000] [--seed 1] [--dir DIR]
+       [--shots 20000] [--seed 1] [--dir DIR] [--target line:6 --level 2]
+
+With --target, QUMO compiles each program for that target first: the compiled
+program, on physical qubits, is what gets compared with the exact distribution.
 """
 
 import argparse
@@ -209,6 +212,8 @@ def binary(op, a, b):
     if op in ("<<", ">>", "&", "|", "^") and (a[0][0] == "float" or b[0][0] == "float" or a[0][0] == "bool"):
         raise OracleError("operator on a float")
     if op in ("<<", ">>"):
+        if is_lit(a) and a[0][0] == "int" and a[1] >= 0:
+            a = lit(("uint", 64), a[1])  # a literal adapts, as it does to any operand
         t, v = a
         n = t[1]
         s = b[1]
@@ -828,9 +833,9 @@ class Oracle:
 # Random programs
 # --------------------------------------------------------------------------
 class Gen:
-    def __init__(self, rng):
+    def __init__(self, rng, max_qubits=3):
         self.r = rng
-        self.nq = rng.randint(1, 3)
+        self.nq = rng.randint(1, max_qubits)
         self.nc = rng.randint(2, 5)
         self.vars = {}  # name -> type
         self.lines = []
@@ -1123,11 +1128,11 @@ class Gen:
         vals = r.sample(range(0, 5), r.randint(1, 3))
         for v in vals:
             self.emit("case %d {" % v)
-            self.scoped(lambda: self.stmts(r.randint(1, 2), depth + 1, False))
+            self.scoped(lambda: self.stmts(r.randint(1, 2), depth + 1, in_loop))
             self.emit("}")
         if r.random() < 0.6:
             self.emit("default {")
-            self.scoped(lambda: self.stmts(1, depth + 1, False))
+            self.scoped(lambda: self.stmts(1, depth + 1, in_loop))
             self.emit("}")
         self.pad -= 1
         self.emit("}")
@@ -1186,6 +1191,9 @@ def main():
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--dir", default=None)
     ap.add_argument("--keep", action="store_true")
+    ap.add_argument("--qubits", type=int, default=3)
+    ap.add_argument("--target", default=None)
+    ap.add_argument("--level", type=int, default=2)
     args = ap.parse_args()
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     work = args.dir or tempfile.mkdtemp(prefix="qumo_control_flow_")
@@ -1198,7 +1206,7 @@ def main():
     index = 0
     while made < args.programs:
         index += 1
-        text = Gen(random.Random(rng.random())).program()
+        text = Gen(random.Random(rng.random()), args.qubits).program()
         try:
             prog = openqasm3.parse(text)
             orc = Oracle(prog)
@@ -1222,7 +1230,10 @@ def main():
         exact[name] = (dist, dropped)
         made += 1
     exe = build_runner(root, os.path.join(root, "build"))
-    subprocess.run([exe, work, str(args.shots), str(args.seed)], check=True, stderr=subprocess.DEVNULL)
+    cmd = [exe, work, str(args.shots), str(args.seed)]
+    if args.target:
+        cmd += [args.target, str(args.level)]
+    subprocess.run(cmd, check=True, stderr=subprocess.DEVNULL)
     tol = math.sqrt(math.log(args.programs / 1e-6) / (2 * args.shots))
     worst = 0.0
     bad = []

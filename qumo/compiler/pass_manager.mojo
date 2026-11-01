@@ -681,6 +681,49 @@ def working_gate_set(c: Circuit, target: Target) -> GateSet:
     return GateSet(target.basis)
 
 
+def route_options(args: List[String], seed: Int, mut aopts: AIRouteOptions, mut star: Bool) raises -> RouteOptions:
+    """Options of a `route(...)` pass: the routing ones, and what is not routing
+    proper, the learned router in `aopts` and star pre-routing in `star`."""
+    var opts = RouteOptions()
+    opts.seed = seed
+    aopts.policy = "off"
+    for a in args:
+        var eq = a.find("=")
+        if eq < 0:
+            continue
+        var key = String(a[byte=0:eq].strip())
+        var val = String(a[byte=eq + 1:].strip())
+        if key == "layout": opts.layout = val
+        elif key == "seed": opts.seed = Int(val)
+        elif key == "trials": opts.trials = Int(val)
+        elif key == "iterations": opts.iterations = Int(val)
+        elif key == "lookahead": opts.lookahead = Int(val)
+        elif key == "weight": opts.weight = Float64(val)
+        elif key == "decay": opts.decay = Float64(val)
+        elif key == "vf2_steps": opts.vf2_steps = Int(val)
+        elif key == "valve": opts.valve = Int(val)
+        elif key == "star": star = val != "0" and val != "false" and val != "off"
+        elif key == "heuristic": opts.heuristic = val
+        elif key == "swap_trials": opts.swap_trials = Int(val)
+        elif key == "absorb": opts.absorb = Float64(val)
+        elif key == "absorb_alt": opts.absorb_alt = Float64(val)
+        elif key == "mirror":
+            opts.mirror_auto = val == "auto"
+            opts.mirror = val != "0" and val != "false" and val != "off"
+            if val == "free":
+                opts.mirror_gain = 1e9
+        elif key == "mirror_gain": opts.mirror_gain = Float64(val)
+        elif key == "commute":
+            opts.commute_auto = val == "auto"
+            opts.commute = val != "0" and val != "false" and val != "off"
+        elif key == "policy": aopts.policy = val
+        elif key == "ai_level": aopts.level = Int(val)
+        elif key == "layout_mode": aopts.layout_mode = val
+        elif key == "model_dir": aopts.model_dir = val
+    aopts.seed = opts.seed
+    return opts^
+
+
 def _apply(p: PassSpec, mut c: Circuit, target: Target, mut st: _State) raises -> String:
     """Run one pass in place; returns a short note."""
     var id = p.id
@@ -714,45 +757,9 @@ def _apply(p: PassSpec, mut c: Circuit, target: Target, mut st: _State) raises -
             st.dropped = True
         return "translated " + String(r) + " gates to " + String(g2) + (" (symbolic phase dropped)" if dropped else "")
     if id == PassId.ROUTE:
-        var opts = RouteOptions()
-        opts.seed = st.seed
         var aopts = AIRouteOptions()
-        aopts.policy = "off"
         var star = True
-        for a in p.args:
-            var eq = a.find("=")
-            if eq < 0:
-                continue
-            var key = String(a[byte=0:eq].strip())
-            var val = String(a[byte=eq + 1:].strip())
-            if key == "layout": opts.layout = val
-            elif key == "seed": opts.seed = Int(val)
-            elif key == "trials": opts.trials = Int(val)
-            elif key == "iterations": opts.iterations = Int(val)
-            elif key == "lookahead": opts.lookahead = Int(val)
-            elif key == "weight": opts.weight = Float64(val)
-            elif key == "decay": opts.decay = Float64(val)
-            elif key == "vf2_steps": opts.vf2_steps = Int(val)
-            elif key == "valve": opts.valve = Int(val)
-            elif key == "star": star = val != "0" and val != "false" and val != "off"
-            elif key == "heuristic": opts.heuristic = val
-            elif key == "swap_trials": opts.swap_trials = Int(val)
-            elif key == "absorb": opts.absorb = Float64(val)
-            elif key == "absorb_alt": opts.absorb_alt = Float64(val)
-            elif key == "mirror":
-                opts.mirror_auto = val == "auto"
-                opts.mirror = val != "0" and val != "false" and val != "off"
-                if val == "free":
-                    opts.mirror_gain = 1e9
-            elif key == "mirror_gain": opts.mirror_gain = Float64(val)
-            elif key == "commute":
-                opts.commute_auto = val == "auto"
-                opts.commute = val != "0" and val != "false" and val != "off"
-            elif key == "policy": aopts.policy = val
-            elif key == "ai_level": aopts.level = Int(val)
-            elif key == "layout_mode": aopts.layout_mode = val
-            elif key == "model_dir": aopts.model_dir = val
-        aopts.seed = opts.seed
+        var opts = route_options(p.args, st.seed, aopts, star)
         _ = unroll_3q(c)
         var star_map = List[Int]()
         var star_note = String()
