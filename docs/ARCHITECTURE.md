@@ -45,6 +45,13 @@ seeding and JSON conventions.
 * **QEC in the same IR**: noise channels (`DEPOLARIZE1/2`, `X/Y/Z_ERROR`,
   `PAULI_CHANNEL_1/2`, `E`) and annotations (`DETECTOR`, `OBSERVABLE`, `TICK`) with
   Stim-style absolute measurement records.
+* **`Program`** (`program.mojo`, `classical.mojo`) is `Circuit` plus what a flat list
+  cannot hold: structured regions on a tape, classical variables, expressions in
+  postorder. The `Circuit` is its arena: a block is a range of ops, and no opcode is
+  new, because every walker of `.ops` skips what it does not know. `cfg_of` derives
+  the control-flow graph, used by the interpreter and by the verifier. It is a
+  separate type so that a route that was not adapted does not compile
+  ([CONTROL_FLOW.md](CONTROL_FLOW.md)).
 * **Text formats**: OpenQASM 3 is canonical (`qasm.mojo`, round-trip exact,
   `#pragma qumo` for noise/detectors); OpenQASM 2 export (`qasm2.mojo`) for
   interoperability with every other SDK.
@@ -71,6 +78,10 @@ seeding and JSON conventions.
   applied block by block (2^15 amplitudes = 512 KiB per block, one pass over
   memory for the whole run of gates).
 * **Determinism**: xoshiro256** seeded by SplitMix64; `split(k)` per worker.
+
+* **Programs**: `program_runner.mojo` walks the graph shot by shot through a static
+  `ShotBackend` (state vector, tableau, branching). A program without runtime regions
+  is a circuit and goes to `sample`. The straight paths did not change.
 
 ## 3. Compiler (`qumo/compiler`)
 
@@ -102,6 +113,10 @@ seeding and JSON conventions.
   after routing). O2/O3 may permute outputs even on all-to-all targets (SWAP
   elision), so always read results through `final_layout`.
 * **O3** runs the O3 and O2 pipelines and keeps the better result.
+
+* **Programs**: `program_compile.mojo` runs the passes around `route` on each block
+  and keeps one layout: a region exits with the layout it entered with, and
+  `verify_program` checks the skeleton, every edge and the blocks it can.
 
 ## 4. Execution (`qumo/exec`)
 
@@ -136,8 +151,8 @@ detector error model → swappable decoders → Sinter-style statistics.
   turns them into structured `Diagnostic` JSON (`docs/ERRORS.md`).
 * **Self-description**: `qumo describe gates|errors|capabilities`, `llms.txt`.
 * **Python**: `build/qumo_py.so` (Mojo-built CPython extension) exposes
-  circuits, QASM I/O, `transpile`, simulation and benchmark generators — used
-  by the Benchpress gym and the neutral benchmark.
+  circuits, programs, QASM I/O, `transpile`, simulation and benchmark generators —
+  used by the Benchpress gym and the neutral benchmark.
 
 ## 7. Conventions
 

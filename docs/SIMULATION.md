@@ -47,6 +47,26 @@ path ORed every MEASURE into the register, so an earlier 1 survived a later
 (`test_repeated_clbit_last_write_wins`) covers the reported cases and 150
 random circuits against the trajectory path and the stabilizer sampler.
 
+### 1.2 Programs
+
+`qumo.sim.program_runner.sample_program` interprets a `Program` shot by shot: blocks
+of quantum ops go to a `ShotBackend`, classical statements run on a `CStore` that is
+allocated once per worker, and a shot past `max_iterations` back-edges raises QM-E480.
+
+* A program without runtime regions goes to `sample`, so `Program.from_circuit` gives
+  identical counts.
+* Otherwise Clifford gates with Pauli noise go to the tableau, and the rest to the state
+  vector, through `run_trajectory_ops`, the loop of `sample`, in the same RNG order.
+  Pending 1q gates survive block boundaries, and long stretches of static gates run from
+  one `build_plan`.
+* 'gpu' runs on the CPU with QM-W020, because each shot branches on its own. 'density',
+  'ptsbe' and 'frame' are QM-E483: each needs one fixed sequence of operations.
+* Shots run in parallel up to `PAR_SHOTS_MAX_QUBITS` qubits, each on `rng.split(shot)`,
+  so the counts do not depend on the number of workers. Above that, shots run in series
+  and the kernels in parallel.
+
+The classical rules are in [CONTROL_FLOW.md](CONTROL_FLOW.md).
+
 ## 2. Cache blocking with qubit reordering
 
 Above 2^19 amplitudes (8 MiB) the state no longer fits in cache and a pass

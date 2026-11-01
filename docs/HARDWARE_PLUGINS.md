@@ -473,6 +473,11 @@ Notes for the next ones:
 
 ## 10. Limitations
 
+* Programs: a `while`, classical variables or any other runtime region cannot run on
+  hardware yet. The payload here is OpenQASM 2, which has no loops, so text, a file or
+  a `qumo_py.Program` with runtime regions is QM-E954 before anything reaches a
+  provider. A program without runtime regions is a circuit and compiles
+  ([CONTROL_FLOW.md](CONTROL_FLOW.md)).
 * Single circuit per job (no PUB broadcasting / parameter sweeps / sessions or
   batches yet); parameters are bound once before submission.
 * Dynamic circuits: mid-circuit measurements and conditions on whole classical

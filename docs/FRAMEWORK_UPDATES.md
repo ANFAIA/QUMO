@@ -22,8 +22,8 @@ Versions: Qiskit 2.6.1, qiskit-ibm-runtime 0.51, Aer 0.18.2, pytket 2.18.5, tket
 | `switch`, Qiskit's `switch_dummy` and V1 forms | OpenQASM 3, Qiskit | done, register conditions |
 | Verbatim box semantics, `Circuit.protect` | Braket, CUDA-Q 0.16 | deferred: `box` only stops motion across it |
 | `delay`, `stretch`, scheduling, dynamical decoupling | Qiskit, Cirq | deferred |
-| Constant `break` / `continue` | QDK 1.31 | deferred |
-| `while`, classical variables, CFG IR | Qiskit, Cirq 1.8, Guppy | skipped: QUMO circuits are straight-line by design |
+| Constant `break` / `continue` | QDK 1.31 | done through `Program`: a loop with either stays a region, simulated and compiled; [CONTROL_FLOW](CONTROL_FLOW.md) |
+| `while`, classical variables, CFG IR | Qiskit, Guppy; `cirq.While` exists only in 1.8.dev, unreleased (the latest Cirq release is 1.7.0) | done on the CPU, `qumo.ir.program`: regions on a tape with a derived CFG, a separate type from `Circuit`, [CONTROL_FLOW](CONTROL_FLOW.md). Hardware and GPU are deferred |
 | Text circuit drawer | Cirq, Qibo, PennyLane | done, `Circuit.draw()`, `qumo draw`, `qumo_draw`, `qumo_py.draw` |
 | Quantikz / LaTeX drawing | Cirq 1.7 | deferred |
 | Multi-qubit Pauli operators beyond 64 qubits | Qiskit `SparseObservable` | deferred, needed for Pauli propagation |
