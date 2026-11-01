@@ -12,8 +12,9 @@ all: cli py
 MOJO_VERSION ?= 1.2.0
 MAX_VERSION ?= 26.7.0
 
-setup:  ## create .venv with the Mojo toolchain + MAX runtime (parallelize)
-	uv venv .venv --python 3.12 && uv pip install --python .venv/bin/python "mojo==$(MOJO_VERSION)" "max-mojo-libs==$(MAX_VERSION)" "max-core==$(MAX_VERSION)"
+setup:  ## create .venv, or update an existing one, to the pinned Mojo toolchain + MAX runtime (parallelize)
+	[ -x .venv/bin/python ] || uv venv .venv --python 3.12
+	uv pip install --python .venv/bin/python "mojo==$(MOJO_VERSION)" "max-mojo-libs==$(MAX_VERSION)" "max-core==$(MAX_VERSION)"
 
 setup-py:  ## bench/.venv: Python 3.12 + latest Qiskit, Aer, TKET, Cirq, Stim, PyMatching (examples, benchmarks, plugin tests)
 	[ -x bench/.venv/bin/python ] || uv venv bench/.venv --python 3.12

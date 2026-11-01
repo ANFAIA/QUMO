@@ -60,6 +60,19 @@ make py           # build/qumo_py.so — CPython extension (import qumo_py)
 
 Run a single suite: `.venv/bin/mojo run -I . tests/test_sim.mojo`. Mojo dialect notes for contributors: [docs/MOJO_GUIDE.md](docs/MOJO_GUIDE.md).
 
+### Updating an existing clone
+
+**QUMO now needs Mojo 1.2.0 + MAX 26.7.0. A `.venv` created before that keeps Mojo 1.1, which cannot build this tree**, and the build stops with `module 'file_descriptor' does not contain 'RawFileDescriptor'`. After every pull that changes the pins in the Makefile, update the toolchain and rebuild:
+
+```bash
+git pull
+make setup        # updates the existing .venv to the pinned versions; no need to delete it
+make setup-py     # optional: updates bench/.venv
+make cli py       # rebuild: binaries in build/ still come from the old toolchain
+```
+
+`examples/colab/run_on_any_gpu.sh` and the notebooks skip the install when `.venv/bin/mojo` exists, so run `make setup` first on a machine that already has a `.venv`.
+
 ## Usage
 
 **CLI** (human output by default, `--json` for machines; exit codes 0 ok / 1 failed / 2 usage):
