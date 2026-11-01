@@ -1,7 +1,8 @@
 from qumo.ir.circuit import Circuit
 from qumo.ir.pauli import parse_pauli_sum
 from qumo.exec.orchestrator import Workflow, Device, job_precision
-from qumo.exec.resources import estimate_resources, estimate_hardware, estimate_fault_tolerant, HardwareProfile
+from std.math import pi
+from qumo.exec.resources import estimate_resources, estimate_hardware, estimate_fault_tolerant, HardwareProfile, SynthesisModel
 from std.testing import assert_equal, assert_true, assert_almost_equal
 
 
@@ -13,7 +14,42 @@ def ghz(n: Int) -> Circuit:
     return c^
 
 
+def test_rotation_t_cost() raises:
+    """Arbitrary rotations cost a synthesised sequence, not one T (regression:
+    200 rotations used to report T=200)."""
+    var c = Circuit(2)
+    for _ in range(200):
+        c.rz(0.3, 0)
+    var r = estimate_resources(c)
+    assert_equal(r.rotations, 200)
+    assert_equal(r.t_exact, 0)
+    assert_equal(r.t_per_rotation, 53)  # ceil(3 log2(200 / 1e-3))
+    assert_equal(r.t_count, 200 * 53)
+    var rus = estimate_resources(c, model=SynthesisModel.repeat_until_success())
+    assert_equal(rus.t_per_rotation, 30)  # ceil(1.149 log2(200 / 1e-3) + 9.2)
+    assert_true(estimate_resources(c, rotation_budget=1e-6).t_count > r.t_count)
+    # exact Clifford+T stays exact; two-qubit rotations are counted too
+    var d = Circuit(3)
+    d.t(0)
+    d.ccx(0, 1, 2)
+    assert_equal(estimate_resources(d).t_count, 8)
+    var e = Circuit(2)
+    e.rzz(0.3, 0, 1)
+    e.cp(0.3, 0, 1)
+    assert_equal(estimate_resources(e).rotations, 4)  # rzz 1, cp 3
+    var f = Circuit(2)
+    f.rz(pi / 4, 0)  # exactly one T up to Cliffords, nothing to synthesise
+    f.cp(pi / 2, 0, 1)  # CS: three T
+    f.cp(pi, 0, 1)  # CZ
+    var rf = estimate_resources(f)
+    assert_equal(rf.t_exact, 4)
+    assert_equal(rf.rotations, 0)
+    # the fault-tolerant estimate pays for the synthesised T states
+    assert_equal(estimate_fault_tolerant(c).logical_cycles, 200 * 48)  # budget 1e-2 / 3
+
+
 def main() raises:
+    test_rotation_t_cost()
     var wf = Workflow()
     var a = wf.add_estimate("zz", ghz(4), parse_pauli_sum("Z0 Z3"))
     var g = ghz(6)

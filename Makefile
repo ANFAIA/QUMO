@@ -13,7 +13,7 @@ setup:  ## create .venv with the Mojo toolchain + MAX runtime (parallelize)
 setup-py:  ## bench/.venv: Python 3.12 + latest Qiskit, Aer, TKET, Cirq, Stim, PyMatching (examples, benchmarks, plugin tests)
 	[ -x bench/.venv/bin/python ] || uv venv bench/.venv --python 3.12
 	uv pip install --python bench/.venv/bin/python -U qiskit qiskit-aer qiskit-ibm-runtime pytket pytket-qiskit \
-		cirq-core stim pymatching numpy scipy matplotlib psutil pytest nbformat
+		cirq-core ply stim pymatching numpy scipy matplotlib psutil pytest nbformat
 	uv pip install --python bench/.venv/bin/python -U "./plugins/hardware[all]"
 
 test:  ## run every Mojo test file

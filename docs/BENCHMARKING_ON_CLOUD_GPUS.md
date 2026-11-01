@@ -86,11 +86,9 @@ encodes this table in `gpu_supported()` and stores the verdict for every detecte
   ([PR #5025](https://github.com/NVIDIA/cuda-quantum/pull/5025); `CuStateVecConfig.cpp` L146-169 at 0.16.0). Sources: [CUDA-Q quick start](https://nvidia.github.io/cuda-quantum/latest/using/quick_start.html),
   [CUDA-Q state-vector simulators](https://nvidia.github.io/cuda-quantum/latest/using/backends/sims/svsims.html),
   [pypi.org/project/cudaq](https://pypi.org/project/cudaq/), [pypi.org/project/cuda-quantum-cu13](https://pypi.org/project/cuda-quantum-cu13/).
-* **Qiskit Aer GPU**: `qiskit-aer-gpu` 0.15.1 (2024-09-13) is the latest wheel: Linux x86_64 only, cp38-cp312, CUDA 12
-  runtime and cuQuantum from pip. It declares `qiskit>=1.1` without an upper bound, but the 0.15 code base does not
-  import under Qiskit 2.x (checked here with the CPU build `qiskit-aer==0.15.1` + Qiskit 2.5.2: `ImportError:
-  cannot import name 'convert_to_target'`; it works with Qiskit 1.4.6). So it gets its own environment with
-  `qiskit>=1.1,<2`. Sources: [pypi.org/project/qiskit-aer-gpu](https://pypi.org/project/qiskit-aer-gpu/),
+* **Qiskit Aer GPU**: `qiskit-aer-gpu` 0.18.2 (2026-10) brings GPU wheels back after 0.15.1 (2024): Linux x86_64,
+  cp311-cp315, CUDA 12 runtime, `qiskit>=1.1,<3`, and it pins `cuquantum-cu12<24.11`, an older cuStateVec than the one
+  CUDA-Q 0.16 uses (state this when comparing them). It gets its own environment because of those wheels. Sources: [pypi.org/project/qiskit-aer-gpu](https://pypi.org/project/qiskit-aer-gpu/),
   [Qiskit Aer](https://github.com/Qiskit/qiskit-aer/).
 * **PennyLane Lightning** `lightning.gpu` (cuStateVec; installed by default, the third-party GPU baseline that AMD
   GPUs also have, as `lightning.amdgpu`): `pennylane-lightning-gpu` 0.45.0, manylinux_2_28

@@ -399,15 +399,19 @@ Mojo `error_catalog()` that generates [ERRORS.md](ERRORS.md).
 
 ## 8. Installation and tests
 
-Versions verified on 2026-10-12: qiskit 2.5.2, qiskit-ibm-runtime 0.50.0,
-qiskit-aer 0.17.2, qnexus 0.51.1, pytket 2.18.5, pytket-quantinuum 0.59.3,
-pytket-pecos 0.3.3 / quantum-pecos 0.8.0.dev8, guppylang 1.0.0a4 (with
-guppylang-internals 1.0.0a4), selene-sim 0.2.18.
+Versions verified on 2026-11-01 (mocked remote paths, no live Nexus or hardware
+run): guppylang 1.2.0, selene-sim 0.3.7, qnexus 0.51.2, tket 0.15.13, hugr 0.18.8,
+pytket 2.18.5, pytket-quantinuum 0.59.3, pytket-qiskit 0.79.0, Python 3.12. The H2
+local emulator needs pre-release quantum-pecos 0.8.0.dev8, which requires
+selene-sim < 0.3 while guppylang 1.2 requires >= 0.3.1: install `[helios]` and
+`[local-quantinuum]` in separate environments. qiskit-ibm-runtime must be >= 0.50.1
+(0.50.0 `FoldRzzAngle` emits a `GlobalPhaseGate`, invalid on IBM hardware).
 
 ```bash
 uv pip install --python bench/.venv/bin/python qnexus pytket-quantinuum          # IBM deps already in bench/.venv
-uv pip install --prerelease=allow --python bench/.venv/bin/python \
-    "pytket-quantinuum[pecos]==0.59.3" "pytket==2.18.5" "guppylang==1.0.0a4" "guppylang-internals==1.0.0a4"
+uv pip install --python bench/.venv/bin/python "guppylang>=1.2"                  # Helios / Selene path
+# or, in another venv, for the H2-1LE emulator:
+# uv pip install --prerelease=allow --python <venv>/bin/python "pytket-quantinuum[pecos]==0.59.3" "pytket==2.18.5"
 bench/.venv/bin/python -m pytest plugins/hardware/tests -q                        # 160 tests (156 run, 4 slow skipped), no accounts
 QUMO_HW_SLOW=1 bench/.venv/bin/python -m pytest plugins/hardware/tests -q -m slow # + the 4 slow H2-1LE / Selene emulator tests
 ```
@@ -481,8 +485,9 @@ Notes for the next ones:
   `qnx.circuits.cost`) for billing-grade numbers.
 * Quantinuum device table and nominal error rates are static (verified
   2026-10-12); `backends --online` shows what Nexus offers your account.
-* Helios submission depends on guppylang's `load_pytket` (pre-release 1.0
-  line) and on HUGR acceptance by Helios; it is exercised locally with Selene
+* Helios submission depends on guppylang's `load_pytket` (compiled with
+  `with_minimal_opt()`, so Guppy does not re-optimise QUMO's output) and on HUGR
+  acceptance by Helios; it is exercised locally with Selene
   and with mocked Nexus calls, not on Helios hardware.
 * The IBM ECR direction fix and fractional-angle folding use Qiskit passes
   (semantics-preserving and reported); everything else is QUMO's output.

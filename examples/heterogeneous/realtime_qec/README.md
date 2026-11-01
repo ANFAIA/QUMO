@@ -54,7 +54,7 @@ PyMatching agree on >= 99.9 % of shots and their logical error rates within
   it agrees too (it used to export undecomposed hyperedges: 0.2 % disagreement, fixed).
 * No GPU-trained decoder stage.
 
-Sources: [CUDA-Q QEC](https://nvidia.github.io/cudaqx/components/qec/introduction.html);
+Sources: [CUDA-Q QEC](https://nvidia.github.io/cudaq-qec/components/qec/introduction.html);
 [NVQLink](https://developer.nvidia.com/blog/nvidia-nvqlink-architecture-integrates-accelerated-computing-with-quantum-processors/);
 Riverlane real-time decoding, [arXiv:2410.05202](https://arxiv.org/abs/2410.05202);
 Higgott & Gidney, sparse blossom, [arXiv:2303.15933](https://arxiv.org/abs/2303.15933).

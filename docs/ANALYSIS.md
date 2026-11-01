@@ -35,7 +35,7 @@
 - **Primitives V2 with PUBs** (*Primitive Unified Blocs*): `(circuit, parameters[, shots])` for Sampler, `(circuit, observables, parameters[, precision])` for Estimator, with numpy-style broadcasting and shaped results. Modes: job / Batch / Session.
 - 2026: "directed execution": `Executor` + `samplomatic` (box-annotated circuits → template + *samplex*; randomisation/twirling happens server-side). In 0.50 the server-side Sampler/Estimator are deprecated in favour of client-side versions built on Executor.
 
-**Simulation**: Aer (C++; statevector, density matrix, MPS, stabilizer, cuStateVec) is in maintenance mode (no release for 13 months; no GPU wheels since 2024).
+**Simulation**: Aer (C++; statevector, density matrix, MPS, stabilizer, cuStateVec) is on reduced maintenance (0.18.2 in October 2026 brought GPU wheels back after 2024).
 
 **QEC / experimentalist**: no pulse access since 2.0 (replaced by fractional gates and dynamic circuits); no in-SDK stabilizer simulator or decoders (IBM research uses Stim + Relay-BP). Strong fault-tolerant compilation (PBC, Litinski, Clifford+T).
 

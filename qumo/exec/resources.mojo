@@ -14,11 +14,86 @@ Litinski 2019 "Magic state distillation: not as costly as you think"):
   p_L(d) = 0.03 * (p / p_th)^((d+1)/2), p_th = 0.01, 2 d^2 physical qubits per
   logical patch, logical layout Q = 2n + ceil(sqrt(8n)) + 1, one logical cycle
   = d code cycles, 15-to-1 distillation p_out = 35 p_in^3.
+
+Arbitrary rotations are not one T gate: each costs a synthesised Clifford+T
+sequence that grows with log2(1/eps), so `t_count` includes them through an
+explicit `SynthesisModel` (`t_exact` and `rotations` keep the two parts apart).
+The synthesis error budget is split evenly over the rotations (Beverland et
+al. 2022). Models: Ross-Selinger gridsynth (arXiv:1403.2975, ancilla-free,
+3 log2(1/eps), the O(log log) term is omitted) and the repeat-until-success fit
+1.149 log2(1/eps) + 9.2 (arXiv:1404.5320) that PennyLane's estimator uses.
 """
 
-from std.math import sqrt, ceil, log, exp
-from qumo.ir.circuit import Circuit
+from std.math import sqrt, ceil, log, log2, exp, pi
+from qumo.ir.circuit import Circuit, Instruction
 from qumo.ir.gates import Op, op_arity, op_is_unitary, op_name
+
+
+struct SynthesisModel(Copyable):
+    """T gates per arbitrary rotation: ceil(a log2(1/eps) + b)."""
+    var name: String
+    var a: Float64
+    var b: Float64
+
+    def __init__(out self, name: String, a: Float64, b: Float64):
+        self.name = name
+        self.a = a
+        self.b = b
+
+    @staticmethod
+    def ross_selinger() -> SynthesisModel:
+        return SynthesisModel("ross_selinger", 3.0, 0.0)
+
+    @staticmethod
+    def repeat_until_success() -> SynthesisModel:
+        return SynthesisModel("repeat_until_success", 1.149, 9.2)
+
+    def t_per_rotation(self, eps: Float64) -> Int:
+        return max(1, Int(ceil(self.a * log2(1.0 / eps) + self.b)))
+
+
+def t_cost(g: Instruction, mut exact: Int, mut rots: Int):
+    """Exact T gates and arbitrary rotations to synthesise for one gate.
+
+    Decompositions: controlled rotations are two half-angle rotations, CP three
+    (P(t/2) on each wire and one between CX gates), U three (ZYZ). A rotation
+    by an odd multiple of pi/4 is one exact T up to Cliffords."""
+    exact = 0
+    rots = 0
+    if not op_is_unitary(g.kind) or g.is_clifford():
+        return
+    var k = g.kind
+    if k == Op.T or k == Op.TDG:
+        exact = 1
+        return
+    if k == Op.CH:
+        exact = 2  # Ry(pi/4) CX Ry(-pi/4)
+        return
+    if k == Op.CCX or k == Op.CCZ or k == Op.CSWAP:
+        exact = 7  # standard Toffoli decomposition
+        return
+    if k == Op.U:
+        rots = 3
+        return
+    var n = 1
+    var scale = 1.0
+    if k == Op.CRX or k == Op.CRY or k == Op.CRZ:
+        n = 2
+        scale = 0.5
+    elif k == Op.CP:
+        n = 3
+        scale = 0.5
+    elif not (k == Op.RX or k == Op.RY or k == Op.RZ or k == Op.P or k == Op.RXX or k == Op.RYY or k == Op.RZZ):
+        return
+    if g.p0.is_symbolic():
+        rots = n
+        return
+    var r = g.p0.value() * scale / (pi / 4)
+    if abs(r - round(r)) < 1e-12:
+        if Int(round(r)) % 2 != 0:
+            exact = n
+        return
+    rots = n
 
 
 struct ResourceEstimate(Copyable, Writable):
@@ -33,7 +108,12 @@ struct ResourceEstimate(Copyable, Writable):
     var resets: Int
     var depth: Int
     var depth_2q: Int
-    var t_count: Int
+    var t_count: Int  # t_exact + rotations * t_per_rotation
+    var t_exact: Int  # T/Tdg gates and Toffoli-family expansions
+    var rotations: Int  # arbitrary-angle rotations to synthesise
+    var t_per_rotation: Int
+    var rotation_budget: Float64  # total synthesis error split over `rotations`
+    var synthesis_model: String
     var t_depth: Int
     var is_clifford: Bool
     var is_dynamic: Bool
@@ -55,6 +135,11 @@ struct ResourceEstimate(Copyable, Writable):
         self.depth = 0
         self.depth_2q = 0
         self.t_count = 0
+        self.t_exact = 0
+        self.rotations = 0
+        self.t_per_rotation = 0
+        self.rotation_budget = 0
+        self.synthesis_model = ""
         self.t_depth = 0
         self.is_clifford = True
         self.is_dynamic = False
@@ -77,6 +162,11 @@ struct ResourceEstimate(Copyable, Writable):
         s += ",\"depth\":" + String(self.depth)
         s += ",\"depth_2q\":" + String(self.depth_2q)
         s += ",\"t_count\":" + String(self.t_count)
+        s += ",\"t_exact\":" + String(self.t_exact)
+        s += ",\"rotations\":" + String(self.rotations)
+        s += ",\"t_per_rotation\":" + String(self.t_per_rotation)
+        s += ",\"rotation_budget\":" + String(self.rotation_budget)
+        s += ",\"synthesis_model\":\"" + self.synthesis_model + "\""
         s += ",\"t_depth\":" + String(self.t_depth)
         s += ",\"is_clifford\":" + ("true" if self.is_clifford else "false")
         s += ",\"is_dynamic\":" + ("true" if self.is_dynamic else "false")
@@ -103,17 +193,20 @@ def format_bytes(b: Float64) -> String:
     return String(Int(b / (1024.0 * 1024 * 1024 * 1024))) + " TiB"
 
 
-def _is_t_like(c: Circuit, i: Int) -> Bool:
-    var g = c.ops[i]
-    if g.kind == Op.T or g.kind == Op.TDG:
-        return True
-    if (g.kind == Op.RZ or g.kind == Op.P or g.kind == Op.RX or g.kind == Op.RY) and not g.is_clifford():
-        return True
-    return False
-
-
-def estimate_resources(c: Circuit, available_memory_bytes: Float64 = 16e9) -> ResourceEstimate:
+def estimate_resources(c: Circuit, available_memory_bytes: Float64 = 16e9, rotation_budget: Float64 = 1e-3,
+                       model: SynthesisModel = SynthesisModel.ross_selinger()) -> ResourceEstimate:
+    """`rotation_budget` is the total synthesis error of the circuit, split
+    evenly over its arbitrary rotations."""
     var r = ResourceEstimate()
+    var exact = 0
+    var rots = 0
+    for i in range(len(c.ops)):
+        t_cost(c.ops[i], exact, rots)
+        r.rotations += rots
+    r.rotation_budget = rotation_budget
+    r.synthesis_model = model.name
+    if r.rotations > 0:
+        r.t_per_rotation = model.t_per_rotation(rotation_budget / Float64(r.rotations))
     r.num_qubits = c.num_qubits
     r.num_clbits = c.num_clbits
     r.num_params = c.num_params()
@@ -144,19 +237,18 @@ def estimate_resources(c: Circuit, available_memory_bytes: Float64 = 16e9) -> Re
             for j in range(a):
                 lvl2[g.qubit(j)] = l + 1
             r.depth_2q = max(r.depth_2q, l + 1)
-        var t_like = _is_t_like(c, i)
-        if t_like:
-            r.t_count += 1
+        t_cost(g, exact, rots)
+        var layers = 3 if exact == 7 else exact  # a Toffoli has T-depth 3
+        r.t_exact += exact
         var lt = 0
         for j in range(a):
             lt = max(lt, lvlt[g.qubit(j)])
-        if t_like:
-            lt += 1
+        if layers + rots > 0:
+            lt += layers + rots * r.t_per_rotation
             r.t_depth = max(r.t_depth, lt)
         for j in range(a):
             lvlt[g.qubit(j)] = lt
-        if k == Op.CCX or k == Op.CCZ or k == Op.CSWAP:
-            r.t_count += 7  # standard Toffoli decomposition
+    r.t_count = r.t_exact + r.rotations * r.t_per_rotation
     r.depth = c.depth()
     r.is_dynamic = c.is_dynamic()
     r.has_noise = c.has_noise()
@@ -343,11 +435,12 @@ def estimate_fault_tolerant(c: Circuit, physical_error: Float64 = 1e-3,
                             cycle_time_ns: Float64 = 1000.0) raises -> FTEstimate:
     if physical_error >= 0.01:
         raise Error("QM-E450: physical error " + String(physical_error) + " is above the surface-code threshold (~1e-2). Hint: FT estimation needs p < 1e-2.")
-    var res = estimate_resources(c)
+    var res = estimate_resources(c, rotation_budget=error_budget / 3.0)
     var r = FTEstimate()
     var n = max(c.num_qubits, 1)
     r.logical_qubits = 2 * n + Int(ceil(sqrt(8.0 * Float64(n)))) + 1
-    # one T (or non-Clifford rotation ~ synthesised T sequence) per logical cycle
+    # one T per logical cycle (t_count includes the synthesised rotations);
+    # budget: 1/3 logical, 1/3 T states, 1/3 rotation synthesis
     var rot = res.t_count
     r.logical_cycles = max(res.depth, rot)
     var budget_logical = error_budget / 3.0

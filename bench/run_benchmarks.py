@@ -53,7 +53,7 @@ strongest baseline that runs on it.
 The runner itself is stdlib-only (psutil used when present). Baselines run in
 worker subprocesses (`--worker <name>`) with the interpreter named in the config
 or in QUMO_BENCH_PYTHON / QUMO_AER_GPU_PYTHON / QUMO_CUDAQ_PYTHON /
-QUMO_LIGHTNING_PYTHON, so e.g. qiskit-aer-gpu (needs qiskit<2) and CUDA-Q live
+QUMO_LIGHTNING_PYTHON, so e.g. qiskit-aer-gpu (pins cuquantum-cu12) and CUDA-Q live
 in their own virtual environments. Error codes QM-E960..QM-E969 (docs/ERRORS.md).
 """
 
@@ -1862,7 +1862,7 @@ SUITES = {  # execution order
 # expected (the notebooks and run_on_any_gpu.sh install with `-U`).
 FRESHNESS_PACKAGES = {
     "main": ["qiskit", "qiskit-aer", "pytket", "pytket-qiskit", "cirq-core", "stim", "pymatching"],
-    "QUMO_AER_GPU_PYTHON": ["qiskit", "qiskit-aer-gpu-cu11", "qiskit-aer-gpu"],
+    "QUMO_AER_GPU_PYTHON": ["qiskit", "qiskit-aer-gpu"],
     "QUMO_CUDAQ_PYTHON": ["cuda-quantum-cu12", "cuda-quantum-cu13"],
     "QUMO_LIGHTNING_PYTHON": ["pennylane", "pennylane-lightning", "pennylane-lightning-gpu"],
 }

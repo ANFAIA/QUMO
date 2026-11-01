@@ -13,7 +13,8 @@ formula, error budget 0.01). Neither prints its results in the repository.
 QUMO estimates explicit circuits with three read-only estimators from
 qumo/exec/resources.mojo:
 - `estimate_resources`: logical counts, depth, T-count (T/Tdg, 7 per
-  Toffoli-class gate, 1 per non-Clifford rotation), recommended simulator;
+  Toffoli-class gate, a synthesised sequence per arbitrary rotation),
+  recommended simulator;
 - `estimate_hardware`: NISQ duration and estimated success probability per
   modality preset (superconducting, trapped_ion, neutral_atom; none is a default);
 - `estimate_fault_tolerant`: surface-code distance, factories, physical
@@ -37,7 +38,7 @@ floquet codes) are not modelled.
 Checks:
 - the T-count equals an explicit count: Toffoli-class gates expanded into
   Clifford+T (7 T each, equivalence checked on the state vector at 1e-12) plus
-  non-Clifford rotations counted one by one;
+  non-Clifford rotations counted one by one (`rotations` in the estimate);
 - the decomposed QFT equals the library qft(8) (1e-12);
 - every code distance is >= 3, and physical qubits never decrease as the error budget tightens;
 - distances are ordered by the presets' physical error: trapped_ion <= superconducting <= neutral_atom;
@@ -99,13 +100,20 @@ def expand_clifford_t(c: Circuit) raises -> Circuit:
 
 
 def explicit_t_count(c: Circuit) -> Int:
-    """T/Tdg gates plus non-Clifford single-qubit rotations, counted one by one."""
+    """Exact T gates (T/Tdg, rotations by odd multiples of pi/4) plus the
+    arbitrary-angle rotations, counted one by one."""
     var n = 0
     for g in c.ops:
         if g.kind == Op.T or g.kind == Op.TDG:
             n += 1
         elif (g.kind == Op.RZ or g.kind == Op.RX or g.kind == Op.RY or g.kind == Op.P) and not g.is_clifford():
             n += 1
+        elif (g.kind == Op.RZZ or g.kind == Op.RXX or g.kind == Op.RYY) and not g.is_clifford():
+            n += 1
+        elif g.kind == Op.CP:  # P(t/2) on both wires + one between CX gates; CP(pi) is CZ
+            var r = g.p0.value() / pi
+            if abs(r - round(r)) > 1e-12:
+                n += 3
         elif g.kind == Op.CCX or g.kind == Op.CCZ or g.kind == Op.CSWAP:
             n += 1000000  # must have been expanded
     return n
@@ -196,7 +204,7 @@ def main() raises:
         var tc = explicit_t_count(expanded)
         if i == 0:  # the Toffoli expansion is checked on the state vector (9 qubits)
             equiv_err = equivalent(c, expanded, 11)
-        if tc != re.t_count:
+        if tc != re.t_exact + re.rotations or re.t_count != re.t_exact + re.rotations * re.t_per_rotation:
             t_ok = False
         print("  ", c.name, "  ", re.num_qubits, "  ", re.gates_total, "  ", re.gates_2q, "  ", re.gates_3q, "  ",
               re.depth, "  ", re.t_count, "  ", tc, "  ", re.recommended_method)

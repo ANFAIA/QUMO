@@ -75,7 +75,7 @@ LOCAL_MAX_QUBITS = 26  # state-vector memory guard for the local emulators
 # max_classical_register_width = 63 for every H-series device (checked 2026-10-12).
 H2_MAX_CREG_WIDTH = 63
 # Native op types the Helios (HUGR) path is known to lower (checked with the Selene HUGR-QIS
-# compiler, guppylang 1.0.0a4); anything else (conditional gates,
+# compiler, guppylang 1.2.0); anything else (conditional gates,
 # classical expressions, WASM calls, ...) is refused before upload.
 HELIOS_LOWERABLE = ("Rz", "PhasedX", "ZZPhase", "Measure", "Reset", "Barrier")  # verified with Selene
 
@@ -259,6 +259,12 @@ def offline_backend(device: str, n_qubits: int, local_emulator: bool = False):
     data = QuantinuumBackendData(n_qubits=n_qubits, n_cl_reg=4000, gate_set=gate_set,
                                  local_emulator=local_emulator)
     return QuantinuumBackend(device, data=data)
+
+
+def _minimal_opt(program):
+    """Run QUMO's payload as compiled: guppylang >= 1.0 optimises in compile() and emulator()
+    by default, and its default level aborts the process on a pytket Conditional."""
+    return program.with_minimal_opt() if hasattr(program, "with_minimal_opt") else program
 
 
 def hugr_program(native_circ, n_qubits: int):
@@ -472,7 +478,7 @@ class QuantinuumProvider:
             if family == "Helios":
                 from qnexus.models import HeliosEmulatorConfig
 
-                program = hugr_program(circ, compiled.num_qubits).compile()
+                program = _minimal_opt(hugr_program(circ, compiled.num_qubits)).compile()
                 ref = qnx.hugr.upload(hugr_package=program, name=job_name, project=project)
                 # n_qubits goes with the job item (start_execute_job), not into the deprecated
                 # HeliosEmulatorConfig.n_qubits field (quantinuum-schemas 7.8).
@@ -502,7 +508,7 @@ class QuantinuumProvider:
     def _run_local(self, circ, shots: int, backend: str, layout, seed: int | None) -> dict[str, int]:
         num_clbits = sum(int(w) for _, w in layout)
         if backend == "selene":
-            prog = hugr_program(circ, circ.n_qubits)
+            prog = _minimal_opt(hugr_program(circ, circ.n_qubits))
             inst = prog.emulator(n_qubits=circ.n_qubits).with_shots(int(shots))
             if seed is not None:
                 inst = inst.with_seed(int(seed))

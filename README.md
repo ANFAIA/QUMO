@@ -192,7 +192,7 @@ bench/run_final.sh                                    # Benchpress (QUMO + Qiski
 bench/.venv/bin/python bench/neutral/report.py bench/results/neutral.jsonl
 ```
 
-The benchmark venv needs `qiskit qiskit-aer qiskit-ibm-runtime pytket pytket-qiskit cirq-core stim pymatching` and Benchpress' `pytest-benchmark` fork.
+The benchmark venv needs `qiskit qiskit-aer qiskit-ibm-runtime pytket pytket-qiskit cirq-core ply stim pymatching` and Benchpress' `pytest-benchmark` fork.
 
 ## Documentation
 

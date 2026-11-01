@@ -2,7 +2,7 @@
 """Decoding while sampling: a surface-code memory experiment streamed from a QPU stand-in to a CPU decoder pool under a real-time budget.
 
 Reproduces: CUDA-Q QEC real-time decoding / NVQLink and Riverlane-style streaming decoding (syndromes decoded concurrently with their generation), with QUMO's sparse-blossom decoder
-Source: https://nvidia.github.io/cudaqx/components/qec/introduction.html
+Source: https://nvidia.github.io/cudaq-qec/components/qec/introduction.html
 Source: https://developer.nvidia.com/blog/nvidia-nvqlink-architecture-integrates-accelerated-computing-with-quantum-processors/
 Source: https://arxiv.org/abs/2410.05202
 Source: https://arxiv.org/abs/2303.15933

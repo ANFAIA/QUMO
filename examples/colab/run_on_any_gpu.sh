@@ -27,7 +27,7 @@
 # detection: nvidia-smi -> NVIDIA, rocminfo / amd-smi / rocm-smi -> AMD,
 # macOS arm64 -> Apple (Metal), otherwise CPU only. Vendor-specific baselines go
 # into their own virtual environments under $QUMO_VENVS (default <dir>/build/baseline-venvs):
-#   NVIDIA: CUDA-Q (cuda-quantum-cu12/13), qiskit-aer-gpu-cu11 (latest Aer + Qiskit; fallback qiskit-aer-gpu 0.15.1)
+#   NVIDIA: CUDA-Q (cuda-quantum-cu12/13), qiskit-aer-gpu (latest Aer + Qiskit)
 #   AMD:    PennyLane lightning.amdgpu (+ lightning.qubit)
 #   Apple:  PennyLane lightning.qubit (CPU reference)
 # Results: bench/results/cloud/*.json + .csv (see examples/colab/README.md).
@@ -170,10 +170,7 @@ if [ "$BASELINES" = 1 ]; then
     nvidia)
       if [ "${CUDA_MAJOR:-12}" -ge 13 ]; then mkvenv cudaq QUMO_CUDAQ_PYTHON cuda-quantum-cu13 numpy;
       else mkvenv cudaq QUMO_CUDAQ_PYTHON cuda-quantum-cu12 numpy; fi
-      if [ "$(uname -m)" = "x86_64" ]; then  # latest Aer + Qiskit; fallback: last CUDA-12 wheel (Qiskit < 2)
-        mkvenv aer-gpu QUMO_AER_GPU_PYTHON qiskit qiskit-aer-gpu-cu11 numpy
-        [ -n "${QUMO_AER_GPU_PYTHON:-}" ] || mkvenv aer-gpu-legacy QUMO_AER_GPU_PYTHON 'qiskit>=1.1,<2' qiskit-aer-gpu numpy
-      fi
+      if [ "$(uname -m)" = "x86_64" ]; then mkvenv aer-gpu QUMO_AER_GPU_PYTHON qiskit qiskit-aer-gpu numpy; fi
       mkvenv lightning QUMO_LIGHTNING_PYTHON pennylane pennylane-lightning pennylane-lightning-gpu numpy ;;
     amd)
       mkvenv lightning QUMO_LIGHTNING_PYTHON pennylane pennylane-lightning pennylane-lightning-amdgpu numpy ;;
