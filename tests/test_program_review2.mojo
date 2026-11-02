@@ -266,6 +266,10 @@ def test_18_float_declarations_and_range_bounds() raises:
     assert_equal(_int("output int r = 0; for int i in [0.0:1] { if (r > 9) { break; } r += 1; }"), 2)
     assert_equal(_int("output int r = 0; for int i in [0:1.0:1] { if (r > 9) { break; } r += 1; }"), 2)
     _is(_err_prog("output int r = 0; for int i in [0.5:1] { if (r > 9) { break; } r += 1; }"), "QM-E570")
+    # a cast is not a declaration: nothing here takes a clbit
+    assert_equal(len(parse_qasm(H + "for int i in [1:0] { rz(int(bit[1](i))) q[0]; }").ops), 0)
+    _is(_err_flat("for int i in [1:0] { bit b; }"), "QM-E504")
+    _is(_err_flat("for int i in [1:0] { h q[0]; bit[2] b; }"), "QM-E504")
 
 
 def main() raises:

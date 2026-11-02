@@ -2334,7 +2334,7 @@ struct QasmParser(Movable):
             raise self.err("QM-E570", "too many unrolled loop iterations", ft, "QUMO unrolls loops at parse time; keep the total below " + String(_MAX_UNROLL))
         var body = self.pos
         if len(values) == 0:
-            if self.body_mentions("bit"):
+            if self.body_declares_bit():
                 raise self.err("QM-E504", "a bit declared in a loop that never runs still takes a clbit", rt, "parse with parse_qasm_program or load_any, which keep the loop")
             self.skip_statement()
             return
@@ -3483,16 +3483,19 @@ struct QasmParser(Movable):
         self.pos = save
         return found
 
-    def body_mentions(mut self, word: String) raises -> Bool:
-        """Does the statement at self.pos hold this word?"""
+    def body_declares_bit(mut self) raises -> Bool:
+        """Does the statement at self.pos declare a `bit`? Only a statement starts
+        with that word: `bit[1](x)` in an expression is a cast."""
         var save = self.pos
         self.skip_statement()
         var stop = self.pos
         self.pos = save
         for i in range(save, stop):
             ref t = self.toks[i]
-            if t.kind == TK.IDENT and self.text(t) == word:
-                return True
+            if t.kind == TK.IDENT and self.text(t) == "bit":
+                ref before = self.toks[i - 1]
+                if i == save or before.kind != TK.PUNCT or before.sub == P.SEMI or before.sub == P.LBRACE or before.sub == P.RBRACE:
+                    return True
         return False
 
     def body_assigns(mut self, nm: String) raises -> Bool:
@@ -3548,7 +3551,7 @@ struct QasmParser(Movable):
             return True
         self.skip_iterable()
         # a bit in the body takes a clbit even if the loop never runs, as on the tape
-        var needs = self.body_has_jump() or self.body_assigns(nm) or (empty and self.body_mentions("bit"))
+        var needs = self.body_has_jump() or self.body_assigns(nm) or (empty and self.body_declares_bit())
         self.pos = save
         return needs
 
