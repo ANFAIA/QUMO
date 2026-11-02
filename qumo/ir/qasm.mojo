@@ -1129,8 +1129,12 @@ struct QasmParser(Movable):
                 a = self.p_mul(a, b, t)
             elif self.is_punct(t, P.SLASH):
                 _ = self.next()
-                self.saw_division = True
                 var b = self.parse_unary()
+                # `pi / 2` is the common case, and no integer division: a value with a
+                # fraction has no integer type, and the deepest integer division in
+                # an operand has whole operands, so note_real_division misses nothing
+                if _is_whole(a) and _is_whole(b):
+                    self.saw_division = True
                 a = self.p_div(a, b, t)
             elif self.is_punct(t, P.PERCENT):
                 _ = self.next()
@@ -1267,6 +1271,11 @@ struct QasmParser(Movable):
         var neg = self.is_punct(t, P.MINUS)
         var lit = self.peek(1) if neg else t
         if lit.kind == TK.INT and self.literal_ahead(2 if neg else 1):
+            if lit.num < 9007199254740992.0:  # the token's float is exact below 2^53
+                _ = self.next()
+                if neg:
+                    _ = self.next()
+                return -Int(lit.num) if neg else Int(lit.num)
             var value = self.parse_c_literal(lit)
             if value.root().ty.tag != CT.INT and not (neg and value.root().ty.tag == CT.UINT and value.const_int() == -9223372036854775807 - 1):
                 raise self.err("QM-E580", what + " does not fit a 64-bit int", lit, "use a smaller value")
@@ -4043,6 +4052,11 @@ struct QasmParser(Movable):
         except e:
             raise Error(String(e))
         return c^
+
+
+def _is_whole(p: Param) -> Bool:
+    """A value that could be an integer: a symbol here is a float or an angle."""
+    return not p.is_symbolic() and p.offset == floor(p.offset)
 
 
 def _const_radians(e: CExpr) -> Float64:

@@ -550,6 +550,19 @@ def test_13_a_remainder_that_differs_from_the_table_warns() raises:
     assert_equal(len(w), 1)
 
 
+def test_13_only_integer_operands_go_through_the_table() raises:
+    # parse_term skips the second reading when an operand has a fraction, because that
+    # is most gate arguments. Every integer division has to reach it all the same.
+    for arg in ["3/4*pi", "pi*(3/4)", "(7/2)/pi", "2*pi*(1/2)", "-(3/4)", "pi/(7/2)", "sqrt(7/2)", "sin(3/4)", "2**(1/2)", "(1/3)**2", "1/2/pi", "pi+1/2"]:
+        var w = List[String]()
+        _ = parse_qasm_with_warnings("OPENQASM 3.0; qubit[1] q; rz(" + String(arg) + ") q[0];", w)
+        assert_equal(len(w), 1, String(arg))
+    for arg in ["pi/2", "2*pi/3", "-pi/2", "pi/2/2", "3*pi/4", "1.5/2", "3/pi", "3/2.5", "3.0/4", "6/3", "pi/2**3", "sqrt(2)/2"]:
+        var w = List[String]()
+        _ = parse_qasm_with_warnings("OPENQASM 3.0; qubit[1] q; rz(" + String(arg) + ") q[0];", w)
+        assert_equal(len(w), 0, String(arg))
+
+
 def test_14_a_shift_of_zero_is_zero() raises:
     assert_equal(parse_qasm("OPENQASM 3.0; qubit[1] q; float t = 0 << 1100; rz(t) q[0];").ops[0].p0.value(), 0.0)
     assert_equal(sample_program(parse_qasm_program(H + "output float t = 0 << 1100;"), 1, 1).real_output("t")[0], 0.0)
@@ -582,5 +595,6 @@ def main() raises:
     test_11_float_remainder_is_exact()
     test_12_draw_shows_a_constant_with_no_literal()
     test_13_a_remainder_that_differs_from_the_table_warns()
+    test_13_only_integer_operands_go_through_the_table()
     test_14_a_shift_of_zero_is_zero()
     print("test_program_review3 OK")
