@@ -119,6 +119,13 @@ def test_draw_and_lint(q):
     assert [code for code, _ in stuck.lint()] == ["QM-W054"]
 
 
+def test_lint_has_the_warnings_of_the_parser(q):
+    flat = q.load_program('OPENQASM 3.0; include "stdgates.inc"; qubit q; float t = 3 / 4 * pi; rz(t) q;')
+    assert [code for code, _ in flat.lint()] == ["QM-W055"]
+    loop = q.load_program('OPENQASM 3.0; include "stdgates.inc"; qubit q; rz(1 / 2) q; int k = 0; while (k < 3) { }')
+    assert [code for code, _ in loop.lint()] == ["QM-W055", "QM-W054"]
+
+
 def test_plugin_refuses_program_text():
     with pytest.raises(HardwareError) as e:
         compile_for_target(RUS, _spec())

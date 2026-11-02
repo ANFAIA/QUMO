@@ -37,13 +37,13 @@ from qumo.ir.gates import Op, op_name, op_arity, op_is_unitary, op_from_name
 from qumo.ir.pauli import parse_pauli_sum, PauliSum
 from qumo.sim.runner import sample, evolve
 from qumo.ir.program import Program
-from qumo.ir.qasm import draw_program, parse_qasm, load_any, load_qasm, to_qasm
+from qumo.ir.qasm import draw_program, parse_qasm, load_any_with_warnings, load_qasm, to_qasm
 from qumo.ir.qasm2 import to_qasm2
 from qumo.sim.program_runner import DEFAULT_MAX_ITERATIONS, sample_program
 from qumo.compiler.program_compile import compile_program
 from qumo.ai.describe import program_from_json, program_to_json
 from qumo.ai.json import parse_json
-from qumo.ai.diagnostics import lint_program
+from qumo.ai.diagnostics import diagnostic_from_error, lint_program
 from qumo.compiler.target import Target
 from qumo.exec.dispatch import sample_on
 from qumo.gpu.device import query_gpu
@@ -188,9 +188,11 @@ struct PyProgram(Movable, Writable):
     """A circuit with classical variables and control flow at run time."""
 
     var p: Program
+    var warnings: List[String]  # of the parser that read it
 
-    def __init__(out self, var p: Program):
+    def __init__(out self, var p: Program, var warnings: List[String] = List[String]()):
         self.p = p^
+        self.warnings = warnings^
 
     @staticmethod
     def _get(py_self: PythonObject) raises -> Pointer[PyProgram, MutAnyOrigin]:
@@ -232,8 +234,11 @@ struct PyProgram(Movable, Writable):
 
     @staticmethod
     def lint(py_self: PythonObject) raises -> PythonObject:
-        """Warnings of the program as [(code, message), ...]."""
+        """Warnings of the parser and of the program as [(code, message), ...]."""
         var out = Python.list()
+        for s in Self._get(py_self)[].warnings:
+            var d = diagnostic_from_error(s)
+            out.append(Python.tuple(d.code, d.message))
         for d in lint_program(Self._get(py_self)[].p):
             out.append(Python.tuple(d.code, d.message))
         return out
@@ -256,7 +261,9 @@ def _wrap(var c: Circuit) raises -> PythonObject:
 def py_load_program(text: PythonObject) raises -> PythonObject:
     """Parse OpenQASM 2/3 into a Program: anything a Circuit holds keeps its exact
     meaning, and while, break, continue and classical variables are added."""
-    return PythonObject(alloc=PyProgram(load_any(String(py=text))))
+    var warnings = List[String]()
+    var p = load_any_with_warnings(String(py=text), warnings)
+    return PythonObject(alloc=PyProgram(p^, warnings^))
 
 
 def py_program_from_json(text: PythonObject) raises -> PythonObject:

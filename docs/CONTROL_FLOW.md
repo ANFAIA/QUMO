@@ -212,6 +212,10 @@ that loses a remainder is a trap where an angle is meant:
 The hint is to write `3.0 / 4`, which every tool reads alike. Literal-only arguments keep
 their meaning, and OPENQASM 2 sources, or a source with no header, get no warning.
 
+Both reach `qumo run`, `qumo validate`, the `warnings` of a tool, and `Program.lint()` in
+Python. `qumo_py.load_qasm` gives a `Circuit`, which has no `lint`, so use `load_program`
+to see them.
+
 ## Simulation
 
 `sample_program(p, shots, seed, params, max_iterations, method)`. A program without
