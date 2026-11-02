@@ -48,7 +48,7 @@ from qumo.ir.param import Param
 from qumo.ir.classical import (
     CExpr, CN, CF, CT, CType, CNode, type_name, bit_type, bool_type, int_type, uint_type, float_type,
     angle_type, ce_binary, ce_bool, ce_bnot, ce_cast, ce_explicit_cast, ce_function, ce_lnot, ce_logical, ce_neg,
-    angle_radians,
+    angle_radians, never_negative, truncates,
 )
 from qumo.ir.program import CReg, FORR, Program, SK, Stmt, TapeBuilder, check_program, slot_prefix
 
@@ -789,6 +789,12 @@ struct QasmParser(Movable):
     var temp_count: Int
     var block_depth: Int  # open `{`, in both parsers
     var loop_names: List[_LoopName]
+    var openqasm3: Bool  # the source says OPENQASM 3
+    var truncations: List[Token]  # integer divisions of constants that lost a remainder
+    var warned: Dict[Int, Bool]  # start of each token warned about: unrolled bodies repeat
+    var cexpr_open: Bool  # inside parse_cexpr
+    var shadow: Bool  # parse_cexpr is reading a literal-only argument to compare meanings
+    var saw_division: Bool
 
     def __init__(out self, src: String, name: String) raises:
         self.src = src
@@ -832,6 +838,12 @@ struct QasmParser(Movable):
         self.temp_count = 0
         self.block_depth = 0
         self.loop_names = List[_LoopName]()
+        self.openqasm3 = False
+        self.truncations = List[Token]()
+        self.warned = Dict[Int, Bool]()
+        self.cexpr_open = False
+        self.shadow = False
+        self.saw_division = False
 
     # ------------------------------------------------------------ tokens
     def peek(self, k: Int = 0) -> Token:
@@ -1113,6 +1125,7 @@ struct QasmParser(Movable):
                 a = self.p_mul(a, b, t)
             elif self.is_punct(t, P.SLASH):
                 _ = self.next()
+                self.saw_division = True
                 var b = self.parse_unary()
                 a = self.p_div(a, b, t)
             elif self.is_punct(t, P.PERCENT):
@@ -1214,12 +1227,23 @@ struct QasmParser(Movable):
             hint = "did you mean " + _quote_list(sug) + "? " + hint
         raise self.err("QM-E534", "unknown function '" + nm + "'", f, hint)
 
+    def parse_const_real(mut self, what: String) raises -> Float64:
+        """A constant number: by the classical table when it names a typed constant,
+        which is what a gate argument does too."""
+        var t = self.peek()
+        if self.reads_typed():
+            var e = self.parse_cexpr()
+            if not e.is_const():
+                raise self.err("QM-E530", what + " must be a constant", t, "bind the parameter first or use a numeric value")
+            return _const_radians(e)
+        return self.need_const(self.parse_expr(), t, what)
+
     def literal_ahead(self, at: Int) -> Bool:
         """The token at offset `at` ends a constant: no operator follows it."""
         var n = self.peek(at)
         if n.kind != TK.PUNCT:
             return n.kind == TK.IDENT or n.kind == TK.EOF
-        return n.sub == P.COMMA or n.sub == P.RPAREN or n.sub == P.RBRACK or n.sub == P.COLON or n.sub == P.RBRACE or n.sub == P.LBRACE or n.sub == P.SEMI
+        return n.sub == P.COMMA or n.sub == P.RPAREN or n.sub == P.RBRACK or n.sub == P.COLON or n.sub == P.RBRACE or n.sub == P.LBRACE or n.sub == P.SEMI or n.sub == P.ANDAND or n.sub == P.OROR
 
     def parse_const_int(mut self, what: String) raises -> Int:
         var t = self.peek()
@@ -1228,17 +1252,20 @@ struct QasmParser(Movable):
         var lit = self.peek(1) if neg else t
         if lit.kind == TK.INT and self.literal_ahead(2 if neg else 1):
             var value = self.parse_c_literal(lit)
-            if value.root().ty.tag == CT.UINT and not (neg and value.const_int() == -9223372036854775807 - 1):
+            if value.root().ty.tag != CT.INT and not (neg and value.root().ty.tag == CT.UINT and value.const_int() == -9223372036854775807 - 1):
                 raise self.err("QM-E580", what + " does not fit a 64-bit int", lit, "use a smaller value")
             _ = self.next()
             if neg:
                 _ = self.next()
             return 0 - value.const_int() if neg else value.const_int()
         if (self.program_mode or len(self.const_exprs) > 0 or len(self.scopes) > 0) and self.reads_typed():
-            # typed constants compute in their types, exactly
-            var e = self.parse_cexpr()
+            # typed constants compute in their types, exactly; && and || belong to
+            # the condition around an integer position, not to the integer
+            var e = self.parse_c_bor()
             if not e.is_const():
                 raise self.err("QM-E584", what + " must be a constant", t, "use a constant, or a for loop that can unroll")
+            if e.ty().tag == CT.ANGLE:
+                raise self.err("QM-E530", what + " must be an integer, not an angle", t, "use an integer constant")
             if e.ty().tag != CT.FLOAT:
                 if e.ty().tag == CT.UINT and e.const_int() < 0:
                     raise self.err("QM-E580", what + " does not fit a 64-bit int", t, "use a smaller value")
@@ -1584,6 +1611,7 @@ struct QasmParser(Movable):
         if major != 2 and major != 3:
             raise self.err("QM-E503", "unsupported OpenQASM version " + self.text(v), v, "QUMO reads OpenQASM 2.0 and 3.x")
         self.version = major
+        self.openqasm3 = major == 3
         _ = self.expect_punct(P.SEMI, "';'")
 
     def parse_reg_decl(mut self, is_qubit: Bool) raises:
@@ -1630,6 +1658,8 @@ struct QasmParser(Movable):
         var known = self.scoped_regs.get(kw.start) if scoped else None
         var offset: Int
         if known:
+            if self.regs[known.value()].size != size:
+                raise self.err("QM-E504", "a bit declared in a loop keeps its size on every pass", nt, "use a constant size, or declare the largest size before the loop")
             offset = self.regs[known.value()].offset  # the same declaration, on a later pass of an unrolled loop
         elif is_qubit:
             offset = self.circs[0].num_qubits
@@ -1723,6 +1753,7 @@ struct QasmParser(Movable):
         var tt = first
         if not typed:
             tt = self.skip_type()
+            typed = self.is_word(tt, "float")  # float[32] folds as float does
         var nt = self.expect_ident("variable name")
         self.check_new_name(nt)
         if not self.is_punct(self.peek(), P.EQ):
@@ -1748,9 +1779,13 @@ struct QasmParser(Movable):
                 if msg.startswith("QM-E580") or msg.startswith("QM-E533") or msg.startswith("QM-E482"):
                     raise self.relocate(msg, eq)
             if ok:
+                if ty.tag == CT.FLOAT or ty.tag == CT.ANGLE:
+                    self.warn_truncations()
                 _ = self.next()
+                var radians = _const_radians(value)
+                self.check_finite_constant(radians, eq)
                 self.const_exprs[nm] = value.copy()
-                self.consts[nm] = Param(_const_radians(value))
+                self.consts[nm] = Param(radians)
                 return
             self.pos = start  # depends on an input: an affine Param, below
         var v = self.parse_expr()
@@ -1759,6 +1794,8 @@ struct QasmParser(Movable):
             if not v.is_symbolic():
                 v = Param(Float64(Int(v.offset)))
         _ = is_const
+        if not v.is_symbolic():
+            self.check_finite_constant(v.offset, eq)
         self.consts[nm] = v
 
     def parse_gate_def(mut self) raises:
@@ -2321,6 +2358,8 @@ struct QasmParser(Movable):
                 var value = _loop_value(v, loop_ty)
                 sc.values[0] = Param(_const_radians(value))
                 sc.exprs.append(value^)
+            elif not named:
+                sc.exprs.append(_loop_value(v, int_type(64, True)))  # in a gate body
             self.scopes.append(sc^)
             self.parse_statement()
             _ = self.scopes.pop()
@@ -2527,8 +2566,7 @@ struct QasmParser(Movable):
                 _ = self.next()
                 var at = self.peek()
                 if is_pow:
-                    var pv = self.parse_expr()
-                    var x = self.need_const(pv, at, "pow() exponent")
+                    var x = self.parse_const_real("pow() exponent")
                     if x != floor(x):
                         raise self.err("QM-E550", "pow(" + String(x) + ") @ needs an integer exponent", at, "QUMO supports integer powers; use inv @ for -1")
                     arg = Int(x)
@@ -2574,10 +2612,10 @@ struct QasmParser(Movable):
             _ = self.next()
             if not self.is_punct(self.peek(), P.RPAREN):
                 var classical = self.program_mode or len(self.const_exprs) > 0 or len(self.scopes) > 0
-                ps.append(self.parse_gate_arg() if classical else self.parse_expr())
+                ps.append(self.parse_gate_arg() if classical else self.parse_plain_arg())
                 while self.is_punct(self.peek(), P.COMMA):
                     _ = self.next()
-                    ps.append(self.parse_gate_arg() if classical else self.parse_expr())
+                    ps.append(self.parse_gate_arg() if classical else self.parse_plain_arg())
             _ = self.expect_punct(P.RPAREN, "')' to close the parameter list")
         var flat = List[Int](capacity=4)
         var lens = List[Int](capacity=4)
@@ -2931,9 +2969,66 @@ struct QasmParser(Movable):
         except err:
             raise self.relocate(String(err), t)
 
+    def note_truncation(mut self, t: Token):
+        self.truncations.append(t)
+
+    def warn_truncations(mut self):
+        """QM-W055 for each integer division that lost a remainder in a constant that
+        is used as an angle or a float. OPENQASM 2 has no such division."""
+        if self.openqasm3 and not self.shadow:
+            for i in range(len(self.truncations)):
+                var t = self.truncations[i]
+                if t.start not in self.warned:
+                    self.warned[t.start] = True
+                    self.warn("QM-W055", "this integer division drops a remainder, and the result is used as an angle or a float", t, "write it in floats, such as 3.0 / 4, to keep the fraction")
+        if not self.shadow:
+            self.truncations.clear()
+
+    def note_real_division(mut self, begin: Int, t: Token):
+        """A literal-only gate argument keeps real arithmetic. QM-W055 when OpenQASM 3
+        would read it otherwise: `rz(3/4*pi)` is 3 pi / 4 here, 0 there."""
+        if not self.saw_division or not self.openqasm3:
+            return
+        self.saw_division = False
+        var stop = self.pos
+        self.pos = begin
+        self.shadow = True
+        try:
+            _ = self.parse_cexpr()
+        except:
+            self.truncations.clear()
+        self.shadow = False
+        self.pos = stop
+        if len(self.truncations) > 0 and t.start not in self.warned:
+            self.warned[t.start] = True
+            self.warn("QM-W055", "this argument keeps real division here, and the OpenQASM 3 specification and Qiskit truncate it as integer division", t, "write it in floats, such as 3.0 / 4, so that every tool reads the same value")
+        self.truncations.clear()
+
+    def check_finite_constant(self, v: Float64, t: Token) raises:
+        """A Circuit has nowhere to report NaN later: it would run on as a NaN state.
+        A program checks its angles when it runs (QM-E482)."""
+        if not self.program_mode and (isnan(v) or isinf(v)):
+            raise self.err("QM-E533", "this constant is not a finite number", t, "check the expression: the square root of a negative, the logarithm of 0, or an overflow")
+
     def parse_cexpr(mut self) raises -> CExpr:
         """An expression evaluated at run time, in OpenQASM precedence; typing and
         casts come from qumo.ir.classical. `parse_expr` remains the constant path."""
+        if self.cexpr_open:
+            return self.parse_c_or()
+        self.truncations.clear()
+        self.cexpr_open = True
+        var e: CExpr
+        try:
+            e = self.parse_c_or()
+        except err:
+            self.cexpr_open = False
+            raise err^
+        self.cexpr_open = False
+        if e.ty().tag == CT.FLOAT:
+            self.warn_truncations()
+        return e^
+
+    def parse_c_or(mut self) raises -> CExpr:
         var a = self.parse_c_and()
         while self.is_punct(self.peek(), P.OROR):
             var t = self.next()
@@ -3040,7 +3135,10 @@ struct QasmParser(Movable):
             if op < 0:
                 return a^
             _ = self.next()
-            a = self.rel(op, a, self.parse_c_unary(), t)
+            var b = self.parse_c_unary()
+            if op == CN.DIV and truncates(a, b):
+                self.note_truncation(t)
+            a = self.rel(op, a, b, t)
 
     def parse_c_unary(mut self) raises -> CExpr:
         var t = self.peek()
@@ -3076,7 +3174,7 @@ struct QasmParser(Movable):
                 continue
             var nv = v * 10 + UInt64(d - 0x30)
             if nv / 10 != v:
-                raise self.err("QM-E580", "integer literal does not fit 64 bits", t, "use a smaller value")
+                return CExpr.literal_float(t.num)  # past 64 bits it goes on as a float
             v = nv
         if v >= UInt64(1) << 63:
             return CExpr.literal_uint(Int(v))
@@ -3151,10 +3249,10 @@ struct QasmParser(Movable):
                         return self.scopes[s].exprs[i].copy()
                     var q = self.scopes[s].values[i]
                     if q.is_symbolic():
-                        raise self.err("QM-E584", "gate parameter '" + nm + "' cannot be read as a classical value", t, "gate bodies take affine angles only")
-                    if q.offset == floor(q.offset) and abs(q.offset) < 9e15:
+                        return self.param_expr(q, t)
+                    if not self.scopes[s].closed and q.offset == floor(q.offset) and abs(q.offset) < 9e15:
                         return CExpr.literal_int(Int(q.offset))
-                    return CExpr.literal_float(q.offset)
+                    return CExpr.literal_float(q.offset)  # a gate parameter is an angle
             if self.scopes[s].closed:
                 break
             s -= 1
@@ -3170,7 +3268,7 @@ struct QasmParser(Movable):
         var cp = self.consts.get(nm)
         if cp:
             if cp.value().is_symbolic():
-                raise self.err("QM-E584", "'" + nm + "' depends on an input, and a value is needed here", t, "use the input directly")
+                return self.param_expr(cp.value(), t)
             return CExpr.literal_float(cp.value().offset)
         if nm in self.int_vars:
             raise self.err("QM-E504", "reading '" + nm + "' in an expression needs a value at run time", t, "parse with parse_qasm_program or load_any")
@@ -3182,6 +3280,13 @@ struct QasmParser(Movable):
             return self.parse_c_bits(t)
         _ = self.lookup_value(t)  # raises the undeclared-identifier error
         return CExpr.literal_int(0)
+
+    def param_expr(self, p: Param, t: Token) raises -> CExpr:
+        """coeff * input + offset, which `affine` reads back as the same `Param`."""
+        try:
+            return ce_binary(CN.ADD, ce_binary(CN.MUL, CExpr.input(p.index), CExpr.literal_float(p.coeff)), CExpr.literal_float(p.offset))
+        except e:
+            raise self.relocate(String(e), t)
 
     def parse_c_bits(mut self, t: Token) raises -> CExpr:
         var bits = self.parse_bit_operand()
@@ -3245,6 +3350,8 @@ struct QasmParser(Movable):
             raise self.err("QM-E504", "only bit registers take a measurement directly", self.peek(), "measure into a bit register, then assign")
         var e = self.parse_cexpr()
         _ = self.expect_punct(P.SEMI, "';'")
+        if ty.tag == CT.FLOAT or ty.tag == CT.ANGLE:
+            self.warn_truncations()
         var value = self.cast_at(e, ty, eq)
         if value.is_const() and not is_output and (is_const or nm not in self.reassigned):
             if len(self.scope_marks) > 0:
@@ -3273,6 +3380,8 @@ struct QasmParser(Movable):
         var store = self.prog.vars[v].store
         var e = self.parse_cexpr()
         _ = self.expect_punct(P.SEMI, "';'")
+        if ty.tag == CT.FLOAT or ty.tag == CT.ANGLE:
+            self.warn_truncations()
         if self.is_punct(op, P.OPASSIGN):
             e = self.compound(op, CExpr.variable(store, ty), e)
         self.tb.assign(v, self.prog.add_expr(self.cast_at(e, ty, op)), self.ops_end(), t.line)
@@ -3460,6 +3569,7 @@ struct QasmParser(Movable):
         var steps = -1
         var stops = -1
         var set_off = -1
+        var unsigned_ = 0
         if self.is_punct(rt, P.LBRACK):
             _ = self.next()
             var a = self.parse_cexpr()
@@ -3473,6 +3583,9 @@ struct QasmParser(Movable):
                 b = self.parse_cexpr()
                 has_step = True
             _ = self.expect_punct(P.RBRACK, "']' to close the range")
+            a = _integral_bound(a)  # 0.0 unrolls as 0, so it counts here too
+            b = _integral_bound(b)
+            step = _integral_bound(step)
             if step.ty().tag == CT.FLOAT:
                 raise self.err("QM-E570", "range step must be an integer, got " + type_name(step.ty()), rt, "write [0:2:10]")
             if a.ty().tag == CT.FLOAT or b.ty().tag == CT.FLOAT:
@@ -3480,6 +3593,7 @@ struct QasmParser(Movable):
             _ = has_step
             if step.is_const() and step.const_int() == 0:
                 raise self.err("QM-E570", "range step must be non-zero", rt, "write [0:2:10]")
+            unsigned_ = 1 if never_negative(a) and never_negative(b) else 0
             starts = self.prog.add_expr(self.cast_at(a, i64, rt))
             steps = self.prog.add_expr(self.cast_at(step, i64, rt))
             stops = self.prog.add_expr(self.cast_at(b, i64, rt))
@@ -3501,6 +3615,7 @@ struct QasmParser(Movable):
         self.prog.for_ranges.append(self.prog.num_store)
         self.prog.num_store += 3
         self.prog.for_ranges.append(set_off)
+        self.prog.for_ranges.append(unsigned_)
         self.push_scope()
         var v = self.declare_var(self.text(vt), ty, False)
         self.tb.begin(SK.FOR, v, off, self.ops_end(), vt.line)
@@ -3573,7 +3688,7 @@ struct QasmParser(Movable):
         2^63), which the float path of parse_const_int cannot promise."""
         var t = self.peek()
         var e = self.parse_cexpr()
-        if not e.is_const() or e.ty().tag == CT.FLOAT:
+        if not e.is_const() or e.ty().tag == CT.FLOAT or e.ty().tag == CT.ANGLE:
             raise self.err("QM-E584", what + " must be a constant integer", t, "use an integer literal or a const")
         return e.const_int()
 
@@ -3582,7 +3697,7 @@ struct QasmParser(Movable):
         match by accident of its bits (-1 is not 2^64 - 1), so it is refused."""
         var t = self.peek()
         var e = self.parse_cexpr()
-        if not e.is_const() or e.ty().tag == CT.FLOAT:
+        if not e.is_const() or e.ty().tag == CT.FLOAT or e.ty().tag == CT.ANGLE:
             raise self.err("QM-E584", "case value must be a constant integer", t, "use an integer literal or a const")
         var v = e.const_int()
         if (unsigned_target and e.ty().is_signed() and v < 0) or (not unsigned_target and e.ty().tag == CT.UINT and v < 0):
@@ -3693,6 +3808,7 @@ struct QasmParser(Movable):
         the classical table's, in both parsers; a literal-only expression keeps the
         constant path's (`rz(1/2)` is 0.5, as it always was here)."""
         var open = 0
+        var square = 0  # inside `int[8](x)` or `c[0]`, a `]` ends nothing
         var i = self.pos
         while i < len(self.toks):
             ref t = self.toks[i]
@@ -3705,11 +3821,17 @@ struct QasmParser(Movable):
                     if open == 0:
                         return False
                     open -= 1
-                elif open == 0 and (t.sub == P.COMMA or t.sub == P.RBRACK or t.sub == P.COLON or t.sub == P.SEMI or t.sub == P.LBRACE or t.sub == P.RBRACE):
+                elif t.sub == P.LBRACK:
+                    square += 1
+                elif t.sub == P.RBRACK and square > 0:
+                    square -= 1
+                elif open == 0 and square == 0 and (t.sub == P.COMMA or t.sub == P.RBRACK or t.sub == P.COLON or t.sub == P.SEMI or t.sub == P.LBRACE or t.sub == P.RBRACE or t.sub == P.ANDAND or t.sub == P.OROR):
                     return False
             elif t.kind == TK.IDENT:
                 var nm = self.text(t)
-                if self.program_mode:
+                if (nm == "int" or nm == "uint" or nm == "float" or nm == "angle" or nm == "bit") and self.is_punct(self.toks[i + 1], P.LBRACK):
+                    return True  # a sized cast: only the classical table reads it
+                if self.program_mode and self.depth == 0:
                     var k = self.find_name(nm)
                     if k >= 0:
                         if self.names[k].kind == NK.CONST:
@@ -3729,37 +3851,67 @@ struct QasmParser(Movable):
             i += 1
         return False
 
+    def parse_plain_arg(mut self) raises -> Param:
+        """The argument of a gate in a source with no typed constants at all, which
+        is most of them, by the shortest path."""
+        var begin = self.pos
+        var t = self.peek()
+        self.saw_division = False
+        var plain: Param
+        try:
+            plain = self.parse_expr()
+        except e:
+            self.pos = begin
+            if self.reads_typed():  # a sized cast
+                return self.parse_gate_arg()
+            raise e^
+        if not plain.is_symbolic():
+            self.check_finite_constant(plain.offset, t)
+        if self.saw_division:
+            self.note_real_division(begin, t)
+        return plain
+
     def parse_gate_arg(mut self) raises -> Param:
         """A gate angle. Without typed constants, whatever the constant path takes
         keeps its exact value. Otherwise the classical parser decides: an affine
         expression becomes a `Param`, and in a program anything else goes to a
-        temporary assigned just before the gate."""
-        if self.depth > 0:
-            return self.parse_expr()
+        temporary assigned just before the gate. A gate body has no such place, so
+        what is not affine there stays with the constant path."""
+        var begin = self.pos
+        var t = self.peek()
+        self.saw_division = False
+        var in_body = self.depth > 0
         if not self.reads_typed():
-            if not self.program_mode:
-                return self.parse_expr()
+            if not self.program_mode or in_body:
+                var plain = self.parse_expr()
+                if not plain.is_symbolic():
+                    self.check_finite_constant(plain.offset, t)
+                self.note_real_division(begin, t)
+                return plain
             var save = self.pos
             try:
                 var value = self.parse_expr()
                 if self.is_punct(self.peek(), P.COMMA) or self.is_punct(self.peek(), P.RPAREN):
+                    self.note_real_division(begin, t)
                     return value
             except:
                 pass
             self.pos = save  # not a constant expression: the classical parser reports errors
-        var t = self.peek()
         var e = self.parse_cexpr()
+        self.warn_truncations()
         if e.is_const():
-            return Param(_const_radians(e))
+            var radians = _const_radians(e)
+            self.check_finite_constant(radians, t)
+            return Param(radians)
         var ty = e.ty()
-        if ty.tag == CT.ANGLE and self.program_mode:
+        if ty.tag == CT.ANGLE and self.program_mode and not in_body:
             var root = e.root()
             if root.op == CN.VAR:
                 return Param.symbol(self.slot_for(self.var_of_store(root.x)))
             var a = self.temp_var(ty)
             self.tb.assign(a, self.prog.add_expr(e), self.ops_end(), t.line)
             return Param.symbol(self.slot_for(a))
-        if ty.tag != CT.FLOAT:
+        if ty.tag != CT.FLOAT and ty.tag != CT.ANGLE:
             if ty.tag == CT.BIT or ty.tag == CT.BOOL:
                 e = self.cast_at(e, uint_type(ty.width), t)
             e = self.cast_at(e, float_type(), t)
@@ -3767,14 +3919,15 @@ struct QasmParser(Movable):
         var index = -1
         var coeff = 0.0
         var offset = 0.0
-        if self.affine(e, len(e.nodes) - 1, kind, index, coeff, offset):
+        if ty.tag != CT.ANGLE and self.affine(e, len(e.nodes) - 1, kind, index, coeff, offset):
             if kind == 0:
                 return Param(offset)
             if kind == 2:
                 return Param(offset, index, coeff)
             return Param(offset, self.slot_for(self.var_of_store(index)), coeff)
-        if not self.program_mode:
-            raise self.err("QM-E504", "this angle needs a value at run time", t, "parse with parse_qasm_program or load_any")
+        if not self.program_mode or in_body:
+            self.pos = begin  # products and the like: the constant path says what is wrong
+            return self.parse_expr()
         var tmp = self.temp_var(float_type())
         self.tb.assign(tmp, self.prog.add_expr(e), self.ops_end(), t.line)
         return Param.symbol(self.slot_for(tmp))
@@ -3814,6 +3967,13 @@ def _const_radians(e: CExpr) -> Float64:
     if e.ty().tag == CT.ANGLE:
         return angle_radians(e.const_int(), e.ty().width)
     return e.const_float()
+
+
+def _integral_bound(e: CExpr) -> CExpr:
+    """A constant float range value with no fraction, as an integer."""
+    if e.is_const() and e.ty().tag == CT.FLOAT and e.root().f == floor(e.root().f) and abs(e.root().f) < 9007199254740992.0:
+        return CExpr.literal_int(Int(e.root().f))
+    return e.copy()
 
 
 def _value_fits(v: Int, ty: CType) -> Bool:
@@ -4552,10 +4712,19 @@ def _for_head(p: Program, s: Stmt, name: String, names: _PNames) raises -> Strin
             head += (", " if j > 0 else "") + String(p.case_vals[set_off + 1 + j])
         return head + "}"
     var i64 = int_type(64)
-    var a = _value_text(p, p.for_ranges[s.b + FORR.START], i64, names)
+    var a = _bound_text(p, s.b, FORR.START, names)
     var st = _value_text(p, p.for_ranges[s.b + FORR.STEP], i64, names)
-    var b = _value_text(p, p.for_ranges[s.b + FORR.STOP], i64, names)
+    var b = _bound_text(p, s.b, FORR.STOP, names)
     return head + "[" + a + ":" + ("" if st == "1" else st + ":") + b + "]"
+
+
+def _bound_text(p: Program, off: Int, field: Int, names: _PNames) raises -> String:
+    """A range bound. On an unsigned range a constant past 2^63 is held by its bits."""
+    var e = p.for_ranges[off + field]
+    ref root = p.nodes[p.expr_root[e]]
+    if p.for_ranges[off + FORR.UNSIGNED] != 0 and root.op == CN.CONST:
+        return String(UInt64(root.i))
+    return _value_text(p, e, int_type(64), names)
 
 
 def draw_program(p: Program, width: Int = 80, style: String = "ascii") raises -> String:

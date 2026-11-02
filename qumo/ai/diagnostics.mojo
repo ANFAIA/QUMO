@@ -268,7 +268,7 @@ def error_ranges() -> List[ErrorRange]:
        "Raised by the Python package `qumo_hardware`, not by the Mojo core. This block mirrors `CATALOG` in plugins/hardware/qumo_hardware/errors.py (tests/test_mcp.mojo checks that every code used there is listed here). See [HARDWARE_PLUGINS.md](HARDWARE_PLUGINS.md#error-codes); `python -m qumo_hardware errors --json` prints the plugin's own catalogue. Messages never contain credentials.")
     _r(r, "QM-E96x", "benchmark", "Benchmark harness", "Benchmark harness (bench/run_benchmarks.py, Python)", 960, 969,
        "Raised by the Python benchmark harness, not by the Mojo core. Reported in the result JSON (`suites.<name>.reason`) and on stderr; a suite failure never aborts the run. See [BENCHMARKING_ON_CLOUD_GPUS.md](BENCHMARKING_ON_CLOUD_GPUS.md).")
-    _r(r, "QM-W0xx", "warning", "Warnings", "Warnings: lint findings QM-W001..W019 (qumo.ai.diagnostics.lint), execution notes QM-W020..W049, OpenQASM parser warnings QM-W050..W053, Program lint QM-W054", 0, 99)
+    _r(r, "QM-W0xx", "warning", "Warnings", "Warnings: lint findings QM-W001..W019 (qumo.ai.diagnostics.lint), execution notes QM-W020..W049, OpenQASM parser warnings QM-W050..W053 and QM-W055, Program lint QM-W054", 0, 99)
     return r^
 
 
@@ -495,7 +495,7 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E968", "benchmark", "A benchmark binary (e.g. a GPU runtime error) or a baseline worker crashed or produced no result.", "Rerun the recorded command; for GPU errors add `MODULAR_DEBUG=device-sync-mode`.")
     _e(c, "QM-E969", "benchmark", "A test, `gpu-check` target or correctness check reported FAIL.", "Rerun the failing file: `.venv/bin/mojo run -I . <file>`.")
     _e(c, "QM-E999", "internal", "Uncategorized internal error (no QUMO code in the message).", "Report it with the input that triggered it.")
-    # warnings: lint (W001-W019), execution notes (W020-W049), OpenQASM parser (W050-W053), Program lint (W054)
+    # warnings: lint (W001-W019), execution notes (W020-W049), OpenQASM parser (W050-W053, W055), Program lint (W054)
     _e(c, "QM-W001", "lint", "Qubits are declared but never used.", "Shrink the register to save simulation memory (2x per qubit).")
     _e(c, "QM-W002", "lint", "A gate acts on a qubit after it was measured (no reset): the circuit becomes dynamic.", "Intended for mid-circuit measurement; otherwise move measurements to the end.")
     _e(c, "QM-W003", "lint", "A qubit is measured without any prior operation (always 0).", "Check the qubit index of the measurement.")
@@ -516,6 +516,7 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-W052", "qasm", "OpenQASM annotation is ignored.", "Annotations carry no meaning in QUMO; the annotated statement still runs.")
     _e(c, "QM-W053", "qasm", "OpenQASM box duration is ignored.", "QUMO circuits have no timing model; the box still keeps its gates together.")
     _e(c, "QM-W054", "qasm", "The body of a while loop cannot change its condition and has no break: the loop never runs, or runs until QM-E480.", "Assign a variable the condition reads, measure into a bit it reads, or add a break.")
+    _e(c, "QM-W055", "qasm", "An integer division loses a remainder in a constant used as an angle or a float (float t = 3 / 4 * pi is 0), or a literal-only gate argument keeps real division where OpenQASM 3 and Qiskit truncate (rz(3/4*pi) is 3 pi / 4 here, 0 there).", "Write it in floats, such as 3.0 / 4, so that every tool reads the same value.")
     return c^
 
 

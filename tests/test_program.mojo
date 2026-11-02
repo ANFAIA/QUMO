@@ -199,8 +199,8 @@ def test_functions_and_power() raises:
     assert_almost_equal(ce_function(CF.SQRT, _lit(2)).const_float(), sqrt(2.0))
     assert_equal(_ti(ce_function(CF.POPCOUNT, CExpr.typed_const(uint_type(8), 0x13))), 3)
     assert_equal(_ti(ce_function(CF.ABS, CExpr.typed_const(int_type(8), -3))), 3)
-    with assert_raises(contains="QM-E533"):
-        _ = ce_binary(CN.POW, _lit(2), _lit(-1))
+    # a negative exponent gives a float on constants with no width
+    assert_almost_equal(ce_binary(CN.POW, _lit(2), _lit(-1)).const_float(), 0.5)
     with assert_raises(contains="QM-E533"):
         _ = ce_binary(CN.POW, CExpr.typed_const(int_type(32), 2), _lit(-1))
 

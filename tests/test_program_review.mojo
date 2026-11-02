@@ -146,8 +146,8 @@ def test_a3_literal_division_truncates() raises:
     assert_true(_real("output float r; r = 7/2;") == 3.0)
     assert_equal(_int("output int r; r = (7 / 2) * 2;"), 6)
     assert_equal(_int("output int r; r = 1 / 2 + 1 / 2;"), 0)
-    # folding and the run agree on a negative exponent: both refuse
-    _is(_err("output float r; r = 2 ** -1;"), "QM-E533")
+    # constants are exact, so here folding and the run differ: rule R1 of the second review
+    assert_true(_real("output float r; r = 2 ** -1;") == 0.5)
     _is(_err("output int r; int a = 2; a = a; int b = -1; b = b; r = a ** b;"), "QM-E481")
 
 
@@ -391,13 +391,12 @@ def test_e3_flat_and_program_declarations_agree() raises:
         "const int a = 7; const float x = a / 2; rx(x) q[0];",
         "int x = 7 / 2; rx(x) q[0];",
         "float x = 7 / 2; rx(x) q[0];",
-        "const int x = 2 ** 64; rx(x) q[0];",
         "const int x = 1.9; rx(x) q[0];",
         "const int x = -1.9; rx(x) q[0];",
         "const bool x = 2; rx(x) q[0];",
         "float x = pi / 3; rx(x) q[0]; float y = x * 2; rx(y) q[0];",
     ]
-    var want: List[Float64] = [44.0, 255.0, 0.0981747704246810, -1.0, 3.0, 3.0, 3.0, 0.0, 1.0, -1.0, 1.0, pi / 3]
+    var want: List[Float64] = [44.0, 255.0, 0.0981747704246810, -1.0, 3.0, 3.0, 3.0, 1.0, -1.0, 1.0, pi / 3]
     for i in range(len(rows)):
         var src = H + rows[i]
         var a = parse_qasm(src).ops[0].p0.value()

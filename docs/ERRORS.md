@@ -49,7 +49,7 @@ Machine-readable catalog: `qumo describe errors --json`, or the MCP tool
 | `QM-E9xx` | interface | JSON, MCP tools, CLI and device selection (qumo.ai, qumo.exec.tools, cli); QM-E999 = uncategorized |
 | `QM-E95x` | hardware | Hardware plugins (Python package plugins/hardware: IBM Quantum via Qiskit Runtime, Quantinuum via pytket/qnexus) |
 | `QM-E96x` | benchmark | Benchmark harness (bench/run_benchmarks.py, Python) |
-| `QM-W0xx` | warning | Warnings: lint findings QM-W001..W019 (qumo.ai.diagnostics.lint), execution notes QM-W020..W049, OpenQASM parser warnings QM-W050..W053, Program lint QM-W054 |
+| `QM-W0xx` | warning | Warnings: lint findings QM-W001..W019 (qumo.ai.diagnostics.lint), execution notes QM-W020..W049, OpenQASM parser warnings QM-W050..W053 and QM-W055, Program lint QM-W054 |
 
 A code belongs to the narrowest range that contains it (QM-E472 is in QM-E47x, not QM-E4xx).
 
@@ -1153,3 +1153,8 @@ Fix: QUMO circuits have no timing model; the box still keeps its gates together.
 
 **The body of a while loop cannot change its condition and has no break: the loop never runs, or runs until QM-E480.**  
 Fix: Assign a variable the condition reads, measure into a bit it reads, or add a break.
+
+### QM-W055
+
+**An integer division loses a remainder in a constant used as an angle or a float (float t = 3 / 4 * pi is 0), or a literal-only gate argument keeps real division where OpenQASM 3 and Qiskit truncate (rz(3/4*pi) is 3 pi / 4 here, 0 there).**  
+Fix: Write it in floats, such as 3.0 / 4, so that every tool reads the same value.

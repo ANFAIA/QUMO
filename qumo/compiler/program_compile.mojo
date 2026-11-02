@@ -807,6 +807,8 @@ def _static_iterations(p: Program, s: Stmt) -> Int:
     var b = 0
     if not (_const_expr(p, p.for_ranges[off + FORR.START], a) and _const_expr(p, p.for_ranges[off + FORR.STEP], st) and _const_expr(p, p.for_ranges[off + FORR.STOP], b)) or st == 0:
         return -1
+    if p.for_ranges[off + FORR.UNSIGNED] != 0 and (a < 0 or b < 0):
+        return -1  # past 2^63: held by its bits, and past what this count needs
     return max(0, (b - a) // st + 1)
 
 

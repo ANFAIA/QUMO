@@ -27,7 +27,7 @@ from qumo.ir.circuit import Circuit, Instruction
 from qumo.ir.gates import Op, op_name, op_is_unitary, op_is_noise
 from qumo.ir.param import Param
 from qumo.ir.classical import (
-    CExpr, CNode, CN, CT, CType, bit_type, int_type, ce_bool, ce_cast,
+    CExpr, CNode, CN, CT, CType, bit_type, int_type, ce_bool, ce_cast, never_negative,
 )
 
 
@@ -81,7 +81,8 @@ struct FORR:
     comptime STOP = 2  # expression
     comptime STORE = 3  # 3 hidden ints: current value or set position, step, stop
     comptime SET = 4  # offset in case_vals of [count, values...], or -1
-    comptime SIZE = 5
+    comptime UNSIGNED = 5  # 1: the bounds cannot be negative, so they compare unsigned
+    comptime SIZE = 6
 
 
 struct Program(Copyable, Writable):
@@ -785,6 +786,7 @@ struct ProgramBuilder(Movable):
         self.p.for_ranges.append(self.p.num_store)
         self.p.num_store += 3
         self.p.for_ranges.append(-1)
+        self.p.for_ranges.append(1 if never_negative(start) and never_negative(stop) else 0)
         self.tb.begin(SK.FOR, var_id, off, self._end(), 0)
 
     def begin_switch(mut self, e: CExpr) raises:

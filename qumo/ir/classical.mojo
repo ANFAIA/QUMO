@@ -16,11 +16,16 @@ The rules the OpenQASM 3 specification leaves open, fixed here (and in
 docs/CONTROL_FLOW.md):
   * `/` and `%` truncate toward zero, literals included; `%` has the sign of the
     dividend; dividing by zero raises QM-E481 at run time, QM-E533 when the divisor
-    is constant. An expression folds to what it would compute at run time.
+    is constant. An expression folds to what it would compute at run time, with one
+    exception: an integer constant with no width (a literal, `const int`, an unrolled
+    `int` loop variable) is exact. It does not wrap at 64 bits: a result past them
+    goes on as a float, a negative exponent gives a float, and negating an unsized
+    `uint` gives the negative number. See `_exact_binary`.
   * Shifts apply to bit, uint and angle; shifting by the width or more gives 0.
   * `int` with `uint` is QM-E580, except for literals.
   * `bool` and `bit` promote to a 64-bit `int` in arithmetic, as in C99, so
-    `true + 1` is 2, or to the `uint` next to them.
+    `true + 1` is 2 and `uint[8]` 255 plus `true` is 256. Next to a 64-bit `uint`
+    they stay in it.
   * A literal takes the type of the other operand when it fits. A literal too wide
     for it is QM-E580 in arithmetic and bitwise operators; a comparison widens the
     operand, so it stays exact, and a shift count is free.
@@ -622,8 +627,13 @@ def can_cast(src: CType, dst: CType) -> Bool:
 
 
 def ce_cast(a: CExpr, ty: CType) raises -> CExpr:
-    """`a` as `ty`, by the cast table (QM-E580 when refused)."""
+    """`a` as `ty`, by the cast table (QM-E580 when refused). A sized target wraps; an
+    unsized value does not wrap into an unsized target (QM-E482 when out of range)."""
     var src = a.ty()
+    if _is_unsized(a) and ty.bare and (ty.tag == CT.INT or ty.tag == CT.UINT):
+        var v = _exact_of(a)
+        if (ty.tag == CT.INT and v >= (Int128(1) << 63)) or (ty.tag == CT.UINT and v < 0):
+            raise Error("QM-E482: the constant " + String(v) + " is out of range for " + type_name(ty) + ". Hint: use a type that holds it, or cast to a sized type to wrap.")
     if src == ty:
         if a.is_const():
             var e = a.copy()
@@ -678,6 +688,137 @@ def _width_for(v: Int, unsigned_: Bool, signed_target: Bool) -> Int:
     return w
 
 
+# ---------------------------------------------------------------------------
+# Exact integer constants
+# ---------------------------------------------------------------------------
+def _is_unsized(e: CExpr) -> Bool:
+    """An integer constant with no width. Its value is exact: it is not an int64."""
+    if not e.is_const() or not e.ty().bare:
+        return False
+    return e.ty().tag == CT.INT or e.ty().tag == CT.UINT
+
+
+def _exact_operand(e: CExpr) -> Bool:
+    return _is_unsized(e) or (e.is_const() and _is_bitlike(e.ty()))
+
+
+def _exact_of(e: CExpr) -> Int128:
+    var n = e.root()
+    return Int128(n.i) if n.ty.is_signed() else Int128(UInt64(n.i))
+
+
+def _real_const(v: Float64, literal: Bool) -> CExpr:
+    return CExpr._leaf(CN.CONST, float_type(), 0, 1 if literal else 0, 0, v)
+
+
+def _exact_const(v: Int128, unsigned_: Bool, literal: Bool) -> CExpr:
+    """`v` as a constant. Past the 64 bits of int and uint it goes on as a float."""
+    if v < -(Int128(1) << 63) or v >= (Int128(1) << 64):
+        return _real_const(Float64(v), literal)
+    var y = 1 if literal else 0
+    if v >= (Int128(1) << 63):
+        return CExpr._leaf(CN.CONST, uint_type(64, True), 0, y, Int(UInt64(v)))
+    return CExpr._leaf(CN.CONST, uint_type(64, True) if unsigned_ and v >= 0 else int_type(64, True), 0, y, Int(v))
+
+
+comptime _EXACT_LIMIT = 1.0e30  # below it a product of two 65-bit values fits Int128
+
+
+def _exact_pow(x: Int128, e: Int128, unsigned_: Bool, literal: Bool) -> CExpr:
+    if e < 0:
+        return _real_const(Float64(x) ** Float64(e), literal)
+    if x == 0 or x == 1 or e == 0:
+        return _exact_const(Int128(1) if e == 0 else x, unsigned_, literal)
+    if x == -1:
+        return _exact_const(Int128(1) if e % 2 == 0 else Int128(-1), unsigned_, literal)
+    var r = Int128(1)
+    var left = e
+    while left > 0:
+        if abs(Float64(r) * Float64(x)) >= _EXACT_LIMIT:
+            return _real_const(Float64(x) ** Float64(e), literal)
+        r *= x
+        left -= 1
+    return _exact_const(r, unsigned_, literal)
+
+
+def _exact_shift(op: Int, x: Int128, n: Int128, literal: Bool) -> CExpr:
+    if op == CN.SHR:
+        return _exact_const(Int128(0) if n >= 64 else x >> n, True, literal)
+    if n < 126 and x < (Int128(1) << (126 - n)):
+        return _exact_const(x << n, True, literal)
+    return _real_const(Float64(x) * Float64(2.0) ** Float64(n), literal)
+
+
+def _exact_binary(op: Int, a: CExpr, b: CExpr) raises -> CExpr:
+    """`a op b` on integer constants with no width, in exact arithmetic. This is the
+    one place where folding differs from run time, which would wrap or refuse."""
+    var x = _exact_of(a)
+    var y = _exact_of(b)
+    var unsigned_ = a.ty().tag == CT.UINT or b.ty().tag == CT.UINT
+    var literal = a.is_literal() and b.is_literal()
+    if op == CN.ADD:
+        return _exact_const(x + y, unsigned_, literal)
+    if op == CN.SUB:
+        return _exact_const(x - y, unsigned_, literal)
+    if op == CN.MUL:
+        var f = Float64(x) * Float64(y)
+        if abs(f) >= _EXACT_LIMIT:
+            return _real_const(f, literal)
+        return _exact_const(x * y, unsigned_, literal)
+    if op == CN.DIV or op == CN.MOD:
+        if y == 0:
+            raise Error("QM-E533: division by a constant zero. Hint: check the divisor.")
+        var q = x / y  # truncates, as the table says
+        return _exact_const(q if op == CN.DIV else x - q * y, unsigned_, literal)
+    if op == CN.POW:
+        return _exact_pow(x, y, unsigned_, literal)
+    if op == CN.SHL or op == CN.SHR:
+        return _exact_shift(op, x, y, literal)
+    if op == CN.AND or op == CN.OR or op == CN.XOR:
+        var ux = UInt64(x)
+        var uy = UInt64(y)
+        var bits = ux & uy if op == CN.AND else (ux | uy if op == CN.OR else ux ^ uy)
+        if x < 0 or y < 0:
+            return _exact_const(Int128(Int(bits)), False, literal)
+        return _exact_const(Int128(bits), unsigned_, literal)
+    var r: Bool
+    if op == CN.EQ: r = x == y
+    elif op == CN.NE: r = x != y
+    elif op == CN.LT: r = x < y
+    elif op == CN.LE: r = x <= y
+    elif op == CN.GT: r = x > y
+    else: r = x >= y
+    return CExpr._leaf(CN.CONST, bool_type(), 0, 1 if literal else 0, 1 if r else 0)
+
+
+def _exact_pair(op: Int, a: CExpr, b: CExpr) -> Bool:
+    if not _exact_operand(a) or not _exact_operand(b) or not (_is_unsized(a) or _is_unsized(b)):
+        return False
+    if op == CN.SHL or op == CN.SHR:
+        # a shift keeps the width of what it shifts, and `int` does not shift
+        return _is_unsized(a) and (a.ty().tag == CT.UINT or a.is_literal()) and _exact_of(a) >= 0 and _exact_of(b) >= 0
+    return True
+
+
+def never_negative(e: CExpr) -> Bool:
+    """A range bound that cannot be negative, so that it may pass 2^63."""
+    var t = e.ty()
+    if e.is_const() and t.is_signed():
+        return e.const_int() >= 0
+    return t.tag == CT.UINT or t.tag == CT.BIT or t.tag == CT.BOOL
+
+
+def truncates(a: CExpr, b: CExpr) -> Bool:
+    """Does `a / b` lose a remainder, on integer constants with no width?"""
+    if not _exact_pair(CN.DIV, a, b):
+        return False
+    var y = _exact_of(b)
+    if y == 0:
+        return False
+    var x = _exact_of(a)
+    return x - (x / y) * y != 0
+
+
 comptime _ARITH = 0
 comptime _BITWISE = 1
 comptime _COMPARE = 2
@@ -702,6 +843,13 @@ def _common(a: CExpr, b: CExpr, mut ca: CExpr, mut cb: CExpr, mode: Int) raises 
     var tb = _promoted(ob, mode)
     var la = a.is_literal()
     var lb = b.is_literal()
+    if mode == _ARITH and (_is_bitlike(oa) != _is_bitlike(ob)):
+        # a 64-bit int holds any sum with a narrow operand; only a 64-bit uint does not
+        var other = tb if _is_bitlike(oa) else ta
+        if other.tag == CT.INT or (other.tag == CT.UINT and other.width < 64):
+            ca = _to_common(a, int_type(64))
+            cb = _to_common(b, int_type(64))
+            return int_type(64)
     # bit and bool hold plain non-negative values, which either kind of integer takes
     if _is_bitlike(oa) and not lb and (tb.tag == CT.UINT or (tb.tag == CT.INT and mode != _ARITH)):
         ta = uint_type(max(tb.width, oa.width)) if tb.tag == CT.UINT else int_type(min(max(tb.width, oa.width + 1), 64))
@@ -762,6 +910,8 @@ def _to_common(a: CExpr, ty: CType) raises -> CExpr:
 
 def ce_binary(op: Int, a: CExpr, b: CExpr) raises -> CExpr:
     """Typed arithmetic, bitwise, shift or comparison node."""
+    if _exact_pair(op, a, b):
+        return _exact_binary(op, a, b)
     var ta = a.ty()
     var tb = b.ty()
     var ca = CExpr()
@@ -865,13 +1015,13 @@ def _angle_scale(s: CExpr, angle: CType) raises -> CExpr:
 
 
 def ce_neg(a: CExpr) raises -> CExpr:
+    if _is_unsized(a):
+        return _exact_const(Int128(0) - _exact_of(a), False, a.is_literal())
     var t = _promoted(a.ty(), _ARITH)
     if a.is_literal():
         var n = a.root()
         if t.tag == CT.FLOAT:
             return CExpr.literal_float(-n.f)
-        if t.tag == CT.UINT and n.i != -9223372036854775807 - 1:
-            raise Error("QM-E580: the literal does not fit a 64-bit int once negated. Hint: use a smaller value.")
         return CExpr.literal_int(0 - n.i)
     return _unary(CN.NEG, t, _to_common(a, t))
 
@@ -915,6 +1065,9 @@ def ce_function(f: Int, a: CExpr, b: Optional[CExpr] = None) raises -> CExpr:
             raise Error("QM-E580: popcount takes bit or uint, not " + type_name(t) + ". Hint: cast the operand.")
         return _unary(CN.FN, uint_type(64), a, f)
     if f == CF.ABS and t.tag != CT.FLOAT:
+        if _is_unsized(a):
+            var v = _exact_of(a)
+            return _exact_const(Int128(0) - v if v < 0 else v, t.tag == CT.UINT, a.is_literal())
         if t.tag == CT.INT:
             return _unary(CN.FN, t, a, f)
         return a.copy()

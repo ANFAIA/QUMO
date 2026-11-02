@@ -427,7 +427,13 @@ def _for_test[B: ShotBackend](p: Program, at: Int, mut st: CStore, mut b: B) rai
     else:
         var step = st.ints[store + 1]
         var stop = st.ints[store + 2]
-        if step == 0 or (step > 0 and cur > stop) or (step < 0 and cur < stop):
+        var unsigned_ = p.for_ranges[off + FORR.UNSIGNED] != 0
+        var past: Bool
+        if unsigned_:
+            past = UInt64(cur) > UInt64(stop) if step > 0 else UInt64(cur) < UInt64(stop)
+        else:
+            past = cur > stop if step > 0 else cur < stop
+        if step == 0 or past:
             return False
         value = cur
     var ty = p.vars[s.a].ty
