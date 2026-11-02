@@ -84,7 +84,12 @@ struct FORR:
     comptime STOP = 2  # expression
     comptime STORE = 3  # 3 hidden ints: current value or set position, step, stop
     comptime SET = 4  # offset in case_vals of [count, values...], or -1
-    comptime UNSIGNED = 5  # 1: the bounds cannot be negative, so they compare unsigned
+    comptime UNSIGNED = 5  # flags, below
+    comptime BOUNDS_UNSIGNED = 1  # the bounds cannot be negative, so they compare unsigned
+    comptime STEP_UINT = 2  # a uint step, which a run refuses at or above 2^63
+    comptime START_UINT = 4  # a uint start next to a signed stop: the same
+    comptime STOP_UINT = 8  # a uint stop next to a signed start: the same
+    comptime ALL_FLAGS = 15
     comptime SIZE = 6
 
 

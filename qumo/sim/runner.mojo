@@ -17,7 +17,7 @@ from qumo.ir.gates import (
     Op, M2, M4, matrix_1q, matrix_2q, op_arity, op_is_unitary, op_is_noise,
     op_is_controlled_1q, op_base_1q,
 )
-from qumo.ir.circuit import Circuit, Instruction
+from qumo.ir.circuit import Circuit, Instruction, check_finite_values, check_shots
 from qumo.ir.kraus import KrausChannel
 from qumo.ir.pauli import PauliSum
 from qumo.sim.statevector import (
@@ -915,6 +915,7 @@ def evolve(circuit: Circuit, params: List[Float64] = List[Float64]()) raises -> 
     check_statevector_size(circuit.num_qubits)
     if len(params) != circuit.num_params():
         raise Error("QM-E101: circuit has " + String(circuit.num_params()) + " parameters " + circuit.param_names_str() + " but " + String(len(params)) + " values were given.")
+    check_finite_values(params)
     var sv = StateVector(circuit.num_qubits)
     evolve_into(sv, circuit, params)
     return sv^
@@ -1115,6 +1116,8 @@ def run_trajectory_ops(circuit: Circuit, lo: Int, hi: Int, params: List[Float64]
 def sample(circuit: Circuit, shots: Int, seed: UInt64 = 1234,
            params: List[Float64] = List[Float64]()) raises -> SampleResult:
     """Sample measurement outcomes. Picks static sampling or trajectories."""
+    check_shots(shots)
+    check_finite_values(params)
     circuit.validate()
     check_statevector_size(circuit.num_qubits)
     if len(params) != circuit.num_params():

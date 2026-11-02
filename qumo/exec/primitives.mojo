@@ -19,7 +19,7 @@ from std.time import perf_counter_ns
 from std.runtime import parallelism_level
 from max.algorithm import parallelize
 
-from qumo.ir.circuit import Circuit
+from qumo.ir.circuit import Circuit, check_finite_values
 from qumo.ir.gates import Op
 from qumo.ir.pauli import PauliSum, PauliTerm
 from qumo.sim.statevector import StateVector
@@ -90,6 +90,7 @@ struct EstimatorResult(Copyable, Writable):
 
 
 def _check_params(c: Circuit, params: List[Float64]) raises:
+    check_finite_values(params)
     if len(params) != c.num_params():
         raise Error("QM-E101: PUB parameter set has " + String(len(params)) + " values but circuit has " + String(c.num_params()) + " parameters " + c.param_names_str() + ".")
 

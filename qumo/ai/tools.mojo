@@ -28,7 +28,7 @@ appears automatically in MCP `tools/list`, `qumo tool <name> '<json>'`,
 from std.time import perf_counter_ns
 from std.math import sqrt
 
-from qumo.ir.circuit import Circuit
+from qumo.ir.circuit import Circuit, check_finite_values
 from qumo.ir.gates import Op
 from qumo.ir.pauli import PauliSum, parse_pauli_sum
 from qumo.ir.program import Program, SK
@@ -233,6 +233,12 @@ def _names_text(names: List[String]) -> String:
 
 def _values_of(args: JsonValue, names: List[String], owner: String) raises -> List[Float64]:
     """`params`: array (declaration order) or object name -> value."""
+    var out = _named_values(args, names, owner)
+    check_finite_values(out)
+    return out^
+
+
+def _named_values(args: JsonValue, names: List[String], owner: String) raises -> List[Float64]:
     var out = List[Float64]()
     var p = args.get("params")
     var n = len(names)
@@ -338,6 +344,24 @@ def write_program_outputs(mut w: JsonWriter, r: ProgramResult) raises:
             w.begin_array()
             for s in range(min(shots, 16)):
                 w.number(vals[s])
+            w.end_array()
+        elif r.out_is_unsigned[j]:
+            var vals = r.uint_output(r.out_names[j])
+            var lo = vals[0] if shots > 0 else UInt64(0)
+            var hi = lo
+            for v in vals:
+                total += Float64(v)
+                lo = min(lo, v)
+                hi = max(hi, v)
+            w.kv_float("mean", total / Float64(max(shots, 1)))
+            w.key("min")
+            w.unsigned(lo)
+            w.key("max")
+            w.unsigned(hi)
+            w.key("first_shots")
+            w.begin_array()
+            for s in range(min(shots, 16)):
+                w.unsigned(vals[s])
             w.end_array()
         else:
             var vals = r.int_output(r.out_names[j])

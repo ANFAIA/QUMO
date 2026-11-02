@@ -13,7 +13,7 @@ Design (best-of synthesis):
   * Explicit `global_phase` so compiler rewrites stay exactly unitary-equivalent.
 """
 
-from std.math import pi
+from std.math import isinf, isnan, pi
 from qumo.ir.gates import (
     Op,
     op_name,
@@ -36,6 +36,18 @@ from qumo.ir.kraus import KrausChannel
 # comes out whole no longer says the angle is near a multiple of pi/2: at 2^51, with
 # one fractional bit left, some such angles are 0.57 rad away from every one.
 comptime QUARTER_TURN_LIMIT = 4194304.0  # 2^22
+
+
+def check_finite_values(values: List[Float64]) raises:
+    """Input values on entry: a NaN would otherwise run on as a NaN state."""
+    for i in range(len(values)):
+        if isnan(values[i]) or isinf(values[i]):
+            raise Error("QM-E482: input value " + String(i) + " is " + String(values[i]) + ". Hint: pass a finite number.")
+
+
+def check_shots(shots: Int) raises:
+    if shots < 0:
+        raise Error("QM-E913: argument 'shots' = " + String(shots) + " is out of range. Hint: ask for at least one shot.")
 
 
 @fieldwise_init
@@ -539,6 +551,7 @@ struct Circuit(Copyable, Writable, Sized):
         """Replace every symbolic parameter by its numeric value."""
         if len(values) != len(self.param_names):
             raise Error("QM-E101: bind() got " + String(len(values)) + " values, circuit has " + String(len(self.param_names)) + " parameters " + self.param_names_str() + ".")
+        check_finite_values(values)
         var out = self.copy()
         out.param_names = List[String]()
         for ref g in out.ops:

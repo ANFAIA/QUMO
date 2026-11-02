@@ -33,7 +33,7 @@ from std.runtime import parallelism_level
 
 from max.algorithm import parallelize
 
-from qumo.ir.circuit import Circuit, Instruction
+from qumo.ir.circuit import Circuit, Instruction, check_finite_values, check_shots
 from qumo.ir.classical import BitReader, CT, CEval, CStore, angle_radians, eval_nodes, wrap_int
 from qumo.ir.gates import Op, op_is_noise, op_is_pauli_noise, op_is_unitary
 from qumo.ir.program import Cfg, FORR, Program, SK, TERM, check_program, slot_prefix
@@ -56,6 +56,7 @@ struct ProgramResult(Copyable, Writable):
     var sample: SampleResult
     var out_names: List[String]  # declared outputs other than bit registers
     var out_is_real: List[Bool]
+    var out_is_unsigned: List[Bool]  # uint and angle: `out_int` holds their 64 bits
     var out_int: List[Int]  # shots x outputs: value of output j in shot s at [s * n + j]
     var out_real: List[Float64]  # same shape; holds the float outputs
     var iterations: List[Int]  # back-edges per shot
@@ -65,6 +66,7 @@ struct ProgramResult(Copyable, Writable):
         self.sample = sample^
         self.out_names = List[String]()
         self.out_is_real = List[Bool]()
+        self.out_is_unsigned = List[Bool]()
         self.out_int = List[Int]()
         self.out_real = List[Float64]()
         self.iterations = List[Int]()
@@ -77,12 +79,24 @@ struct ProgramResult(Copyable, Writable):
         raise Error("QM-E913: no output named '" + name + "'. Hint: declare it 'output int " + name + ";' or read one of the declared outputs.")
 
     def int_output(self, name: String) raises -> List[Int]:
-        """Value of an integer, bool or angle output per shot (angle: its bits)."""
+        """Value of an integer, bool or angle output per shot (angle: its bits). A uint
+        at or above 2^63 comes back as its 64 bits, negative: `uint_output` reads it."""
         var j = self._output(name)
         var n = len(self.out_names)
         var out = List[Int](capacity=len(self.iterations))
         for s in range(len(self.iterations)):
             out.append(self.out_int[s * n + j])
+        return out^
+
+    def uint_output(self, name: String) raises -> List[UInt64]:
+        """Value of a uint or angle output per shot; QM-E913 for a signed one."""
+        var j = self._output(name)
+        if not self.out_is_unsigned[j]:
+            raise Error("QM-E913: output '" + name + "' is not unsigned. Hint: read it with int_output or real_output.")
+        var n = len(self.out_names)
+        var out = List[UInt64](capacity=len(self.iterations))
+        for s in range(len(self.iterations)):
+            out.append(UInt64(self.out_int[s * n + j]))
         return out^
 
     def real_output(self, name: String) raises -> List[Float64]:
@@ -407,9 +421,15 @@ def _for_init[B: ShotBackend](p: Program, at: Int, mut st: CStore, b: B, shot: I
     var r2 = _eval(p, p.for_ranges[off + FORR.STOP], st, b, shot, s.line)
     if step == 0:
         raise Error("QM-E570: for-loop step is 0 in shot " + String(shot) + " (line " + String(s.line) + "). Hint: use a non-zero step.")
+    var stop = st.ti[r2]
+    var flags = p.for_ranges[off + FORR.UNSIGNED]
+    if flags > FORR.BOUNDS_UNSIGNED:  # a uint in a 64-bit signed slot: see FORR
+        var signed_ = (flags & FORR.BOUNDS_UNSIGNED) == 0
+        if ((flags & FORR.STEP_UINT) != 0 and step < 0) or (signed_ and (((flags & FORR.START_UINT) != 0 and cur < 0) or ((flags & FORR.STOP_UINT) != 0 and stop < 0))):
+            raise Error("QM-E482: a for-loop range holds a uint at or above 2^63, which it cannot read, in shot " + String(shot) + " (line " + String(s.line) + "). Hint: keep the step below 2^63, and both bounds uint if one is above it.")
     st.ints[store] = cur
     st.ints[store + 1] = step
-    st.ints[store + 2] = st.ti[r2]
+    st.ints[store + 2] = stop
 
 
 def _for_test[B: ShotBackend](p: Program, at: Int, mut st: CStore, mut b: B) raises -> Bool:
@@ -427,7 +447,7 @@ def _for_test[B: ShotBackend](p: Program, at: Int, mut st: CStore, mut b: B) rai
     else:
         var step = st.ints[store + 1]
         var stop = st.ints[store + 2]
-        var unsigned_ = p.for_ranges[off + FORR.UNSIGNED] != 0
+        var unsigned_ = (p.for_ranges[off + FORR.UNSIGNED] & FORR.BOUNDS_UNSIGNED) != 0
         var past: Bool
         if unsigned_:
             past = UInt64(cur) > UInt64(stop) if step > 0 else UInt64(cur) < UInt64(stop)
@@ -436,6 +456,8 @@ def _for_test[B: ShotBackend](p: Program, at: Int, mut st: CStore, mut b: B) rai
         if step == 0 or past:
             return False
         value = cur
+        if unsigned_ and value < 0 and p.vars[s.a].ty.tag == CT.INT and p.vars[s.a].ty.width >= 64:
+            raise Error("QM-E482: an int loop variable reached 2^63 (line " + String(s.line) + "). Hint: count in a uint.")
     var ty = p.vars[s.a].ty
     # the loop variable goes through a node slot, like any assignment
     var tmp = len(st.ti) - 1
@@ -525,6 +547,7 @@ def run_shot[B: ShotBackend](p: Program, cfg: Cfg, mut b: B, mut st: CStore, sho
 
 def shot_params(p: Program, params: List[Float64]) raises -> List[Float64]:
     """The full parameter vector of a shot: `input` values, slots at 0."""
+    check_finite_values(params)
     if len(params) != p.num_params():
         var names = String()
         for nm in p.user_param_names():
@@ -606,6 +629,7 @@ def _run_shots[B: ShotBackend](p: Program, cfg: Cfg, shots: Int, seed: UInt64, f
     for v in outs:
         res.out_names.append(p.vars[v].name)
         res.out_is_real.append(p.vars[v].ty.tag == CT.FLOAT)
+        res.out_is_unsigned.append(p.vars[v].ty.tag == CT.UINT or p.vars[v].ty.tag == CT.ANGLE)
     for s in range(shots):
         res.sample.record(cregs[s])
     res.iterations = iters^
@@ -669,6 +693,7 @@ def sample_program(p: Program, shots: Int, seed: UInt64 = 1234,
                    method: String = "auto") raises -> ProgramResult:
     """Sample a program with the method named in the module docstring. Any method
     other than 'auto' is taken at its word, and `result.warnings` tells what ran."""
+    check_shots(shots)
     var chosen = _method_for(p, method)
     if (method == "auto" or method == "statevector") and not p.has_runtime_region():
         var c = p.try_flatten()

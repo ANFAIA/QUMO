@@ -31,7 +31,7 @@ from std.bit import pop_count, count_trailing_zeros
 from std.math import pi
 
 from qumo.ir.gates import Op, op_name, op_arity, op_is_unitary, op_is_noise
-from qumo.ir.circuit import Circuit, Instruction, QUARTER_TURN_LIMIT
+from qumo.ir.circuit import Circuit, Instruction, QUARTER_TURN_LIMIT, check_shots
 from qumo.ir.param import Param
 from qumo.ir.pauli import PauliTerm
 from qumo.sim.rng import Rng
@@ -688,6 +688,7 @@ def sample_stabilizer(circuit: Circuit, shots: Int, seed: UInt64 = 1234) raises 
         raise Error("QM-E705: sample_stabilizer() returns integer-keyed counts and supports <= 62 clbits (got " + String(circuit.num_clbits) + "). Hint: use TableauSimulator.run() records or FrameSimulator.sample_measurements().")
     if not circuit.is_clifford():
         raise Error("QM-E701: circuit is not Clifford. Hint: use qumo.sim.runner.sample() (state vector).")
+    check_shots(shots)
     var res = SampleResult(circuit.num_clbits, shots, "stabilizer:tableau")
     var root = Rng(seed)
     var sim = TableauSimulator(circuit.num_qubits, 0)

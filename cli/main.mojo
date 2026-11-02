@@ -122,6 +122,8 @@ def parse_cli(args: List[String]) -> CliArgs:
 # ---------------------------------------------------------------------------
 def fmt_fixed(v: Float64, decimals: Int) -> String:
     """Fixed-point decimal rendering (Mojo has no format specifiers)."""
+    if abs(v) >= 1e12:  # past what an Int holds once it is scaled
+        return String(v)
     var scale = 1
     for _ in range(decimals):
         scale *= 10
@@ -257,7 +259,7 @@ def cmd_run(a: CliArgs) raises -> Int:
             var names = outs.keys()
             for i in range(len(names)):
                 var o = outs.at(i)
-                human += "\n  output " + names[i] + ": mean " + fmt_fixed(o.get("mean").as_float(), 6) + ", range " + String(o.get("min").as_float()) + " to " + String(o.get("max").as_float())
+                human += "\n  output " + names[i] + ": mean " + fmt_fixed(o.get("mean").as_float(), 6) + ", range " + o.get("min").number_text() + " to " + o.get("max").number_text()
         var ws = v.get("warnings")
         for i in range(len(ws)):
             human += "\n  note[" + ws.at(i).get("code").as_string() + "]: " + ws.at(i).get("message").as_string()

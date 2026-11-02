@@ -21,7 +21,7 @@ from std.bit import pop_count, count_trailing_zeros
 from std.collections import Dict
 from std.math import pi, cos, sin, sqrt
 from qumo.ir.gates import Op, op_name, op_arity, op_is_unitary, op_is_noise, op_is_annotation
-from qumo.ir.circuit import Circuit, Instruction
+from qumo.ir.circuit import Circuit, Instruction, check_shots
 from qumo.sim.rng import Rng
 from qumo.sim.stabilizer import TableauSimulator, bound_instruction
 from qumo.sim.runner import SampleResult
@@ -404,6 +404,7 @@ struct BranchingSimulator(Movable):
 
 def sample_branching(c: Circuit, shots: Int, seed: UInt64 = 1234) raises -> SampleResult:
     """Shot-by-shot sampling on the branching simulator (any qubit count up to 512)."""
+    check_shots(shots)
     c.validate()
     if c.num_measurements == 0:
         raise Error("QM-E402: circuit has no measurements. Hint: call measure_all() or use evolve()/expectation().")

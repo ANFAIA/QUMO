@@ -30,7 +30,7 @@ precision); automatic dispatch instead keeps such a circuit on the CPU (fp64).
 
 from std.sys.defines import is_defined
 
-from qumo.ir.circuit import Circuit
+from qumo.ir.circuit import Circuit, check_finite_values, check_shots
 from qumo.ir.gates import Op
 from qumo.sim.runner import sample, SampleResult
 from qumo.sim.stabilizer import sample_stabilizer
@@ -168,6 +168,8 @@ def sample_auto(c: Circuit, shots: Int, seed: UInt64 = 1234,
     "fp32" | "fp64") is the precision of a GPU state-vector run; the GPU is
     used only when that precision is available there (fp64 on an Apple GPU
     stays on the fp64 CPU simulator). QM-E941 for an unknown selector."""
+    check_shots(shots)
+    check_finite_values(params)
     _ = parse_gpu_precision(precision)
     if len(params) == 0:
         var m = choose_method(c, shots)
@@ -220,6 +222,8 @@ def sample_on(c: Circuit, shots: Int, seed: UInt64, params: List[Float64],
     (argument or environment variable); QM-E472 when the GPU state vector
     would run in fp64 on an Apple GPU."""
     note = ""
+    check_shots(shots)
+    check_finite_values(params)
     if device != "auto" and device != "cpu" and device != "gpu":
         raise Error("QM-E940: unknown device '" + device + "'. Hint: use 'auto', 'cpu' or 'gpu'.")
     _ = parse_gpu_precision(precision)

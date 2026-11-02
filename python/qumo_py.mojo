@@ -304,6 +304,9 @@ def py_sample_program(prog: PythonObject, shots: PythonObject, seed: PythonObjec
         if r.out_is_real[j]:
             for v in r.real_output(r.out_names[j]):
                 vals.append(v)
+        elif r.out_is_unsigned[j]:
+            for v in r.uint_output(r.out_names[j]):
+                vals.append(v)
         else:
             for v in r.int_output(r.out_names[j]):
                 vals.append(v)

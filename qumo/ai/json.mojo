@@ -153,6 +153,10 @@ struct JsonWriter(Movable):
         self._sep()
         self.out += String(v)
 
+    def unsigned(mut self, v: UInt64):
+        self._sep()
+        self.out += String(v)
+
     def number(mut self, v: Float64):
         self._sep()
         self.out += json_number(v)
@@ -245,8 +249,9 @@ def json_kind_name(k: Int) -> String:
 struct JsonNode(ImplicitlyCopyable):
     var kind: Int
     var num: Float64  # NUMBER value; BOOL: 1.0 / 0.0
-    var ival: Int  # exact integer when `is_int`
+    var ival: Int  # exact integer when `is_int`; its 64 bits when `is_uint`
     var is_int: Bool
+    var is_uint: Bool  # an integer at or above 2^63
     var str_idx: Int  # STRING payload (index into strs)
     var key_idx: Int  # key of this node inside its parent object, -1 otherwise
     var first: Int  # ARRAY/OBJECT: first child slot in `kids`
@@ -377,6 +382,18 @@ struct JsonValue(Copyable, Sized, Writable):
             return Int(nd.num)
         raise Error("QM-E911: expected a JSON integer of at most 64 bits, got " + String(nd.num) + ". Hint: drop the fractional part, or use a smaller value.")
 
+    def number_text(self) raises -> String:
+        """A number as a person should read it: an integer keeps all its digits, up
+        to 2^64, which `as_float` would round."""
+        if self.kind() != JsonKind.NUMBER:
+            raise Error("QM-E911: expected a JSON number, got " + self.kind_name() + ". Hint: pass a numeric literal such as 0.5.")
+        var nd = self._node()
+        if nd.is_int:
+            return String(nd.ival)
+        if nd.is_uint:
+            return String(UInt64(nd.ival))
+        return String(nd.num)
+
     def as_bool(self) raises -> Bool:
         if self.kind() != JsonKind.BOOL:
             raise Error("QM-E911: expected a JSON boolean, got " + self.kind_name() + ". Hint: use true or false.")
@@ -457,6 +474,8 @@ def _write_node(arena: JsonArena, idx: Int, mut w: JsonWriter):
     elif k == JsonKind.NUMBER:
         if nd.is_int:
             w.integer(nd.ival)
+        elif nd.is_uint:
+            w.unsigned(UInt64(nd.ival))
         else:
             w.number(nd.num)
     elif k == JsonKind.STRING:
@@ -561,7 +580,7 @@ def _skip_ws(bs: Span[Byte, _], mut pos: Int):
 
 
 def _new_node(mut arena: JsonArena, kind: Int) -> Int:
-    arena.nodes.append(JsonNode(kind, 0.0, 0, False, -1, -1, 0, 0))
+    arena.nodes.append(JsonNode(kind, 0.0, 0, False, False, -1, -1, 0, 0))
     return len(arena.nodes) - 1
 
 
@@ -759,15 +778,18 @@ def _parse_value(text: String, bs: Span[Byte, _], mut pos: Int, mut arena: JsonA
             pos += 1
         if pos >= n or not _is_digit(Int(bs[pos])):
             raise _json_error(text, pos, "invalid number", "numbers look like -12, 0.5 or 1e-3")
-        var iv = UInt64(0)  # 19 digits fit; more are not read as an integer
+        var iv = UInt64(0)  # an integer below 2^64; anything longer is a float
+        var fits = True
         var digits = 0
         if Int(bs[pos]) == 0x30:
             pos += 1
-            digits = 1
         else:
             while pos < n and _is_digit(Int(bs[pos])):
-                if digits < 19:
-                    iv = iv * 10 + UInt64(Int(bs[pos]) - 0x30)
+                var d = UInt64(Int(bs[pos]) - 0x30)
+                if digits >= 19 and (digits > 19 or iv > 1844674407370955161 or (iv == 1844674407370955161 and d > 5)):
+                    fits = False
+                else:
+                    iv = iv * 10 + d
                 digits += 1
                 pos += 1
         var is_int = True
@@ -789,13 +811,16 @@ def _parse_value(text: String, bs: Span[Byte, _], mut pos: Int, mut arena: JsonA
                 pos += 1
         var node = _new_node(arena, JsonKind.NUMBER)
         var top = UInt64(9223372036854775808) if neg else UInt64(9223372036854775807)
-        if is_int and digits <= 19 and iv <= top:
+        if is_int and fits and iv <= top:
             var v = Int(UInt64(0) - iv) if neg else Int(iv)
             arena.nodes[node].ival = v
             arena.nodes[node].is_int = True
             arena.nodes[node].num = Float64(v)
         else:
             arena.nodes[node].num = Float64(StringSlice(unsafe_from_utf8=bs[start:pos]))
+            if is_int and fits and not neg:
+                arena.nodes[node].ival = Int(iv)
+                arena.nodes[node].is_uint = True
         return node
     raise _json_error(text, pos, "unexpected character '" + String(unsafe_from_utf8=bs[pos:pos + 1]) + "'", "values are objects, arrays, strings, numbers, true, false or null")
 
