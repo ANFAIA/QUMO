@@ -727,7 +727,7 @@ def circuit_to_json(circuit: Circuit) -> String:
     return w.finish()
 
 
-comptime _UNUSED_WIRES = 1048576
+comptime _UNUSED_WIRES = 4096  # a tableau over this many is 8 MB; past it, instructions must justify them
 
 
 def _path_err(path: String, msg: String, hint: String) -> Error:

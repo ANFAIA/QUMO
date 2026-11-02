@@ -121,12 +121,15 @@ def test_9_a_small_document_cannot_ask_for_much() raises:
     _refused(_swap(doc, "\"num_store\":9", "\"num_store\":10"), "one store past what it justifies")
     _refused(_swap(doc, "\"num_store\":9", "\"num_store\":1048576"), "the review's store")
     _refused(_swap(doc, "\"num_store\":9", "\"num_store\":" + INT_MAX), "INT_MAX stores")
-    _refused(_swap(doc, "\"num_clbits\":4", "\"num_clbits\":2097152"), "clbits nothing uses")
+    _refused(_swap(doc, "\"num_clbits\":4", "\"num_clbits\":5000"), "clbits nothing uses")
     _refused(_swap(doc, "\"num_clbits\":4", "\"num_clbits\":" + INT_MAX), "INT_MAX clbits")
     _refused(_swap(doc, "\"num_qubits\":2", "\"num_qubits\":" + INT_MAX), "INT_MAX qubits")
-    # a width that a real program can have still loads
-    var wide = program_to_json(parse_qasm_program("OPENQASM 3.0; qubit[5000] q; bit[5000] c; int i = 0; while (i < 1) { i += 1; h q[4999]; } c[4999] = measure q[4999];"))
-    assert_true(_code(wide) == "" or _code(wide) != "QM-E587", _code(wide))
+    _refused(_swap(doc, "\"num_qubits\":2", "\"num_qubits\":1000000"), "a million qubits, for a tableau")
+    # a width that a real program can have still loads, and instructions justify more
+    var wide = program_to_json(parse_qasm_program("OPENQASM 3.0; qubit[4000] q; bit[4000] c; int i = 0; while (i < 1) { i += 1; h q[3999]; } c[3999] = measure q[3999];"))
+    assert_equal(_load_said(wide), "")
+    var used = String("OPENQASM 3.0; qubit[5000] q; int i = 0; while (i < 1) { i += 1; h q; }")
+    assert_equal(_load_said(program_to_json(parse_qasm_program(used))), "")
 
 
 def test_9_the_flat_loader_caps_what_a_measure_grows() raises:
