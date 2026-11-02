@@ -372,8 +372,7 @@ def binary(op, a, b):
             raise RunError("QM-E481", "division by zero")
         if op == "/":
             return wraplit(a, b, (t, x / y))
-        q = x / y
-        return wraplit(a, b, (t, x - y * math.trunc(q)))
+        return wraplit(a, b, (t, math.fmod(x, y)))
     if op == "+":
         r = x + y
     elif op == "-":
@@ -495,6 +494,14 @@ def apply_1q(st, m, q):
     m = np.array(m, dtype=complex)
     st = np.tensordot(m, st, axes=([1], [q]))
     return np.moveaxis(st, 0, q)
+
+
+def apply_rzz(st, a, p, q):
+    """exp(-i a/2 Z Z): the even subspace gets e^(-i a/2), the odd one e^(i a/2)."""
+    out = np.array(st, dtype=complex)
+    for i in np.ndindex(st.shape):
+        out[i] *= cmath.exp(-0.5j * a if i[p] == i[q] else 0.5j * a)
+    return out
 
 
 def apply_controlled(st, m, c, t):
@@ -780,13 +787,20 @@ class Oracle:
             return self.read_bits(name, None, w)
         return w.env[name]
 
+    def position(self, ix):
+        """A literal integer position: integer arithmetic, as the classical table has it."""
+        if isinstance(ix, ast.IntegerLiteral):
+            return ix.value
+        x, y = self.position(ix.lhs), self.position(ix.rhs)
+        return int_div(x, y) if ix.op.name == "/" else x * y
+
     def qubits_of(self, q):
         if isinstance(q, ast.Identifier):
             first, size = self.qregs[q.name]
             return list(range(first, first + size))
         first, size = self.qregs[q.name.name]
         ix = q.indices[0][0]
-        return [first + ix.value]
+        return [first + self.position(ix)]
 
     def literal_only(self, e, params):
         """No name but pi, tau, euler and a gate's own parameters."""
@@ -821,7 +835,8 @@ class Oracle:
         if op == "/":
             return x / y
         if op == "%":
-            return x - y * math.floor(x / y)
+            m = math.fmod(x, y)
+            return m + y if m != 0.0 and (m < 0.0) != (y < 0.0) else m
         return math.pow(x, y)
 
     def angle_arg(self, a, w, params):
@@ -868,6 +883,10 @@ class Oracle:
             st = apply_controlled(st, FIXED["y"], qs[0], qs[1])
         elif nm == "cp":
             st = apply_controlled(st, rot("p", args[0]), qs[0], qs[1])
+        elif nm == "crz":
+            st = apply_controlled(st, rot("rz", args[0]), qs[0], qs[1])
+        elif nm == "rzz":
+            st = apply_rzz(st, args[0], qs[0], qs[1])
         elif nm == "swap":
             st = np.swapaxes(st, qs[0], qs[1])
         elif nm == "ccx":
@@ -1399,7 +1418,10 @@ class Gen:
         gate = r.choice(["rx", "ry", "rz", "p"])
         self.consts += 1
         k = "k%d" % self.consts
-        form = r.randrange(9)
+        form = r.randrange(12)
+        if form >= 9:
+            self.small_rotation_or_position(form)
+            return
         if form == 0:  # past 64 bits, in a denominator
             self.emit("const int %s = %d;" % (k, r.randint(60, 90)))
             arg = "pi / 2 ** %s" % k
@@ -1432,6 +1454,23 @@ class Gen:
             self.emit("g%s(%s) q[%d];" % (k, r.choice(["0.5", "2", "pi/3"]), q))
             return
         self.emit("%s(%s) q[%d];" % (gate, arg, q))
+
+    def small_rotation_or_position(self, form):
+        """Angles a compiler could round away, by themselves and as sums, and an
+        integer position that computes in integers."""
+        r = self.r
+        if form == 11:
+            b = r.randint(1, 3)
+            a = r.randrange(0, (self.nq - 1) // b + 1) * b + r.randrange(b)
+            self.emit("x q[%d / %d * %d];" % (a, b, b))
+            return
+        theta = "%.2e" % (r.choice([1, -1]) * 10 ** r.uniform(-12, -3)) if form == 9 else "%spi / 2 ** %d" % (r.choice(["", "-"]), r.randint(8, 40))
+        two = self.nq > 1 and r.random() < 0.5
+        name = r.choice(["crz", "cp", "rzz"] if two else ["rx", "rz", "p"])
+        qs = r.sample(range(self.nq), 2 if two else 1)
+        times = r.choice([1, 1, 2, 3])
+        for _ in range(times):
+            self.emit("%s(%s) %s;" % (name, theta, ", ".join("q[%d]" % q for q in qs)))
 
     def angle_under_branch(self):
         """A variable the gate reads only at run time, set on one path or the other."""

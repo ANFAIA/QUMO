@@ -36,6 +36,7 @@ docs/CONTROL_FLOW.md):
 """
 
 from std.bit import pop_count
+from std.ffi import external_call
 from std.math import sin, cos, tan, asin, acos, atan, exp, log, sqrt, floor, ceil, isnan, isinf, pi
 
 
@@ -290,6 +291,18 @@ def _float_to_angle(x: Float64, width: Int, mut out: Int) -> Bool:
     return True
 
 
+def float_rem(a: Float64, b: Float64) -> Float64:
+    """`a % b` with the sign of `a`, exact: `a - b * trunc(a / b)` loses all of it
+    once a / b has no fraction to keep."""
+    return external_call["fmod", Float64](a, b)
+
+
+def float_mod(a: Float64, b: Float64) -> Float64:
+    """`mod(a, b)` and the constant path's `%`: the same, with the sign of `b`."""
+    var r = float_rem(a, b)
+    return r + b if r != 0.0 and (r < 0.0) != (b < 0.0) else r
+
+
 def _fn_real(f: Int, a: Float64, b: Float64) -> Float64:
     if f == CF.SIN: return sin(a)
     if f == CF.COS: return cos(a)
@@ -303,7 +316,7 @@ def _fn_real(f: Int, a: Float64, b: Float64) -> Float64:
     if f == CF.ABS: return abs(a)
     if f == CF.FLOOR: return floor(a)
     if f == CF.CEIL: return ceil(a)
-    return a - b * floor(a / b)  # CF.MOD
+    return float_mod(a, b)  # CF.MOD
 
 
 def eval_nodes[B: BitReader](nodes: List[CNode], lo: Int, root: Int, mut st: CStore, bits: B) -> Int:
@@ -383,8 +396,7 @@ def eval_nodes[B: BitReader](nodes: List[CNode], lo: Int, root: Int, mut st: CSt
                 if op == CN.DIV:
                     st.tf[pc] = a / b
                 else:
-                    var q = a / b
-                    st.tf[pc] = a - b * (-floor(-q) if q < 0.0 else floor(q))
+                    st.tf[pc] = float_rem(a, b)
             else:
                 var a = st.ti[n.x]
                 var b = st.ti[n.y]
@@ -742,6 +754,8 @@ def _exact_pow(x: Int128, e: Int128, unsigned_: Bool, literal: Bool) -> CExpr:
 
 
 def _exact_shift(op: Int, x: Int128, n: Int128, literal: Bool) -> CExpr:
+    if x == 0:
+        return _exact_const(Int128(0), True, literal)  # 0 * 2.0 ** n would be NaN at huge n
     if op == CN.SHR:
         return _exact_const(Int128(0) if n >= 64 else x >> n, True, literal)
     if n < 126 and x < (Int128(1) << (126 - n)):

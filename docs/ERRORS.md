@@ -339,6 +339,11 @@ Fix: Use 'OPENQASM 3.0;' or 'OPENQASM 2.0;'.
 **OpenQASM feature outside QUMO's supported subset, or one a Circuit cannot hold: subroutines, or, in parse_qasm, while and classical assignment.**  
 Fix: Parse with parse_qasm_program or load_any for while and classical variables; see 'qumo describe capabilities' for the rest.
 
+### QM-E505
+
+**An expression or a block nests deeper than 256 levels.**  
+Fix: Split it into smaller expressions or statements; a chain of else-if arms counts as nesting too.
+
 ### QM-E510
 
 **Unknown gate name.**  

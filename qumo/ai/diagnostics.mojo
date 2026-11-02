@@ -349,6 +349,7 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E502", "qasm", "Unterminated string literal or block comment.", "Close strings on the same line and comments with */.")
     _e(c, "QM-E503", "qasm", "Unsupported OpenQASM version.", "Use 'OPENQASM 3.0;' or 'OPENQASM 2.0;'.")
     _e(c, "QM-E504", "qasm", "OpenQASM feature outside QUMO's supported subset, or one a Circuit cannot hold: subroutines, or, in parse_qasm, while and classical assignment.", "Parse with parse_qasm_program or load_any for while and classical variables; see 'qumo describe capabilities' for the rest.")
+    _e(c, "QM-E505", "qasm", "An expression or a block nests deeper than 256 levels.", "Split it into smaller expressions or statements; a chain of else-if arms counts as nesting too.")
     _e(c, "QM-E510", "qasm", "Unknown gate name.", "Check the suggestions, run 'qumo describe gates', or define it with 'gate name(params) a, b { ... }'.")
     _e(c, "QM-E511", "qasm", "Wrong number of gate parameters.", "Match the gate signature, e.g. rz(theta) q[0];")
     _e(c, "QM-E512", "qasm", "Wrong number of qubit operands (including ctrl @ controls).", "Match the gate arity; controls of ctrl @ come first.")

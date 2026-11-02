@@ -992,6 +992,16 @@ def _json_string(v: JsonValue, key: String, what: String) raises -> String:
     return x.as_string()
 
 
+def _json_bool_or(v: JsonValue, key: String, default: Bool, what: String) raises -> Bool:
+    var x = v.get(key)
+    if not x.is_defined() or x.is_null():
+        return default
+    try:
+        return x.as_bool()
+    except:
+        raise _bad_program(what + " has a '" + key + "' that is not true or false")
+
+
 def _json_array(v: JsonValue, key: String) raises -> JsonValue:
     var a = v.get(key)
     if not a.is_array():
@@ -1183,9 +1193,9 @@ def _check_statement(p: Program, s: Stmt, at: Int) raises:
         var store = p.for_ranges[s.b + FORR.STORE]
         if store < 0 or store > p.num_store - 3:
             raise _bad_program(what + " keeps its state outside the store")
-        var unsigned_ = p.for_ranges[s.b + FORR.UNSIGNED]
-        if unsigned_ != 0 and unsigned_ != 1:
-            raise _bad_program(what + " has an unsigned flag that is neither 0 nor 1")
+        var flags = p.for_ranges[s.b + FORR.UNSIGNED]
+        if flags < 0 or flags > FORR.ALL_FLAGS:
+            raise _bad_program(what + " has flags that do not exist")
         var set_at = p.for_ranges[s.b + FORR.SET]
         if set_at < -1:
             raise _bad_program(what + " has a set outside case_values")
@@ -1234,7 +1244,7 @@ def program_from_json(v: JsonValue) raises -> Program:
         var x = vars.at(i)
         var what = "variables[" + String(i) + "]"
         p.vars.append(CVar(_json_string(x, "name", what), _type_from_name(_json_string(x, "type", what), what),
-                           _json_int_or(x, "store", -1, what), _json_int_or(x, "slot", -1, what), x.get_bool("output", False)))
+                           _json_int_or(x, "store", -1, what), _json_int_or(x, "slot", -1, what), _json_bool_or(x, "output", False, what)))
     var names = _node_names()
     var nodes = _json_array(v, "nodes")
     for i in range(len(nodes)):

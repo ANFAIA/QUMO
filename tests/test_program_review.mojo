@@ -246,7 +246,8 @@ def test_a7_typed_constants_in_integer_positions() raises:
     assert_equal(_int("const int n = 9223372036854775807; output int r = 0; for int j in [1:n % 3] { r += 1; }"), 1)
     assert_equal(parse_qasm("const int n = 7; qubit[4] q; h q[n / 2];").ops[0].q0, 3)
     assert_equal(parse_qasm("qubit[4] q; for int i in [3:3] { h q[i / 2]; }").ops[0].q0, 1)
-    _is(_err("h q[1/2];"), "QM-E530")
+    assert_equal(parse_qasm("qubit[4] q; h q[3/2];").ops[0].q0, 1)  # the classical table, since the third review
+    _is(_err("h q[1.5];"), "QM-E530")
 
 
 def test_a8_for_stepping_at_the_int64_ends() raises:
