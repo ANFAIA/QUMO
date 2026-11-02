@@ -82,6 +82,18 @@ These hold today, and each one fails loudly instead of doing less:
 * **The flat lints do not run on a program.** They read the ops as one pass from
   start to end, which a loop is not. A program gets QM-W054 only.
 
+Two costs do not fail at all:
+
+* **The classical table is slower to parse.** It builds an expression per argument, and
+  it reads a typed constant, an integer position that computes, and a literal-only
+  integer division, which is read twice for QM-W055. Per 100000 gates, before control
+  flow and now: `rx(t)` with a `float t` 30 and 45 ms, `rz(k * t)` with two `const` 35 and
+  109 ms, `rx(1 / 2)` 31 and 109 ms, and `q[i % 64]` in an unrolled loop 44 and 72 ms. A source without them parses at most 8% slower.
+* **Source text has no size limit.** Only `qumo.circuit.v1` and `qumo.program.v1`
+  documents do. `pow(n) @` expands the gate n times, 2 GB at 3000000, and a tableau
+  takes n^2 / 2 bytes, 5 GB at 100000 qubits. Do not run text you do not trust on a
+  machine that matters.
+
 ## What a Program is
 
 `Program` (`qumo/ir/program.mojo`) sits on top of `Circuit`, with no new opcode and
@@ -326,12 +338,12 @@ Measured at 20000 shots, with no program skipped by the oracle:
 
 | Corpus | Programs | Both raised | Worst TV / limit | Blocks checked | Not checked |
 |---|---|---|---|---|---|
-| Source | 500 | 40 | 0.447 | n/a | n/a |
-| `line:6`, level 0 | 200 | 17 | 0.357 | 1690 | 69 |
-| `heavy_hex:3`, level 2 | 200 | 20 | 0.485 | 1770 | 64 |
+| Source | 500 | 40 | 0.416 | n/a | n/a |
+| `line:6`, level 0 | 200 | 22 | 0.387 | 1643 | 73 |
+| `heavy_hex:3`, level 2 | 200 | 20 | 0.384 | 1703 | 71 |
 
-Those 900 programs, source and compiled, also came back identical through JSON. The
-hostile documents total 129271: 69271 with one number of a document set in turn to
+900 programs of an earlier run of this generator, source and compiled, also came back
+identical through JSON. The hostile documents total 129271: 69271 with one number of a document set in turn to
 INT_MAX, INT_MIN, -1, 2^53 or 2^63 (floats to 2^63, -2^63, 1e308 or 2^53 + 2), over 85
 documents, and 60000 random mutations, the circuit part included. Each went through
 load, sample, draw, convert and compile in Python, and through five tools of the MCP
