@@ -625,11 +625,13 @@ struct _State(Movable):
     var dropped: Bool
     var seed: Int
     var routed: Bool
+    var exact: Bool  # a block of a Program: see GateSet.exact
     # running totals of the AI synthesis passes, per block kind (0..3):
     # blocks, proposed, verified, replaced, saved 2q cost, rejected
     var synth_totals: List[Int]
 
     def __init__(out self, n: Int, seed: Int):
+        self.exact = False
         self.init = List[Int](length=n, fill=0)
         for i in range(n):
             self.init[i] = i
@@ -728,8 +730,9 @@ def _apply(p: PassSpec, mut c: Circuit, target: Target, mut st: _State) raises -
     """Run one pass in place; returns a short note."""
     var id = p.id
     var gs = working_gate_set(c, target)
+    gs.exact = st.exact
     if id == PassId.REMOVE_IDENTITIES:
-        return "removed " + String(remove_identities(c))
+        return "removed " + String(remove_identities(c, st.exact))
     if id == PassId.CANCEL:
         return "cancelled " + String(cancel_inverses(c, gs, _int_arg(p.args, 32))) + " pairs"
     if id == PassId.MERGE:
@@ -738,6 +741,7 @@ def _apply(p: PassSpec, mut c: Circuit, target: Target, mut st: _State) raises -
         return "merged " + String(commute_rotations(c, gs, _int_arg(p.args, 32)))
     if id == PassId.FUSE1Q:
         var g2 = _gs_from_args(p.args, c, target)
+        g2.exact = st.exact
         return "saved " + String(fuse_1q(c, g2)) + " 1q gates " + String(g2)
     if id == PassId.PHASE_FOLD:
         var t0 = c.t_count()
@@ -751,6 +755,7 @@ def _apply(p: PassSpec, mut c: Circuit, target: Target, mut st: _State) raises -
         var g2 = GateSet(target.basis)
         if len(p.args) > 0:
             g2 = _gs_from_args(p.args, c, target)
+        g2.exact = st.exact
         var dropped = False
         var r = translate_to_basis(c, g2, dropped)
         if dropped:
@@ -821,6 +826,9 @@ def _apply(p: PassSpec, mut c: Circuit, target: Target, mut st: _State) raises -
         var blocks = 0
         var saved = 0
         var tgs = GateSet(target.basis)
+        tgs.exact = st.exact
+        var anyset = GateSet()
+        anyset.exact = st.exact
         var rounds = 4 if len(c.ops) < 20000 else 1
         for _ in range(rounds):
             var b2 = 0
@@ -829,7 +837,7 @@ def _apply(p: PassSpec, mut c: Circuit, target: Target, mut st: _State) raises -
             saved += s2
             if s2 <= 0:
                 break
-            _ = cancel_inverses(c, GateSet(), 32)
+            _ = cancel_inverses(c, anyset, 32)
         if not gs.any and saved > 0:
             var dropped = False
             _ = translate_to_basis(c, gs, dropped)
@@ -851,7 +859,9 @@ def _apply(p: PassSpec, mut c: Circuit, target: Target, mut st: _State) raises -
         var objective_t = False
         for a in p.args:
             objective_t = objective_t or a == "objective=t"
-        var saved = pauli_resynthesize(c, 64, GateSet(target.basis), objective_t)
+        var pgs = GateSet(target.basis)
+        pgs.exact = st.exact
+        var saved = pauli_resynthesize(c, 64, pgs, objective_t)
         if objective_t:
             return ("saved " + String(saved) + " T gates") if saved > 0 else "kept original"
         return ("saved " + String(saved) + " 2q gates") if saved > 0 else "kept original"
@@ -868,6 +878,7 @@ def _apply(p: PassSpec, mut c: Circuit, target: Target, mut st: _State) raises -
             parse_angle_bound(a, bounded)
         var changed = wrap_angles(c, bounded)
         var g2 = GateSet(target.basis)
+        g2.exact = st.exact
         if changed > 0 and len(target.basis) > 0:
             # Pauli corrections may be outside the basis
             var dropped = False
@@ -1132,11 +1143,13 @@ struct PassManager(Copyable, Writable):
     var spec: String
     var passes: List[PassSpec]
     var seed: Int
+    var exact: Bool  # no pass rounds off more than EXACT_TOL per gate: blocks of a Program
 
     def __init__(out self, spec: String, seed: Int = 7) raises:
         self.spec = spec
         self.passes = parse_pipeline(spec)
         self.seed = seed
+        self.exact = False
 
     @staticmethod
     def preset(level: Int, target: Target, seed: Int = 7) raises -> PassManager:
@@ -1156,6 +1169,7 @@ struct PassManager(Copyable, Writable):
         var c = circuit.copy()
         reduce_large_angles(c)
         var st = _State(c.num_qubits, self.seed)
+        st.exact = self.exact
         var t0 = perf_counter_ns()
         try:
             _run_list(self.passes, c, target, st, res.reports)

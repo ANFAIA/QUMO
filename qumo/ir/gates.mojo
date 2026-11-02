@@ -424,8 +424,9 @@ def _arg(re: Float64, im: Float64) -> Float64:
     return atan2(im, re)
 
 
-def zyz_decompose(m: M2) -> ZYZ:
-    """Euler decomposition of any 2x2 unitary into U3 angles + global phase."""
+def zyz_decompose(m: M2, small: Float64 = 1e-12) -> ZYZ:
+    """Euler decomposition of any 2x2 unitary into U3 angles + global phase. An entry
+    of modulus `small` or less is taken as zero, and its phase is not read."""
     # det = m00*m11 - m01*m10
     var dr = m.re[0] * m.re[3] - m.im[0] * m.im[3] - (m.re[1] * m.re[2] - m.im[1] * m.im[2])
     var di = m.re[0] * m.im[3] + m.im[0] * m.re[3] - (m.re[1] * m.im[2] + m.im[1] * m.re[2])
@@ -440,9 +441,9 @@ def zyz_decompose(m: M2) -> ZYZ:
     var theta = 2 * atan2(a10, a00)
     var ssum = 0.0
     var sdiff = 0.0
-    if a00 > 1e-12:
+    if a00 > small:
         ssum = 2 * _arg(vr[3], vi[3])
-    if a10 > 1e-12:
+    if a10 > small:
         sdiff = 2 * _arg(vr[2], vi[2])
     var phi = (ssum + sdiff) / 2
     var lam = (ssum - sdiff) / 2

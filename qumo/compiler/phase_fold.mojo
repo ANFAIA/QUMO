@@ -270,6 +270,7 @@ def phase_fold(mut c: Circuit, gs: GateSet) -> Int:
     var rep_len = List[Int](length=n, fill=0)
     var rep = List[Instruction]()
     var anyset = GateSet()
+    anyset.exact = gs.exact
     var phase = f.phase
     for t in range(len(f.t_anchor)):
         if f.t_count[t] < 2:
@@ -279,9 +280,9 @@ def phase_fold(mut c: Circuit, gs: GateSet) -> Int:
         var start = len(rep)
         var total = f.t_angle[t]
         if g.kind == Op.RZZ:
-            if not total.is_symbolic() and abs(wrap_angle(total.value(), FOUR_PI)) < ANG_TOL:
+            if not total.is_symbolic() and abs(wrap_angle(total.value(), FOUR_PI)) < gs.angle_tol():
                 pass
-            elif not total.is_symbolic() and abs(abs(wrap_angle(total.value(), FOUR_PI)) - TWO_PI) < ANG_TOL:
+            elif not total.is_symbolic() and abs(abs(wrap_angle(total.value(), FOUR_PI)) - TWO_PI) < gs.angle_tol():
                 phase += pi
             else:
                 rep.append(Instruction.make(Op.RZZ, g.q0, g.q1, -1, total))

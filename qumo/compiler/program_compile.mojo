@@ -983,6 +983,7 @@ def compile_spec_program(p: Program, target: Target, spec: String, seed: Int = 7
     # logical passes, block by block
     var pre = List[Circuit]()
     var pm_pre = PassManager(pre_spec, seed) if pre_spec.byte_length() > 0 else PassManager("remove_identities", seed)
+    pm_pre.exact = True
     for s in p.tape:
         if s.kind != SK.OPS:
             continue
@@ -1003,7 +1004,9 @@ def compile_spec_program(p: Program, target: Target, spec: String, seed: Int = 7
             layout.append(i)
     var post: Optional[PassManager] = None
     if post_spec.byte_length() > 0:
-        post = PassManager(post_spec, seed)
+        var pm_post = PassManager(post_spec, seed)
+        pm_post.exact = True
+        post = pm_post^
     var comp = _Compiler(p, target, opts, routes, N, seed, post^, layout.copy())
     comp.run(pre)
     var out = p.copy()

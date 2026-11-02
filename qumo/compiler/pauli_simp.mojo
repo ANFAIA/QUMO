@@ -34,9 +34,9 @@ from std.math import pi
 from std.bit import pop_count
 from qumo.ir.gates import Op, op_arity, op_is_unitary, op_num_params
 from qumo.ir.param import Param
-from qumo.ir.circuit import Circuit, Instruction
+from qumo.ir.circuit import Circuit, Instruction, QUARTER_TURN_LIMIT
 from qumo.compiler.common import (
-    GateSet, HALF_PI, QUARTER_PI, TWO_PI, ANG_TOL, wrap_angle, shell_like,
+    GateSet, HALF_PI, QUARTER_PI, TWO_PI, ANG_TOL, EXACT_TOL, wrap_angle, shell_like,
 )
 from qumo.compiler.basis import expand_rule
 from qumo.compiler.optimize import cancel_inverses, commute_rotations
@@ -244,8 +244,10 @@ struct _Extract(Movable):
     var oz: List[UInt64]
     var tx: List[UInt64]
     var tz: List[UInt64]
+    var clifford_tol: Float64  # how far from a multiple of pi/2 an angle counts as on it
 
     def __init__(out self, n: Int):
+        self.clifford_tol = 1e-12
         self.tab = Tableau(n)
         self.gad = GadgetList(n)
         self.rem = List[Instruction]()
@@ -315,8 +317,8 @@ struct _Extract(Movable):
     def rot_or_clifford(mut self, axis: Int, q: Int, theta: Float64):
         """Single-qubit rotation exp(-i theta/2 P_axis); Clifford angles go to the tableau."""
         var r = theta / HALF_PI
-        var m = Int(round(r))
-        if abs(r - Float64(m)) < 1e-12:
+        var m = Int(round(r)) if abs(r) < QUARTER_TURN_LIMIT else 0
+        if abs(r) < QUARTER_TURN_LIMIT and abs(r - Float64(m)) < self.clifford_tol:
             var t = ((m % 4) + 4) % 4
             # R_axis(m pi/2) = e^{-i m pi/4} * (named Clifford)^m
             self.phase -= Float64(m) * QUARTER_PI
@@ -492,7 +494,7 @@ def _synth_candidate(mut ex: _Extract, c: Circuit, window: Int, tail: List[Instr
     var prev_idx = -1
     var live = List[Int]()
     for i in range(m):
-        if ex.gad.alive[i] and abs(wrap_angle(ex.gad.angle[i], 4 * pi)) > 1e-12:
+        if ex.gad.alive[i] and abs(wrap_angle(ex.gad.angle[i], 4 * pi)) > ex.clifford_tol:
             live.append(i)
     # greedy reordering of commuting gadgets: from the next `window` pending
     # gadgets pick one that commutes with everything it overtakes and shares
@@ -548,6 +550,7 @@ def _synth_candidate(mut ex: _Extract, c: Circuit, window: Int, tail: List[Instr
     cand.ops = ops^
     cand.global_phase += ex.phase
     var anyset = GateSet()
+    anyset.exact = ex.clifford_tol == EXACT_TOL
     _ = cancel_inverses(cand, anyset, 64)
     _ = commute_rotations(cand, anyset, 64)
     _ = cancel_inverses(cand, anyset, 64)
@@ -570,6 +573,8 @@ def pauli_resynthesize(mut c: Circuit, window: Int = 64, kak_gs: GateSet = GateS
         return 0
     var n = c.num_qubits
     var ex = _Extract(n)
+    if kak_gs.exact:
+        ex.clifford_tol = EXACT_TOL
     var seen_nonunitary = False
     var tail = List[Instruction]()
     var rotations = 0
@@ -615,6 +620,7 @@ def pauli_resynthesize(mut c: Circuit, window: Int = 64, kak_gs: GateSet = GateS
 
     def job(t: Int) {mut base, mut cand, mut ex, mut nb, mut nc, imm c, imm window, imm tail, imm kak_gs}:
         var anyset = GateSet()
+        anyset.exact = kak_gs.exact
         var bb = 0
         if t == 0:
             _ = cancel_inverses(base, anyset, 64)
