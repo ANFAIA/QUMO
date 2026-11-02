@@ -3023,7 +3023,7 @@ struct QasmParser(Movable):
                 var t = self.truncations[i]
                 if t.start not in self.warned:
                     self.warned[t.start] = True
-                    self.warn("QM-W055", "this integer division drops a remainder, and the result is used as an angle or a float", t, "write it in floats, such as 3.0 / 4, to keep the fraction")
+                    self.warn("QM-W055", "this integer division drops a remainder, and the result is used as an angle, a float or an exponent", t, "write it in floats, such as 3.0 / 4, to keep the fraction")
         if not self.shadow:
             self.truncations.clear()
 
@@ -3051,7 +3051,7 @@ struct QasmParser(Movable):
         self.pos = stop
         if (differs or len(self.truncations) > 0) and t.start not in self.warned:
             self.warned[t.start] = True
-            self.warn("QM-W055", "this argument keeps real division here, and the OpenQASM 3 specification and Qiskit truncate it as integer division", t, "write it in floats, such as 3.0 / 4, so that every tool reads the same value")
+            self.warn("QM-W055", "this argument keeps real arithmetic here, and the OpenQASM 3 specification and Qiskit read it as integers", t, "write it in floats, such as 3.0 / 4, so that every tool reads the same value")
         self.truncations.clear()
 
     def check_finite_constant(self, v: Float64, t: Token) raises:

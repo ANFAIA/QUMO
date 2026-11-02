@@ -215,6 +215,9 @@ two-qubit gates, so it stays out of O0-O3. On the Feynman circuits against
   at level 2 used to change `sx rz(1) p(2^63-1) sx rz(1) p(2^63-1)`. The verifier of
   programs found it. Output changes only for such angles. The offset of a symbolic
   angle reduces the same way; a huge coefficient on a symbol stays a float limit.
+* **`transpile` drops small rotations:** a rotation below about 2e-6 is within the
+  1e-12 infidelity of `remove_identities` and goes, so many such gates can add up to
+  more than each one. Program blocks compile in exact mode instead, below.
 * Past 2^22 quarter turns an angle is not Clifford (`QUARTER_TURN_LIMIT`), in
   `Instruction.is_clifford` and in the helpers that read a count of quarter turns.
 
@@ -225,6 +228,9 @@ seed)` compile a `Program` block by block on one layout, in
 `qumo/compiler/program_compile.mojo`. A program without runtime regions goes through
 `transpile`.
 
+* Each block compiles in exact mode (`PassManager.exact`, `GateSet.exact`): angle and
+  matrix tolerances are 1e-14 (`EXACT_TOL`) and the KAK check 1e-13, far below the 1e-7
+  of `verify_program`, so nothing it can see is dropped.
 * The pipeline splits at its `route`. Passes around it run on each block, without
   `elide_swaps`, `post_layout` and `star`, which relabel qubits going forward only.
   A second `route`, a relabeling pass inside `fixpoint`, synthesis passes and the AI

@@ -235,7 +235,7 @@ Fix: Guard the divisor with an if.
 
 ### QM-E482
 
-**A float reached an integer or a gate angle as NaN, infinite or out of range of the target type.**  
+**A float reached an integer or a gate angle as NaN, infinite or out of range of the target type, an input value is not finite, or a for-loop range holds a uint at or above 2^63 that it cannot read.**  
 Fix: Guard the value, or use a wider integer.
 
 ### QM-E483

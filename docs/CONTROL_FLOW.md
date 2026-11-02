@@ -120,8 +120,11 @@ range has a `bit` in its body.
 
 `arg_program` is how a tool reads a program, and `arg_circuit` is `arg_program` plus
 QM-E585. A run reports `iterations` (mean and max back-edges per shot) and `outputs`
-(mean, range and the first 16 shots of each declared output). A compile reports
-`metrics`, `restored_swaps`, `blocks_checked` and `blocks_unchecked`.
+(mean, range and the first 16 shots of each declared output). A `uint` at or above
+2^63 reads through its type everywhere: `ProgramResult.uint_output` in Mojo, an int of
+that value in Python, its digits in the JSON of a tool and in `qumo run`. `int_output`
+gives the same 64 bits as a signed number. A compile reports `metrics`, `restored_swaps`,
+`blocks_checked` and `blocks_unchecked`.
 
 ## Classical semantics
 
@@ -160,7 +163,7 @@ this work: `rz(3/4*pi)` is 0.0 and `rz(10000000000*10000000000)` is 1e20.
 | Types | `bit[n]`, `bool`, `int[n]`, `uint[n]` (1 <= n <= 64), `float` (binary64), `angle[n]`. `float[32]` and a mutable `angle` without a width are QM-E582 |
 | Overflow | Modulo 2^n, two's complement. `int[8]` 127 + 1 is -128 |
 | `/`, `%` on integers | Truncate toward zero, literals included: `7 / 2` is 3, also in `float x = 7 / 2`, which is 3.0. `%` has the sign of the dividend: `-7 % 3` is -1 |
-| `/`, `%` on floats | `%` truncates the quotient: `-7.5 % 2.0` is -1.5. `mod(-7.5, 2.0)` floors it: 0.5 |
+| `/`, `%` on floats | `%` truncates the quotient: `-7.5 % 2.0` is -1.5. `mod(-7.5, 2.0)` floors it: 0.5. Both are exact, like `fmod`: `1e20 % 7.0` is 2.0, at run time and folded |
 | Division by zero | QM-E481 at run time, with shot and line. QM-E533 when the divisor is a constant zero. `mod(x, 0.0)` is QM-E481; `mod(1.0, 0.0)`, all constant, is QM-E533 |
 | `**` on integers | Modulo 2^n. A negative exponent is QM-E481 at run time. On a sized constant it is QM-E533; on an unsized one, see above |
 | Shifts | `bit`, `uint` and `angle` only; `int` is QM-E580. Shifting by the width or more gives 0. A count is a uint or a non-negative literal |
@@ -179,8 +182,11 @@ this work: `rz(3/4*pi)` is 0.0 and `rz(10000000000*10000000000)` is 1e20.
 | `bit` declared in a loop body | Restarts at 0 on each pass, and its name is scoped to the block. It keeps one clbit per declaration, even when the loop never runs |
 | Loop variable | Counts in `int` or `uint` (QM-E580 otherwise; flat `parse_qasm` still takes `for float x`). It is declared first in the body, so redeclaring it is QM-E522. Assigning it is allowed and does not change the iteration |
 | Ranges | A step of 0, or a step or bound with a fraction, is QM-E570. A constant float with no fraction counts as an integer, unrolled or on the tape: `[0.0:1]`. Stepping cannot overflow at the ends of int64, and when neither bound can be negative they compare unsigned, so `for uint i in [9223372036854775807:n]` with `n` = 2^63 runs twice |
+| Ranges past 2^63 | A `uint` counter crosses 2^63 and stops on time. A step at or above 2^63, or a `uint` bound that high next to a signed one, has no reading: QM-E580 for a constant, as in a flat range, and QM-E482 when the loop starts for a value only a run knows. An `int` counter that reaches 2^63 stops the shot with QM-E482, and a `uint` value that high in a set of an `int` loop is QM-E580 |
 | `bit` in a loop | Keeps its size on every pass: `for int i in [0:1] { bit[i + 1] b; }` is QM-E504 |
-| Integer positions | A qubit index, a size or a range bound takes an integer, bool, bit or integral float constant. An `angle` is QM-E530 |
+| Integer positions | A qubit index, a size, a width, a range bound, a `pow` or `ctrl` count and a `switch` value follow this table, literals included, as a gate argument does not: `q[7/2*2]` is q[6], as Qiskit reads it, and exact to 64 bits, so `q[9007199254740993 - 9007199254740992]` is q[1]. They take an integer, bool, bit or integral float constant. An `angle` is QM-E530, and a float past 2^53 is QM-E580 |
+| Nesting | 256 levels, in both parsers: parentheses, calls, casts and unary or power operators in an expression; braces, and bodies without braces, in statements. An arm of an `else if` chain is a level. Past it, QM-E505 |
+| Input values | A NaN or an infinity is QM-E482 on entry, on every surface |
 | Gate bodies | A name of a typed constant follows the table there too, and in `pow(k / 2) @` and `ctrl(k / 2) @`. Gate parameters are angles and stay affine |
 | Symbolic constants | `input float t; float u = t * 2; float w = 1.0; rz(u + w) q[0];` is `rz(2*t + 1)`: they read as affine |
 | Non-finite constants | In a flat declaration or gate argument, gate bodies included, QM-E533: `sqrt(-1.0)`, `ln(0.0)`, `1e308 * 10`. In a program, QM-E482 at the gate that reads one |
@@ -262,6 +268,14 @@ fresh ancilla, and ancillas are paired by (clbit, nth write to that clbit): the 
 measurement principle. Both sides reduce huge angles first, so a phase of 1e12 is not a
 false alarm.
 
+Blocks compile in exact mode: `remove_identities`, merging, commutation, resynthesis and
+angle comparisons work to 1e-13 or better, far below that distance, so nothing the check
+can see is dropped, one gate at a time or as a sum. 20000 of `rx(1e-10) q[0]; cx q[0], q[1];`
+compile and pass, and so does a sweep of theta from 1e-12 to 1e-3 over rx, rz, p, crz, cp
+and rzz, with `pi / 2 ** k`, at levels 1 to 3. **A flat `transpile` is not exact:** it
+keeps its tolerances and drops a rotation below about 2e-6, where `remove_identities`
+sees an infidelity under 1e-12. A block keeps that rotation.
+
 The cost of a block is gates x 2^wires x 2 states. The budget is **2^27 per block and
 2^29 per compile**, with at most **22 wires** for the memory of one state. Over budget
 a block is unchecked and counted. A block whose source has a reset, noise or a
@@ -271,9 +285,10 @@ A compiled program whose blocks all start with a reset, like iterative phase est
 here, has its layouts and structure checked and none of its gates.
 
 Paired compile times on this machine, in the foreground, against commit a55628b, which
-checked only blocks without measurements: 120 small programs for `line:6` at level 2
-take 0.063 to 0.068 s against 0.060 to 0.065 s, and a 200-gate loop body on 7 qubits with
-3 measures, for `line:7` at level 2, takes 4.3 to 6.1 ms against 4.1 to 4.7 ms.
+checked only blocks without measurements: 120 small programs that both trees compile,
+for `line:6` at level 2, take 0.079 to 0.083 s against 0.075 to 0.077 s, and a 200-gate
+loop body on 7 qubits with 3 measures, for `line:7` at level 2, takes 4.3 to 6.4 ms
+against 4.1 to 6.1 ms.
 
 The first run of this check tripped on a valid compile, and it was right:
 `transpile` at level 2 was miscompiling `p(2^63 - 1)`. Merging sums the angles, and
@@ -283,7 +298,10 @@ and cos before any pass (`reduce_large_angles`). Compiled output changes only fo
 such angles, in plain circuits too. The offset of a symbolic angle reduces the same way.
 A huge coefficient on a symbol stays a float limit, and so does binding: at 2^63 the sum
 `t + offset` in `Param.resolve` drops `t`, so an uncompiled circuit loses `t` where a
-compiled one keeps it.
+compiled one keeps it. Next to a coefficient of 1e10 a float cannot hold an offset to
+1e-7, so a compile of a runtime angle that large stops instead of losing it, measured on
+`line:2` at levels 1 to 3: `rx(1e9 * t)` and `ry` are QM-E604, `rz` from 1e10 is QM-E631,
+and `crz` and `rzz` from 1e12 are QM-E631. Up to 1e8 all of them compile.
 
 ## Cross-check
 
@@ -296,18 +314,26 @@ in loops, narrow types with literals, unsigned values at or above 2^63, `bool` a
 its programs end in a run-time error that both sides must raise with the same code.
 It also writes gate arguments from unsized constants, with its own exact integers: past
 64 bits, under negative exponents, as negated `uint` loop variables, in real arithmetic
-when literal-only, and read in a gate body next to a parameter.
+when literal-only, and read in a gate body next to a parameter. And rotations a compiler
+could round away, from 1e-12 to 1e-3 and `pi / 2 ** k`, once or repeated, on rx, rz, p,
+crz, cp and rzz, and integer positions that compute, like `q[7 / 2 * 2]`.
 
 Measured at 20000 shots, with no program skipped by the oracle:
 
 | Corpus | Programs | Both raised | Worst TV / limit | Blocks checked | Not checked |
 |---|---|---|---|---|---|
-| Source | 500 | 57 | 0.482 | n/a | n/a |
-| `line:6`, level 0 | 200 | 17 | 0.400 | 1580 | 61 |
-| `heavy_hex:3`, level 2 | 200 | 19 | 0.341 | 1661 | 56 |
+| Source | 500 | 40 | 0.447 | n/a | n/a |
+| `line:6`, level 0 | 200 | 17 | 0.357 | 1690 | 69 |
+| `heavy_hex:3`, level 2 | 200 | 20 | 0.485 | 1770 | 64 |
 
-Those 900 programs, source and compiled, also came back identical through JSON, and
-60000 mutated documents went through the JSON loader with no crash and no QM-E631.
+Those 900 programs, source and compiled, also came back identical through JSON. The
+hostile documents total 129271: 69271 with one number of a document set in turn to
+INT_MAX, INT_MIN, -1, 2^53 or 2^63 (floats to 2^63, -2^63, 1e308 or 2^53 + 2), over 85
+documents, and 60000 random mutations, the circuit part included. Each went through
+load, sample, draw, convert and compile in Python, and through six tools of the MCP
+server on stdio. None ended the process. QM-E604 and QM-E631 came only from coefficients
+of 1e8 or more, the float limit above.
+
 Aer is a partial reference only: it ran `while_loop`, `store` and logic, comparison
 and bitwise expressions on registers, and failed on `expr.add` and on a free `Bool`.
 
@@ -333,13 +359,20 @@ The format wraps `qumo.circuit.v1`, which holds the arena.
 
 `x`, `y`, `i` and `f` of a node are left out when zero. A constant JSON cannot write
 is the string `"nan"`, `"inf"` or `"-inf"`, in a node and in an affine coefficient.
-Integers keep 64 bits.
+Integers keep 64 bits, and the JSON parser keeps every digit up to 2^64.
 
-`program_from_json` trusts nothing in the file. Every index is checked, because a bad
-one would be a crash inside a shot, and each node may read only what comes before it in
-its expression and is not skipped by a short-circuit. Blocks cover the arena in order, and
-a statement must hold the kind of value the interpreter reads from it. Anything wrong is
-QM-E587. The links between statements are not in the file: they are built again from
+`program_from_json` trusts nothing in the file. Every index is checked without adding,
+so a huge one cannot overflow its own bounds check, because a bad one would be a crash
+inside a shot. Each node may read only what comes before it in its expression and is not
+skipped by a short-circuit. Blocks cover the arena in order, and a statement must hold
+the kind of value the interpreter reads from it. A measure writes inside the declared
+clbits, and every symbol is an input or the slot of a variable.
+
+Sizes have to be justified by the document, so a short file cannot ask for a large
+allocation: `num_store` by its variables and three per loop, `num_qubits` and
+`num_clbits` by 4096 unused wires plus three per instruction, blocks times stores by
+2^26, and nesting by 256 levels. Anything wrong is QM-E587, including what the circuit
+part refuses. The links between statements are not in the file: they are built again from
 the statements, so a wrong nesting is QM-E583. A read before assignment is QM-E581, as
 from text.
 
@@ -349,7 +382,7 @@ from text.
 golden corpus did not move. On the second review's differential, 700 random flat loop
 programs are identical, and so are 1486 of 1500 random float-only programs: the other
 14 are a NaN that is now an error, or an error reworded. Of 956 repository files and
-edge cases, 902 are identical and the other 54 are what this section lists. `Before`
+edge cases, 903 are identical and the other 53 are what this section lists. `Before`
 is 11e15b5, and every row was run on both trees.
 
 **Typed declarations follow the classical table:**
@@ -399,7 +432,7 @@ an unrolled `uint k`, `rz(pi * 2.0 ** (-k))`, `q[n - k]` and `rz(a + b)` with `i
 | `angle[n] a = 1;` | 1 | QM-E580 |
 | `angle[8] t = pi/4; float f = t;`, `rz(sin(t))`, `float t = angle(0.3);` | the radians | QM-E580: no cast from angle to float |
 | `angle[8] t = pi/4; rz(t * 0.5) q[0];` | pi / 8 | QM-E580: an angle scales by a uint |
-| An integer position that an expression computes past 2^53 | rounded | QM-E580: write it as one literal |
+| An expression or a block nested past 256 levels | read up to a few thousand levels, and past them the process ended | QM-E505 |
 | `if (c[0] == 1) { qubit r; }` | accepted | QM-E504 |
 | `for int[8] i in [0:300] { x q[0]; }` | 301 passes | QM-E504; `load_any` takes it, and the variable wraps |
 | `for uint i in [2:-1:-1] { rz(i) q[0]; }` | ran with -1 | QM-E504; `load_any` takes it, and the variable wraps |
@@ -407,9 +440,32 @@ an unrolled `uint k`, `rz(pi * 2.0 ** (-k))`, `q[n - k]` and `rz(a + b)` with `i
 | An `if` body that writes a bit it tests, with an operation after the write | wrong answer | QM-E541 |
 | `int d; d = c;` with `c` measured again before the `switch` on `d` | wrong answer | QM-E541 |
 
+**Literal integer positions follow the table, as Qiskit does.** A gate argument does not:
+`rz(7/2*2)` is still 7.
+
+| Input | Before | Now |
+|---|---|---|
+| `h q[7/2*2];`, `h q[{7/2*2, 1}];` | q[7] | q[6] |
+| `h q[6/4*2];` | q[3] | q[2] |
+| `h q[1/2];` | QM-E530 | q[0] |
+| `h q[-7 % 3 + 2];` | q[4] | q[1] |
+| `h q[9007199254740993 - 9007199254740992];` | q[0] | q[1] |
+| `qubit[7/2*2] r;`, `bit[7/2*2] c;` | 7 | 6 |
+| `h q[0:7/2];` | QM-E530 | q[0:3] |
+| `for int i in [0:7/2*2] { h q[i]; }` | 8 passes | 7 |
+| `for int i in {7/2*2} { h q[i]; }` | q[7] | q[6] |
+| `for int i in [1:7/2:7] { h q[i]; }` | QM-E530 | step 3 |
+| `pow(7/2*2) @ x q[0];` | 7 x | 6 x |
+| `pow(5/2) @ x q[0];` | QM-E550 | 2 x, with QM-W055 |
+| `pow(1/2) @ x q[0];` | QM-E550 | no gate, with QM-W055 |
+| `ctrl(3/2) @ x q[0], q[1];` | QM-E530 | one control |
+| `int[7/2*2] x = 200;` | 200 | 8, in 6 bits |
+| `switch (7/2*2) { case 6 { } default { } }` | default | case 6 |
+| `switch (1) { case 3/2 { } }` | QM-E530 | case 1 |
+
 **Now accepted:** `bool b = 1 < 2;`, `bool b = true && false;`, `float t = 1 << 3;`,
-`float t = 2 ^ 3;`, `int n = "0101";`, `rz(int[8](k))`, and `c[0] == v && c[1] == 0` with a
-typed `v`, which gave QM-E500 or QM-E541.
+`float t = 2 ^ 3;`, `float t = 0 << 1100;`, `int n = "0101";`, `rz(int[8](k))`, and
+`c[0] == v && c[1] == 0` with a typed `v`, which gave QM-E500 or QM-E541.
 
 **Also changed:**
 
@@ -422,6 +478,18 @@ typed `v`, which gave QM-E500 or QM-E541.
   `choose_method` picks the state vector, and `t_count` counts it.
 * JSON numbers of 19 digits are exact integers, and an affine coefficient that overflowed
   is written as a string. It used to come back as 1.
+* `circuit_from_json` refuses `num_qubits` and `num_clbits` past 4096 plus three per
+  instruction, QM-E911, and a measure that grows `num_clbits` past the same limit. Such a
+  document could end the process in a summary or a tableau. A register of 5000 qubits
+  with a few gates no longer comes back from JSON; with a gate on each qubit it does.
+* `rz(1e20 % 7.0)` and `rz(mod(1e20, 7.0))` are 2, not -6144.
+* A NaN or infinite value is QM-E482 in `Circuit.bind`, `sample`, `evolve`,
+  `density_evolve` and the primitives. It used to run on as a NaN state.
+* Negative shots are QM-E913 in `sample` and the other samplers, where they ended the
+  process.
+* `exact_rz_sequence`, the `pi8` count of `PauliProgram.counts` and `estimate_resources`
+  apply the 2^22 quarter-turn limit too.
+* `qumo run` prints the range of an integer output as integers: `range 0 to 5`.
 * `qumo_statevector` and the other circuit tools answer QM-E585 for a `while`, where they
   used to answer QM-E504. `qumo_validate_qasm` calls it valid.
 * Some QM-E533 and QM-E522 messages are worded differently, under the same codes.
@@ -432,7 +500,8 @@ typed `v`, which gave QM-E500 or QM-E541.
 is 1, in both parsers, as a constant angle always was in QUMO. `qiskit.qasm3.loads`
 (Qiskit 2.6.1) gives `rz(1/2)` = 0 and `rz(7/2)` = 3, and refuses `%`. A gate argument
 that names a typed constant or a loop variable follows the classical table, so
-`const int a = 7; rz(a/2)` is 3.0 in both. QM-W055 points at the difference.
+`const int a = 7; rz(a/2)` is 3.0 in both. QM-W055 points at the difference. An integer
+position is not a gate argument: `q[7/2*2]` is q[6] in both.
 
 Float loop variables, the `angle` declaration of `input`, and the wider literal rule
 are in the table above. `expr.add` on `Uint(8)` and 300 is a `TypeError` in Qiskit
@@ -444,9 +513,10 @@ are in the table above. `expr.add` on `Uint(8)` and 300 is a `TypeError` in Qisk
 |---|---|
 | QM-E480 | a shot passed `max_iterations` |
 | QM-E481 | division by zero, or an integer power with a negative exponent, in a shot |
-| QM-E482 | a float reached an integer or a gate angle as NaN, infinite or out of range |
+| QM-E482 | a float reached an integer or a gate angle as NaN, infinite or out of range; an input value that is not finite; a for-loop range past 2^63 that it cannot read |
 | QM-E483 | a method that cannot run a program |
 | QM-E484 | an opcode a block cannot run |
+| QM-E505 | an expression or a block nested past 256 levels |
 | QM-E533 | a constant division by zero, a sized constant under a negative exponent, or a flat constant that is not finite |
 | QM-E580 | classical type error |
 | QM-E581 | a variable may be read before it is assigned |
@@ -461,6 +531,6 @@ are in the table above. `expr.add` on `Uint(8)` and 300 is a `TypeError` in Qisk
 | QM-E632 | no SWAP network restores a region's layout |
 | QM-E633 | a runtime angle on a gate with target bounds |
 | QM-W054 | a `while` body cannot change its condition |
-| QM-W055 | integer division loses a remainder where an angle is meant, or a literal-only argument keeps real division |
+| QM-W055 | integer division loses a remainder where an angle or an exponent is meant, or a literal-only argument keeps real arithmetic where the table would differ |
 
 Full text and fixes: [ERRORS.md](ERRORS.md).

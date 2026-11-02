@@ -400,6 +400,12 @@ def test_5_literal_positions_follow_the_classical_table() raises:
     assert_equal(d.ops[0].p0.value(), 44.0)
     d = parse_qasm("OPENQASM 3.0; include \"stdgates.inc\"; qubit[2] q; switch (7/2*2) { case 6 { x q[0]; } default { y q[1]; } }")
     assert_equal(d.ops[0].q0, 0)
+    # the table gives pow(1/2) no gate at all, and says what it dropped
+    var w = List[String]()
+    d = parse_qasm_with_warnings("OPENQASM 3.0; include \"stdgates.inc\"; qubit[1] q; pow(1/2) @ x q[0]; h q[0];", w)
+    assert_equal(len(d.ops), 1)
+    assert_equal(len(w), 1)
+    assert_true(w[0].startswith("QM-W055"), w[0])
     # a program reads them the same
     assert_equal(parse_qasm_program("OPENQASM 3.0; qubit[8] q; h q[7/2*2]; while (false) { }").body.ops[0].q0, 6)
     assert_equal(load_any("OPENQASM 3.0; qubit[8] q; h q[7/2*2];").body.ops[0].q0, 6)
