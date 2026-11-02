@@ -330,7 +330,7 @@ Those 900 programs, source and compiled, also came back identical through JSON. 
 hostile documents total 129271: 69271 with one number of a document set in turn to
 INT_MAX, INT_MIN, -1, 2^53 or 2^63 (floats to 2^63, -2^63, 1e308 or 2^53 + 2), over 85
 documents, and 60000 random mutations, the circuit part included. Each went through
-load, sample, draw, convert and compile in Python, and through six tools of the MCP
+load, sample, draw, convert and compile in Python, and through five tools of the MCP
 server on stdio. None ended the process. QM-E604 and QM-E631 came only from coefficients
 of 1e8 or more, the float limit above.
 
