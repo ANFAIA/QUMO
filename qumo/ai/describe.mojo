@@ -26,7 +26,7 @@ from qumo.ir.circuit import Circuit, Instruction
 from qumo.ir.param import Param
 from qumo.ir.kraus import KrausChannel
 from qumo.ir.classical import CF, CN, CNode, CT, CType, type_name
-from qumo.ir.program import CReg, CVar, FORR, Program, SK, Stmt, TapeBuilder, check_program
+from qumo.ir.program import CReg, CVar, FORR, MAX_NESTING, Program, SK, Stmt, TapeBuilder, check_program
 from qumo.ir.qasm import builtin_gate_table, format_param
 from qumo.ai.json import JsonWriter, JsonValue, JsonKind, parse_json
 from qumo.ai.diagnostics import error_catalog, error_ranges, range_index_of
@@ -727,19 +727,29 @@ def circuit_to_json(circuit: Circuit) -> String:
     return w.finish()
 
 
+comptime _UNUSED_WIRES = 1048576
+
+
 def _path_err(path: String, msg: String, hint: String) -> Error:
     return Error("QM-E911: " + path + ": " + msg + ". Hint: " + hint)
 
 
 def circuit_from_json(v: JsonValue) raises -> Circuit:
     """Inverse of `circuit_to_json` (format qumo.circuit.v1). Gate names may
-    be any QASM alias; params are numbers or {param, coeff, offset} objects."""
+    be any QASM alias; params are numbers or {param, coeff, offset} objects. A size
+    has to come with the instructions that use it: a short document cannot ask for
+    a large allocation further on."""
     if not v.is_object():
         raise _path_err("circuit", "expected an object", "pass the output of circuit_to_json / qumo_convert(to='json')")
     var nq = v.get_int("num_qubits", -1)
     if nq < 0:
         raise Error("QM-E910: circuit.num_qubits is required. Hint: e.g. {\"num_qubits\": 2, \"instructions\": [...]}.")
-    var c = Circuit(nq, v.get_int("num_clbits", 0), v.get_string("name", "circuit"))
+    var ncl = v.get_int("num_clbits", 0)
+    var listed = v.get("instructions")
+    var room = _UNUSED_WIRES + (3 * len(listed) if listed.is_array() else 0)
+    if nq > room or ncl < 0 or ncl > room:
+        raise _path_err("circuit", "num_qubits and num_clbits go past what its instructions use", "the sizes allow " + String(_UNUSED_WIRES) + " unused wires")
+    var c = Circuit(nq, ncl, v.get_string("name", "circuit"))
     c.global_phase = v.get_float("global_phase", 0.0)
     var ps = v.get("params")
     for i in range(len(ps)):
@@ -843,6 +853,8 @@ def circuit_from_json(v: JsonValue) raises -> Circuit:
                 pp.append(Param(0.0))
             c.add(k, qs[0] if a > 0 else -1, qs[1] if a > 1 else -1, qs[2] if a > 2 else -1, pp[0], pp[1], pp[2])
         _read_condition_json(c, g)
+    if c.num_clbits < 0 or c.num_clbits > room:  # a measure grows the register
+        raise _path_err("circuit", "an instruction writes past num_clbits", "keep clbit below " + String(room))
     c.validate()
     return c^
 
@@ -851,7 +863,7 @@ def circuit_from_json(v: JsonValue) raises -> Circuit:
 # Programs
 # ---------------------------------------------------------------------------
 comptime _PROGRAM_FORMAT = "qumo.program.v1"
-comptime _MAX_STORE = 1048576  # a table this large is a bad file, not a program
+comptime _MAX_ANALYSIS = 67108864  # blocks x stored values: the assignment analysis keeps a set per block
 
 
 def _node_names() -> List[String]:
@@ -1057,7 +1069,7 @@ def _check_expression(p: Program, lo: Int, root: Int) raises:
             if n.x < 0 or n.x >= p.body.num_params() or not fl:
                 raise _bad_program("nodes[" + String(pc) + "] reads a parameter outside the circuit")
         elif op == CN.BITS:
-            if n.x < 0 or n.y < 1 or n.y > 64 or n.x + n.y > p.num_clbits() or fl:
+            if n.x < 0 or n.y < 1 or n.y > 64 or n.x > p.num_clbits() - n.y or fl:
                 raise _bad_program("nodes[" + String(pc) + "] reads bits outside the circuit")
         elif op == CN.CAST:
             _operand(last, lo, n.x, pc)
@@ -1092,21 +1104,38 @@ def _check_expression(p: Program, lo: Int, root: Int) raises:
                 raise _bad_program("nodes[" + String(pc) + "] calls mod with one operand")
 
 
+def _check_arena(p: Program) raises:
+    """What the circuit part holds that only the program can judge: where measures
+    write, and that every symbol is an input or the slot of a variable."""
+    var known = List[Bool](length=p.body.num_params(), fill=False)
+    for i in p.user_params:
+        known[i] = True
+    for v in p.vars:
+        if v.slot >= 0:
+            known[v.slot] = True
+    for g in p.body.ops:
+        if g.kind == Op.MEASURE and (g.clbit < 0 or g.clbit >= p.num_clbits()):
+            raise _bad_program("a measure writes outside the circuit's clbits")
+        for j in range(op_num_params(g.kind)):
+            var q = g.param(j)
+            if q.is_symbolic() and not known[q.index]:
+                raise _bad_program("a gate reads a parameter that is neither an input nor a variable's slot")
+
+
 def _check_tables(p: Program) raises:
     """Every index in the classical tables of a program read from a file. Nothing
-    runs on trust in the file: a bad index here would be a crash in a shot."""
+    runs on trust in the file: a bad index here would be a crash in a shot. Bounds
+    compare without adding, because a huge index would overflow the sum."""
     var nv = p.num_store
-    if nv < 0 or nv > _MAX_STORE:
-        raise _bad_program("num_store is out of range")
     for i in p.user_params:
         if i < 0 or i >= p.body.num_params():
             raise _bad_program("user_params names a parameter outside the circuit")
     for r in p.cregs:
-        if r.first < 0 or r.width < 0 or r.first + r.width > p.num_clbits():
+        if r.first < 0 or r.width < 0 or r.first > p.num_clbits() - r.width:
             raise _bad_program("register '" + r.name + "' lies outside the circuit")
     for v in p.vars:
         if v.ty.tag == CT.BIT:
-            if v.store < 0 or v.store + v.ty.width > p.num_clbits():
+            if v.store < 0 or v.store > p.num_clbits() - v.ty.width:
                 raise _bad_program("variable '" + v.name + "' lies outside the circuit")
         elif v.store < 0 or v.store >= nv:
             raise _bad_program("variable '" + v.name + "' lies outside the store")
@@ -1146,17 +1175,22 @@ def _check_statement(p: Program, s: Stmt, at: Int) raises:
         if s.a != -1 and (s.a < 0 or s.b < s.a or s.b > len(p.case_vals)):
             raise _bad_program(what + " lies outside case_values")
     elif s.kind == SK.FOR:
-        if s.a < 0 or s.a >= len(p.vars) or s.b < 0 or s.b + FORR.SIZE > len(p.for_ranges):
+        if s.a < 0 or s.a >= len(p.vars) or s.b < 0 or s.b > len(p.for_ranges) - FORR.SIZE:
             raise _bad_program(what + " names a variable or range that does not exist")
         var tag = p.vars[s.a].ty.tag
         if tag != CT.INT and tag != CT.UINT:
             raise _bad_program(what + " counts in a variable that is not int or uint")
         var store = p.for_ranges[s.b + FORR.STORE]
-        if store < 0 or store + 3 > p.num_store:
+        if store < 0 or store > p.num_store - 3:
             raise _bad_program(what + " keeps its state outside the store")
+        var unsigned_ = p.for_ranges[s.b + FORR.UNSIGNED]
+        if unsigned_ != 0 and unsigned_ != 1:
+            raise _bad_program(what + " has an unsigned flag that is neither 0 nor 1")
         var set_at = p.for_ranges[s.b + FORR.SET]
+        if set_at < -1:
+            raise _bad_program(what + " has a set outside case_values")
         if set_at >= 0:
-            if set_at >= len(p.case_vals) or p.case_vals[set_at] < 0 or set_at + 1 + p.case_vals[set_at] > len(p.case_vals):
+            if set_at >= len(p.case_vals) or p.case_vals[set_at] < 0 or p.case_vals[set_at] > len(p.case_vals) - set_at - 1:
                 raise _bad_program(what + " has a set outside case_values")
         for f in range(FORR.START, FORR.STOP + 1):
             var e = p.for_ranges[s.b + f]
@@ -1171,10 +1205,24 @@ def program_from_json(v: JsonValue) raises -> Program:
     links are built again from the statements (QM-E583 when they do not nest)."""
     if not v.is_object():
         raise _bad_program("a program is an object")
-    if v.get_string("format", "") != _PROGRAM_FORMAT:
+    var format_ = v.get("format")
+    if not format_.is_string() or format_.as_string() != _PROGRAM_FORMAT:
         raise _bad_program("format must be '" + _PROGRAM_FORMAT + "'")
-    var p = Program(circuit_from_json(v.get("circuit")))
+    var arena: Circuit
+    var declared: Int
+    try:
+        arena = circuit_from_json(v.get("circuit"))
+        declared = v.get("circuit").get_int("num_clbits", 0)
+    except e:
+        raise _bad_program("its circuit does not load: " + String(e))
+    if arena.num_clbits != declared:  # a measure past the end grew them
+        raise _bad_program("a measure writes outside the circuit's clbits")
+    var p = Program(arena^)
+    # what the document can justify: one store per variable, three per FOR
+    var justified = len(_json_array(v, "variables")) + len(_json_ints(v, "for_ranges")) // FORR.SIZE * 3
     p.num_store = _json_int_or(v, "num_store", 0, "program")
+    if p.num_store < 0 or p.num_store > justified:
+        raise _bad_program("num_store is more than its variables and loops use")
     p.user_params = _json_ints(v, "user_params")
     var regs = _json_array(v, "registers")
     for i in range(len(regs)):
@@ -1212,10 +1260,12 @@ def program_from_json(v: JsonValue) raises -> Program:
     p.for_ranges = _json_ints(v, "for_ranges")
     p.case_vals = _json_ints(v, "case_values")
     _check_tables(p)
+    _check_arena(p)
     var kinds = _stmt_names()
     var stmts = _json_array(v, "statements")
     var t = TapeBuilder()
     var ops_end = 0  # blocks cover the arena in order, as every builder writes them
+    var blocks = 1
     for i in range(len(stmts)):
         var x = stmts.at(i)
         var what = "statements[" + String(i) + "]"
@@ -1228,6 +1278,10 @@ def program_from_json(v: JsonValue) raises -> Program:
             raise _bad_program(what + ": unknown kind '" + nm + "'")
         var s = Stmt(kind, _json_int_or(x, "a", -1, what), _json_int_or(x, "b", -1, what), -1, -1, _json_int_or(x, "line", 0, what))
         _check_statement(p, s, i)
+        if kind != SK.OPS and kind != SK.ASSIGN:
+            blocks += 1
+        if len(t.open) >= MAX_NESTING and (kind == SK.IF or kind == SK.WHILE or kind == SK.FOR or kind == SK.SWITCH):
+            raise _bad_program(what + " nests past " + String(MAX_NESTING) + " levels")
         if len(t.tape) > 0 and t.tape[len(t.tape) - 1].kind == SK.SWITCH and kind != SK.CASE and kind != SK.END:
             raise Error("QM-E583: a statement between a switch and its first case. Hint: every statement of a switch sits in a case.")
         if kind == SK.OPS:
@@ -1251,6 +1305,8 @@ def program_from_json(v: JsonValue) raises -> Program:
         raise Error("QM-E583: a region of the program is left open. Hint: every if, while, for and switch needs its end.")
     if ops_end != len(p.body.ops):
         raise _bad_program("the statements leave ops of the circuit out")
+    if p.num_store > _MAX_ANALYSIS // blocks:
+        raise _bad_program("its blocks and variables are too many to analyse")
     p.tape = t.tape.copy()
     _ = check_program(p)
     return p^

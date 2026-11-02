@@ -373,9 +373,9 @@ struct JsonValue(Copyable, Sized, Writable):
         var nd = self._node()
         if nd.is_int:
             return nd.ival
-        if nd.num == Float64(Int(nd.num)):
+        if abs(nd.num) < 9223372036854775808.0 and nd.num == Float64(Int(nd.num)):
             return Int(nd.num)
-        raise Error("QM-E911: expected a JSON integer, got " + String(nd.num) + ". Hint: drop the fractional part.")
+        raise Error("QM-E911: expected a JSON integer of at most 64 bits, got " + String(nd.num) + ". Hint: drop the fractional part, or use a smaller value.")
 
     def as_bool(self) raises -> Bool:
         if self.kind() != JsonKind.BOOL:

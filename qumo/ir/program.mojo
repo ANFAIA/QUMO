@@ -31,6 +31,9 @@ from qumo.ir.classical import (
 )
 
 
+comptime MAX_NESTING = 256  # blocks and expressions, in source and in a program file
+
+
 struct SK:
     """Statement kinds of the tape."""
 
@@ -624,18 +627,26 @@ def _raise_unassigned(p: Program, store: Int, line: Int) raises:
     raise Error("QM-E581: " + name + " may be read before it is assigned (line " + String(line) + "). Hint: assign it on every path, for example where it is declared.")
 
 
+def _reads_bits(first: List[Int], last: List[Int], lo: Int, hi: Int) -> Bool:
+    for i in range(len(first)):
+        if lo <= last[i] and first[i] <= hi:
+            return True
+    return False
+
+
 def _can_leave(p: Program, at: Int) -> Bool:
     """Can the body of the WHILE at tape index `at` end it? A `break` can, and so can
     anything that writes a variable or a bit its condition reads."""
     ref head = p.tape[at]
     var stores = List[Int]()
     _reads(p, head.a, stores)
-    var bits = List[Bool](length=p.num_clbits(), fill=False)
+    var first = List[Int]()  # the condition's bit fields, [first[i], last[i]]
+    var last = List[Int]()
     for i in range(p.expr_lo[head.a], p.expr_root[head.a] + 1):
         ref n = p.nodes[i]
         if n.op == CN.BITS:
-            for j in range(n.y):
-                bits[n.x + j] = True
+            first.append(n.x)
+            last.append(n.x + n.y - 1)
     for j in range(at + 1, head.end):
         ref s = p.tape[j]
         if s.kind == SK.BREAK and s.end == at:
@@ -643,14 +654,13 @@ def _can_leave(p: Program, at: Int) -> Bool:
         if s.kind == SK.OPS:
             for i in range(s.a, s.b):
                 ref g = p.body.ops[i]
-                if g.kind == Op.MEASURE and bits[g.clbit]:
+                if g.kind == Op.MEASURE and _reads_bits(first, last, g.clbit, g.clbit):
                     return True
         elif s.kind == SK.ASSIGN or s.kind == SK.FOR:
             ref v = p.vars[s.a]
             if v.ty.tag == CT.BIT:
-                for b in range(v.store, v.store + v.ty.width):
-                    if bits[b]:
-                        return True
+                if _reads_bits(first, last, v.store, v.store + v.ty.width - 1):
+                    return True
             else:
                 for r in stores:
                     if r == v.store:
