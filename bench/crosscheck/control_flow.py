@@ -1546,21 +1546,23 @@ class Gen:
             head = "for uint[2] %s in [2:5] {" % nm
             t = ("uint", 2)
         else:
-            # the ends of int64: the value after the last one does not exist
+            # the ends of int64: the value after the last one does not exist. The width
+            # is written so that i + i wraps: an unsized constant would pass 2^63 and
+            # become a uint, a type error wherever the body is, reached or not
             top = 9223372036854775807
             low = -9223372036854775808
             form = r.randrange(4)
             if form == 0:
-                head = "for int %s in [%d:%d] {" % (nm, top - r.randint(0, 2), top)
+                head = "for int[64] %s in [%d:%d] {" % (nm, top - r.randint(0, 2), top)
             elif form == 1:
-                head = "for int %s in [%d:-1:%d] {" % (nm, low + r.randint(0, 2), low)
+                head = "for int[64] %s in [%d:-1:%d] {" % (nm, low + r.randint(0, 2), low)
             elif form == 2:
-                head = "for int %s in [%d:%d:%d] {" % (nm, top - 7, r.randint(3, 9), top)
+                head = "for int[64] %s in [%d:%d:%d] {" % (nm, top - 7, r.randint(3, 9), top)
             else:
                 lim = "e%d" % self.loops
                 self.emit("int %s = %d;" % (lim, top))
                 self.emit("%s = %s - 0;" % (lim, lim))
-                head = "for int %s in [%d:%s] {" % (nm, top - 1, lim)
+                head = "for int[64] %s in [%d:%s] {" % (nm, top - 1, lim)
         self.emit(head)
 
         def body():
