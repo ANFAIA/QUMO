@@ -272,8 +272,8 @@ here, has its layouts and structure checked and none of its gates.
 
 Paired compile times on this machine, in the foreground, against commit a55628b, which
 checked only blocks without measurements: 120 small programs for `line:6` at level 2
-take 0.062 to 0.067 s against 0.067 to 0.070 s, and a 200-gate loop body on 7 qubits with
-3 measures, for `line:7` at level 2, takes 4.6 to 7.0 ms against 4.9 to 6.6 ms.
+take 0.063 to 0.068 s against 0.060 to 0.065 s, and a 200-gate loop body on 7 qubits with
+3 measures, for `line:7` at level 2, takes 4.3 to 6.1 ms against 4.1 to 4.7 ms.
 
 The first run of this check tripped on a valid compile, and it was right:
 `transpile` at level 2 was miscompiling `p(2^63 - 1)`. Merging sums the angles, and
