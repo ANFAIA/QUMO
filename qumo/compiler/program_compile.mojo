@@ -21,17 +21,22 @@ layout it inherits.
   * A runtime angle cannot be wrapped into a target's angle bounds: QM-E633.
 
 `verify_program` then checks the result on its own (QM-E631): the same statements
-in the same order, l_out(u) == l_in(v) on every edge of `cfg_of`, l_out = perm(l_in)
-in each block, and `dense_equiv` of each block against its source through the
-layouts, with runtime angles set to arbitrary values. A measurement enters that
-comparison by the principle of deferred measurement, as a CX onto a fresh ancilla,
-and the ancillas of the two sides are paired by (clbit, nth write to that clbit).
-Blocks with reset, noise or classical conditions, or above 10 qubits with their
-ancillas, are counted as not checked.
+in the same order and the same classical tables, a compiled block at the place of
+every reachable source block, l_out(u) == l_in(v) on every edge of `cfg_of`,
+l_out = perm(l_in) in each block, and each block against its source through the
+layouts, with runtime angles set to arbitrary values. That comparison runs both
+through the state-vector kernels on two seeded random states: they must come out
+equal up to one global phase. A measurement enters it by the principle of deferred
+measurement, as a CX onto a fresh ancilla, and the ancillas of the two sides are
+paired by (clbit, nth write to that clbit). A compiled block with a reset, noise or
+a conditional gate that its source lacks is QM-E631. Blocks whose source has them,
+and blocks over the budget in gates x 2^wires, are counted as not checked.
 
 `ProgramMetrics` reports `base + sum per_iteration_i * N_i`, with the costlier branch
 of each IF. There is no global depth: a single number would mislead.
 """
+
+from std.math import sqrt
 
 from qumo.ir.circuit import Circuit, Instruction
 from qumo.ir.gates import Op, op_arity, op_is_unitary, op_name
@@ -40,17 +45,27 @@ from qumo.ir.param import Param
 from qumo.ir.program import FORR, Program, SK, Stmt, TERM, TapeBuilder, cfg_of, check_program
 from qumo.compiler.ai_route import AIRouteOptions
 from qumo.compiler.basis import unroll_3q
-from qumo.compiler.blockalg import Perm, SubGraph, dense_equiv
+from qumo.compiler.blockalg import Perm, SubGraph
 from qumo.compiler.block_synth import synth_perm
-from qumo.compiler.common import shell_like
+from qumo.compiler.common import reduce_angle, shell_like
 from qumo.compiler.pass_manager import (
     PassId, PassManager, is_synth_pass, parse_pipeline, preset_pipeline, route_options, split_top_level, transpile,
 )
 from qumo.compiler.routing import RouteOptions, plan_route, route_circuit
 from qumo.compiler.target import Target
+from qumo.sim.rng import Rng
+from qumo.sim.runner import apply_instruction
+from qumo.sim.statevector import StateVector
 
 comptime _SUMMARY_LOOP_WEIGHT = 4  # a loop body counts this many times per nesting level
 comptime _SUMMARY_MAX_WEIGHT = 16
+# What verify_program spends on a block, in gates x 2^wires x 2 random states. Over
+# either budget a block is counted as unchecked. Wires are what the budget buys, up
+# to the memory of one state.
+comptime _CHECK_BLOCK_BUDGET = 1 << 27
+comptime _CHECK_TOTAL_BUDGET = 1 << 29
+comptime _CHECK_MAX_WIRES = 22
+comptime _CHECK_TOLERANCE = 1e-7
 
 
 @fieldwise_init
@@ -107,8 +122,8 @@ struct ProgramCompileResult(Copyable, Writable):
     var pipeline: String
     var target_name: String
     var restored_swaps: Int  # SWAPs added to return to region layouts
-    var blocks_checked: Int  # blocks proved equal to their source by dense_equiv
-    var blocks_unchecked: Int  # with a reset, noise or a conditional gate, or over 10 wires
+    var blocks_checked: Int  # blocks that equal their source on random states
+    var blocks_unchecked: Int  # with a reset, noise or a conditional gate, or over budget
 
     def __init__(out self, var program: Program):
         self.program = program^
@@ -347,9 +362,9 @@ struct _Compiler(Movable):
 
     def flush(mut self, line: Int) raises:
         """Finish the pending block: post-routing passes, then into the arena."""
-        if self.has_pending and len(self.pending.ops) > 0:
+        if self.has_pending:
             var out = self.pending.copy()
-            if self.post:
+            if self.post and len(self.pending.ops) > 0:
                 out = self.post.value().run(self.pending, self.target).circuit.copy()
             var qmap = List[Int](capacity=self.N)
             for i in range(self.N):
@@ -361,12 +376,12 @@ struct _Compiler(Movable):
             var moved = False
             for x in range(self.N):
                 moved = moved or self.block.perm[x] != x
-            if len(self.arena.ops) > before or moved:
+            if len(self.arena.ops) > before or moved or self.block.src_lo >= 0:
                 self.block.l_out = self.cur.copy()
                 self.blocks.append(self.block.copy())
                 if len(self.arena.ops) == before:
-                    # a source SWAP and a restore SWAP can cancel: no gates are left,
-                    # but the block still takes one layout to another
+                    # gates can cancel, and a source SWAP with a restore SWAP: the block
+                    # stays, for what it does to the layout and to tie it to its source
                     self.tb.tape.append(Stmt(SK.OPS, before, before, -1, -1, line))
         self.tb.flush(len(self.arena.ops), line)
         self.pending = shell_like(self.src.body, self.N)
@@ -522,31 +537,45 @@ def _skeleton(p: Program) -> List[Stmt]:
     return out^
 
 
+def _bound_angle(p: Param, values: List[Float64]) -> Param:
+    """A number, reduced as `reduce_large_angles` does: one side of the comparison was
+    compiled, and a huge angle the other way round would differ in its rounding."""
+    if p.is_symbolic():
+        return Param(reduce_angle(p.coeff * values[p.index] + reduce_angle(p.offset)))
+    return Param(reduce_angle(p.offset))
+
+
 def _bound_ops(ops: List[Instruction], values: List[Float64]) -> List[Instruction]:
     var out = List[Instruction](capacity=len(ops))
     for g in ops:
         var h = g
-        if g.p0.is_symbolic():
-            h.p0 = Param(g.p0.resolve(values))
-        if g.p1.is_symbolic():
-            h.p1 = Param(g.p1.resolve(values))
-        if g.p2.is_symbolic():
-            h.p2 = Param(g.p2.resolve(values))
+        h.p0 = _bound_angle(g.p0, values)
+        h.p1 = _bound_angle(g.p1, values)
+        h.p2 = _bound_angle(g.p2, values)
         if g.kind != Op.BARRIER and g.kind != Op.TICK:
             out.append(h)
     return out^
 
 
-def _checkable(c: Circuit, lo: Int, hi: Int) -> Bool:
-    """Only unitary gates and plain measurements. Pairing a reset or a noise channel
-    across a reordering could raise false alarms, and a conditional gate is not one
-    unitary."""
+comptime _HAS_RESET = 1
+comptime _HAS_NOISE = 2
+comptime _HAS_CONDITION = 4
+
+
+def _block_kinds(c: Circuit, lo: Int, hi: Int) -> Int:
+    """What keeps a block from being one unitary plus measurements. Pairing a reset or
+    a noise channel across a reordering could raise false alarms, and a conditional
+    gate is not one unitary."""
+    var kinds = 0
     for i in range(lo, hi):
         ref g = c.ops[i]
-        var plain = op_is_unitary(g.kind) or g.kind == Op.MEASURE or g.kind == Op.BARRIER or g.kind == Op.TICK
-        if g.cond >= 0 or not plain:
-            return False
-    return True
+        if g.cond >= 0:
+            kinds |= _HAS_CONDITION
+        if g.kind == Op.RESET:
+            kinds |= _HAS_RESET
+        elif not op_is_unitary(g.kind) and g.kind != Op.MEASURE and g.kind != Op.BARRIER and g.kind != Op.TICK:
+            kinds |= _HAS_NOISE
+    return kinds
 
 
 def _touch(g: Instruction, mut index: List[Int], mut count: Int):
@@ -583,22 +612,68 @@ def _deferred(g: Instruction, N: Int, mut keys: List[Int], mut writes: List[Int]
     return Instruction.make(Op.CX, g.q0, N + len(keys) - 1)
 
 
-def _dense_form(ops: List[Instruction], index: List[Int], count: Int, values: List[Float64]) raises -> List[Instruction]:
-    """Relabelled to 0..count-1, bound, and with 3-qubit gates unrolled, which is
-    what `dense_equiv` takes; unrolling is exact up to the phase it ignores."""
-    var c = Circuit(count)
+def _wires(ops: List[Instruction], index: List[Int], values: List[Float64]) raises -> List[Instruction]:
+    """Relabelled to wires 0..count-1, and bound."""
+    var out = List[Instruction](capacity=len(ops))
     for g in _bound_ops(ops, values):
-        c.ops.append(_relabel(g, index))
-    _ = unroll_3q(c)
-    return c.ops.copy()
+        out.append(_relabel(g, index))
+    return out^
 
 
-def _check_block(src: Program, built: Program, b: ProgramBlock, lo: Int, hi: Int, values: List[Float64]) raises -> Bool:
-    """dense_equiv of a compiled block against source + layout change. False when
-    the block is outside what that can check."""
-    if not _checkable(built.body, lo, hi):
-        return False
-    if b.src_lo >= 0 and not _checkable(src.body, b.src_lo, b.src_hi):
+def _random_state(count: Int, mut rng: Rng) -> StateVector:
+    var sv = StateVector(count)
+    var norm = 0.0
+    for i in range(sv.size()):
+        sv.re[i] = rng.normal()
+        sv.im[i] = rng.normal()
+        norm += sv.re[i] * sv.re[i] + sv.im[i] * sv.im[i]
+    norm = sqrt(norm)
+    for i in range(sv.size()):
+        sv.re[i] /= norm
+        sv.im[i] /= norm
+    return sv^
+
+
+def _same_on_random_states(want: List[Instruction], got: List[Instruction], count: Int, seed: UInt64) -> Bool:
+    """Do two gate lists act alike on two random states, up to one global phase? They
+    differ on a random state with probability 1 if they differ at all. Each state
+    must come out as z times the other side, with the same unit complex z, which is
+    both overlaps equal; distance rather than overlap, so that a small angle shows."""
+    var rng = Rng(seed)
+    var none = List[Float64]()
+    var have = False
+    var zr = 0.0
+    var zi = 0.0
+    for _ in range(2):
+        var a = _random_state(count, rng)
+        var b = a.copy()
+        for g in want:
+            apply_instruction(a, g, none)
+        for g in got:
+            apply_instruction(b, g, none)
+        if not have:
+            for i in range(a.size()):
+                zr += a.re[i] * b.re[i] + a.im[i] * b.im[i]
+                zi += a.re[i] * b.im[i] - a.im[i] * b.re[i]
+            have = True
+        var distance = 0.0
+        for i in range(a.size()):
+            var dr = zr * a.re[i] - zi * a.im[i] - b.re[i]
+            var di = zr * a.im[i] + zi * a.re[i] - b.im[i]
+            distance += dr * dr + di * di
+        if distance > _CHECK_TOLERANCE * _CHECK_TOLERANCE:
+            return False
+    return True
+
+
+def _check_block(src: Program, built: Program, b: ProgramBlock, lo: Int, hi: Int, values: List[Float64], mut spent: Int, seed: UInt64) raises -> Bool:
+    """A compiled block against its source plus the layout change, on random states.
+    False when the block is outside what that can check, or over budget."""
+    var made = _block_kinds(built.body, lo, hi)
+    var given = _block_kinds(src.body, b.src_lo, b.src_hi) if b.src_lo >= 0 else 0
+    if (made & ~given) != 0:
+        raise Error("QM-E631: compiled block at op " + String(lo) + " holds a reset, noise or a conditional gate that its source does not. Hint: report this program; run with a lower optimization level meanwhile.")
+    if made != 0 or given != 0:
         return False
     var N = built.num_qubits()
     var keys = List[Int]()
@@ -639,19 +714,92 @@ def _check_block(src: Program, built: Program, b: ProgramBlock, lo: Int, hi: Int
         _touch(g, index, count)
     for g in got:
         _touch(g, index, count)
-    if count > 10:
-        return False
     if count == 0:
         return True
-    var phase = 0.0
-    if not dense_equiv(_dense_form(expected, index, count, values), _dense_form(got, index, count, values), count, phase, 1e-7):
+    if count > _CHECK_MAX_WIRES:
+        return False
+    var cost = (len(expected) + len(got)) * (2 << count)
+    if cost > _CHECK_BLOCK_BUDGET or spent + cost > _CHECK_TOTAL_BUDGET:
+        return False
+    spent += cost
+    if not _same_on_random_states(_wires(expected, index, values), _wires(got, index, values), count, seed):
         raise Error("QM-E631: compiled block at op " + String(lo) + " does not match its source. Hint: report this program; run with a lower optimization level meanwhile.")
     return True
 
 
+def _reachable_ops(p: Program) -> List[Bool]:
+    """By tape index: can a shot reach this statement?"""
+    var cfg = cfg_of(p)
+    var seen = List[Bool](length=len(cfg.blocks), fill=False)
+    var out = List[Bool](length=len(p.tape), fill=False)
+    var work: List[Int] = [0]
+    seen[0] = True
+    while len(work) > 0:
+        var u = work.pop()
+        ref bb = cfg.blocks[u]
+        for i in range(bb.lo, bb.hi):
+            out[i] = True
+        var succ = List[Int]()
+        if bb.term == TERM.JMP or bb.term == TERM.BR:
+            succ.append(bb.t0)
+        if bb.term == TERM.BR:
+            succ.append(bb.t1)
+        if bb.term == TERM.SWITCH:
+            for j in range(bb.t0, bb.t1 + 1):
+                succ.append(cfg.sw_bb[j])
+        for v in succ:
+            if not seen[v]:
+                seen[v] = True
+                work.append(v)
+    return out^
+
+
+def _check_blocks_cover_source(src: Program, built: Program, blocks: List[ProgramBlock]) raises:
+    """Walk both tapes: the skeletons are equal, so between two statements each holds
+    at most one OPS, and every source block a shot can reach has its compiled block at
+    that position, with the same source range. Nothing else may claim a source."""
+    var reach = _reachable_ops(src)
+    var j = 0
+    var k = 0
+    for i in range(len(src.tape)):
+        ref s = src.tape[i]
+        var here = j < len(built.tape) and built.tape[j].kind == SK.OPS
+        if s.kind == SK.OPS:
+            if here:
+                if k >= len(blocks) or blocks[k].src_lo != s.a or blocks[k].src_hi != s.b:
+                    raise Error("QM-E631: the compiled block at tape " + String(j) + " does not come from the source block at tape " + String(i) + ". Hint: report this program.")
+                j += 1
+                k += 1
+            elif reach[i]:
+                raise Error("QM-E631: the source block at tape " + String(i) + " has no compiled block. Hint: report this program.")
+            continue
+        if here:
+            if k >= len(blocks) or blocks[k].src_lo >= 0:
+                raise Error("QM-E631: the compiled block at tape " + String(j) + " claims a source it does not sit at. Hint: report this program.")
+            j += 1
+            k += 1
+        j += 1
+    if j < len(built.tape):
+        if built.tape[j].kind != SK.OPS or k >= len(blocks) or blocks[k].src_lo >= 0 or j + 1 != len(built.tape):
+            raise Error("QM-E631: the compiled program ends with statements its source does not have. Hint: report this program.")
+
+
+def _same_tables(a: Program, other: Program) -> Bool:
+    """Classical tables pass through compiling untouched."""
+    if len(a.nodes) != len(other.nodes) or a.expr_lo != other.expr_lo or a.expr_root != other.expr_root or a.for_ranges != other.for_ranges or a.case_vals != other.case_vals:
+        return False
+    for i in range(len(a.nodes)):
+        ref u = a.nodes[i]
+        ref v = other.nodes[i]
+        if u.op != v.op or u.x != v.x or u.y != v.y or u.i != v.i or u.ty != v.ty or String(u.f) != String(v.f):
+            return False
+    return True
+
+
 def verify_program(src: Program, res: ProgramCompileResult) raises -> Tuple[Int, Int]:
-    """QM-E631 unless the compiled program keeps the source's skeleton and every
-    edge joins equal layouts. Returns blocks checked and not checked by dense_equiv."""
+    """QM-E631 unless the compiled program keeps the source's skeleton and classical
+    tables, every reachable source block has its compiled block, and every edge joins
+    equal layouts. Returns the blocks checked and not checked on random states."""
     ref out = res.program
     ref blocks = res.blocks
     var a = _skeleton(src)
@@ -660,8 +808,9 @@ def verify_program(src: Program, res: ProgramCompileResult) raises -> Tuple[Int,
     if same:
         for i in range(len(a)):
             same = same and a[i].kind == b[i].kind and a[i].a == b[i].a and a[i].b == b[i].b and a[i].end == b[i].end
-    if not same:
+    if not same or not _same_tables(src, out):
         raise Error("QM-E631: compiled program has a different control structure. Hint: report this program.")
+    _check_blocks_cover_source(src, out, blocks)
     var cfg = cfg_of(out)
     var n = src.num_qubits()
     var nb = len(cfg.blocks)
@@ -718,11 +867,12 @@ def verify_program(src: Program, res: ProgramCompileResult) raises -> Tuple[Int,
         values.append(0.37 + 0.11 * Float64(i))
     var checked = 0
     var unchecked = 0
+    var spent = 0
     k = 0
     for s in out.tape:
         if s.kind != SK.OPS:
             continue
-        if _check_block(src, out, blocks[k], s.a, s.b, values):
+        if _check_block(src, out, blocks[k], s.a, s.b, values, spent, UInt64(k + 1)):
             checked += 1
         else:
             unchecked += 1
