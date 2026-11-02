@@ -851,7 +851,7 @@ def circuit_from_json(v: JsonValue) raises -> Circuit:
 # Programs
 # ---------------------------------------------------------------------------
 comptime _PROGRAM_FORMAT = "qumo.program.v1"
-comptime _MAX_STORE = 16777216  # a table this large is a bad file, not a program
+comptime _MAX_STORE = 1048576  # a table this large is a bad file, not a program
 
 
 def _node_names() -> List[String]:
@@ -1020,22 +1020,35 @@ def _is_float(t: CType) -> Bool:
     return t.tag == CT.FLOAT
 
 
-def _check_operand(p: Program, pc: Int, at: Int, lo: Int, float_: Bool) raises:
-    """Node `at` is an operand of node `pc` in an expression starting at `lo`."""
-    if at < lo or at >= pc:
-        raise _bad_program("nodes[" + String(pc) + "] has an operand outside its expression")
+def _operand(last: List[Int], lo: Int, at: Int, pc: Int) raises:
+    if at < lo or at >= pc or last[at - lo] < pc:
+        raise _bad_program("nodes[" + String(pc) + "] has an operand it cannot read")
+
+
+def _typed(p: Program, last: List[Int], lo: Int, at: Int, pc: Int, float_: Bool) raises:
+    _operand(last, lo, at, pc)
     if _is_float(p.nodes[at].ty) != float_:
         raise _bad_program("nodes[" + String(pc) + "] has an operand of the wrong kind")
 
 
 def _check_expression(p: Program, lo: Int, root: Int) raises:
-    """What `eval_nodes` takes on trust: operands before their node, in tables."""
-    var pc = lo
-    while pc <= root:
+    """What `eval_nodes` takes on trust: each operand comes before its node, in this
+    expression, of the kind the node reads. A short-circuit jumps over its right
+    side, so a node inside one can be read only up to its SC_END, and the jump itself
+    has no value to read. `last[i]` is the last node that may read node lo + i."""
+    var last = List[Int](capacity=root - lo + 1)
+    var open = List[Int]()  # SC_END of each open short-circuit, innermost last
+    for pc in range(lo, root + 1):
         ref n = p.nodes[pc]
         var op = n.op
         var fl = _is_float(n.ty)
-        if op == CN.CONST:
+        if op == CN.SC_END:
+            if len(open) == 0 or open[len(open) - 1] != pc:
+                raise _bad_program("nodes[" + String(pc) + "] ends a short-circuit that nothing started")
+            _typed(p, last, lo, n.x, pc, False)
+            _ = open.pop()
+        last.append(open[len(open) - 1] if len(open) > 0 else root)
+        if op == CN.CONST or op == CN.SC_END:
             pass
         elif op == CN.VAR:
             if n.x < 0 or n.x >= p.num_store:
@@ -1047,36 +1060,36 @@ def _check_expression(p: Program, lo: Int, root: Int) raises:
             if n.x < 0 or n.y < 1 or n.y > 64 or n.x + n.y > p.num_clbits() or fl:
                 raise _bad_program("nodes[" + String(pc) + "] reads bits outside the circuit")
         elif op == CN.CAST:
-            if n.x < lo or n.x >= pc:
-                raise _bad_program("nodes[" + String(pc) + "] has an operand outside its expression")
+            _operand(last, lo, n.x, pc)
         elif op == CN.NEG:
-            _check_operand(p, pc, n.x, lo, fl)
-        elif op == CN.LNOT or op == CN.BNOT or op == CN.SC_END:
-            _check_operand(p, pc, n.x, lo, False)
+            _typed(p, last, lo, n.x, pc, fl)
+        elif op == CN.LNOT or op == CN.BNOT:
+            _typed(p, last, lo, n.x, pc, False)
         elif op == CN.ADD or op == CN.SUB or op == CN.MUL or op == CN.DIV or op == CN.MOD or op == CN.POW:
-            _check_operand(p, pc, n.x, lo, fl)
-            _check_operand(p, pc, n.y, lo, fl)
+            _typed(p, last, lo, n.x, pc, fl)
+            _typed(p, last, lo, n.y, pc, fl)
         elif op == CN.SHL or op == CN.SHR or op == CN.AND or op == CN.OR or op == CN.XOR:
-            _check_operand(p, pc, n.x, lo, False)
-            _check_operand(p, pc, n.y, lo, False)
+            _typed(p, last, lo, n.x, pc, False)
+            _typed(p, last, lo, n.y, pc, False)
         elif op >= CN.EQ and op <= CN.GE:
-            if n.x < lo or n.x >= pc:
-                raise _bad_program("nodes[" + String(pc) + "] has an operand outside its expression")
-            _check_operand(p, pc, n.y, lo, _is_float(p.nodes[n.x].ty))
+            _operand(last, lo, n.x, pc)
+            _typed(p, last, lo, n.y, pc, _is_float(p.nodes[n.x].ty))
         elif op == CN.SC_AND or op == CN.SC_OR:
-            _check_operand(p, pc, n.x, lo, False)
-            if n.y <= pc or n.y > root or p.nodes[n.y].op != CN.SC_END:
+            _typed(p, last, lo, n.x, pc, False)
+            var stop = open[len(open) - 1] if len(open) > 0 else root + 1
+            if n.y <= pc or n.y >= stop or p.nodes[n.y].op != CN.SC_END:
                 raise _bad_program("nodes[" + String(pc) + "] skips to a node that does not end it")
+            last[pc - lo] = -1
+            open.append(n.y)
         elif op == CN.FN:
             if n.i < 0 or n.i > CF.POPCOUNT:
                 raise _bad_program("nodes[" + String(pc) + "] calls an unknown function")
             var on_ints = n.i == CF.POPCOUNT or (n.i == CF.ABS and not fl)
-            _check_operand(p, pc, n.x, lo, not on_ints)
+            _typed(p, last, lo, n.x, pc, not on_ints)
             if n.y != -1:
-                _check_operand(p, pc, n.y, lo, not on_ints)
+                _typed(p, last, lo, n.y, pc, not on_ints)
             elif n.i == CF.MOD:
                 raise _bad_program("nodes[" + String(pc) + "] calls mod with one operand")
-        pc += 1
 
 
 def _check_tables(p: Program) raises:
@@ -1097,8 +1110,8 @@ def _check_tables(p: Program) raises:
                 raise _bad_program("variable '" + v.name + "' lies outside the circuit")
         elif v.store < 0 or v.store >= nv:
             raise _bad_program("variable '" + v.name + "' lies outside the store")
-        if v.slot < -1 or v.slot >= p.body.num_params():
-            raise _bad_program("variable '" + v.name + "' has a slot outside the circuit")
+        if v.slot < -1 or v.slot >= p.body.num_params() or (v.slot >= 0 and v.ty.tag == CT.BIT):
+            raise _bad_program("variable '" + v.name + "' has a slot it cannot hold")
     if len(p.expr_lo) != len(p.expr_root):
         raise _bad_program("expressions must be [lo, root] pairs")
     for e in range(len(p.expr_lo)):
@@ -1107,6 +1120,10 @@ def _check_tables(p: Program) raises:
         if lo < 0 or root < lo or root >= len(p.nodes):
             raise _bad_program("expressions[" + String(e) + "] lies outside the nodes")
         _check_expression(p, lo, root)
+
+
+def _is_float_expr(p: Program, e: Int) -> Bool:
+    return _is_float(p.nodes[p.expr_root[e]].ty)
 
 
 def _check_statement(p: Program, s: Stmt, at: Int) raises:
@@ -1118,15 +1135,22 @@ def _check_statement(p: Program, s: Stmt, at: Int) raises:
     elif s.kind == SK.ASSIGN:
         if s.a < 0 or s.a >= len(p.vars) or s.b < 0 or s.b >= ne:
             raise _bad_program(what + " names a variable or expression that does not exist")
+        if _is_float(p.vars[s.a].ty) != _is_float_expr(p, s.b):
+            raise _bad_program(what + " assigns a value of the wrong kind")
     elif s.kind == SK.IF or s.kind == SK.WHILE or s.kind == SK.SWITCH:
         if s.a < 0 or s.a >= ne:
             raise _bad_program(what + " names an expression that does not exist")
+        if _is_float_expr(p, s.a):
+            raise _bad_program(what + " tests a float")
     elif s.kind == SK.CASE:
         if s.a != -1 and (s.a < 0 or s.b < s.a or s.b > len(p.case_vals)):
             raise _bad_program(what + " lies outside case_values")
     elif s.kind == SK.FOR:
         if s.a < 0 or s.a >= len(p.vars) or s.b < 0 or s.b + FORR.SIZE > len(p.for_ranges):
             raise _bad_program(what + " names a variable or range that does not exist")
+        var tag = p.vars[s.a].ty.tag
+        if tag != CT.INT and tag != CT.UINT:
+            raise _bad_program(what + " counts in a variable that is not int or uint")
         var store = p.for_ranges[s.b + FORR.STORE]
         if store < 0 or store + 3 > p.num_store:
             raise _bad_program(what + " keeps its state outside the store")
@@ -1134,11 +1158,12 @@ def _check_statement(p: Program, s: Stmt, at: Int) raises:
         if set_at >= 0:
             if set_at >= len(p.case_vals) or p.case_vals[set_at] < 0 or set_at + 1 + p.case_vals[set_at] > len(p.case_vals):
                 raise _bad_program(what + " has a set outside case_values")
-        else:
-            for f in range(FORR.START, FORR.STOP + 1):
-                var e = p.for_ranges[s.b + f]
-                if e < 0 or e >= ne:
-                    raise _bad_program(what + " names an expression that does not exist")
+        for f in range(FORR.START, FORR.STOP + 1):
+            var e = p.for_ranges[s.b + f]
+            if e == -1 and set_at >= 0:
+                continue  # a set has no range
+            if e < 0 or e >= ne or _is_float_expr(p, e):
+                raise _bad_program(what + " has a bound that is not an integer expression")
 
 
 def program_from_json(v: JsonValue) raises -> Program:
@@ -1190,6 +1215,7 @@ def program_from_json(v: JsonValue) raises -> Program:
     var kinds = _stmt_names()
     var stmts = _json_array(v, "statements")
     var t = TapeBuilder()
+    var ops_end = 0  # blocks cover the arena in order, as every builder writes them
     for i in range(len(stmts)):
         var x = stmts.at(i)
         var what = "statements[" + String(i) + "]"
@@ -1202,10 +1228,17 @@ def program_from_json(v: JsonValue) raises -> Program:
             raise _bad_program(what + ": unknown kind '" + nm + "'")
         var s = Stmt(kind, _json_int_or(x, "a", -1, what), _json_int_or(x, "b", -1, what), -1, -1, _json_int_or(x, "line", 0, what))
         _check_statement(p, s, i)
-        if kind == SK.OPS or kind == SK.ASSIGN:
+        if len(t.tape) > 0 and t.tape[len(t.tape) - 1].kind == SK.SWITCH and kind != SK.CASE and kind != SK.END:
+            raise Error("QM-E583: a statement between a switch and its first case. Hint: every statement of a switch sits in a case.")
+        if kind == SK.OPS:
+            if s.a != ops_end or (len(t.tape) > 0 and t.tape[len(t.tape) - 1].kind == SK.OPS):
+                raise _bad_program(what + " breaks the order of the blocks")
+            ops_end = s.b
+            t.tape.append(s)
+        elif kind == SK.ASSIGN:
             t.tape.append(s)
         elif kind == SK.IF or kind == SK.WHILE or kind == SK.FOR or kind == SK.SWITCH:
-            t.begin(kind, s.a, s.b, 0, s.line)
+            t.begin(kind, s.a, s.b if kind == SK.FOR else -1, 0, s.line)
         elif kind == SK.ELSE:
             t.else_(0, s.line)
         elif kind == SK.CASE:
@@ -1216,6 +1249,8 @@ def program_from_json(v: JsonValue) raises -> Program:
             t.end(0, s.line)
     if len(t.open) != 0:
         raise Error("QM-E583: a region of the program is left open. Hint: every if, while, for and switch needs its end.")
+    if ops_end != len(p.body.ops):
+        raise _bad_program("the statements leave ops of the circuit out")
     p.tape = t.tape.copy()
     _ = check_program(p)
     return p^

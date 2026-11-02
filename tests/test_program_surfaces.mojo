@@ -144,6 +144,18 @@ def test_json_keeps_a_coefficient_that_overflowed() raises:
     assert_true(b.startswith("QM-E482"), b)
 
 
+def _float_expression(text: String) raises -> Int:
+    """Index of an expression of float type."""
+    var v = parse_json(text)
+    var nodes = v.get("nodes")
+    var exprs = v.get("expressions")
+    for e in range(len(exprs)):
+        var root = exprs.at(e).at(1).as_int()
+        if nodes.at(root).get("type").as_string().startswith("float"):
+            return e
+    raise Error("no float expression")
+
+
 def _reject(text: String, code: String) raises:
     var message = String()
     try:
@@ -175,11 +187,26 @@ def test_json_refuses_what_a_shot_would_trust() raises:
     _reject(good.replace("\"variables\":[", "\"variables\":[{\"name\":\"z\",\"type\":\"int\",\"store\":0,\"slot\":99},"), "QM-E587")
     _reject(good.replace("\"registers\":[", "\"registers\":[{\"name\":\"z\",\"first\":0,\"width\":99},"), "QM-E587")
     _reject(good.replace("\"user_params\":[", "\"user_params\":[99"), "QM-E587")
+    # blocks cover the arena in order: the compiler and its verifier rely on it
+    var two = program_to_json(parse_qasm_program(H + "h q[0]; c[0] = measure q[0]; if (c[0]) { x q[0]; } h q[1];"))
+    assert_true(two.find("{\"kind\":\"ops\",\"a\":0,\"b\":2") > 0, two)
+    _reject(two.replace("{\"kind\":\"ops\",\"a\":0,\"b\":2", "{\"kind\":\"ops\",\"a\":0,\"b\":1,\"line\":1},{\"kind\":\"ops\",\"a\":1,\"b\":2"), "QM-E587")
+    _reject(two.replace("{\"kind\":\"ops\",\"a\":0,\"b\":2", "{\"kind\":\"ops\",\"a\":1,\"b\":2"), "QM-E587")
+    _reject(two.replace("\"statements\":[{\"kind\":\"ops\",\"a\":0,\"b\":2,\"line\":1},", "\"statements\":["), "QM-E587")
+    # a statement must also hold what the interpreter reads from it
+    var both = program_to_json(parse_qasm_program(H + "output int r = 0; float x = 0.5; x = x; for int i in [0:1] { r += i; }"))
+    _ = program_from_json(parse_json(both))
+    _reject(both.replace("\"statements\":[", "\"statements\":[{\"kind\":\"assign\",\"a\":0,\"b\":" + String(_float_expression(both)) + "},"), "QM-E587")
+    _reject(both.replace("\"statements\":[", "\"statements\":[{\"kind\":\"if\",\"a\":" + String(_float_expression(both)) + "},{\"kind\":\"end\"},"), "QM-E587")
+    _reject(both.replace("\"type\":\"int\",\"store\":", "\"type\":\"float\",\"store\":"), "QM-E587")
+    _reject(good.replace("\"variables\":[", "\"variables\":[{\"name\":\"z\",\"type\":\"bit\",\"store\":0,\"slot\":1},"), "QM-E587")
     # the links are rebuilt, so a nesting that is wrong cannot be smuggled in
     _reject(good.replace("\"statements\":[", "\"statements\":[{\"kind\":\"end\"},"), "QM-E583")
     _reject(good.replace("\"statements\":[", "\"statements\":[{\"kind\":\"else\"},"), "QM-E583")
     _reject(good.replace("\"statements\":[", "\"statements\":[{\"kind\":\"break\"},"), "QM-E583")
     _reject(good.replace("\"statements\":[", "\"statements\":[{\"kind\":\"if\",\"a\":0},"), "QM-E583")
+    var sw = program_to_json(parse_qasm_program(H + "output int r = 0; int s = 1; s = s; switch (s) { case 1 { r = 1; } default { r = 2; } }"))
+    _reject(sw.replace("{\"kind\":\"case\"", "{\"kind\":\"ops\",\"a\":0,\"b\":0},{\"kind\":\"case\""), "QM-E583")
 
 
 def test_json_checks_nodes_inside_expressions() raises:
@@ -193,6 +220,50 @@ def test_json_checks_nodes_inside_expressions() raises:
     var cut = comma if comma >= 0 and comma < end_at else end_at
     var forged = String(good[byte=0:x_at]) + "\"x\":999999" + String(good[byte=cut:])
     _reject(forged, "QM-E587")
+
+
+def test_json_keeps_short_circuits_whole() raises:
+    # the fuzzer found these: a stray SC_END walked off the start of the nodes, a jump
+    # read as a value made a cycle that overflowed the stack in to_qasm, and a set
+    # loop kept unchecked bounds
+    var good = program_to_json(parse_qasm_program(H + "output bool r; int a = 1; a = a; r = a > 0 || a < 9;"))
+    var v = parse_json(good)
+    var nodes = v.get("nodes")
+    var end_at = -1
+    var jump_at = -1
+    for i in range(len(nodes)):
+        if nodes.at(i).get("op").as_string() == "sc_end":
+            end_at = i
+        if nodes.at(i).get("op").as_string() == "sc_or":
+            jump_at = i
+    assert_true(end_at > jump_at and jump_at >= 0)
+    _reject(good.replace("\"sc_or\"", "\"neg\""), "QM-E587")
+    _reject(good.replace("\"sc_end\"", "\"neg\""), "QM-E587")
+    # the right operand reads the jump
+    var cycle = String()
+    for i in range(len(nodes)):
+        var text = nodes.at(i).to_json()
+        if i == end_at:
+            text = "{\"op\":\"sc_end\",\"type\":\"bool\",\"x\":" + String(jump_at) + "}"
+        cycle += ("," if i > 0 else "") + text
+    var start = good.find("\"nodes\":[")
+    var stop = good.find("],\"expressions\"")
+    _reject(String(good[byte=0:start]) + "\"nodes\":[" + cycle + String(good[byte=stop:]), "QM-E587")
+    var loop = program_to_json(parse_qasm_program(H + "output int r = 0; int n = 2; n = n; for int i in {1, 2} { if (r > n) { break; } r += i; }"))
+    assert_true(loop.find("\"for_ranges\":[-1,-1,-1,") > 0, loop)
+    _reject(loop.replace("\"for_ranges\":[-1,-1,-1,", "\"for_ranges\":[4611686018427387904,-1,-1,"), "QM-E587")
+
+
+def test_an_expression_too_deep_to_write_is_refused() raises:
+    var src = String(H + "output int r; int x = 1; x = x; r = x")
+    for _ in range(17000):
+        src += " + x"
+    var message = String()
+    try:
+        _ = to_qasm(parse_qasm_program(src + ";"))
+    except e:
+        message = String(e)
+    assert_true(message.startswith("QM-E552"), message)
 
 
 def test_unassigned_read_in_json_is_refused() raises:
@@ -420,6 +491,8 @@ def main() raises:
     test_json_keeps_a_coefficient_that_overflowed()
     test_json_refuses_what_a_shot_would_trust()
     test_json_checks_nodes_inside_expressions()
+    test_json_keeps_short_circuits_whole()
+    test_an_expression_too_deep_to_write_is_refused()
     test_unassigned_read_in_json_is_refused()
     test_run_tool()
     test_run_tool_takes_input_values()

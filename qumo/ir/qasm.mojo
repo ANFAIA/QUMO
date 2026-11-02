@@ -4227,6 +4227,7 @@ comptime _PR_MUL = 10
 comptime _PR_UNARY = 11
 comptime _PR_POW = 12
 comptime _PR_ATOM = 13
+comptime _MAX_EXPR_TEXT_DEPTH = 16384  # 60000 overflows an 8 MB stack
 
 
 def _op_text(op: Int) -> String:
@@ -4334,8 +4335,8 @@ def _is_soft_cast(p: Program, n: Int) -> Bool:
     return g.ty.tag == CT.UINT and (src.tag == CT.BIT or src.tag == CT.BOOL) and src.width == g.ty.width
 
 
-def _child(p: Program, n: Int, names: _PNames, want: Int, plain: Bool) raises -> String:
-    var t = _node_text(p, n, names, plain)
+def _child(p: Program, n: Int, names: _PNames, want: Int, plain: Bool, depth: Int) raises -> String:
+    var t = _node_text(p, n, names, plain, depth)
     if t[1] < want:
         return "(" + t[0] + ")"
     return t[0]
@@ -4349,8 +4350,11 @@ def _bits_text(first: Int, count: Int, names: _PNames) -> String:
     return "c[" + String(first) + ":" + String(first + count - 1) + "]"
 
 
-def _node_text(p: Program, n: Int, names: _PNames, plain: Bool = False) raises -> Tuple[String, Int]:
-    """Text of node `n` and the precedence of its outermost operator."""
+def _node_text(p: Program, n: Int, names: _PNames, plain: Bool = False, depth: Int = 0) raises -> Tuple[String, Int]:
+    """Text of node `n` and the precedence of its outermost operator. This recurses
+    on the expression, which the stack limits."""
+    if depth > _MAX_EXPR_TEXT_DEPTH:
+        raise Error("QM-E552: an expression is nested more than " + String(_MAX_EXPR_TEXT_DEPTH) + " deep, too deep to write out. Hint: split it with a variable.")
     ref g = p.nodes[n]
     var op = g.op
     if op == CN.CONST:
@@ -4365,19 +4369,19 @@ def _node_text(p: Program, n: Int, names: _PNames, plain: Bool = False) raises -
         return (_bits_text(g.x, g.y, names), _PR_ATOM)
     if op == CN.CAST:
         if _is_soft_cast(p, n):
-            return _node_text(p, g.x, names, plain)
-        var inner = _node_text(p, g.x, names, True)[0]
+            return _node_text(p, g.x, names, plain, depth + 1)
+        var inner = _node_text(p, g.x, names, True, depth + 1)[0]
         # the table has no bit -> float, so that step stays written
         if g.ty.tag == CT.FLOAT and _is_soft_cast(p, g.x) and p.nodes[p.nodes[g.x].x].ty.tag == CT.BIT:
             inner = type_name(p.nodes[g.x].ty) + "(" + inner + ")"
         return (type_name(g.ty) + "(" + inner + ")", _PR_ATOM)
     if op == CN.NEG or op == CN.LNOT or op == CN.BNOT:
         var mark = String("-" if op == CN.NEG else ("!" if op == CN.LNOT else "~"))
-        return (mark + _child(p, g.x, names, _PR_UNARY, False), _PR_UNARY)
+        return (mark + _child(p, g.x, names, _PR_UNARY, False, depth + 1), _PR_UNARY)
     if op == CN.FN:
-        var args = _node_text(p, g.x, names, True)[0]
+        var args = _node_text(p, g.x, names, True, depth + 1)[0]
         if g.y >= 0:
-            args += ", " + _node_text(p, g.y, names, True)[0]
+            args += ", " + _node_text(p, g.y, names, True, depth + 1)[0]
         return (_fn_text(g.i) + "(" + args + ")", _PR_ATOM)
     if op == CN.SC_END:
         var m = n - 1
@@ -4385,8 +4389,8 @@ def _node_text(p: Program, n: Int, names: _PNames, plain: Bool = False) raises -
             m -= 1
         var is_and = p.nodes[m].op == CN.SC_AND
         var pr = _PR_AND if is_and else _PR_OR
-        var left = _child(p, p.nodes[m].x, names, pr, False)
-        var right = _child(p, g.x, names, pr + 1, False)
+        var left = _child(p, p.nodes[m].x, names, pr, False, depth + 1)
+        var right = _child(p, g.x, names, pr + 1, False, depth + 1)
         return (left + (" && " if is_and else " || ") + right, pr)
     # binary: a constant takes the type of its sibling back when parsed again
     var pr = _op_prec(op)
@@ -4397,7 +4401,7 @@ def _node_text(p: Program, n: Int, names: _PNames, plain: Bool = False) raises -
     var rp = same and r.op == CN.CONST and l.op != CN.CONST
     var lwant = pr + 1 if op == CN.POW else pr
     var rwant = pr if op == CN.POW else pr + 1
-    return (_child(p, g.x, names, lwant, lp) + " " + _op_text(op) + " " + _child(p, g.y, names, rwant, rp), pr)
+    return (_child(p, g.x, names, lwant, lp, depth + 1) + " " + _op_text(op) + " " + _child(p, g.y, names, rwant, rp, depth + 1), pr)
 
 
 def _value_text(p: Program, e: Int, ty: CType, names: _PNames) raises -> String:
