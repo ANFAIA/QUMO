@@ -164,6 +164,76 @@ def is_lit(x):
     return isinstance(x, Lit)
 
 
+class Exact(tuple):
+    """An integer constant with no width, which is not a 64-bit value: it holds any
+    integer, and a result past 64 bits goes on as a float."""
+
+
+def is_exact(x):
+    return isinstance(x, Exact) or (is_lit(x) and x[0][0] in ("int", "uint"))
+
+
+def exact_operand(x):
+    return is_exact(x) or (is_lit(x) and x[0][0] in ("bool", "bit"))
+
+
+def real_of(v):
+    try:
+        return float(v)
+    except OverflowError:
+        return math.inf if v > 0 else -math.inf
+
+
+def exact_const(v, unsigned, literal):
+    if v < -(1 << 63) or v >= (1 << 64):
+        out = (("float",), real_of(v))
+        return lit(*out) if literal else out
+    t = ("uint", 64) if v >= (1 << 63) or (unsigned and v >= 0) else ("int", 64)
+    return lit(t, v) if literal else Exact((t, v))
+
+
+def exact_binary(op, a, b):
+    x, y = a[1], b[1]
+    unsigned = a[0][0] == "uint" or b[0][0] == "uint"
+    literal = is_lit(a) and is_lit(b)
+    if op in ("==", "!=", "<", "<=", ">", ">="):
+        r = {"==": x == y, "!=": x != y, "<": x < y, "<=": x <= y, ">": x > y, ">=": x >= y}[op]
+        return lit(("bool",), 1 if r else 0) if literal else (("bool",), 1 if r else 0)
+    if op == "+":
+        return exact_const(x + y, unsigned, literal)
+    if op == "-":
+        return exact_const(x - y, unsigned, literal)
+    if op == "*":
+        return exact_const(x * y, unsigned, literal)
+    if op in ("/", "%"):
+        if y == 0:
+            raise OracleError("a constant zero divisor", "QM-E533")
+        q = int_div(x, y)
+        return exact_const(q if op == "/" else x - q * y, unsigned, literal)
+    if op == "**":
+        if y < 0:
+            try:
+                f = float(x) ** y
+            except (ZeroDivisionError, OverflowError):
+                f = math.inf
+            return lit(("float",), f) if literal else (("float",), f)
+        if abs(x) >= 2 and y > 4096:
+            f = math.inf
+            return lit(("float",), f) if literal else (("float",), f)
+        return exact_const(x ** y, unsigned, literal)
+    if op == "<<":
+        return exact_const(x << y, True, literal)
+    if op == ">>":
+        return exact_const(x >> y, True, literal)
+    if op in ("&", "|", "^"):
+        ux, uy = x & ((1 << 64) - 1), y & ((1 << 64) - 1)
+        r = ux & uy if op == "&" else (ux | uy if op == "|" else ux ^ uy)
+        if x < 0 or y < 0:
+            return exact_const(r - (1 << 64) if r >> 63 else r, False, literal)
+        return exact_const(r, unsigned, literal)
+    raise OracleError("operator " + op)
+
+
 def width_of(t):
     return 1 if t[0] == "bool" else t[1]
 
@@ -184,6 +254,11 @@ def common(a, b, mode):
     pa, pb = promoted(a, mode), promoted(b, mode)
     ta, tb = pa[0], pb[0]
     bita, bitb = a[0][0] in ("bit", "bool"), b[0][0] in ("bit", "bool")
+    if mode == "arith" and bita != bitb:
+        other = tb if bita else ta
+        if other[0] == "int" or (other[0] == "uint" and other[1] < 64):
+            i64 = ("int", 64)
+            return cast(tuple(pa), i64), cast(tuple(pb), i64)
     if bita and not lb and (tb[0] == "uint" or (tb[0] == "int" and mode != "arith")):
         n = width_of(a[0])
         ta = ("uint", max(tb[1], n)) if tb[0] == "uint" else ("int", min(64, max(tb[1], n + 1)))
@@ -234,6 +309,10 @@ def int_rem(a, b):
 
 
 def binary(op, a, b):
+    if exact_operand(a) and exact_operand(b) and (is_exact(a) or is_exact(b)):
+        shift = op in ("<<", ">>")
+        if not shift or (is_exact(a) and (a[0][0] == "uint" or is_lit(a)) and a[1] >= 0 and b[1] >= 0):
+            return exact_binary(op, a, b)
     if op in ("==", "!=", "<", "<=", ">", ">="):
         ca, cb = (a, b) if a[0] == ("bool",) and b[0] == ("bool",) else common(a, b, "cmp")
         x, y = ca[1], cb[1]
@@ -483,12 +562,19 @@ class Oracle:
         self.outputs = []
         self.dropped = 0.0
         self.errors = defaultdict(float)  # code -> weight of the worlds that reach it
+        self.gates = {}
+        self.assigned = set()  # names written after their declaration
         self.scan(program.statements)
 
     def scan(self, stmts):
         """Registers in source order; a block's bit is a register of its own."""
         for st in stmts:
-            if isinstance(st, ast.QubitDeclaration):
+            if isinstance(st, ast.QuantumGateDefinition):
+                self.gates[st.name.name] = st
+            elif isinstance(st, ast.ClassicalAssignment):
+                target = st.lvalue
+                self.assigned.add(target.name if isinstance(target, ast.Identifier) else target.name.name)
+            elif isinstance(st, ast.QubitDeclaration):
                 size = st.size.value if st.size else 1
                 self.qregs[st.qubit.name] = (self.nq, size)
                 self.nq += size
@@ -568,7 +654,7 @@ class Oracle:
         return node if isinstance(node, list) else [node]
 
     def stmt(self, s, w):
-        if isinstance(s, (ast.Include, ast.QubitDeclaration)):
+        if isinstance(s, (ast.Include, ast.QubitDeclaration, ast.QuantumGateDefinition)):
             return [w]
         if isinstance(s, ast.IODeclaration):
             if not isinstance(s.type, ast.BitType):
@@ -586,13 +672,14 @@ class Oracle:
                 return [w]
             t = parse_type(s.type, w.env)
             if s.init_expression is not None:
-                w.env[s.identifier.name] = self.convert(self.expr(s.init_expression, w), t)
+                folds = s.identifier.name not in self.assigned
+                w.env[s.identifier.name] = self.declared(self.expr(s.init_expression, w), t, s.type, folds)
             else:
                 w.env[s.identifier.name] = (t, 0)
             return [w]
         if isinstance(s, ast.ConstantDeclaration):
             t = parse_type(s.type, w.env)
-            w.env[s.identifier.name] = self.convert(self.expr(s.init_expression, w), t)
+            w.env[s.identifier.name] = self.declared(self.expr(s.init_expression, w), t, s.type, True)
             return [w]
         if isinstance(s, ast.ClassicalAssignment):
             return self.assignment(s, w)
@@ -621,6 +708,13 @@ class Oracle:
         if isinstance(s, ast.CompoundStatement):
             return self.block(s.statements, [w])
         raise OracleError("statement " + type(s).__name__)
+
+    def declared(self, val, t, node, folds):
+        """An unsized integer that folds to a constant stays exact."""
+        unsized = isinstance(node, (ast.IntType, ast.UintType)) and node.size is None
+        if folds and unsized and is_exact(val):
+            return Exact((t, val[1]))
+        return self.convert(val, t)
 
     def convert(self, val, t):
         if t[0] == "angle" and val[0][0] == "float":
@@ -684,7 +778,7 @@ class Oracle:
     def read_name(self, name, w):
         if name in self.cregs:
             return self.read_bits(name, None, w)
-        return tuple(w.env[name])
+        return w.env[name]
 
     def qubits_of(self, q):
         if isinstance(q, ast.Identifier):
@@ -694,19 +788,73 @@ class Oracle:
         ix = q.indices[0][0]
         return [first + ix.value]
 
+    def literal_only(self, e, params):
+        """No name but pi, tau, euler and a gate's own parameters."""
+        if isinstance(e, ast.Identifier):
+            return e.name in ("pi", "tau", "euler") or e.name in params
+        if isinstance(e, (ast.IntegerLiteral, ast.FloatLiteral)):
+            return True
+        if isinstance(e, ast.BinaryExpression):
+            return e.op.name in ("+", "-", "*", "/", "%", "**") and self.literal_only(e.lhs, params) and self.literal_only(e.rhs, params)
+        if isinstance(e, ast.UnaryExpression):
+            return e.op.name == "-" and self.literal_only(e.expression, params)
+        return False
+
+    def real_arg(self, e, params):
+        """A literal-only gate argument is real arithmetic, not the classical table."""
+        if isinstance(e, (ast.IntegerLiteral, ast.FloatLiteral)):
+            return real_of(e.value)
+        if isinstance(e, ast.Identifier):
+            if e.name in params:
+                return params[e.name]
+            return {"pi": math.pi, "tau": 2 * math.pi, "euler": math.e}[e.name]
+        if isinstance(e, ast.UnaryExpression):
+            return -self.real_arg(e.expression, params)
+        x, y = self.real_arg(e.lhs, params), self.real_arg(e.rhs, params)
+        op = e.op.name
+        if op == "+":
+            return x + y
+        if op == "-":
+            return x - y
+        if op == "*":
+            return x * y
+        if op == "/":
+            return x / y
+        if op == "%":
+            return x - y * math.floor(x / y)
+        return math.pow(x, y)
+
+    def angle_arg(self, a, w, params):
+        if self.literal_only(a, params):
+            return self.real_arg(a, params)
+        val = self.expr(a, w)
+        if val[0][0] == "angle":
+            return 2 * math.pi * val[1] / (1 << val[0][1])
+        return real_of(val[1])
+
     def gate(self, g, w):
         qs = [self.qubits_of(q) for q in g.qubits]
         qs = [x[0] for x in qs]
+        self.gate_on(g, qs, w, {})
+
+    def gate_on(self, g, qs, w, params):
         nm = g.name.name
         args = []
         for a in g.arguments:
-            val = self.expr(a, w)
-            if val[0][0] == "angle":
-                args.append(2 * math.pi * val[1] / (1 << val[0][1]))
-            else:
-                args.append(float(val[1]))
+            args.append(self.angle_arg(a, w, params))
             if math.isnan(args[-1]) or math.isinf(args[-1]):
                 raise RunError("QM-E482", "a gate reads a NaN or an infinity")
+        if nm in self.gates:
+            d = self.gates[nm]
+            inner = {p.name: v for p, v in zip(d.arguments, args)}
+            where = {q.name: x for q, x in zip(d.qubits, qs)}
+            env = dict(w.env)
+            for k, v in inner.items():
+                w.env[k] = lit(("float",), v)  # a gate parameter is an angle
+            for body in d.body:
+                self.gate_on(body, [where[q.name] for q in body.qubits], w, inner)
+            w.env = env
+            return
         st = w.state
         if nm in FIXED:
             st = apply_1q(st, FIXED[nm], qs[0])
@@ -837,11 +985,13 @@ class Oracle:
             values = [int(self.expr(v, w)[1]) for v in rng.values]
         worlds = [w]
         done = []
+        unsized = isinstance(s.type, (ast.IntType, ast.UintType)) and s.type.size is None
+        exact = unsized and self.unrolls(s, w, values, t)
         for v in values:
             if not worlds:
                 break
             for x in worlds:
-                x.env[name] = (t, wrap(v, t))
+                x.env[name] = Exact((t, v)) if exact else (t, wrap(v, t))
             nxt = []
             for x in self.block(s.block, worlds):
                 if x.flow == "break":
@@ -852,6 +1002,41 @@ class Oracle:
                     nxt.append(x)
             worlds = self.merge(nxt)
         return self.merge(done + worlds)
+
+    def unrolls(self, s, w, values, t):
+        """A for with constant bounds whose body neither jumps nor assigns its
+        variable is unrolled, and an unsized variable is then a constant."""
+        rng = s.set_declaration
+        ends = [rng.start, rng.end, rng.step] if isinstance(rng, ast.RangeDefinition) else list(rng.values)
+        if any(x is not None and not self.is_constant(x, w) for x in ends):
+            return False
+        if any(not literal_fits(v, t) for v in values):
+            return False
+        return not self.jumps_or_assigns(s.block, s.identifier.name)
+
+    def is_constant(self, e, w):
+        return isinstance(self.expr(e, w), Exact) or is_lit(self.expr(e, w))
+
+    def jumps_or_assigns(self, stmts, name):
+        for st in stmts:
+            if isinstance(st, (ast.BreakStatement, ast.ContinueStatement)):
+                return True
+            if isinstance(st, ast.ClassicalAssignment):
+                target = st.lvalue
+                if (target.name if isinstance(target, ast.Identifier) else target.name.name) == name:
+                    return True
+            for field in ("if_block", "else_block", "block", "statements"):
+                inner = getattr(st, field, None)
+                if inner and self.jumps_or_assigns(inner, name):
+                    return True
+            if isinstance(st, ast.SwitchStatement):
+                bodies = [b.statements for _, b in st.cases]
+                if st.default is not None:
+                    bodies.append(st.default.statements)
+                for b in bodies:
+                    if self.jumps_or_assigns(b, name):
+                        return True
+        return False
 
     def switch(self, s, w):
         v = self.expr(s.target, w)
@@ -866,6 +1051,8 @@ class Oracle:
 
     def expr(self, e, w):
         if isinstance(e, ast.IntegerLiteral):
+            if e.value >= (1 << 64):
+                return lit(("float",), real_of(e.value))
             return lit(("int", 64) if e.value < (1 << 63) else ("uint", 64), e.value)
         if isinstance(e, ast.FloatLiteral):
             return lit(("float",), e.value)
@@ -905,6 +1092,8 @@ class Oracle:
             if op == "~":
                 t = v[0]
                 return (t, wrap(~v[1], t))
+            if is_exact(v):
+                return exact_const(-v[1], False, is_lit(v))
             u = promoted(v, "arith")
             if is_lit(v):
                 return lit(("int", 64) if u[0][0] == "uint" else u[0], -u[1])
@@ -922,6 +1111,8 @@ class Oracle:
                         raise OracleError("a literal that does not fit the bits")
                 elif width_of(v[0]) != t[1]:
                     raise OracleError("a cast to bit[m] takes m bits")
+            if isinstance(e.type, (ast.IntType, ast.UintType)) and e.type.size is None and is_exact(v):
+                return Exact((t, v[1]))
             return self.convert(tuple(v), t)
         if isinstance(e, ast.FunctionCall):
             nm = e.name.name
@@ -965,6 +1156,8 @@ class Gen:
         self.count = 0
         self.loops = 0
         self.tail = tail
+        self.consts = 0
+        self.gate_defs = []
 
     def emit(self, s):
         self.lines.append("  " * self.pad + s)
@@ -1145,6 +1338,8 @@ class Gen:
             self.emit("%s = %s;" % (nm, e))
         else:
             self.emit("%s %s = %s;" % (tn, nm, e))
+            if kind == "big":
+                self.emit("%s = %s;" % (nm, nm))  # keep it a variable: it wraps at run time
             if kind == "float":
                 # a folded constant out of range for a cast is refused at parse time,
                 # whether or not a shot reaches the cast: keep this one a variable
@@ -1196,6 +1391,48 @@ class Gen:
         else:
             self.emit("h q[%d];" % q)
 
+    def constant_gate(self):
+        """Gate arguments from constants: exact integers with no width, literal-only
+        real arithmetic, and truncation where a typed name is read."""
+        r = self.r
+        q = r.randrange(self.nq)
+        gate = r.choice(["rx", "ry", "rz", "p"])
+        self.consts += 1
+        k = "k%d" % self.consts
+        form = r.randrange(9)
+        if form == 0:  # past 64 bits, in a denominator
+            self.emit("const int %s = %d;" % (k, r.randint(60, 90)))
+            arg = "pi / 2 ** %s" % k
+        elif form == 1:  # a product past 64 bits
+            self.emit("const int %s = %d;" % (k, r.randint(10 ** 10, 10 ** 11)))
+            arg = "%s * %s * 1e-20" % (k, k)
+        elif form == 2:  # a negative exponent gives a float
+            self.emit("const int %s = -%d;" % (k, r.randint(1, 4)))
+            arg = "%d ** %s" % (r.choice([2, 3, 10]), k)
+        elif form == 3:  # int and uint mix, and underflow gives the negative number
+            self.emit("const int %s = %d;" % (k, r.randint(0, 9)))
+            self.emit("const uint %su = %d;" % (k, r.randint(0, 9)))
+            arg = "(%s - %su) / 3.0" % (k, k)
+        elif form == 4:  # truncation stays
+            self.emit("const int %s = %d;" % (k, r.randint(-9, 9)))
+            arg = r.choice(["%s / 2", "%s %% 3", "%s / 2 + 0.5", "(%s + 1) / 4 * pi"]) % k
+        elif form == 5:  # a negated uint loop variable
+            self.emit("for uint %s in [1:%d] {" % (k, r.randint(1, 3)))
+            self.emit("  %s(%s) q[%d];" % (gate, r.choice(["-%s", "1 - %s", "2 ** (-%s)", "pi * 2.0 ** (-%s)"]) % k, q))
+            self.emit("}")
+            return
+        elif form == 6:  # a literal-only argument is real arithmetic
+            arg = r.choice(["3/4*pi", "7 % 3", "-7 % 3", "2 ** -1", "2 ** 70 / 1e21", "1/2", "10 ** -3"])
+        elif form == 7:  # an integer past 64 bits, through a float
+            self.emit("float %s = 2 ** %d;" % (k, r.randint(64, 90)))
+            arg = "%s / 1e21" % k
+        else:  # a constant read in a gate body, next to a parameter
+            self.gate_defs.append("const int %s = %d;" % (k, r.randint(-9, 9)))
+            self.gate_defs.append("gate g%s(t) r { rx(%s / 2 + t) r; rz(%s %% 3) r; ry(t / 4) r; rz(3/4*t) r; }" % (k, k, k))
+            self.emit("g%s(%s) q[%d];" % (k, r.choice(["0.5", "2", "pi/3"]), q))
+            return
+        self.emit("%s(%s) q[%d];" % (gate, arg, q))
+
     def angle_under_branch(self):
         """A variable the gate reads only at run time, set on one path or the other."""
         r = self.r
@@ -1229,7 +1466,9 @@ class Gen:
         r = self.r
         for _ in range(n):
             k = r.random()
-            if depth >= 3 or k < 0.28:
+            if r.random() < 0.12:
+                self.constant_gate()
+            elif depth >= 3 or k < 0.28:
                 self.gate()
             elif k < 0.4:
                 self.measure()
@@ -1395,7 +1634,7 @@ class Gen:
         if self.tail:
             self.failing_tail()
         head = ['OPENQASM 3.0;', 'include "stdgates.inc";', "qubit[%d] q;" % self.nq, "bit[%d] c;" % self.nc]
-        return "\n".join(head + self.outputs_decl + self.lines) + "\n"
+        return "\n".join(head + self.gate_defs + self.outputs_decl + self.lines) + "\n"
 
 
 # --------------------------------------------------------------------------
