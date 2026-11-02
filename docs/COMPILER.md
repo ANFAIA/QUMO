@@ -213,7 +213,8 @@ two-qubit gates, so it stays out of O0-O3. On the Feynman circuits against
   any pass (`reduce_large_angles` in `PassManager.run`). Merging sums angles, and at
   2^63 the sum drops the smaller term and `wrap_angle` has no bits left: `transpile`
   at level 2 used to change `sx rz(1) p(2^63-1) sx rz(1) p(2^63-1)`. The verifier of
-  programs found it. Output changes only for such angles.
+  programs found it. Output changes only for such angles. The offset of a symbolic
+  angle reduces the same way; a huge coefficient on a symbol stays a float limit.
 * Past 2^22 quarter turns an angle is not Clifford (`QUARTER_TURN_LIMIT`), in
   `Instruction.is_clifford` and in the helpers that read a count of quarter turns.
 
@@ -235,9 +236,12 @@ seed)` compile a `Program` block by block on one layout, in
   component. If none exists, QM-E632.
 * A runtime angle on a gate with target angle bounds is QM-E633.
 * `verify_program` runs on every result (QM-E631): skeleton, layouts on every edge,
-  `l_out == perm(l_in)`, and `dense_equiv` on blocks, with measurements deferred onto
-  ancillas. Blocks with a reset, noise or a conditional gate, or over 10 wires, are not
-  checked, and the result counts them: `blocks_checked`, `blocks_unchecked`.
+  `l_out == perm(l_in)`, a compiled block at the place of each reachable source block,
+  no reset, noise or conditional gate that the source lacks, and each block against its
+  source on two seeded random states, with measurements deferred onto ancillas. Blocks
+  whose source has a reset, noise or a conditional gate, and blocks over the budget
+  (gates x 2^wires x 2 up to 2^27 per block and 2^29 per compile, 22 wires at most), are
+  not checked, and the result counts them: `blocks_checked`, `blocks_unchecked`.
 * `ProgramMetrics` gives base gates plus a cost per loop iteration. There is no global
   depth, which would be a misleading number.
 

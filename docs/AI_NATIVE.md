@@ -115,6 +115,8 @@ variables (`bit`, `bool`, `int[n]`, `uint[n]`, `float`, `angle[n]`), assignment,
 conditions on any value and gate angles computed at run time. Every tool below that
 says "program" goes through them; [CONTROL_FLOW.md](CONTROL_FLOW.md) has the rules.
 `parse_qasm` itself stays straight-line and answers QM-E504 with a hint to them.
+An integer constant with no width is exact and does not wrap at 64 bits, and QM-W055
+warns where integer division is a trap for an angle.
 
 Not supported: subroutines (QM-E504), hexadecimal, octal and binary integer literals
 (QM-E500), and pulse-level `cal`/`defcal`.

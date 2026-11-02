@@ -81,7 +81,7 @@ seeding and JSON conventions.
 
 * **Programs**: `program_runner.mojo` walks the graph shot by shot through a static
   `ShotBackend` (state vector, tableau, branching). A program without runtime regions
-  is a circuit and goes to `sample`. The straight paths did not change.
+  is a circuit and goes to `sample`, as a static circuit always did.
 
 ## 3. Compiler (`qumo/compiler`)
 
