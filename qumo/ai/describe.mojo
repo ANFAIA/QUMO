@@ -22,7 +22,7 @@ from qumo.ir.gates import (
     op_is_clifford, op_is_diagonal, op_is_self_inverse, op_inverse_kind, op_is_symmetric,
     op_description, matrix_1q, matrix_2q, M2, M4,
 )
-from qumo.ir.circuit import Circuit, Instruction
+from qumo.ir.circuit import UNUSED_WIRES, Circuit, Instruction
 from qumo.ir.param import Param
 from qumo.ir.kraus import KrausChannel
 from qumo.ir.classical import CF, CN, CNode, CT, CType, type_name
@@ -727,9 +727,6 @@ def circuit_to_json(circuit: Circuit) -> String:
     return w.finish()
 
 
-comptime _UNUSED_WIRES = 4096  # a tableau over this many is 8 MB; past it, instructions must justify them
-
-
 def _path_err(path: String, msg: String, hint: String) -> Error:
     return Error("QM-E911: " + path + ": " + msg + ". Hint: " + hint)
 
@@ -746,9 +743,9 @@ def circuit_from_json(v: JsonValue) raises -> Circuit:
         raise Error("QM-E910: circuit.num_qubits is required. Hint: e.g. {\"num_qubits\": 2, \"instructions\": [...]}.")
     var ncl = v.get_int("num_clbits", 0)
     var listed = v.get("instructions")
-    var room = _UNUSED_WIRES + (3 * len(listed) if listed.is_array() else 0)
+    var room = UNUSED_WIRES + (3 * len(listed) if listed.is_array() else 0)
     if nq > room or ncl < 0 or ncl > room:
-        raise _path_err("circuit", "num_qubits and num_clbits go past what its instructions use", "the sizes allow " + String(_UNUSED_WIRES) + " unused wires")
+        raise _path_err("circuit", "num_qubits and num_clbits go past what its instructions use", "the sizes allow " + String(UNUSED_WIRES) + " unused wires")
     var c = Circuit(nq, ncl, v.get_string("name", "circuit"))
     c.global_phase = v.get_float("global_phase", 0.0)
     var ps = v.get("params")

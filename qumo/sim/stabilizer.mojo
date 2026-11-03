@@ -89,6 +89,9 @@ def quarter_turns(theta: Float64) raises -> Int:
     return ((k % 4) + 4) % 4
 
 
+comptime MAX_TABLEAU_QUBITS = 262144  # 2^18: (2n + 1) rows of 2n bits are 32 GiB
+
+
 struct TableauSimulator(Copyable):
     """Inverse-tableau stabilizer simulator (see module docstring).
 
@@ -106,7 +109,9 @@ struct TableauSimulator(Copyable):
     var creg: List[UInt8]  # classical register
     var chain_fired: Bool  # the current E / ELSE_CORRELATED_ERROR chain fired
 
-    def __init__(out self, num_qubits: Int, seed: UInt64 = 0):
+    def __init__(out self, num_qubits: Int, seed: UInt64 = 0) raises:
+        if num_qubits > MAX_TABLEAU_QUBITS:
+            raise Error("QM-E713: a tableau on " + String(num_qubits) + " qubits needs about n^2 / 2 bytes; limit is " + String(MAX_TABLEAU_QUBITS) + " qubits (32 GiB). Hint: split the circuit, or drop the wires no operation uses.")
         self.n = num_qubits
         self.nw = max(1, (num_qubits + 63) // 64)
         var rows = 2 * num_qubits + 1

@@ -219,6 +219,18 @@ def op_inverse_kind(k: Int) -> Int:
     return k
 
 
+def op_period(k: Int) -> Int:
+    """A p with U^p == I exactly, global phase included; 0 when none is known
+    (parametric gates, and gates whose powers only return up to a phase)."""
+    if op_is_self_inverse(k):
+        return 2
+    if k == Op.S or k == Op.SDG or k == Op.SX or k == Op.SXDG or k == Op.ISWAP or k == Op.ISWAPDG:
+        return 4
+    if k == Op.T or k == Op.TDG:
+        return 8
+    return 0
+
+
 def op_is_symmetric(k: Int) -> Bool:
     """2/3-qubit gates invariant under permutation of operands."""
     return (

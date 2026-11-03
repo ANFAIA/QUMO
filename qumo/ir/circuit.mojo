@@ -37,6 +37,11 @@ from qumo.ir.kraus import KrausChannel
 # one fractional bit left, some such angles are 0.57 rad away from every one.
 comptime QUARTER_TURN_LIMIT = 4194304.0  # 2^22
 
+# Wires a circuit read from text (OpenQASM, JSON) may declare beyond 3 per operation.
+# A tableau over this many is 8 MB; past it, operations must justify the wires, so a
+# short document cannot ask for a large allocation further on.
+comptime UNUSED_WIRES = 4096
+
 
 def check_finite_values(values: List[Float64]) raises:
     """Input values on entry: a NaN would otherwise run on as a NaN state."""
@@ -454,6 +459,9 @@ struct Circuit(Copyable, Writable, Sized):
         var base = self.copy() if k >= 0 else self.inverse()
         var out = self.empty_like()
         out.global_phase = 0.0
+        if len(base.ops) == 0:  # a phase alone: no loop, however large k is
+            out.global_phase = base.global_phase * Float64(abs(k))
+            return out^
         for _ in range(abs(k)):
             out.compose(base)
         return out^

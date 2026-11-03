@@ -11,6 +11,7 @@ Conventions an agent must know:
 - Results are deterministic: every random process takes a `seed` (default 1234).
 - Errors look like `QM-Exxx: message (line L, col C). Hint: fix`. Codes are stable. Branch on the code and apply the hint. Warnings (`QM-Wxxx`) in tool results have the same JSON shape; QM-W020 means a requested GPU run fell back to the CPU; QM-W021 means a requested GPU precision did not apply (CPU simulators are fp64).
 - QUMO-only operations (noise, detectors, observables) use `#pragma qumo ...` lines.
+- Size limits: what a source expands to (gate calls, unrolled loops, broadcasts, `pow`) is capped at 8 million items plus its length in bytes (QM-E506), and it declares at most 4096 wires beyond 3 per operation (QM-E507). `pow(k) @` of x, h, cx, s, sx, t and the other gates of known period folds to `k mod period` and costs nothing.
 - Programs: `while`, `break`, `continue`, classical variables and gate angles computed during the shot go through `load_any` / `parse_qasm_program`, not `parse_qasm` (QM-E504). They run and compile on the CPU. `qumo_statevector` and `qumo_expectation` refuse them (QM-E585), a loop past `max_iterations` is QM-E480, and nothing of the kind runs on hardware or the GPU yet.
 
 ## Agent interfaces

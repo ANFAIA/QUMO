@@ -39,9 +39,9 @@ from std.collections import Dict
 from std.math import pi, sin, cos, tan, sqrt, exp, log, asin, acos, atan, floor, ceil, isnan, isinf
 
 from qumo.ir.gates import (
-    Op, op_name, op_arity, op_num_params, op_is_unitary, op_is_noise,
+    Op, op_name, op_arity, op_num_params, op_is_unitary, op_is_noise, op_period,
 )
-from qumo.ir.circuit import Circuit, Instruction
+from qumo.ir.circuit import UNUSED_WIRES, Circuit, Instruction
 from qumo.ir.mc import controlled_by
 from qumo.ir.kraus import KrausChannel
 from qumo.ir.param import Param
@@ -489,7 +489,8 @@ def tokenize_qasm(src: String) raises -> List[Token]:
             var j = i + 1
             var iv = 0
             while j < n and _is_digit(Int(bs[j])):
-                iv = iv * 10 + (Int(bs[j]) - 0x30)
+                if iv < 9007199254740992:  # past 2^53 it stays large, and never wraps
+                    iv = iv * 10 + (Int(bs[j]) - 0x30)
                 j += 1
             if j == i + 1:
                 raise _lex_error(src, "QM-E501", "'$' must be followed by a physical qubit number", i, line, "write $0, $1, ...")
@@ -721,6 +722,13 @@ struct Scope(Copyable):
 
 comptime _MAX_GATE_DEPTH = 64
 comptime _MAX_UNROLL = 1000000
+# What a source may expand to beyond its own length in bytes: wires declared,
+# statements run (gate bodies and unrolled loops run again), broadcast and slice
+# targets, controls, pow repeats and the classical expression nodes a program keeps.
+# An op is 136 bytes, so a short source stays near 1 GB of ops, under 2 GB while the
+# list grows: below 2^23, where it would double once more. A long source pays with
+# its own length (QM-E506).
+comptime MAX_SOURCE_ITEMS = 8000000
 
 
 struct NK:
@@ -774,6 +782,9 @@ struct QasmParser(Movable):
     var depth: Int
     var unrolled: Int
     var stmt_count: Int
+    var spent: Int  # items charged against `room` (MAX_SOURCE_ITEMS)
+    var room: Int
+    var wide: Token  # the declaration or `$n` that last added wires
     # program mode (parse_qasm_program): statements go to a tape, the ops of
     # circs[0] are its arena, and classical variables exist at run time
     var program_mode: Bool
@@ -827,6 +838,9 @@ struct QasmParser(Movable):
         self.depth = 0
         self.unrolled = 0
         self.stmt_count = 0
+        self.spent = 0
+        self.room = MAX_SOURCE_ITEMS + src.byte_length()
+        self.wide = self.toks[0]
         self.program_mode = False
         self.prog = Program(Circuit(0, 0, name))
         self.tb = TapeBuilder()
@@ -889,6 +903,21 @@ struct QasmParser(Movable):
 
     def warn(mut self, code: String, msg: String, t: Token, hint: String = ""):
         self.warnings.append(format_qasm_error(self.src, code, msg, t.start, t.end - t.start, t.line, hint))
+
+    def over_budget(self, t: Token) -> Error:
+        return self.err("QM-E506", "the source expands past " + String(self.room) + " wires, statements and repeats", t, "QUMO expands gate calls, unrolled loops, broadcasts and pow at parse time, up to " + String(MAX_SOURCE_ITEMS) + " items plus the length of the source; write the operations out, or build the circuit through the API")
+
+    def charge(mut self, n: Int, t: Token) raises:
+        """Count `n` items against the budget, before allocating what they pay for."""
+        if n > self.room - self.spent:
+            raise self.over_budget(t)
+        self.spent += n
+
+    def check_wires(self, c: Circuit) raises:
+        """A size has to come with the operations that use it, as in circuit_from_json."""
+        var room = UNUSED_WIRES + 3 * len(c.ops)
+        if c.num_qubits > room or c.num_clbits > room:
+            raise self.err("QM-E507", String(c.num_qubits) + " qubits and " + String(c.num_clbits) + " bits for " + String(len(c.ops)) + " operations", self.wide, "a source may declare " + String(UNUSED_WIRES) + " wires beyond 3 per operation; shrink the registers")
 
     def relocate(self, e: String, t: Token) -> Error:
         """Attach a source location to an error raised by core IR code."""
@@ -1363,8 +1392,12 @@ struct QasmParser(Movable):
         var t = self.peek()
         if t.kind == TK.HWQUBIT:
             _ = self.next()
+            if t.num >= Float64(self.room):
+                raise self.over_budget(t)
             var k = Int(t.num)
             if self.circs[0].num_qubits <= k:
+                self.charge(k + 1 - self.circs[0].num_qubits, t)
+                self.wide = t
                 for ref c in self.circs:
                     if c.num_qubits <= k:
                         c.num_qubits = k + 1
@@ -1418,9 +1451,13 @@ struct QasmParser(Movable):
             _ = self.next()
             var rel = List[Int]()
             _ = self.parse_index_set(size, t, rel)
+            if len(rel) > 1:
+                self.charge(len(rel), t)
             for x in rel:
                 out.append(offset + x)
             return len(rel)
+        if size > 1:
+            self.charge(size, t)
         for i in range(size):
             out.append(offset + i)
         return size
@@ -1450,9 +1487,13 @@ struct QasmParser(Movable):
             _ = self.next()
             var rel = List[Int]()
             _ = self.parse_index_set(reg.size, t, rel)
+            if len(rel) > 1:
+                self.charge(len(rel), t)
             for r in rel:
                 out.append(reg.offset + r)
             return out^
+        if reg.size > 1:
+            self.charge(reg.size, t)
         for i in range(reg.size):
             out.append(reg.offset + i)
         return out^
@@ -1486,6 +1527,10 @@ struct QasmParser(Movable):
     def parse_one_statement(mut self) raises:
         var t = self.peek()
         self.stmt_count += 1
+        if self.spent < self.room:
+            self.spent += 1
+        else:
+            raise self.over_budget(t)
         if t.kind == TK.PRAGMA:
             self.parse_pragma()
             return
@@ -1708,10 +1753,14 @@ struct QasmParser(Movable):
             offset = self.regs[known.value()].offset  # the same declaration, on a later pass of an unrolled loop
         elif is_qubit:
             offset = self.circs[0].num_qubits
+            self.charge(size, nt)
+            self.wide = nt
             for ref c in self.circs:
                 c.num_qubits = offset + size
         else:
             offset = self.circs[0].num_clbits
+            self.charge(size, nt)
+            self.wide = nt
             for ref c in self.circs:
                 c.num_clbits = offset + size
         if scoped:
@@ -2621,6 +2670,8 @@ struct QasmParser(Movable):
                     var x = self.parse_const_real("pow() exponent")
                     if x != floor(x):
                         raise self.err("QM-E550", "pow(" + String(x) + ") @ needs an integer exponent", at, "QUMO supports integer powers; use inv @ for -1")
+                    if abs(x) >= 9007199254740992.0:
+                        raise self.err("QM-E550", "pow(" + String(x) + ") @: past 2^53 the exponent is not exact", at, "reduce it first: x, h and cx repeat after 2 powers, s and sx after 4, t after 8")
                     arg = Int(x)
                 elif is_inv:
                     raise self.err("QM-E550", "inv takes no argument", at, "write 'inv @ gate ...'")
@@ -2628,6 +2679,7 @@ struct QasmParser(Movable):
                     arg = self.parse_const_int("number of controls")
                     if arg < 1:
                         raise self.err("QM-E550", "ctrl count must be >= 1", at, "write ctrl(2) @ x a, b, c;")
+                    self.charge(arg, at)  # before the counts are summed
                 _ = self.expect_punct(P.RPAREN, "')'")
             elif is_pow:
                 raise self.err("QM-E550", "pow needs an exponent", self.peek(), "write 'pow(2) @ gate ...'")
@@ -2814,7 +2866,7 @@ struct QasmParser(Movable):
                 if kind == 1:
                     sub = sub.inverse()
                 elif kind == 4:
-                    sub = sub.power(margs[m])
+                    sub = self.power_of(sub, margs[m], mtoks[m])
                 else:
                     var k = margs[m]
                     var before = sub.copy()
@@ -2861,6 +2913,29 @@ struct QasmParser(Movable):
                 raise self.relocate(String(e), mtoks[m])
             m -= 1
         self.compose_sub(sub)
+
+    def power_of(mut self, sub: Circuit, k: Int, t: Token) raises -> Circuit:
+        """`sub^k`. One gate of known period p repeats at most p times: an exponent
+        past p folds to k mod p, so `pow(2^53 - 1) @ x` is one x and `pow(4) @ h` no
+        gate, while `pow(2) @ h` stays two. Anything else repeats in full, paid for
+        before it is built."""
+        var e = k
+        if len(sub.ops) == 1 and sub.global_phase == 0.0:
+            var p = op_period(sub.ops[0].kind)
+            if p > 0 and abs(e) > p:
+                var r = abs(e) % p
+                e = r if e > 0 else -r
+        var n = len(sub.ops)
+        if n > 0:
+            if abs(e) > (self.room - self.spent) // n:
+                raise self.over_budget(t)
+            self.spent += abs(e) * n
+        return sub.power(e)
+
+    def add_expr(mut self, e: CExpr) raises -> Int:
+        """`Program.add_expr`, paying for the nodes: an unrolled loop keeps a copy per pass."""
+        self.charge(len(e.nodes), self.peek())
+        return self.prog.add_expr(e)
 
     def idle_qubits(self, qs: List[Int]) -> List[Int]:
         """Declared qubits other than `qs` (available as dirty ancillas)."""
@@ -3432,7 +3507,7 @@ struct QasmParser(Movable):
         if is_const and not value.is_const():
             raise self.err("QM-E584", "'" + nm + "' is const but its value is only known at run time", nt, "drop 'const'")
         var v = self.declare_var(nm, ty, is_output)
-        self.tb.assign(v, self.prog.add_expr(value), self.ops_end(), nt.line)
+        self.tb.assign(v, self.add_expr(value), self.ops_end(), nt.line)
 
     def parse_var_assign(mut self) raises:
         """`x = e;`, `x += e;`."""
@@ -3452,7 +3527,7 @@ struct QasmParser(Movable):
             self.warn_truncations()
         if self.is_punct(op, P.OPASSIGN):
             e = self.compound(op, CExpr.variable(store, ty), e)
-        self.tb.assign(v, self.prog.add_expr(self.cast_at(e, ty, op)), self.ops_end(), t.line)
+        self.tb.assign(v, self.add_expr(self.cast_at(e, ty, op)), self.ops_end(), t.line)
 
     def compound(mut self, op: Token, a: CExpr, b: CExpr) raises -> CExpr:
         """The value of `a op= b`."""
@@ -3490,14 +3565,14 @@ struct QasmParser(Movable):
                 v = i
         if v < 0:
             v = self.prog.add_bit_var(nm + "[" + String(first) + "]", first, width)
-        self.tb.assign(v, self.prog.add_expr(self.cast_at(e, bit_type(width), t)), self.ops_end(), t.line)
+        self.tb.assign(v, self.add_expr(self.cast_at(e, bit_type(width), t)), self.ops_end(), t.line)
 
     def parse_if_region(mut self, it: Token) raises:
         self.forbid_in_gate(it)
         _ = self.expect_punct(P.LPAREN, "'(' after if")
         var e = self.parse_cexpr()
         _ = self.expect_punct(P.RPAREN, "')' to close the condition")
-        self.tb.begin(SK.IF, self.prog.add_expr(self.cast_at(e, bool_type(), it)), -1, self.ops_end(), it.line)
+        self.tb.begin(SK.IF, self.add_expr(self.cast_at(e, bool_type(), it)), -1, self.ops_end(), it.line)
         if self.pragma_if:
             self.pragma_if = False
             self.parse_pragma_body(it)
@@ -3514,7 +3589,7 @@ struct QasmParser(Movable):
         _ = self.expect_punct(P.LPAREN, "'(' after while")
         var e = self.parse_cexpr()
         _ = self.expect_punct(P.RPAREN, "')' to close the condition")
-        self.tb.begin(SK.WHILE, self.prog.add_expr(self.cast_at(e, bool_type(), wt)), -1, self.ops_end(), wt.line)
+        self.tb.begin(SK.WHILE, self.add_expr(self.cast_at(e, bool_type(), wt)), -1, self.ops_end(), wt.line)
         self.parse_statement()
         self.tb.end(self.ops_end(), wt.line)
 
@@ -3670,9 +3745,9 @@ struct QasmParser(Movable):
             unsigned_ |= self.uint_flag(step, FORR.STEP_UINT, rt)
             if unsigned_ & FORR.BOUNDS_UNSIGNED == 0:
                 unsigned_ |= self.uint_flag(a, FORR.START_UINT, rt) | self.uint_flag(b, FORR.STOP_UINT, rt)
-            starts = self.prog.add_expr(self.cast_at(a, i64, rt))
-            steps = self.prog.add_expr(self.cast_at(step, i64, rt))
-            stops = self.prog.add_expr(self.cast_at(b, i64, rt))
+            starts = self.add_expr(self.cast_at(a, i64, rt))
+            steps = self.add_expr(self.cast_at(step, i64, rt))
+            stops = self.add_expr(self.cast_at(b, i64, rt))
         else:
             _ = self.next()
             var vals = List[Int]()
@@ -3709,7 +3784,7 @@ struct QasmParser(Movable):
         if e.ty().tag == CT.FLOAT:
             raise self.err("QM-E580", "switch takes an integer or bits, not a float", st, "cast the target: switch (int(x))")
         var unsigned_target = not e.ty().is_signed()
-        self.tb.begin(SK.SWITCH, self.prog.add_expr(self.cast_at(e, int_type(64), st)), -1, self.ops_end(), st.line)
+        self.tb.begin(SK.SWITCH, self.add_expr(self.cast_at(e, int_type(64), st)), -1, self.ops_end(), st.line)
         var lb = self.expect_punct(P.LBRACE, "'{' to open the switch")
         var seen = List[Int]()
         var has_default = False
@@ -4001,7 +4076,7 @@ struct QasmParser(Movable):
             if root.op == CN.VAR:
                 return Param.symbol(self.slot_for(self.var_of_store(root.x)))
             var a = self.temp_var(ty)
-            self.tb.assign(a, self.prog.add_expr(e), self.ops_end(), t.line)
+            self.tb.assign(a, self.add_expr(e), self.ops_end(), t.line)
             return Param.symbol(self.slot_for(a))
         if ty.tag != CT.FLOAT and ty.tag != CT.ANGLE:
             if ty.tag == CT.BIT or ty.tag == CT.BOOL:
@@ -4021,7 +4096,7 @@ struct QasmParser(Movable):
             self.pos = begin  # products and the like: the constant path says what is wrong
             return self.parse_expr()
         var tmp = self.temp_var(float_type())
-        self.tb.assign(tmp, self.prog.add_expr(e), self.ops_end(), t.line)
+        self.tb.assign(tmp, self.add_expr(e), self.ops_end(), t.line)
         return Param.symbol(self.slot_for(tmp))
 
     def temp_var(mut self, ty: CType) -> Int:
@@ -4031,6 +4106,7 @@ struct QasmParser(Movable):
 
     def finish_program(mut self) raises -> Program:
         var c = self.circs.pop()
+        self.check_wires(c)
         c.validate()
         var line = self.peek().line
         self.tb.flush(len(c.ops), line)
@@ -4047,6 +4123,7 @@ struct QasmParser(Movable):
 
     def finish(mut self) raises -> Circuit:
         var c = self.circs.pop()
+        self.check_wires(c)
         try:
             c.validate()
         except e:
@@ -4157,10 +4234,18 @@ def load_any(source: String, name: String = "qasm") raises -> Program:
         flat_error = String(e)
     if flat_error.startswith("QM-E504") or flat_error.startswith("QM-E541"):
         return parse_qasm_program(source, name)
+    if _final_size_error(flat_error):
+        raise Error(flat_error)
     try:
         return parse_qasm_program(source, name)
     except:
         raise Error(flat_error)
+
+
+def _final_size_error(flat_error: String) -> Bool:
+    """The program parser charges the same budget and keeps at most the flat
+    parser's ops, so it would refuse the same sizes; one parse of them is enough."""
+    return flat_error.startswith("QM-E506") or flat_error.startswith("QM-E507")
 
 
 def load_any_with_warnings(source: String, mut warnings: List[String], name: String = "qasm") raises -> Program:
@@ -4173,6 +4258,9 @@ def load_any_with_warnings(source: String, mut warnings: List[String], name: Str
         return Program.from_circuit(c)
     except e:
         flat_error = String(e)
+    if _final_size_error(flat_error):
+        warnings.extend(flat_warnings^)
+        raise Error(flat_error)
     var p = QasmParser(source, name)
     p.program_mode = True
     p.prescan()

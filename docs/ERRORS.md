@@ -344,6 +344,16 @@ Fix: Parse with parse_qasm_program or load_any for while and classical variables
 **An expression or a block nests deeper than 256 levels.**  
 Fix: Split it into smaller expressions or statements; a chain of else-if arms counts as nesting too.
 
+### QM-E506
+
+**The source expands past its budget: 8 million items plus its length in bytes, where an item is a declared wire, a statement run (gate bodies and unrolled loops run again), a target of a broadcast or slice, a control, a repeat of pow, or a classical expression node a program keeps.**  
+Fix: Write the operations out, or build the circuit through the API. A pow of x, h, cx, s, sx or t folds into one period and costs nothing.
+
+### QM-E507
+
+**The source declares more wires than its operations use: 4096 beyond 3 per operation, the same rule as circuit_from_json.**  
+Fix: Shrink the registers to the qubits and bits the circuit uses.
+
 ### QM-E510
 
 **Unknown gate name.**  
@@ -684,6 +694,11 @@ Fix: Probabilities must lie in [0, 1].
 
 **Internal invariant violation in the sparse-blossom decoder (never raised per shot; counted in SparseBlossomDecoder.anomalies, which must stay 0).**  
 Fix: Report the syndrome; decode it with 'mwpm_dense' meanwhile.
+
+### QM-E713
+
+**Stabilizer tableau too large: 2n + 1 rows of 2n bits, about n^2 / 2 bytes. The limit is 262144 qubits (32 GiB).**  
+Fix: Split the circuit, or drop the wires no operation uses.
 
 ### QM-E720
 

@@ -350,6 +350,8 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E503", "qasm", "Unsupported OpenQASM version.", "Use 'OPENQASM 3.0;' or 'OPENQASM 2.0;'.")
     _e(c, "QM-E504", "qasm", "OpenQASM feature outside QUMO's supported subset, or one a Circuit cannot hold: subroutines, or, in parse_qasm, while and classical assignment.", "Parse with parse_qasm_program or load_any for while and classical variables; see 'qumo describe capabilities' for the rest.")
     _e(c, "QM-E505", "qasm", "An expression or a block nests deeper than 256 levels.", "Split it into smaller expressions or statements; a chain of else-if arms counts as nesting too.")
+    _e(c, "QM-E506", "qasm", "The source expands past its budget: 8 million items plus its length in bytes, where an item is a declared wire, a statement run (gate bodies and unrolled loops run again), a target of a broadcast or slice, a control, a repeat of pow, or a classical expression node a program keeps.", "Write the operations out, or build the circuit through the API. A pow of x, h, cx, s, sx or t folds into one period and costs nothing.")
+    _e(c, "QM-E507", "qasm", "The source declares more wires than its operations use: 4096 beyond 3 per operation, the same rule as circuit_from_json.", "Shrink the registers to the qubits and bits the circuit uses.")
     _e(c, "QM-E510", "qasm", "Unknown gate name.", "Check the suggestions, run 'qumo describe gates', or define it with 'gate name(params) a, b { ... }'.")
     _e(c, "QM-E511", "qasm", "Wrong number of gate parameters.", "Match the gate signature, e.g. rz(theta) q[0];")
     _e(c, "QM-E512", "qasm", "Wrong number of qubit operands (including ctrl @ controls).", "Match the gate arity; controls of ctrl @ come first.")
@@ -420,6 +422,7 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E711", "qec", "Invalid noise probabilities.", "Probabilities must lie in [0, 1].")
     _e(c, "QM-E712", "qec", "Internal invariant violation in the sparse-blossom decoder (never raised per shot; counted in SparseBlossomDecoder.anomalies, which must stay 0).", "Report the syndrome; decode it with 'mwpm_dense' meanwhile.")
     # fault-tolerant programming layer (qumo.ft, docs/FT.md)
+    _e(c, "QM-E713", "stabilizer", "Stabilizer tableau too large: 2n + 1 rows of 2n bits, about n^2 / 2 bytes. The limit is 262144 qubits (32 GiB).", "Split the circuit, or drop the wires no operation uses.")
     _e(c, "QM-E720", "ft", "Invalid Pauli label or Pauli size mismatch in a code definition (qumo.ft.pauli).", "One character I/X/Y/Z per physical qubit (character i = qubit i), optionally prefixed by + or -.")
     _e(c, "QM-E721", "ft", "Invalid stabilizer-code definition: wrong number of generators or logicals, anticommuting or dependent generators, logicals not commuting with the stabilizers or violating X_i Z_j relations.", "List n-k independent commuting generators and k X/Z logicals with canonical commutation; the message names the offending operators.")
     _e(c, "QM-E722", "ft", "Unknown code name or invalid code parameter (e.g. odd k for an Iceberg code).", "Use steane, five_qubit, css_422, noncss_422, iceberg_<even k>, surface_<d>, repetition_<d> (qumo_ft_codes lists them).")
@@ -567,17 +570,38 @@ def lint_program(p: Program) -> List[Diagnostic]:
     the ops as one pass from start to end, which a loop or a branch is not, so they
     do not apply here."""
     var out = List[Diagnostic]()
-    for at in stuck_loops(p):
+    var stuck = stuck_loops(p)
+    for i in range(min(len(stuck), LINT_LISTED)):
+        var at = stuck[i]
         var d = Diagnostic.make("QM-W054", "warning", "the body of the while loop on line " + String(p.tape[at].line) + " cannot change its condition, and no break leaves it: it never runs, or runs until QM-E480", "assign a variable the condition reads, measure into a bit it reads, or add a break")
         d.line = p.tape[at].line
         d.col = 1
         out.append(d^)
+    if len(stuck) > LINT_LISTED:
+        out.append(Diagnostic.make("QM-W054", "warning", String(len(stuck) - LINT_LISTED) + " more while loops like the above", "the first " + String(LINT_LISTED) + " are listed"))
     return out^
+
+
+# Findings of one code listed per circuit; the rest are counted in one more finding,
+# so that the report of a circuit with millions of operations stays small.
+comptime LINT_LISTED = 100
+
+
+def _per_op_code(slot: Int) -> String:
+    var codes: List[String] = ["QM-W008", "QM-W007", "QM-W014", "QM-W002", "QM-W010", "QM-W011"]
+    return codes[slot]
+
+
+def _listed(mut seen: List[Int], slot: Int) -> Bool:
+    """Count a finding of `_per_op_code(slot)`; True while it is still listed."""
+    seen[slot] += 1
+    return seen[slot] <= LINT_LISTED
 
 
 def lint(circuit: Circuit) -> List[Diagnostic]:
     """Static checks for legal-but-suspicious circuits (codes QM-W0xx)."""
     var out = List[Diagnostic]()
+    var seen = List[Int](length=6, fill=0)  # per-operation findings, by _per_op_code
     var n = circuit.num_qubits
     var used = List[Bool](length=n, fill=False)
     var touched = List[Bool](length=n, fill=False)  # any op before measurement
@@ -594,7 +618,7 @@ def lint(circuit: Circuit) -> List[Diagnostic]:
         var g = circuit.ops[i]
         var k = g.kind
         if g.cond >= 0 and g.cond < nc:
-            if not written[g.cond]:
+            if not written[g.cond] and _listed(seen, 0):
                 out.append(Diagnostic.make("QM-W008", "warning", "instruction #" + String(i) + " '" + op_name(k) + "' is conditioned on bit c[" + String(g.cond) + "] which has not been written yet (it is always 0)", "measure into c[" + String(g.cond) + "] before the condition", i))
             read_since_write[g.cond] = True
         if op_is_annotation(k):
@@ -617,7 +641,7 @@ def lint(circuit: Circuit) -> List[Diagnostic]:
                 last_op[q] = -1
             var cb = g.clbit
             if cb >= 0 and cb < nc:
-                if written[cb] and not read_since_write[cb]:
+                if written[cb] and not read_since_write[cb] and _listed(seen, 1):
                     out.append(Diagnostic.make("QM-W007", "warning", "measurement #" + String(i) + " overwrites bit c[" + String(cb) + "] written by instruction #" + String(cbit_writer[cb]) + " before it was read", "measure into a different bit or condition on c[" + String(cb) + "] first", i))
                 written[cb] = True
                 read_since_write[cb] = False
@@ -633,7 +657,7 @@ def lint(circuit: Circuit) -> List[Diagnostic]:
             var np = op_num_params(k)
             for j in range(np):
                 var p = g.param(j)
-                if not p.is_symbolic() and (p.offset < 0.0 or p.offset > 1.0):
+                if not p.is_symbolic() and (p.offset < 0.0 or p.offset > 1.0) and _listed(seen, 2):
                     out.append(Diagnostic.make("QM-W014", "error", "noise channel '" + op_name(k) + "' at #" + String(i) + " has probability " + String(p.offset) + " outside [0, 1]", "probabilities must lie in [0, 1]", i))
             continue
         # unitary gate
@@ -644,7 +668,8 @@ def lint(circuit: Circuit) -> List[Diagnostic]:
             touched[q] = True
             if measured[q] and not after_meas_reported[q]:
                 after_meas_reported[q] = True
-                out.append(Diagnostic.make("QM-W002", "info", "gate '" + op_name(k) + "' (#" + String(i) + ") acts on qubit " + String(q) + " after it was measured; the circuit is dynamic and runs as per-shot trajectories", "intended for mid-circuit measurement; otherwise move measurements to the end", i))
+                if _listed(seen, 3):
+                    out.append(Diagnostic.make("QM-W002", "info", "gate '" + op_name(k) + "' (#" + String(i) + ") acts on qubit " + String(q) + " after it was measured; the circuit is dynamic and runs as per-shot trajectories", "intended for mid-circuit measurement; otherwise move measurements to the end", i))
         # adjacent cancellation
         if a >= 1 and g.q0 >= 0 and g.q0 < n:
             var j0 = last_op[g.q0]
@@ -653,15 +678,18 @@ def lint(circuit: Circuit) -> List[Diagnostic]:
                 var q = g.qubit(j)
                 if q < 0 or q >= n or last_op[q] != j0:
                     all_same = False
-            if all_same and _cancels(circuit.ops[j0], g):
+            if all_same and _cancels(circuit.ops[j0], g) and _listed(seen, 4):
                 out.append(Diagnostic.make("QM-W010", "info", "gates #" + String(j0) + " '" + op_name(circuit.ops[j0].kind) + "' and #" + String(i) + " '" + op_name(k) + "' cancel each other", "remove both or run the optimizer", i))
         if op_num_params(k) == 1 and (k == Op.RX or k == Op.RY or k == Op.RZ or k == Op.P or k == Op.CP or k == Op.CRX or k == Op.CRY or k == Op.CRZ or k == Op.RXX or k == Op.RYY or k == Op.RZZ):
-            if not g.p0.is_symbolic() and g.p0.offset == 0.0:
+            if not g.p0.is_symbolic() and g.p0.offset == 0.0 and _listed(seen, 5):
                 out.append(Diagnostic.make("QM-W011", "info", "'" + op_name(k) + "' at #" + String(i) + " rotates by 0 (no-op)", "remove the gate", i))
         for j in range(a):
             var q = g.qubit(j)
             if q >= 0 and q < n:
                 last_op[q] = i
+    for slot in range(len(seen)):
+        if seen[slot] > LINT_LISTED:
+            out.append(Diagnostic.make(_per_op_code(slot), "error" if slot == 2 else ("warning" if slot < 2 else "info"), String(seen[slot] - LINT_LISTED) + " more findings like the above", "the first " + String(LINT_LISTED) + " are listed"))
     var unused = List[Int]()
     for q in range(n):
         if not used[q]:

@@ -392,8 +392,8 @@ def test_5_literal_positions_follow_the_classical_table() raises:
     assert_equal(d.ops[0].q0, 6)
     d = parse_qasm("OPENQASM 3.0; qubit[8] q; h q[0:7/2];")
     assert_equal(len(d.ops), 4)
-    d = parse_qasm("OPENQASM 3.0; include \"stdgates.inc\"; qubit[1] q; pow(7/2*2) @ x q[0];")
-    assert_equal(len(d.ops), 6)
+    d = parse_qasm("OPENQASM 3.0; include \"stdgates.inc\"; qubit[1] q; pow(7/2*2) @ rz(0.1) q[0];")
+    assert_equal(len(d.ops), 6)  # rz: a gate with no period, so the exponent shows
     d = parse_qasm("OPENQASM 3.0; include \"stdgates.inc\"; qubit[3] q; ctrl(3/2) @ x q[0], q[1];")
     assert_equal(d.ops[0].q0, 0)
     d = parse_qasm("OPENQASM 3.0; qubit[2] q; int[2*4] x = 300; rz(x) q[0];")

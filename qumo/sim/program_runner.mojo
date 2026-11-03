@@ -276,7 +276,7 @@ struct TableauBackend(ShotBackend):
     var root: Rng
     var nc: Int
 
-    def __init__(out self, n: Int, nc: Int, root: Rng):
+    def __init__(out self, n: Int, nc: Int, root: Rng) raises:
         self.sim = TableauSimulator(n, 0)
         self.root = root.copy()
         self.nc = nc

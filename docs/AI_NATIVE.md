@@ -136,6 +136,37 @@ Not supported: subroutines (QM-E504), hexadecimal, octal and binary integer lite
 The trailing `;` is optional on pragma lines. `pragma qumo ...` without the
 `#` is accepted too.
 
+### Size limits
+
+QUMO expands gate calls, unrolled loops, broadcasts and modifiers at parse time, so
+a few bytes could ask for any amount of memory: `pow(2^53 - 1) @ x` was 2^53 gates.
+A source from an agent or the MCP server can come from anywhere, so the text pays
+for what it asks:
+
+* **Budget, QM-E506.** 8 million items plus the length of the source in bytes. An
+  item is a declared wire, a statement run (gate bodies and unrolled loops run
+  again), a target of a broadcast or slice, a control, a repeat of `pow`, or a
+  classical expression node that a program keeps. An operation is 136 bytes, so a
+  short source stays near 1 GB of operations and under 2 GB at its peak; a long
+  one pays with its length, so written-out circuits of any size still load. The
+  1000000 passes of unrolled loops (QM-E570) still hold.
+* **`pow` of a gate of known period** folds and costs nothing: past its period p,
+  `pow(k) @ g` is g repeated `k mod p` times. x, y, z, h, cx, cy, cz, ch, swap, ecr,
+  ccx, cswap and ccz have period 2; s, sdg, sx, sxdg, iswap and iswapdg 4; t and tdg 8.
+  The equality is exact, global phase included. `pow(2) @ h` stays two gates, while
+  `pow(4) @ h` is none. An exponent at or past 2^53 is QM-E550: as a float it is no
+  longer exact, and its parity is lost.
+* **Wires, QM-E507.** A source declares at most 4096 wires beyond 3 per
+  operation, the rule `circuit_from_json` already had (QM-E911): `qubit[5000] q;
+  h q[0];` is refused, `qubit[5000] q; h q;` is not.
+* **Tableau, QM-E713.** 262144 qubits at most (32 GiB), the way the state vector
+  stops at 32 qubits (QM-E404).
+* **Lint** lists 100 findings of a code per circuit and counts the rest in one
+  more finding.
+
+Not limited: CPU time. `ctrl(120) @ x` (synthesis without ancillas) and
+`qumo_transpile` on 20000 qubits each take more than 25 seconds, with little memory. Stim text has its own limit, 50 million instructions after `REPEAT`.
+
 ### Speed
 
 The lexer makes one pass over UTF-8 bytes, with no regex and no per-character
