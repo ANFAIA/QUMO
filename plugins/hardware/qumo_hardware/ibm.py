@@ -262,6 +262,7 @@ def counts_from_primitive_result(result, num_clbits: int) -> dict[str, int]:
 
 class IBMProvider:
     name = "ibm"
+    payload_format = "openqasm2"
 
     def __init__(
         self,
@@ -375,6 +376,10 @@ class IBMProvider:
 
     def target(self, backend: str) -> TargetSpec:
         return target_from_qiskit(self.backend(backend), self.use_fractional_gates, self.name)
+
+    def encode(self, compiled: CompiledCircuit, shots: int, backend: str) -> str:
+        """QASM-to-payload conversion: the compiled OpenQASM 2 text, unchanged."""
+        return compiled.qasm
 
     def prepare(self, compiled: CompiledCircuit, backend: str):
         """CompiledCircuit -> (ISA QuantumCircuit, finishing report)."""

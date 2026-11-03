@@ -393,6 +393,7 @@ def parse_sim_backend(name: str) -> TargetSpec:
 
 class LocalEmulatorProvider:
     name = "local"
+    payload_format = "openqasm2"
 
     def __init__(self, seed: int | None = None, use_fractional_gates: bool = False, **_: Any):
         self.seed = seed
@@ -439,6 +440,10 @@ class LocalEmulatorProvider:
     def target(self, backend: str) -> TargetSpec:
         d = self._delegate(backend)
         return d.target(backend) if d else parse_sim_backend(backend)
+
+    def encode(self, compiled: CompiledCircuit, shots: int, backend: str) -> str:
+        """QASM-to-payload conversion: the compiled OpenQASM 2 text, unchanged."""
+        return compiled.qasm
 
     def prepare(self, compiled: CompiledCircuit, backend: str):
         d = self._delegate(backend)
