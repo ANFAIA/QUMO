@@ -3,7 +3,7 @@ MOJO ?= .venv/bin/mojo
 PY ?= bench/.venv/bin/python
 TESTS := $(wildcard tests/test_*.mojo)
 
-.PHONY: all setup setup-py test cli py bench-sv bench-neutral benchpress clean examples examples-all examples-gpu test-py
+.PHONY: all setup setup-py test cli py bench-sv bench-neutral bench-charts benchpress clean examples examples-all examples-gpu test-py
 
 all: cli py
 
@@ -44,6 +44,9 @@ bench-sv:  ## state-vector throughput vs Qiskit Aer
 bench-neutral: py  ## hardware-neutral compiler benchmark (QUMO, Qiskit, TKET, Cirq)
 	$(PY) bench/neutral/run_neutral.py --circuits bench/neutral/circuits --out bench/results/neutral.jsonl
 	$(PY) bench/neutral/report.py bench/results/neutral.jsonl > docs/NEUTRAL_BENCHMARK_REPORT.md
+
+bench-charts:  ## charts and summary of compile time and memory per SDK (bench/results/neutral_rss.jsonl)
+	$(PY) bench/charts/make_charts.py --data bench/results/neutral_rss.jsonl --out bench/results/charts
 
 # ---------------------------------------------------------------- AI transpiler (docs/AI_TRANSPILER.md)
 # Models live in models/ai_transpiler/{synth,route}/ with an INDEX.json
