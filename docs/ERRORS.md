@@ -218,6 +218,11 @@ Fix: Translate the circuit to Clifford gates and rotations first.
 **Invalid or unsupported Kraus channel: wrong shape, not trace preserving, or used on a simulator that needs Pauli noise.**  
 Fix: Pass matrices with sum K^dag K = identity; run them on density_evolve() or sample().
 
+### QM-E415
+
+**An angle perturbation cannot apply: the standard deviation or the offset is not finite, or the standard deviation is negative.**  
+Fix: Pass a finite offset and a standard deviation >= 0, e.g. gaussian_angle_perturbation(circuit, 0.01, seed).
+
 ### QM-E408
 
 **Invalid cache-block size for execute_plan_reordered (need 1 <= nb <= num_qubits).**  
@@ -872,6 +877,31 @@ Fix: 1 <= n_eval <= 16 and a unitary on >= 1 qubit.
 **Invalid multi-controlled gate construction.**  
 Fix: Check control/target/ancilla counts.
 
+### QM-E811
+
+**A QUBO is too large for exact enumeration: brute force takes at most 24 variables.**  
+Fix: Use qubo_simulated_annealing, or fewer variables.
+
+### QM-E812
+
+**A Pauli sum has X or Y terms, or a Z product of more than two qubits, so it is not a QUBO (only constants, Z and Z Z terms are quadratic).**  
+Fix: Diagonalise the problem first, or pass only Z and ZZ terms to ising_to_qubo.
+
+### QM-E813
+
+**A schedule coefficient has knots that are not strictly increasing in time, or lie outside [0, total_time].**  
+Fix: List the times in increasing order inside [0, total_time].
+
+### QM-E814
+
+**evolve_schedule got a step count below 1, or a Hamiltonian on another number of qubits than the state.**  
+Fix: Use steps >= 1 and the state of the schedule width.
+
+### QM-E822
+
+**qubo_simulated_annealing got invalid parameters: num_reads or num_sweeps below 1, or a beta range that is not positive and increasing.**  
+Fix: Use num_reads >= 1, num_sweeps >= 1 and 0 < beta_min <= beta_max.
+
 ### QM-E830
 
 **Invalid QML template, embedding or observable arguments (qumo.algorithms.qml): wrong weight/feature count, bad wires, unknown rotation, zero-norm or oversized amplitude vector, diagonal observable above 12 qubits.**  
@@ -933,6 +963,11 @@ Fix: Check allowed values in the inputSchema / 'qumo help <command>'.
 
 **Observable acts on qubits outside the circuit.**  
 Fix: Use Pauli indices < num_qubits.
+
+### QM-E915
+
+**A YAML document QUMO does not read: a tag such as !Name, an anchor or alias, block-style YAML, or a shape that is not a Pauli sum.**  
+Fix: QUMO reads flow-style YAML (JSON is a subset of YAML 1.2) and no tags, so no document can name a class or run code. Write the document in flow style.
 
 ### QM-E920
 

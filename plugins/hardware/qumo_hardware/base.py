@@ -13,6 +13,7 @@ the user's classical bits with the leftmost character = highest clbit.
 
 from __future__ import annotations
 
+import json
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -129,7 +130,9 @@ class CostEstimate:
     """Pre-submission cost estimate. `amount` is in `unit`.
 
     Units: "HQC" (Quantinuum hardware credits), "eHQC" (Quantinuum emulator
-    credits), "QPU-seconds" (IBM billed QPU time), "free" (local / syntax check).
+    credits), "QPU-seconds" (IBM billed QPU time), "free" (local / syntax check),
+    "unknown" (billable, but the provider publishes no price, e.g. SpeQtrum; the
+    amount is then 0 and must not be read as a quote).
     `usd` is only filled when a public list price is known and is indicative.
     """
 
@@ -145,7 +148,7 @@ class CostEstimate:
 
     @property
     def billable(self) -> bool:
-        return self.unit != "free" and self.amount > 0
+        return self.unit != "free" and (self.amount > 0 or self.unit == "unknown")
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -155,6 +158,8 @@ class CostEstimate:
     def summary(self) -> str:
         if self.unit == "free":
             return "free (" + (self.notes[0] if self.notes else "no billing") + ")"
+        if self.unit == "unknown":
+            return "unknown, billable (" + (self.notes[0] if self.notes else "no public price") + ")"
         s = f"{self.amount:.4g} {self.unit}"
         if self.usd is not None:
             s += f" (~${self.usd:,.2f} at list price)"
@@ -187,6 +192,33 @@ def new_local_job_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:12]}"
 
 
+PAYLOAD_FORMAT_V1 = "qumo.payload.v1"
+
+
+def qumo_payload_yaml(compiled: "CompiledCircuit", shots: int, backend: str) -> str:
+    """Deterministic YAML 1.2 document carrying one compiled circuit.
+
+    Written as a flow-style mapping with `json.dumps(..., sort_keys=True)`. JSON is
+    a subset of YAML 1.2, so the text needs no YAML loader that can build objects:
+    it has no tags, anchors, aliases or block style, and `json.loads` reads it. The
+    OpenQASM 2 text is kept exactly in "qasm"; the layouts and the measure map let a
+    receiver turn counts back into QUMO's bit order.
+    """
+    doc = {
+        "format": PAYLOAD_FORMAT_V1,
+        "backend": str(backend),
+        "shots": int(shots),
+        "qasm": compiled.qasm,
+        "num_qubits": int(compiled.num_qubits),
+        "num_clbits": int(compiled.num_clbits),
+        "initial_layout": [int(q) for q in compiled.initial_layout],
+        "final_layout": [int(q) for q in compiled.final_layout],
+        "measure_map": {str(c): int(q) for c, q in compiled.measure_map.items()},
+        "auto_measured": bool(compiled.auto_measured),
+    }
+    return json.dumps(doc, sort_keys=True)
+
+
 @runtime_checkable
 class Provider(Protocol):
     """Interface every hardware plugin implements.
@@ -197,6 +229,12 @@ class Provider(Protocol):
     finishing (e.g. gate direction, angle wrapping) are allowed, and they must be
     reported in the job metadata.
 
+    `encode` is the QASM-to-payload conversion of this interface: it returns the
+    text the provider ships for a compiled circuit, with no network access and no
+    credentials. `payload_format` says what that text is: "openqasm2" (the
+    compiled OpenQASM 2 unchanged) or "yaml" (a `qumo.payload.v1` document, see
+    `qumo_payload_yaml`).
+
     Safety contract: `submit(..., confirm=False)` must refuse (QM-E957) to send
     anything to a remote backend unless the caller passes `confirm=True`
     (`check_confirmed` does it). `runner.run` passes `confirm=True` only after
@@ -204,6 +242,7 @@ class Provider(Protocol):
     """
 
     name: str
+    payload_format: str  # "openqasm2" | "yaml"
 
     def list_backends(self, online: bool = False) -> list[BackendInfo]: ...
 
@@ -212,6 +251,8 @@ class Provider(Protocol):
     def is_local(self, backend: str) -> bool: ...
 
     def prepare(self, compiled: "CompiledCircuit", backend: str) -> Any: ...
+
+    def encode(self, compiled: "CompiledCircuit", shots: int, backend: str) -> str: ...
 
     def validate(self, payload: Any, backend: str) -> dict: ...
 

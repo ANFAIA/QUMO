@@ -1,6 +1,6 @@
 """Provider registry.
 
-Built-in providers: `ibm`, `quantinuum`, `local`. Third-party packages can add
+Built-in providers: `ibm`, `quantinuum`, `local`, `speqtrum`. Third-party packages can add
 providers without touching QUMO by declaring an entry point:
 
     [project.entry-points."qumo_hardware.providers"]
@@ -34,7 +34,14 @@ def _local():
     return LocalEmulatorProvider
 
 
-BUILTIN: dict[str, Callable[[], type]] = {"ibm": _ibm, "quantinuum": _quantinuum, "local": _local}
+def _speqtrum():
+    from .speqtrum import SpeQtrumProvider
+
+    return SpeQtrumProvider
+
+
+BUILTIN: dict[str, Callable[[], type]] = {"ibm": _ibm, "quantinuum": _quantinuum, "local": _local,
+                                          "speqtrum": _speqtrum}
 
 
 def _entry_points() -> dict[str, Any]:

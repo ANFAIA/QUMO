@@ -87,7 +87,7 @@ Rules every provider follows:
 | `CompiledCircuit` | `qasm` (physical, OpenQASM 2), `source_qasm` (logical), `num_qubits/num_logical/num_clbits`, `initial_layout/final_layout` (physical qubit of logical *l*), `measure_map` (clbit → physical), `ops`, `two_qubit_gates`, `depth`, `region`, `estimated_success()` |
 | `CostEstimate` | `unit` (`QPU-seconds`, `HQC`, `eHQC`, `free`), `amount`, `formula`, `usd` (only with a known list price), `breakdown`, `notes` |
 | `JobHandle` | `job_id, provider, backend, shots, local, status, meta` (layouts, measure map, provider options; never tokens), `counts` (local runs) |
-| `Provider` (protocol) | `name`, `list_backends(online)`, `target(backend)`, `is_local(backend)`, `prepare(compiled, backend) -> (payload, report)`, `validate(payload, backend)`, `estimate_cost(compiled, shots, backend, payload=None)`, `submit(compiled, shots, backend, seed=None, payload=None, report=None, confirm=False, **opts) -> JobHandle` (refuses remote backends with QM-E957 unless `confirm=True`), `status(job)`, `result(job) -> counts`; optional `provider_compile` / `circuit_stats` (comparison), `public_options()` |
+| `Provider` (protocol) | `name`, `payload_format` (`openqasm2`, or `yaml` for SpeQtrum), `encode(compiled, shots, backend) -> str` (the QASM-to-payload conversion: the text the provider ships; `qumo_payload_yaml` builds the QUMO YAML document), `list_backends(online)`, `target(backend)`, `is_local(backend)`, `prepare(compiled, backend) -> (payload, report)`, `validate(payload, backend)`, `estimate_cost(compiled, shots, backend, payload=None)`, `submit(compiled, shots, backend, seed=None, payload=None, report=None, confirm=False, **opts) -> JobHandle` (refuses remote backends with QM-E957 unless `confirm=True`), `status(job)`, `result(job) -> counts`; optional `provider_compile` / `circuit_stats` (comparison), `public_options()` |
 
 High-level workflow (`qumo_hardware.runner`), used by the CLI, examples and agents.
 This snippet runs from the repository root without any account (`make py` first):
@@ -472,6 +472,14 @@ Notes for the next ones:
   `prx` phases.
 
 ## 10. Limitations
+
+* SpeQtrum (`-p speqtrum`, `qumo_hardware/speqtrum.py`): the service publishes no
+  topology, so targets come from `--targets FILE` (JSON `{device code: target spec}`)
+  or `SpeQtrumProvider(targets=...)`. No cost is published, so `--max-cost` is refused
+  (QM-E956). Acceptance of QUMO's YAML payload by the live service is unverified: the
+  provider was tested only against a local fake server. Results that carry YAML tags
+  are refused with QM-E955 and an `UnsafeFormatWarning` at the moment they are read,
+  and nothing in them is loaded. See `docs/QILISDK_MAPPING.md`.
 
 * Programs: a `while`, classical variables or any other runtime region cannot run on
   hardware yet. The payload here is OpenQASM 2, which has no loops, so text, a file or

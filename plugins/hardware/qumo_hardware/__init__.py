@@ -6,6 +6,8 @@ Providers implement one neutral interface (`qumo_hardware.base.Provider`):
 * `quantinuum` Quantinuum Nexus (qnexus; H2 pytket circuits, Helios HUGR)
 * `local`      offline emulation (QUMO simulator, IBM fake backends + Aer,
                Quantinuum local emulators)
+* `speqtrum`   SpeQtrum (Qilimanjaro) digital propagation; YAML payload; configured
+               from QUMO_SPEQTRUM_* environment variables
 
 Quick start (dry-run by default, nothing is submitted without confirm=True):
 

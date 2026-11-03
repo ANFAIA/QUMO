@@ -293,6 +293,7 @@ def hugr_program(native_circ, n_qubits: int):
 
 class QuantinuumProvider:
     name = "quantinuum"
+    payload_format = "openqasm2"
 
     def __init__(self, project: str = "qumo-hardware", max_cost: float | None = None, seed: int | None = None):
         self.project = project
@@ -350,6 +351,10 @@ class QuantinuumProvider:
                     "errors_source": "nominal public data-sheet values, not live calibration",
                     "program_format": "HUGR (Guppy)" if family == "Helios" else "pytket circuit"},
         )
+
+    def encode(self, compiled: CompiledCircuit, shots: int, backend: str) -> str:
+        """QASM-to-payload conversion: the compiled OpenQASM 2 text, unchanged."""
+        return compiled.qasm
 
     def prepare(self, compiled: CompiledCircuit, backend: str):
         """CompiledCircuit -> native pytket circuit (validated offline)."""

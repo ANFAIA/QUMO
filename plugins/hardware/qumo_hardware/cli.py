@@ -27,8 +27,8 @@ from pathlib import Path
 
 from . import jobs as job_store
 from . import runner
-from .base import CANCELLED, ERROR
-from .errors import E_COMPILE, E_CONFIRM, HardwareError, catalog
+from .base import CANCELLED, ERROR, TargetSpec
+from .errors import E_COMPILE, E_CONFIRM, E_INVALID_PAYLOAD, HardwareError, catalog
 from .registry import get_provider, provider_names
 
 EXIT_OK, EXIT_ERR, EXIT_USAGE, EXIT_CONFIRM, EXIT_INTERRUPTED = 0, 1, 2, 3, 130
@@ -43,8 +43,25 @@ def _read_circuit(path: str) -> str:
     return p.read_text()
 
 
+def _load_targets(path: str | None):
+    """`--targets FILE`: JSON object mapping device codes to TargetSpec dicts (SpeQtrum)."""
+    if not path:
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            raw = json.load(fh)
+    except (OSError, ValueError) as exc:
+        raise HardwareError(E_INVALID_PAYLOAD, f"cannot read targets file '{path}': {exc}",
+                            "write a JSON object {\"device code\": {target spec}}") from exc
+    if not isinstance(raw, dict):
+        raise HardwareError(E_INVALID_PAYLOAD, f"targets file '{path}' must hold one JSON object",
+                            "write a JSON object {\"device code\": {target spec}}")
+    return {code: TargetSpec.from_dict(spec) for code, spec in raw.items()}
+
+
 def _provider_options(args) -> dict:
     return {
+        "targets": _load_targets(getattr(args, "targets", None)),
         "channel": getattr(args, "channel", None),
         "instance": getattr(args, "instance", None),
         "account_name": getattr(args, "account", None),
@@ -72,6 +89,7 @@ def _add_common(p: argparse.ArgumentParser, circuit: bool = True, backend: bool 
     p.add_argument("--channel", help="IBM channel (default: SDK default / QISKIT_IBM_CHANNEL)")
     p.add_argument("--instance", help="IBM instance CRN or name (default: QISKIT_IBM_INSTANCE / saved account)")
     p.add_argument("--account", help="IBM saved-account name")
+    p.add_argument("--targets", help="SpeQtrum: JSON file mapping device codes to target specs (the service publishes no topology)")
     p.add_argument("--project", help="Quantinuum Nexus project (default: qumo-hardware)")
     p.add_argument("--show-qasm", action="store_true", help="include the compiled OpenQASM 2 payload")
     p.add_argument("--params", help="bind symbolic parameters: JSON list (declaration order) or {name: value}")
@@ -238,7 +256,7 @@ def cmd_run(args, estimate_only: bool = False) -> int:
 
 
 def cmd_backends(args) -> int:
-    names = [args.provider] if args.provider else ["local", "ibm", "quantinuum"]
+    names = [args.provider] if args.provider else ["local", "ibm", "quantinuum", "speqtrum"]
     rows, warnings = [], []
     for n in names:
         try:
