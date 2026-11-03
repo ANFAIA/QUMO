@@ -37,7 +37,7 @@ from qumo.ir.gates import (
 from qumo.ir.param import Param
 from qumo.ir.circuit import Circuit, Instruction
 from qumo.compiler.common import (
-    GateSet, WireList, TWO_PI, FOUR_PI, HALF_PI, ANG_TOL, AX_Z, AX_ANY, AX_OTHER,
+    GateSet, WireList, TWO_PI, FOUR_PI, HALF_PI, ANG_TOL, EXACT_TOL, AX_Z, AX_ANY, AX_OTHER,
     is_plain_gate, is_bound, is_all_wire_op, commutes, same_qubit_set, compact,
     wrap_angle, near_mod, m2_identity_phase, inst_matrix_1q, rot_axis, rot_is_r,
     rot_angle, combine_rotations, emit_rotation, wire_axis,
@@ -70,7 +70,7 @@ def _period_rule(k: Int) -> Int:
     return 0
 
 
-def gate_identity_phase(g: Instruction, mut phase: Float64) -> Bool:
+def gate_identity_phase(g: Instruction, mut phase: Float64, tol: Float64 = ANG_TOL) -> Bool:
     """True when the (bound) gate equals e^{i phase} I."""
     var k = g.kind
     if k == Op.I:
@@ -80,20 +80,20 @@ def gate_identity_phase(g: Instruction, mut phase: Float64) -> Bool:
         return False
     var a = op_arity(k)
     if a == 1:
-        return m2_identity_phase(inst_matrix_1q(g), phase)
+        return m2_identity_phase(inst_matrix_1q(g), phase, tol)
     var rule = _period_rule(k)
     if rule == 0:
         return False
     var v = g.p0.value()
     if rule == 1:
-        if near_mod(v, 0.0, TWO_PI):
+        if near_mod(v, 0.0, TWO_PI, tol):
             phase = 0.0
             return True
         return False
-    if near_mod(v, 0.0, FOUR_PI):
+    if near_mod(v, 0.0, FOUR_PI, tol):
         phase = 0.0
         return True
-    if rule == 2 and near_mod(v, TWO_PI, FOUR_PI):
+    if rule == 2 and near_mod(v, TWO_PI, FOUR_PI, tol):
         phase = pi
         return True
     return False
@@ -135,8 +135,10 @@ def gate_near_identity(g: Instruction, mut phase: Float64) -> Bool:
     return False
 
 
-def remove_identities(mut c: Circuit) -> Int:
-    """Drop gates equal (to 1e-12 process infidelity) to a global phase."""
+def remove_identities(mut c: Circuit, exact: Bool = False) -> Int:
+    """Drop gates equal (to 1e-12 process infidelity) to a global phase. That is any
+    rotation below about 2e-6. `exact`, for a block of a Program, keeps every gate
+    further from the identity than EXACT_TOL: verify_program would see it go."""
     var n = len(c.ops)
     var alive = List[Bool](length=n, fill=True)
     var removed = 0
@@ -145,7 +147,7 @@ def remove_identities(mut c: Circuit) -> Int:
         if not op_is_unitary(g.kind):
             continue
         var ph = 0.0
-        if gate_near_identity(g, ph):
+        if gate_identity_phase(g, ph, EXACT_TOL) if exact else gate_near_identity(g, ph):
             alive[i] = False
             removed += 1
             if g.cond < 0:
@@ -158,7 +160,7 @@ def remove_identities(mut c: Circuit) -> Int:
 # ----------------------------------------------------------------------------
 # pairwise combination
 # ----------------------------------------------------------------------------
-def is_inverse_pair(h: Instruction, g: Instruction, mut phase: Float64) -> Bool:
+def is_inverse_pair(h: Instruction, g: Instruction, mut phase: Float64, tol: Float64 = ANG_TOL) -> Bool:
     """h followed by g equals e^{i phase} I (same operands up to gate symmetry)."""
     var a = op_arity(h.kind)
     if a != op_arity(g.kind) or not same_qubit_set(h, g):
@@ -170,7 +172,7 @@ def is_inverse_pair(h: Instruction, g: Instruction, mut phase: Float64) -> Bool:
             return True
         if a == 1 and rot_axis(h.kind) == AX_OTHER and rot_axis(g.kind) == AX_OTHER:
             var m = inst_matrix_1q(g) @ inst_matrix_1q(h)
-            return m2_identity_phase(m, phase)
+            return m2_identity_phase(m, phase, tol)
         return False
     if a == 1:
         # rotations of the same axis are summed by combine_rotations; rotations
@@ -179,17 +181,17 @@ def is_inverse_pair(h: Instruction, g: Instruction, mut phase: Float64) -> Bool:
             if h.kind == g.kind and np == 1:
                 var ok = False
                 var s = h.p0.try_add(g.p0, ok)
-                if ok and not s.is_symbolic() and abs(s.value()) < ANG_TOL:
+                if ok and not s.is_symbolic() and abs(s.value()) < tol:
                     phase = 0.0
                     return True
             return False
         if is_bound(h) and is_bound(g):
             var m = inst_matrix_1q(g) @ inst_matrix_1q(h)
-            return m2_identity_phase(m, phase)
+            return m2_identity_phase(m, phase, tol)
         if h.kind == g.kind and np == 1:
             var ok = False
             var s = h.p0.try_add(g.p0, ok)
-            if ok and not s.is_symbolic() and abs(s.value()) < ANG_TOL:
+            if ok and not s.is_symbolic() and abs(s.value()) < tol:
                 phase = 0.0
                 return True
         return False
@@ -200,14 +202,14 @@ def is_inverse_pair(h: Instruction, g: Instruction, mut phase: Float64) -> Bool:
     if not ok or s.is_symbolic():
         return False
     var tmp = Instruction.make(h.kind, h.q0, h.q1, h.q2, s)
-    return gate_identity_phase(tmp, phase)
+    return gate_identity_phase(tmp, phase, tol)
 
 
 def combine(h: Instruction, g: Instruction, gs: GateSet, mode: Int,
             mut newh: Instruction, mut phase: Float64) -> Int:
     """Try to replace (h then g) by a single gate (COMB_MERGED) or nothing."""
     var ph = 0.0
-    if is_inverse_pair(h, g, ph):
+    if is_inverse_pair(h, g, ph, gs.angle_tol()):
         phase += ph
         return COMB_IDENTITY
     if mode == MODE_CANCEL:
@@ -241,7 +243,7 @@ def combine(h: Instruction, g: Instruction, gs: GateSet, mode: Int,
             return COMB_NONE
         var cand = Instruction.make(hk, h.q0, h.q1, -1, s)
         var p3 = 0.0
-        if not s.is_symbolic() and gate_identity_phase(cand, p3):
+        if not s.is_symbolic() and gate_identity_phase(cand, p3, gs.angle_tol()):
             phase += p3
             return COMB_IDENTITY
         newh = cand
@@ -256,9 +258,9 @@ def combine(h: Instruction, g: Instruction, gs: GateSet, mode: Int,
             return COMB_NONE
         if not s.is_symbolic():
             var v = s.value()
-            if near_mod(v, 0.0, TWO_PI):
+            if near_mod(v, 0.0, TWO_PI, gs.angle_tol()):
                 return COMB_IDENTITY
-            if near_mod(v, pi, TWO_PI) and gs.has(Op.CZ):
+            if near_mod(v, pi, TWO_PI, gs.angle_tol()) and gs.has(Op.CZ):
                 newh = Instruction.make(Op.CZ, h.q0, h.q1)
                 return COMB_MERGED
         if gs.has(Op.CP):
@@ -411,6 +413,7 @@ def fuse_1q(mut c: Circuit, gs: GateSet) -> Int:
     # memoised synthesis: structured circuits (Clifford, QFT, ...) repeat a
     # handful of distinct 1q runs; key = rounded matrix, verified exactly.
     # Distinct matrices are collected first and synthesised in parallel.
+    var same_tol = EXACT_TOL if gs.exact else 1e-12
     var cache_head = Dict[UInt64, Int]()
     var cache_next = List[Int]()
     var cache_mat = List[M2]()
@@ -424,7 +427,7 @@ def fuse_1q(mut c: Circuit, gs: GateSet) -> Int:
         if run_count[r] == 1 and not run_bad[r]:
             # a single basis gate only improves when it is the identity
             var ph = 0.0
-            if m2_identity_phase(run_mat[r], ph):
+            if m2_identity_phase(run_mat[r], ph, gs.angle_tol()):
                 rep_start[r] = len(rep)
                 rep_len[r] = 0
                 phase += ph
@@ -438,7 +441,7 @@ def fuse_1q(mut c: Circuit, gs: GateSet) -> Int:
             var cm = cache_mat[e]
             var same = True
             comptime for k in range(4):
-                if abs(cm.re[k] - m.re[k]) > 1e-12 or abs(cm.im[k] - m.im[k]) > 1e-12:
+                if abs(cm.re[k] - m.re[k]) > same_tol or abs(cm.im[k] - m.im[k]) > same_tol:
                     same = False
             if same:
                 hit = e
@@ -520,7 +523,7 @@ def _flush_z(mut out: List[Instruction], mut pend: List[Float64], q: Int, gs: Ga
              mut phase: Float64):
     var a = pend[q]
     pend[q] = 0.0
-    if abs(wrap_angle(a, FOUR_PI)) < ANG_TOL:
+    if abs(wrap_angle(a, FOUR_PI)) < gs.angle_tol():
         return
     var tmp = List[Instruction]()
     if emit_rotation(AX_Z, True, Param(a), q, gs, tmp, phase):
@@ -582,7 +585,7 @@ def eject_z(mut c: Circuit, gs: GateSet) -> Int:
             pend[g.q1] = t
             out.append(g)
             continue
-        if k == Op.CX and near_mod(pend[g.q1], pi, TWO_PI):
+        if k == Op.CX and near_mod(pend[g.q1], pi, TWO_PI, gs.angle_tol()):
             # (-iZ_t) then CX == CX then (-i Z_c Z_t) = CX then i RZ(pi)_c RZ(pi)_t:
             # the target frame rides through, the control frame gains pi.
             pend[g.q0] += pi

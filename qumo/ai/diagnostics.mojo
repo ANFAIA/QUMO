@@ -31,6 +31,7 @@ uncategorized), W0xx warnings (lint, execution notes, parser).
 from std.math import pi
 
 from qumo.ir.circuit import Circuit, Instruction
+from qumo.ir.program import Program, stuck_loops
 from qumo.ir.gates import (
     Op, op_name, op_arity, op_num_params, op_is_unitary, op_is_noise,
     op_is_annotation, op_is_self_inverse, op_inverse_kind, op_is_symmetric,
@@ -267,7 +268,7 @@ def error_ranges() -> List[ErrorRange]:
        "Raised by the Python package `qumo_hardware`, not by the Mojo core. This block mirrors `CATALOG` in plugins/hardware/qumo_hardware/errors.py (tests/test_mcp.mojo checks that every code used there is listed here). See [HARDWARE_PLUGINS.md](HARDWARE_PLUGINS.md#error-codes); `python -m qumo_hardware errors --json` prints the plugin's own catalogue. Messages never contain credentials.")
     _r(r, "QM-E96x", "benchmark", "Benchmark harness", "Benchmark harness (bench/run_benchmarks.py, Python)", 960, 969,
        "Raised by the Python benchmark harness, not by the Mojo core. Reported in the result JSON (`suites.<name>.reason`) and on stderr; a suite failure never aborts the run. See [BENCHMARKING_ON_CLOUD_GPUS.md](BENCHMARKING_ON_CLOUD_GPUS.md).")
-    _r(r, "QM-W0xx", "warning", "Warnings", "Warnings: lint findings QM-W001..W019 (qumo.ai.diagnostics.lint), execution notes QM-W020..W049, OpenQASM parser warnings QM-W050..W059", 0, 99)
+    _r(r, "QM-W0xx", "warning", "Warnings", "Warnings: lint findings QM-W001..W019 (qumo.ai.diagnostics.lint), execution notes QM-W020..W049, OpenQASM parser warnings QM-W050..W053 and QM-W055, Program lint QM-W054", 0, 99)
     return r^
 
 
@@ -324,6 +325,11 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E413", "simulation", "The stabilizer branching simulator has no decomposition for this gate.", "Translate the circuit to Clifford gates and rotations first.")
     _e(c, "QM-E414", "simulation", "Invalid or unsupported Kraus channel: wrong shape, not trace preserving, or used on a simulator that needs Pauli noise.", "Pass matrices with sum K^dag K = identity; run them on density_evolve() or sample().")
     _e(c, "QM-E408", "simulation", "Invalid cache-block size for execute_plan_reordered (need 1 <= nb <= num_qubits).", "Use execute_plan(), or pass nb in [1, num_qubits].")
+    _e(c, "QM-E480", "simulation", "A shot of a Program passed its budget of loop iterations (max_iterations, default 65536 back-edges per shot).", "The loop may never exit; raise max_iterations if it is only long.")
+    _e(c, "QM-E481", "simulation", "Division or remainder by zero, or an integer power with a negative exponent, while a shot of a Program ran. The message gives the shot and line.", "Guard the divisor with an if.")
+    _e(c, "QM-E482", "simulation", "A float reached an integer or a gate angle as NaN, infinite or out of range of the target type, an input value is not finite, or a for-loop range holds a uint at or above 2^63 that it cannot read.", "Guard the value, or use a wider integer.")
+    _e(c, "QM-E483", "simulation", "A simulation method that cannot run a Program ('density', 'ptsbe', 'frame': they need one fixed sequence of operations for all shots), or an unknown method name.", "Use 'auto', 'statevector', 'tableau' or 'branching'.")
+    _e(c, "QM-E484", "simulation", "An opcode that a Program block cannot run: blocks take unitary gates, measure, reset, noise, barrier and tick.", "Report it: every other walker of the instruction list would skip such an opcode in silence.")
     _e(c, "QM-E450", "simulation", "Invalid physical error rate (out of [0, 1], or above the surface-code threshold for fault-tolerant estimates).", "Probabilities must lie in [0, 1]; fault-tolerant estimation needs p < 1e-2.")
     _e(c, "QM-E460", "execution", "No devices available in the execution pool.", "Add Device.cpu() at least.")
     _e(c, "QM-E461", "execution", "A workflow job fits no device in the pool (too many qubits).", "Add a device with more qubits, or a stabilizer device for Clifford circuits.")
@@ -342,7 +348,10 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E501", "qasm", "Unexpected character in OpenQASM source.", "Remove it or check for a missing quote/comment marker.")
     _e(c, "QM-E502", "qasm", "Unterminated string literal or block comment.", "Close strings on the same line and comments with */.")
     _e(c, "QM-E503", "qasm", "Unsupported OpenQASM version.", "Use 'OPENQASM 3.0;' or 'OPENQASM 2.0;'.")
-    _e(c, "QM-E504", "qasm", "OpenQASM feature outside QUMO's supported subset (subroutines, while, classical assignment, ...).", "Use the gate-level subset; see 'qumo describe capabilities'.")
+    _e(c, "QM-E504", "qasm", "OpenQASM feature outside QUMO's supported subset, or one a Circuit cannot hold: subroutines, or, in parse_qasm, while and classical assignment.", "Parse with parse_qasm_program or load_any for while and classical variables; see 'qumo describe capabilities' for the rest.")
+    _e(c, "QM-E505", "qasm", "An expression or a block nests deeper than 256 levels.", "Split it into smaller expressions or statements; a chain of else-if arms counts as nesting too.")
+    _e(c, "QM-E506", "qasm", "The source expands past its budget: 8 million items plus its length in bytes, where an item is a declared wire, a statement run (gate bodies and unrolled loops run again), a target of a broadcast or slice, a control, a repeat of pow, or a classical expression node a program keeps.", "Write the operations out, or build the circuit through the API. A pow of x, h, cx, s, sx or t folds into one period and costs nothing.")
+    _e(c, "QM-E507", "qasm", "The source declares more wires than its operations use: 4096 beyond 3 per operation, the same rule as circuit_from_json.", "Shrink the registers to the qubits and bits the circuit uses.")
     _e(c, "QM-E510", "qasm", "Unknown gate name.", "Check the suggestions, run 'qumo describe gates', or define it with 'gate name(params) a, b { ... }'.")
     _e(c, "QM-E511", "qasm", "Wrong number of gate parameters.", "Match the gate signature, e.g. rz(theta) q[0];")
     _e(c, "QM-E512", "qasm", "Wrong number of qubit operands (including ctrl @ controls).", "Match the gate arity; controls of ctrl @ come first.")
@@ -358,10 +367,18 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E533", "qasm", "Math domain error (division by zero, log/sqrt of invalid value).", "Check the expression.")
     _e(c, "QM-E534", "qasm", "Unknown function or wrong arity in an expression.", "Supported: sin cos tan arcsin arccos arctan exp ln sqrt abs floor ceil pow mod.")
     _e(c, "QM-E540", "qasm", "Measurement maps a different number of qubits and bits.", "Qubit and bit operands must have equal size.")
-    _e(c, "QM-E541", "qasm", "Unsupported condition (multi-bit register value, nested or compound if).", "QUMO conditions test one bit: if (c[i] == 1) ...")
+    _e(c, "QM-E541", "qasm", "Unsupported condition: nested if, '||', 'else' after a register or '&&' test, a body that writes a bit it still tests, or a switch on a copy of bits measured since.", "Conditions test a bit, a whole register or an '&&' chain of bits; keep writes to tested bits at the end of the body.")
     _e(c, "QM-E550", "qasm", "Invalid gate modifier (non-integer pow, bad ctrl count).", "Use inv @, ctrl(n) @, negctrl @ or pow(k) @ with integer k.")
     _e(c, "QM-E551", "qasm", "Gate definition expands recursively.", "Gates must not call themselves.")
-    _e(c, "QM-E552", "qasm", "OpenQASM export cannot express a classical condition: a single-bit condition on a multi-bit register (OpenQASM 2), or a register condition that does not cover every clbit.", "Export OpenQASM 3 (to_qasm) for single-bit conditions; condition on single bits or on the whole register.")
+    _e(c, "QM-E552", "qasm", "OpenQASM export cannot express something: a single-bit condition on a multi-bit register (OpenQASM 2), a register condition that does not cover every clbit, or a constant that is NaN or infinite.", "Export OpenQASM 3 (to_qasm) for single-bit conditions; condition on single bits or on the whole register; compute a non-finite value at run time.")
+    _e(c, "QM-E580", "qasm", "Classical type error: a cast the OpenQASM table refuses, or operands that do not mix (int with uint, float with angle, shift of an int).", "Cast one operand explicitly; docs/CONTROL_FLOW.md has the rules.")
+    _e(c, "QM-E581", "qasm", "A classical variable may be read before it is assigned, on some path through the program.", "Assign it on every path, for example where it is declared. Bits start at 0 and are exempt.")
+    _e(c, "QM-E582", "qasm", "Classical type not representable: a width outside 1..64, float[32], or a mutable angle without a width.", "float is binary64; write angle[n] for a variable.")
+    _e(c, "QM-E583", "qasm", "Malformed control flow: break or continue outside a loop, else or case without its opener, or a region left open.", "Check the nesting of the block.")
+    _e(c, "QM-E584", "qasm", "A value known only at run time where a constant is needed: qubit index, size, modifier, const initializer.", "Use a constant, or a for loop that can unroll.")
+    _e(c, "QM-E585", "qasm", "A Program with classical variables or runtime control flow was given to an operation that needs one Circuit: exact state vector, expectation value, density matrix, OpenQASM 2, resource estimates, device emulation, encoding.", "Sample it with qumo_run_qasm, or keep the part you need in a straight-line circuit.")
+    _e(c, "QM-E586", "qasm", "Detector or observable in a program with runtime control flow: they index measurements as if each ran once, and no decoder takes a syndrome of varying length.", "Move the QEC circuit out of the loop.")
+    _e(c, "QM-E587", "qasm", "Program JSON (qumo.program.v1) that cannot be read: a wrong format, a missing field, or an index outside its table.", "Pass the output of program_to_json or qumo_convert with to='json'; docs/CONTROL_FLOW.md has the format.")
     _e(c, "QM-E560", "qasm", "Invalid '#pragma qumo' directive.", "See docs/AI_NATIVE.md for detector/observable/tick/param pragmas.")
     _e(c, "QM-E570", "qasm", "Invalid or too large for-loop range.", "Use constant inclusive ranges [a:b] / [a:step:b] or sets {a, b}.")
     # compiler
@@ -388,6 +405,10 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E624", "compiler", "A circuit with E / correlated_error was given to the compiler: its qubits live in a side table no pass reads.", "Compile first, then add noise.")
     _e(c, "QM-E622", "compiler", "A constant angle cannot be brought into the target's angle bounds.", "A Pauli rotation needs an interval covering [0, pi/2] up to a period; widen the bounds or drop them.")
     # stabilizer / qec
+    _e(c, "QM-E630", "compiler", "A Program cannot use the AI presets, synthesis passes or the learned router, which need a whole circuit, nor a second route or a relabeling pass inside fixpoint.", "Use a preset level, or a pipeline with one route and none of these.")
+    _e(c, "QM-E631", "compiler", "A compiled Program failed verification: a different control structure, two layouts meeting on a control-flow edge, or a block that does not equal its source.", "Report the program; run a lower optimization level meanwhile.")
+    _e(c, "QM-E632", "compiler", "No SWAP network was found to bring a region of a Program back to its entry layout.", "Report the program; check that the target's coupling graph is what you meant.")
+    _e(c, "QM-E633", "compiler", "A gate with target angle bounds takes an angle known only at run time, which cannot be wrapped into the bounds.", "Use a gate without bounds, or drop the bounds.")
     _e(c, "QM-E701", "stabilizer", "Non-Clifford operation in a stabilizer-only path.", "Use the state-vector simulator, or keep rotations at multiples of pi/2.")
     _e(c, "QM-E702", "stabilizer", "Unbound parameters in a stabilizer/Stim export path.", "Bind parameters first.")
     _e(c, "QM-E703", "stabilizer", "Detectors/observables are not deterministic in the noiseless circuit.", "Check the measurement records referenced by detectors.")
@@ -401,6 +422,7 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E711", "qec", "Invalid noise probabilities.", "Probabilities must lie in [0, 1].")
     _e(c, "QM-E712", "qec", "Internal invariant violation in the sparse-blossom decoder (never raised per shot; counted in SparseBlossomDecoder.anomalies, which must stay 0).", "Report the syndrome; decode it with 'mwpm_dense' meanwhile.")
     # fault-tolerant programming layer (qumo.ft, docs/FT.md)
+    _e(c, "QM-E713", "stabilizer", "Stabilizer tableau too large: 2n + 1 rows of 2n bits, about n^2 / 2 bytes. The limit is 262144 qubits (32 GiB).", "Split the circuit, or drop the wires no operation uses.")
     _e(c, "QM-E720", "ft", "Invalid Pauli label or Pauli size mismatch in a code definition (qumo.ft.pauli).", "One character I/X/Y/Z per physical qubit (character i = qubit i), optionally prefixed by + or -.")
     _e(c, "QM-E721", "ft", "Invalid stabilizer-code definition: wrong number of generators or logicals, anticommuting or dependent generators, logicals not commuting with the stabilizers or violating X_i Z_j relations.", "List n-k independent commuting generators and k X/Z logicals with canonical commutation; the message names the offending operators.")
     _e(c, "QM-E722", "ft", "Unknown code name or invalid code parameter (e.g. odd k for an Iceberg code).", "Use steane, five_qubit, css_422, noncss_422, iceberg_<even k>, surface_<d>, repetition_<d> (qumo_ft_codes lists them).")
@@ -477,7 +499,7 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E968", "benchmark", "A benchmark binary (e.g. a GPU runtime error) or a baseline worker crashed or produced no result.", "Rerun the recorded command; for GPU errors add `MODULAR_DEBUG=device-sync-mode`.")
     _e(c, "QM-E969", "benchmark", "A test, `gpu-check` target or correctness check reported FAIL.", "Rerun the failing file: `.venv/bin/mojo run -I . <file>`.")
     _e(c, "QM-E999", "internal", "Uncategorized internal error (no QUMO code in the message).", "Report it with the input that triggered it.")
-    # warnings: lint (W001-W019), execution notes (W020-W049), OpenQASM parser (W050-W059)
+    # warnings: lint (W001-W019), execution notes (W020-W049), OpenQASM parser (W050-W053, W055), Program lint (W054)
     _e(c, "QM-W001", "lint", "Qubits are declared but never used.", "Shrink the register to save simulation memory (2x per qubit).")
     _e(c, "QM-W002", "lint", "A gate acts on a qubit after it was measured (no reset): the circuit becomes dynamic.", "Intended for mid-circuit measurement; otherwise move measurements to the end.")
     _e(c, "QM-W003", "lint", "A qubit is measured without any prior operation (always 0).", "Check the qubit index of the measurement.")
@@ -497,6 +519,8 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-W051", "qasm", "OpenQASM delay is ignored.", "Model idle noise with '#pragma qumo depolarize1(p) q[i];'.")
     _e(c, "QM-W052", "qasm", "OpenQASM annotation is ignored.", "Annotations carry no meaning in QUMO; the annotated statement still runs.")
     _e(c, "QM-W053", "qasm", "OpenQASM box duration is ignored.", "QUMO circuits have no timing model; the box still keeps its gates together.")
+    _e(c, "QM-W054", "qasm", "The body of a while loop cannot change its condition and has no break: the loop never runs, or runs until QM-E480.", "Assign a variable the condition reads, measure into a bit it reads, or add a break.")
+    _e(c, "QM-W055", "qasm", "An integer division loses a remainder in a constant used as an angle or a float (float t = 3 / 4 * pi is 0), or a literal-only gate argument keeps real division where OpenQASM 3 and Qiskit truncate (rz(3/4*pi) is 3 pi / 4 here, 0 there).", "Write it in floats, such as 3.0 / 4, so that every tool reads the same value.")
     return c^
 
 
@@ -541,9 +565,43 @@ def _cancels(a: Instruction, b: Instruction) -> Bool:
     return p.offset == -q.offset
 
 
+def lint_program(p: Program) -> List[Diagnostic]:
+    """Static checks for a program with runtime regions. The checks of `lint` read
+    the ops as one pass from start to end, which a loop or a branch is not, so they
+    do not apply here."""
+    var out = List[Diagnostic]()
+    var stuck = stuck_loops(p)
+    for i in range(min(len(stuck), LINT_LISTED)):
+        var at = stuck[i]
+        var d = Diagnostic.make("QM-W054", "warning", "the body of the while loop on line " + String(p.tape[at].line) + " cannot change its condition, and no break leaves it: it never runs, or runs until QM-E480", "assign a variable the condition reads, measure into a bit it reads, or add a break")
+        d.line = p.tape[at].line
+        d.col = 1
+        out.append(d^)
+    if len(stuck) > LINT_LISTED:
+        out.append(Diagnostic.make("QM-W054", "warning", String(len(stuck) - LINT_LISTED) + " more while loops like the above", "the first " + String(LINT_LISTED) + " are listed"))
+    return out^
+
+
+# Findings of one code listed per circuit; the rest are counted in one more finding,
+# so that the report of a circuit with millions of operations stays small.
+comptime LINT_LISTED = 100
+
+
+def _per_op_code(slot: Int) -> String:
+    var codes: List[String] = ["QM-W008", "QM-W007", "QM-W014", "QM-W002", "QM-W010", "QM-W011"]
+    return codes[slot]
+
+
+def _listed(mut seen: List[Int], slot: Int) -> Bool:
+    """Count a finding of `_per_op_code(slot)`; True while it is still listed."""
+    seen[slot] += 1
+    return seen[slot] <= LINT_LISTED
+
+
 def lint(circuit: Circuit) -> List[Diagnostic]:
     """Static checks for legal-but-suspicious circuits (codes QM-W0xx)."""
     var out = List[Diagnostic]()
+    var seen = List[Int](length=6, fill=0)  # per-operation findings, by _per_op_code
     var n = circuit.num_qubits
     var used = List[Bool](length=n, fill=False)
     var touched = List[Bool](length=n, fill=False)  # any op before measurement
@@ -560,7 +618,7 @@ def lint(circuit: Circuit) -> List[Diagnostic]:
         var g = circuit.ops[i]
         var k = g.kind
         if g.cond >= 0 and g.cond < nc:
-            if not written[g.cond]:
+            if not written[g.cond] and _listed(seen, 0):
                 out.append(Diagnostic.make("QM-W008", "warning", "instruction #" + String(i) + " '" + op_name(k) + "' is conditioned on bit c[" + String(g.cond) + "] which has not been written yet (it is always 0)", "measure into c[" + String(g.cond) + "] before the condition", i))
             read_since_write[g.cond] = True
         if op_is_annotation(k):
@@ -583,7 +641,7 @@ def lint(circuit: Circuit) -> List[Diagnostic]:
                 last_op[q] = -1
             var cb = g.clbit
             if cb >= 0 and cb < nc:
-                if written[cb] and not read_since_write[cb]:
+                if written[cb] and not read_since_write[cb] and _listed(seen, 1):
                     out.append(Diagnostic.make("QM-W007", "warning", "measurement #" + String(i) + " overwrites bit c[" + String(cb) + "] written by instruction #" + String(cbit_writer[cb]) + " before it was read", "measure into a different bit or condition on c[" + String(cb) + "] first", i))
                 written[cb] = True
                 read_since_write[cb] = False
@@ -599,7 +657,7 @@ def lint(circuit: Circuit) -> List[Diagnostic]:
             var np = op_num_params(k)
             for j in range(np):
                 var p = g.param(j)
-                if not p.is_symbolic() and (p.offset < 0.0 or p.offset > 1.0):
+                if not p.is_symbolic() and (p.offset < 0.0 or p.offset > 1.0) and _listed(seen, 2):
                     out.append(Diagnostic.make("QM-W014", "error", "noise channel '" + op_name(k) + "' at #" + String(i) + " has probability " + String(p.offset) + " outside [0, 1]", "probabilities must lie in [0, 1]", i))
             continue
         # unitary gate
@@ -610,7 +668,8 @@ def lint(circuit: Circuit) -> List[Diagnostic]:
             touched[q] = True
             if measured[q] and not after_meas_reported[q]:
                 after_meas_reported[q] = True
-                out.append(Diagnostic.make("QM-W002", "info", "gate '" + op_name(k) + "' (#" + String(i) + ") acts on qubit " + String(q) + " after it was measured; the circuit is dynamic and runs as per-shot trajectories", "intended for mid-circuit measurement; otherwise move measurements to the end", i))
+                if _listed(seen, 3):
+                    out.append(Diagnostic.make("QM-W002", "info", "gate '" + op_name(k) + "' (#" + String(i) + ") acts on qubit " + String(q) + " after it was measured; the circuit is dynamic and runs as per-shot trajectories", "intended for mid-circuit measurement; otherwise move measurements to the end", i))
         # adjacent cancellation
         if a >= 1 and g.q0 >= 0 and g.q0 < n:
             var j0 = last_op[g.q0]
@@ -619,15 +678,18 @@ def lint(circuit: Circuit) -> List[Diagnostic]:
                 var q = g.qubit(j)
                 if q < 0 or q >= n or last_op[q] != j0:
                     all_same = False
-            if all_same and _cancels(circuit.ops[j0], g):
+            if all_same and _cancels(circuit.ops[j0], g) and _listed(seen, 4):
                 out.append(Diagnostic.make("QM-W010", "info", "gates #" + String(j0) + " '" + op_name(circuit.ops[j0].kind) + "' and #" + String(i) + " '" + op_name(k) + "' cancel each other", "remove both or run the optimizer", i))
         if op_num_params(k) == 1 and (k == Op.RX or k == Op.RY or k == Op.RZ or k == Op.P or k == Op.CP or k == Op.CRX or k == Op.CRY or k == Op.CRZ or k == Op.RXX or k == Op.RYY or k == Op.RZZ):
-            if not g.p0.is_symbolic() and g.p0.offset == 0.0:
+            if not g.p0.is_symbolic() and g.p0.offset == 0.0 and _listed(seen, 5):
                 out.append(Diagnostic.make("QM-W011", "info", "'" + op_name(k) + "' at #" + String(i) + " rotates by 0 (no-op)", "remove the gate", i))
         for j in range(a):
             var q = g.qubit(j)
             if q >= 0 and q < n:
                 last_op[q] = i
+    for slot in range(len(seen)):
+        if seen[slot] > LINT_LISTED:
+            out.append(Diagnostic.make(_per_op_code(slot), "error" if slot == 2 else ("warning" if slot < 2 else "info"), String(seen[slot] - LINT_LISTED) + " more findings like the above", "the first " + String(LINT_LISTED) + " are listed"))
     var unused = List[Int]()
     for q in range(n):
         if not used[q]:

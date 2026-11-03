@@ -11,10 +11,13 @@ Conventions an agent must know:
 - Results are deterministic: every random process takes a `seed` (default 1234).
 - Errors look like `QM-Exxx: message (line L, col C). Hint: fix`. Codes are stable. Branch on the code and apply the hint. Warnings (`QM-Wxxx`) in tool results have the same JSON shape; QM-W020 means a requested GPU run fell back to the CPU; QM-W021 means a requested GPU precision did not apply (CPU simulators are fp64).
 - QUMO-only operations (noise, detectors, observables) use `#pragma qumo ...` lines.
+- Size limits: what a source expands to (gate calls, unrolled loops, broadcasts, `pow`) is capped at 8 million items plus its length in bytes (QM-E506), and it declares at most 4096 wires beyond 3 per operation (QM-E507). `pow(k) @` of x, h, cx, s, sx, t and the other gates of known period folds to `k mod period` and costs nothing.
+- Programs: `while`, `break`, `continue`, classical variables and gate angles computed during the shot go through `load_any` / `parse_qasm_program`, not `parse_qasm` (QM-E504). They run and compile on the CPU. `qumo_statevector` and `qumo_expectation` refuse them (QM-E585), a loop past `max_iterations` is QM-E480, and nothing of the kind runs on hardware or the GPU yet.
 
 ## Agent interfaces
 
 - [AI-native interface design](docs/AI_NATIVE.md): OpenQASM subset, diagnostics, MCP tools, CLI, determinism, and how to register new tools and commands
+- [Control flow and classical variables](docs/CONTROL_FLOW.md): `Program`, the classical semantics table, compiling, verification, `qumo.program.v1` JSON, flat inputs that changed, limits
 - [Error and warning codes](docs/ERRORS.md): every QM-Exxx and QM-Wxxx code with its meaning and fix (generated from `error_catalog()`; includes the Python hardware-plugin range QM-E95x and benchmark-harness range QM-E96x)
 - MCP server: run `build/qumo mcp` (MCP 2025-06-18, stdio). Tools: `qumo_run_qasm` (counts), `qumo_statevector`, `qumo_expectation`, `qumo_validate_qasm` (diagnostics and lint), `qumo_circuit_info` (depth, gate counts, T-count, flags), `qumo_draw` (text drawing), `qumo_convert` (canonical QASM 3, portable QASM 2 with `to: "qasm2"`, or circuit JSON), `qumo_describe` (gates, errors, capabilities; `format: "markdown"` for the error catalogue), `qumo_transpile` (vendor-neutral compile: target spec like `grid:4x4/sc_cz`, `trapped_ion:11`, or edges + basis), `qumo_estimate_resources` (logical, NISQ per modality, fault-tolerant), `qumo_vqe`, `qumo_qaoa_maxcut`, `qumo_qec_memory` (surface/repetition code logical error rate; decoders `mwpm` = sparse blossom (default), `sparse_blossom`, `mwpm_correlated` (opt-in, use at d >= 5), `mwpm_dense`, `uf`, `lookup`), `qumo_qec_dem` (Stim-format detector error model), `qumo_stim_import` (Stim text in, missing detectors), `qumo_emulate` (a compiled circuit under a target's noise), `qumo_density` (exact density matrix, up to 15 qubits), `qumo_to_pbc` (Pauli-based form), `qumo_gpu_info` (is GPU support compiled in, which device, GPU precision and fp64 support), `qumo_run_device` (sample with `device` `auto`, `cpu` or `gpu` and `precision` `auto`, `fp32` or `fp64`; GPU state vectors run fp32 by default on every GPU, like CUDA-Q; `auto` = `QUMO_GPU_PRECISION` or the build default; fp64 on an Apple GPU is QM-E472; falls back to the CPU with warning QM-W020)
 - Client config: `{"mcpServers":{"qumo":{"command":"/abs/path/QUMO/build/qumo","args":["mcp"]}}}`, or `claude mcp add qumo -- /abs/path/QUMO/build/qumo mcp`
@@ -27,6 +30,7 @@ Conventions an agent must know:
 - `qumo.ir.circuit`: `Circuit(n_qubits, n_clbits)` with methods `h x y z s t sx rx ry rz p u cx cz cp crx rzz swap ccx ...`, `measure(q, c)`, `measure_all()`, `reset`, `c_if(bit, val)`, `parameter(name)`, `bind(values)`, `inverse()`, `controlled(q)`, `power(k)`, `compose`, `depth()`, `t_count()`, `is_clifford()`, `validate()`
 - `qumo.ir.gates`: opcodes `Op.*` and metadata (`op_name`, `op_arity`, `op_num_params`, `op_is_clifford`, `matrix_1q`, `matrix_2q`)
 - `qumo.ir.qasm`: `parse_qasm(text) -> Circuit`, `parse_qasm_with_warnings(text, warnings)`, `load_qasm(path)`, `to_qasm(circuit) -> String` (OpenQASM 3)
+- `qumo.ir.qasm`, programs: `load_any(text) -> Program`, `parse_qasm_program(text)`, `to_qasm(program)`, `draw_program(program, width, style)`. `qumo.ir.program`: `Program`, `ProgramBuilder`, `cfg_of`. `qumo.sim.program_runner`: `sample_program(program, shots, seed, params, max_iterations, method) -> ProgramResult` (`.sample`, `.int_output(name)`, `.iterations`). `qumo.compiler.program_compile`: `compile_program(program, target, level, seed)`, `verify_program`, `program_metrics`
 - `qumo.ir.qasm2`: `to_qasm2(circuit) -> String`, portable OpenQASM 2 (original `qelib1.inc` plus exact gate definitions; loads in Qiskit strict and legacy modes, pytket and Cirq)
 - `qumo.ir.pauli`: `parse_pauli_sum(text) -> PauliSum`
 - `qumo.exec.dispatch`: `sample_auto(circuit, shots, seed)` picks Pauli-frame / tableau / CPU or GPU state vector automatically (reported in `.method`); `sample_on(circuit, shots, seed, params, device, note, precision="auto")` with device `auto`, `cpu` or `gpu` and GPU precision `auto`, `fp32` or `fp64`
@@ -39,7 +43,7 @@ Conventions an agent must know:
 - `qumo.qec`: `codes.surface_code_memory(d, rounds, NoiseParams)`, `codes.repetition_code_memory`, `codes.to_stim`, `dem.detector_error_model(circuit)`, `sparse_blossom.SparseBlossomDecoder` (default `mwpm`), `decoders.MwpmDecoder` (`mwpm_dense`) / `UnionFindDecoder` / `LookupTableDecoder`, `experiments.memory_experiment(code, d, rounds, p, shots, decoder)`
 - `qumo.algorithms`: `library` (`ghz`, `qft`, `grover`, `qpe`, `trotter`), `variational` (`vqe`, `qaoa_maxcut`), `gradients.gradient`, `optimizers.minimize`, `hamiltonians` (`transverse_field_ising`, `heisenberg_xxz`, `h2_sto3g`, `ground_state`)
 - `qumo.exec`: `primitives.run_sampler` / `run_estimator` (PUBs with parameter broadcasting), `orchestrator.Workflow` (HEFT over CPU/GPU/QPU pools), `resources.estimate_resources` / `estimate_hardware` / `estimate_fault_tolerant`
-- Python: `build/qumo_py.so` (`make py`): `load_qasm`, `transpile(circ, n, edges, basis, level, seed)`, `sample`, `expectation`, benchmark generators
+- Python: `build/qumo_py.so` (`make py`): `load_qasm`, `transpile(circ, n, edges, basis, level, seed)`, `sample`, `expectation`, benchmark generators; programs: `load_program`, `sample_program(prog, shots, seed, params=[], max_iterations=65536, method="auto")`, `transpile_program(prog, n, edges, basis, level, seed)`, `draw_program`, `program_from_json`
 - `qumo.ai`: `json` (`JsonWriter`, `parse_json`), `diagnostics` (`Diagnostic`, `diagnostic_from_error`, `lint`, `error_catalog`), `describe` (`describe_*_json`, `circuit_to_json`, `circuit_from_json`, `circuit_summary_json`), `tools` (`ToolRegistry`, `default_registry`), `registry` (`full_registry` = core + module tools), `mcp` (`McpServer.handle`, `serve_stdio`)
 
 ## Examples
@@ -50,6 +54,8 @@ Conventions an agent must know:
 - [examples/vqe_ansatz.qasm](examples/vqe_ansatz.qasm): parametric ansatz using `input float`
 - [examples/bell_qasm2.qasm](examples/bell_qasm2.qasm): OpenQASM 2.0 input
 - [examples/noisy_bell.qasm](examples/noisy_bell.qasm): `#pragma qumo` noise and a detector
+- [examples/control_flow/repeat_until_success.mojo](examples/control_flow/repeat_until_success.mojo): a rotation that retries in a `while` loop over a measured value
+- [examples/control_flow/iterative_phase_estimation.mojo](examples/control_flow/iterative_phase_estimation.mojo): one ancilla, and a gate angle computed from the bits read so far
 
 ## Optional
 

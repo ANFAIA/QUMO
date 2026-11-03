@@ -40,6 +40,7 @@ Run everything from the repository root after `make setup` (Mojo toolchain in `.
 | [`colab/`](colab/) | Benchmark QUMO on cloud GPUs: Google Colab notebook (NVIDIA), ROCm notebook (AMD), headless script for any GPU host or a Mac, result comparison |
 | [`hardware/`](hardware/) | Running QUMO-compiled circuits on quantum hardware providers through the `qumo_hardware` plugins (dry-run by default) |
 | [`frameworks/`](frameworks/) | Tutorials from Qiskit, Braket, Q#, TKET, CUDA-Q, Cirq and Qibo re-implemented on QUMO, each citing its original and verified by `CHECK` lines ([index](frameworks/README.md)) |
+| [`control_flow/`](control_flow/) | Programs with `while` and classical variables: repeat-until-success, and iterative phase estimation with a gate angle computed during the shot ([docs/CONTROL_FLOW.md](../docs/CONTROL_FLOW.md)) |
 | [`qml/`](qml/) | Quantum machine learning, following PennyLane's demos (embeddings, variational classifiers, data re-uploading, kernels, QNG, barren plateaus, QCNN, QCBM), verified against pinned PennyLane reference numbers ([docs/QML.md](../docs/QML.md)) |
 | [`heterogeneous/`](heterogeneous/) | A model (OpenRouter, a local Ollama / LM Studio server, or offline rules) chooses the algorithm; QUMO runs it partly on a GPU, partly on a CPU and partly on a QPU (local noisy emulator by default) ([README](heterogeneous/README.md)) |
 
@@ -56,6 +57,7 @@ Every example below is run and verified by `bench/.venv/bin/python examples/run_
 | Folder | Examples | Frameworks | Fast / slow |
 |---|---|---|---|
 | [`examples/`](.) | 15 | qumo (legacy smoke tests) | 15 / 0 |
+| [`control_flow/`](control_flow/) | 2 | qumo | 2 / 0 |
 | [`frameworks/`](frameworks/) | 39 | braket, cirq, cudaq, pennylane, qibo, qiskit, qsharp, tket | 36 / 3 |
 | [`ft/`](ft/) | 6 | guppyft | 5 / 1 |
 | [`heterogeneous/`](heterogeneous/) | 6 | qumo | 6 / 0 |
@@ -63,6 +65,8 @@ Every example below is run and verified by `bench/.venv/bin/python examples/run_
 
 | Example | Framework | Tier | Reproduces |
 |---|---|---|---|
+| [`control_flow/iterative_phase_estimation.mojo`](control_flow/iterative_phase_estimation.mojo) — Iterative phase estimation: one ancilla, and a gate angle computed from its own results | qumo | fast | Dobsicek, Johansson, Shumeiko, Wendin - Arbitrary accuracy iterative phase estimation algorithm as a two qubit benchmark |
+| [`control_flow/repeat_until_success.mojo`](control_flow/repeat_until_success.mojo) — Repeat-until-success: a rotation that retries in a `while` loop until it works | qumo | fast | Paetznick, Svore - Repeat-Until-Success: non-deterministic decomposition of single-qubit unitaries (the method, on a textbook circuit) |
 | [`ft/clifford_verification.mojo`](ft/clifford_verification.mojo) — Verifying logical Clifford gadgets and state preparations with the stabilizer tableau | guppyft | fast | Guppy FT - Clifford verification |
 | [`ft/iceberg_program.mojo`](ft/iceberg_program.mojo) — Multi-logical-qubit Iceberg program: native rotations, block allocation and error detection | guppyft | fast | Guppy FT - Iceberg logical API (Block[N], rotations, measure_all, measure_syndrome) |
 | [`ft/logical_error_sweep.mojo`](ft/logical_error_sweep.mojo) — Logical versus physical error rate of an encoded Steane program under circuit-level noise | guppyft | fast | Guppy FT - Steane encoding emulated with Stim (logical vs unencoded behaviour) |

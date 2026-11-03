@@ -19,7 +19,7 @@ from std.time import perf_counter_ns
 from std.runtime import parallelism_level
 from max.algorithm import parallelize
 
-from qumo.ir.circuit import Circuit
+from qumo.ir.circuit import Circuit, check_finite_values
 from qumo.ir.gates import Op
 from qumo.ir.pauli import PauliSum, PauliTerm
 from qumo.sim.statevector import StateVector
@@ -90,6 +90,7 @@ struct EstimatorResult(Copyable, Writable):
 
 
 def _check_params(c: Circuit, params: List[Float64]) raises:
+    check_finite_values(params)
     if len(params) != c.num_params():
         raise Error("QM-E101: PUB parameter set has " + String(len(params)) + " values but circuit has " + String(c.num_params()) + " parameters " + c.param_names_str() + ".")
 
@@ -176,7 +177,7 @@ def run_estimator(pub: EstimatorPub) raises -> EstimatorResult:
     var sd_ptr = List[Float64](length=nsets * nobs, fill=0.0)
     var evp = ev_ptr.unsafe_ptr().as_unsafe_any_origin()
     var sdp = sd_ptr.unsafe_ptr().as_unsafe_any_origin()
-    var failed = List[Int](length=1, fill=0)
+    var failed = List[String](length=nsets, fill=String(""))
     var fp = failed.unsafe_ptr().as_unsafe_any_origin()
     var circ_ptr = Pointer(to=pub.circuit).as_unsafe_any_origin()
     var obs_ptr = Pointer(to=pub.observables).as_unsafe_any_origin()
@@ -200,16 +201,17 @@ def run_estimator(pub: EstimatorPub) raises -> EstimatorResult:
                     _estimate_shots(circ_ptr[], obs_ptr[][o], params, shots, seed + UInt64(s * 7919 + o), ev, sd)
                     evp[unsafe_offset=s * nobs + o] = ev
                     sdp[unsafe_offset=s * nobs + o] = sd
-        except:
-            fp[unsafe_offset=0] = 1
+        except e:
+            fp[unsafe_offset=s] = String(e)
 
     if nsets > 1 and pub.circuit.num_qubits <= PAR_SETS_MAX_QUBITS:
         parallelize(one, nsets)
     else:
         for s in range(nsets):
             one(s)
-    if failed[0] != 0:
-        raise Error("QM-E403: estimator task failed for at least one parameter set.")
+    for s in range(nsets):
+        if failed[s].byte_length() > 0:
+            raise Error("QM-E403: estimator task failed for parameter set " + String(s) + ": " + failed[s])
     for s in range(nsets):
         for o in range(nobs):
             res.evs[s][o] = ev_ptr[s * nobs + o]

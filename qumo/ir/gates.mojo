@@ -219,6 +219,18 @@ def op_inverse_kind(k: Int) -> Int:
     return k
 
 
+def op_period(k: Int) -> Int:
+    """A p with U^p == I exactly, global phase included; 0 when none is known
+    (parametric gates, and gates whose powers only return up to a phase)."""
+    if op_is_self_inverse(k):
+        return 2
+    if k == Op.S or k == Op.SDG or k == Op.SX or k == Op.SXDG or k == Op.ISWAP or k == Op.ISWAPDG:
+        return 4
+    if k == Op.T or k == Op.TDG:
+        return 8
+    return 0
+
+
 def op_is_symmetric(k: Int) -> Bool:
     """2/3-qubit gates invariant under permutation of operands."""
     return (
@@ -424,8 +436,9 @@ def _arg(re: Float64, im: Float64) -> Float64:
     return atan2(im, re)
 
 
-def zyz_decompose(m: M2) -> ZYZ:
-    """Euler decomposition of any 2x2 unitary into U3 angles + global phase."""
+def zyz_decompose(m: M2, small: Float64 = 1e-12) -> ZYZ:
+    """Euler decomposition of any 2x2 unitary into U3 angles + global phase. An entry
+    of modulus `small` or less is taken as zero, and its phase is not read."""
     # det = m00*m11 - m01*m10
     var dr = m.re[0] * m.re[3] - m.im[0] * m.im[3] - (m.re[1] * m.re[2] - m.im[1] * m.im[2])
     var di = m.re[0] * m.im[3] + m.im[0] * m.re[3] - (m.re[1] * m.im[2] + m.im[1] * m.re[2])
@@ -440,9 +453,9 @@ def zyz_decompose(m: M2) -> ZYZ:
     var theta = 2 * atan2(a10, a00)
     var ssum = 0.0
     var sdiff = 0.0
-    if a00 > 1e-12:
+    if a00 > small:
         ssum = 2 * _arg(vr[3], vi[3])
-    if a10 > 1e-12:
+    if a10 > small:
         sdiff = 2 * _arg(vr[2], vi[2])
     var phi = (ssum + sdiff) / 2
     var lam = (ssum - sdiff) / 2

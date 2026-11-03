@@ -2,11 +2,12 @@
 
     mojo build -I . --emit shared-lib -o build/qumo_py.so python/qumo_py.mojo
 
-Exposes an opaque `Circuit` handle plus free functions. Kept deliberately
-small and stable: build/load circuits, compile them for any target
+Exposes opaque `Circuit` and `Program` handles plus free functions. Kept
+deliberately small and stable: build/load circuits, compile them for any target
 (coupling map + basis as plain Python data, vendor-neutral), inspect
-statistics, simulate. Used by the Benchpress `qumo_gym` and by
-`python/qumo/__init__.py`.
+statistics, simulate. A `Program` adds classical variables and control flow at
+run time: `load_program`, `sample_program`, `transpile_program`. Used by the
+Benchpress `qumo_gym` and by `python/qumo/__init__.py`.
 """
 
 from std.python import PythonObject, Python
@@ -35,8 +36,14 @@ from std.collections import Dict
 from qumo.ir.gates import Op, op_name, op_arity, op_is_unitary, op_from_name
 from qumo.ir.pauli import parse_pauli_sum, PauliSum
 from qumo.sim.runner import sample, evolve
-from qumo.ir.qasm import parse_qasm, load_qasm, to_qasm
+from qumo.ir.program import Program
+from qumo.ir.qasm import draw_program, parse_qasm, load_any_with_warnings, load_qasm, to_qasm
 from qumo.ir.qasm2 import to_qasm2
+from qumo.sim.program_runner import DEFAULT_MAX_ITERATIONS, sample_program
+from qumo.compiler.program_compile import compile_program
+from qumo.ai.describe import program_from_json, program_to_json
+from qumo.ai.json import parse_json
+from qumo.ai.diagnostics import diagnostic_from_error, lint_program
 from qumo.compiler.target import Target
 from qumo.exec.dispatch import sample_on
 from qumo.gpu.device import query_gpu
@@ -177,8 +184,173 @@ struct PyCircuit(Movable, Writable):
         self.write_to(w)
 
 
+struct PyProgram(Movable, Writable):
+    """A circuit with classical variables and control flow at run time."""
+
+    var p: Program
+    var warnings: List[String]  # of the parser that read it
+
+    def __init__(out self, var p: Program, var warnings: List[String] = List[String]()):
+        self.p = p^
+        self.warnings = warnings^
+
+    @staticmethod
+    def _get(py_self: PythonObject) raises -> Pointer[PyProgram, MutAnyOrigin]:
+        return py_self.downcast_value_ptr[Self]().as_unsafe_any_origin()
+
+    @staticmethod
+    def num_qubits(py_self: PythonObject) raises -> PythonObject:
+        return Self._get(py_self)[].p.num_qubits()
+
+    @staticmethod
+    def num_clbits(py_self: PythonObject) raises -> PythonObject:
+        return Self._get(py_self)[].p.num_clbits()
+
+    @staticmethod
+    def num_parameters(py_self: PythonObject) raises -> PythonObject:
+        return Self._get(py_self)[].p.num_params()
+
+    @staticmethod
+    def has_runtime_regions(py_self: PythonObject) raises -> PythonObject:
+        """False when the program is one plain circuit."""
+        return Self._get(py_self)[].p.has_runtime_region()
+
+    @staticmethod
+    def to_circuit(py_self: PythonObject) raises -> PythonObject:
+        """The plain circuit of a program without runtime regions (QM-E585 otherwise)."""
+        var c = Self._get(py_self)[].p.try_flatten()
+        if not c:
+            raise Error("QM-E585: this program has classical variables or control flow at run time, so it is not one Circuit. Hint: use sample_program and transpile_program.")
+        return PythonObject(alloc=PyCircuit(c.take()))
+
+    @staticmethod
+    def to_qasm3(py_self: PythonObject) raises -> PythonObject:
+        return to_qasm(Self._get(py_self)[].p)
+
+    @staticmethod
+    def to_json(py_self: PythonObject) raises -> PythonObject:
+        """Program JSON (qumo.program.v1) as a string."""
+        return program_to_json(Self._get(py_self)[].p)
+
+    @staticmethod
+    def lint(py_self: PythonObject) raises -> PythonObject:
+        """Warnings of the parser and of the program as [(code, message), ...]."""
+        var out = Python.list()
+        for s in Self._get(py_self)[].warnings:
+            var d = diagnostic_from_error(s)
+            out.append(Python.tuple(d.code, d.message))
+        for d in lint_program(Self._get(py_self)[].p):
+            out.append(Python.tuple(d.code, d.message))
+        return out
+
+    @staticmethod
+    def text(py_self: PythonObject) raises -> PythonObject:
+        return String(Self._get(py_self)[].p)
+
+    def write_to(self, mut w: Some[Writer]):
+        w.write("<qumo.Program qubits=", self.p.num_qubits(), " statements=", len(self.p.tape), ">")
+
+    def write_repr_to(self, mut w: Some[Writer]):
+        self.write_to(w)
+
+
 def _wrap(var c: Circuit) raises -> PythonObject:
     return PythonObject(alloc=PyCircuit(c^))
+
+
+def py_load_program(text: PythonObject) raises -> PythonObject:
+    """Parse OpenQASM 2/3 into a Program: anything a Circuit holds keeps its exact
+    meaning, and while, break, continue and classical variables are added."""
+    var warnings = List[String]()
+    var p = load_any_with_warnings(String(py=text), warnings)
+    return PythonObject(alloc=PyProgram(p^, warnings^))
+
+
+def py_program_from_json(text: PythonObject) raises -> PythonObject:
+    """Inverse of Program.to_json. Malformed input raises QM-E587."""
+    return PythonObject(alloc=PyProgram(program_from_json(parse_json(String(py=text)))))
+
+
+def py_draw_program(prog: PythonObject, width: PythonObject, style: PythonObject) raises -> PythonObject:
+    """Text drawing by blocks: (program, width, style) -> str."""
+    return PythonObject(draw_program(PyProgram._get(prog)[].p, Int(py=width), String(py=style)))
+
+
+def py_sample_program(prog: PythonObject, shots: PythonObject, seed: PythonObject,
+                      var **kwargs: PythonObject) raises -> PythonObject:
+    """Sample a program -> dict with counts, method, iterations (back-edges per
+    shot), outputs ({name: [value per shot]}) and warnings.
+
+    Python: sample_program(prog, shots, seed, params=[], max_iterations=65536, method="auto").
+    params: values of the `input` declarations, in order. Past max_iterations a shot
+    raises QM-E480. method: 'auto' | 'statevector' | 'tableau' | 'branching' | 'gpu'
+    ('gpu' runs on the CPU with QM-W020; 'density', 'ptsbe' and 'frame' are QM-E483).
+    """
+    var params = List[Float64]()
+    var max_iterations = DEFAULT_MAX_ITERATIONS
+    var method = String("auto")
+    for kv in kwargs.items():
+        if kv.key == "params":
+            params = _floats(kv.value)
+        elif kv.key == "max_iterations":
+            max_iterations = Int(py=kv.value)
+        elif kv.key == "method":
+            method = String(py=kv.value)
+        else:
+            raise Error("QM-E913: sample_program() got an unexpected keyword argument '" + kv.key + "'. Hint: the keyword arguments are params, max_iterations and method.")
+    var r = sample_program(PyProgram._get(prog)[].p, Int(py=shots), UInt64(Int(py=seed)), params, max_iterations, method)
+    var counts = Python.dict()
+    for kv in r.sample.counts.items():
+        counts[kv.key] = kv.value
+    var iterations = Python.list()
+    for v in r.iterations:
+        iterations.append(v)
+    var outputs = Python.dict()
+    for j in range(len(r.out_names)):
+        var vals = Python.list()
+        if r.out_is_real[j]:
+            for v in r.real_output(r.out_names[j]):
+                vals.append(v)
+        elif r.out_is_unsigned[j]:
+            for v in r.uint_output(r.out_names[j]):
+                vals.append(v)
+        else:
+            for v in r.int_output(r.out_names[j]):
+                vals.append(v)
+        outputs[r.out_names[j]] = vals
+    var warnings = Python.list()
+    for w in r.warnings:
+        warnings.append(w)
+    var d = Python.dict()
+    d["counts"] = counts
+    d["method"] = r.sample.method
+    d["iterations"] = iterations
+    d["outputs"] = outputs
+    d["warnings"] = warnings
+    return d
+
+
+def py_transpile_program(prog: PythonObject, num_qubits: PythonObject, edges: PythonObject,
+                         basis: PythonObject, level: PythonObject, seed: PythonObject) raises -> PythonObject:
+    """Compile: (program, num_qubits, edges, basis, level, seed) -> (program, initial, final, report).
+
+    Same arguments as `transpile`. Every block lives on one layout, and each region
+    leaves on the layout it entered with. The result has passed verify_program;
+    report holds metrics, restored_swaps, blocks_checked and blocks_unchecked."""
+    var t = _target(num_qubits, edges, basis)
+    var r = compile_program(PyProgram._get(prog)[].p, t, Int(py=level), Int(py=seed))
+    var init = Python.list()
+    for v in r.initial_layout:
+        init.append(v)
+    var fin = Python.list()
+    for v in r.final_layout:
+        fin.append(v)
+    var d = Python.dict()
+    d["metrics"] = String(r.metrics)
+    d["restored_swaps"] = r.restored_swaps
+    d["blocks_checked"] = r.blocks_checked
+    d["blocks_unchecked"] = r.blocks_unchecked
+    return Python.tuple(PythonObject(alloc=PyProgram(r.program.copy())), init, fin, d)
 
 
 def py_quantum_volume(n: PythonObject, depth: PythonObject, seed: PythonObject) raises -> PythonObject:
@@ -1071,6 +1243,23 @@ def PyInit_qumo_py() abi("C") -> PythonObject:
             .def_method[PyCircuit.to_qasm2]("to_qasm2")
             .def_method[PyCircuit.to_qasm3]("to_qasm3")
         )
+        _ = (
+            m.add_type[PyProgram]("Program")
+            .def_method[PyProgram.num_qubits]("num_qubits")
+            .def_method[PyProgram.num_clbits]("num_clbits")
+            .def_method[PyProgram.num_parameters]("num_parameters")
+            .def_method[PyProgram.has_runtime_regions]("has_runtime_regions")
+            .def_method[PyProgram.to_circuit]("to_circuit")
+            .def_method[PyProgram.to_qasm3]("to_qasm3")
+            .def_method[PyProgram.to_json]("to_json")
+            .def_method[PyProgram.lint]("lint")
+            .def_method[PyProgram.text]("text")
+        )
+        m.def_function[py_load_program]("load_program")
+        m.def_function[py_program_from_json]("program_from_json")
+        m.def_function[py_draw_program]("draw_program")
+        m.def_function[py_sample_program]("sample_program")
+        m.def_function[py_transpile_program]("transpile_program")
         m.def_function[py_empty]("circuit", docstring="Empty circuit with n qubits")
         m.def_function[py_quantum_volume]("quantum_volume")
         m.def_function[py_efficient_su2]("efficient_su2")

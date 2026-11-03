@@ -101,16 +101,25 @@ other QUMO modules plug their features into it.
   slices `q[0:2]`, index sets `q[{0,2}]` and negative indices.
 * `c = measure q;`, `c[0] = measure q[0];`, `measure q[0] -> c[0];`,
   `bit[2] c = measure q;`, `reset`, `barrier`.
-* Single-bit feed-forward: `if (c[0]) x q[1];`, `if (c[0] == 1) { ... } else { ... }`,
-  `if (!c[0])`, and QASM 2 `if (c==1)` on 1-bit registers.
+* Feed-forward on one bit: `if (c[0]) x q[1];`, `if (c[0] == 1) { ... } else { ... }`,
+  `if (!c[0])`; on a whole register of any size: `if (c == 5)`; on several bits:
+  `if (c[0] == 1 && c[2] == 0)`. The last two take no `else`.
 * `const` declarations, and `for` loops over constant ranges (inclusive, as in
   OpenQASM 3) or sets, unrolled at parse time.
 * `#pragma braket ...` and other foreign pragmas, `@annotations`, and
   `// /* */` comments are ignored. `delay` is ignored with warning QM-W051.
 
-Not supported (each is rejected with a QM-E504 hint): subroutines,
-`while`, runtime classical arithmetic, multi-bit conditions (QM-E541), and
-pulse-level `cal`/`defcal`.
+Beyond what a `Circuit` holds, `load_any` and `parse_qasm_program` read a `Program`:
+`while`, `break`, `continue`, `for` and `switch` decided during the shot, classical
+variables (`bit`, `bool`, `int[n]`, `uint[n]`, `float`, `angle[n]`), assignment,
+conditions on any value and gate angles computed at run time. Every tool below that
+says "program" goes through them; [CONTROL_FLOW.md](CONTROL_FLOW.md) has the rules.
+`parse_qasm` itself stays straight-line and answers QM-E504 with a hint to them.
+An integer constant with no width is exact and does not wrap at 64 bits, and QM-W055
+warns where integer division is a trap for an angle.
+
+Not supported: subroutines (QM-E504), hexadecimal, octal and binary integer literals
+(QM-E500), and pulse-level `cal`/`defcal`.
 
 ### QUMO pragmas
 
@@ -126,6 +135,37 @@ pulse-level `cal`/`defcal`.
 
 The trailing `;` is optional on pragma lines. `pragma qumo ...` without the
 `#` is accepted too.
+
+### Size limits
+
+QUMO expands gate calls, unrolled loops, broadcasts and modifiers at parse time, so
+a few bytes could ask for any amount of memory: `pow(2^53 - 1) @ x` was 2^53 gates.
+A source from an agent or the MCP server can come from anywhere, so the text pays
+for what it asks:
+
+* **Budget, QM-E506.** 8 million items plus the length of the source in bytes. An
+  item is a declared wire, a statement run (gate bodies and unrolled loops run
+  again), a target of a broadcast or slice, a control, a repeat of `pow`, or a
+  classical expression node that a program keeps. An operation is 136 bytes, so a
+  short source stays near 1 GB of operations and under 2 GB at its peak; a long
+  one pays with its length, so written-out circuits of any size still load. The
+  1000000 passes of unrolled loops (QM-E570) still hold.
+* **`pow` of a gate of known period** folds and costs nothing: past its period p,
+  `pow(k) @ g` is g repeated `k mod p` times. x, y, z, h, cx, cy, cz, ch, swap, ecr,
+  ccx, cswap and ccz have period 2; s, sdg, sx, sxdg, iswap and iswapdg 4; t and tdg 8.
+  The equality is exact, global phase included. `pow(2) @ h` stays two gates, while
+  `pow(4) @ h` is none. An exponent at or past 2^53 is QM-E550: as a float it is no
+  longer exact, and its parity is lost.
+* **Wires, QM-E507.** A source declares at most 4096 wires beyond 3 per
+  operation, the rule `circuit_from_json` already had (QM-E911): `qubit[5000] q;
+  h q[0];` is refused, `qubit[5000] q; h q;` is not.
+* **Tableau, QM-E713.** 262144 qubits at most (32 GiB), the way the state vector
+  stops at 32 qubits (QM-E404).
+* **Lint** lists 100 findings of a code per circuit and counts the rest in one
+  more finding.
+
+Not limited: CPU time. `ctrl(120) @ x` (synthesis without ancillas) and
+`qumo_transpile` on 20000 qubits each take more than 25 seconds, with little memory. Stim text has its own limit, 50 million instructions after `REPEAT`.
 
 ### Speed
 
@@ -201,6 +241,9 @@ cannot drift from the implementation:
 * **Circuit JSON** (`qumo.circuit.v1`): `circuit_to_json` and
   `circuit_from_json` round-trip. Every tool accepts `circuit` (JSON) instead
   of `qasm`, for agents that prefer structured input.
+* **Program JSON** (`qumo.program.v1`): `program_to_json` and `program_from_json`
+  round-trip, wrapping circuit JSON. Malformed input is QM-E587, or QM-E583 for a
+  wrong nesting; every index is checked before anything runs.
 * **Circuit summary**: qubits, clbits, op counts (sorted), depth, two-qubit
   gate count, T-count, Clifford/dynamic/noise/parametric flags, state-vector
   bytes and a recommended simulator.
@@ -241,23 +284,26 @@ tool (with `data` `{code: "QM-E912", available: [...]}`).
 
 | Tool | Arguments | Result |
 |---|---|---|
-| `qumo_run_qasm` | `qasm` \| `circuit`, `shots`=1024, `seed`=1234, `params`, `max_qubits`=28 | `counts` (sorted), `method` (`statevector:static` or `:trajectories`), `most_frequent`, `warnings`, `timing_ms`. Circuits without measurements are measured on all qubits (QM-W004). |
+| `qumo_run_qasm` | `qasm` \| `circuit` \| `program`, `shots`=1024, `seed`=1234, `params`, `max_qubits`=28, `max_iterations`=65536 | `counts` (sorted), `method` (`statevector:static` or `:trajectories`), `most_frequent`, `warnings`, `timing_ms`; a program adds `iterations` and `outputs`. Circuits without measurements are measured on all qubits (QM-W004). |
 | `qumo_statevector` | `qasm`, `params`, `max_amplitudes`=64, `threshold`, `max_qubits`=24 | `amplitudes[{index, bitstring, re, im, probability}]`, `num_nonzero`, `truncated`, `norm` |
 | `qumo_expectation` | `qasm`, `observable` (string or array), `params` | `expectation`, `results[]` |
-| `qumo_validate_qasm` | `qasm` | `valid`, `errors[]`, `warnings[]` (lint), `summary` |
+| `qumo_validate_qasm` | `qasm` | `valid`, `errors[]`, `warnings[]` (lint; QM-W054 for a program), `summary` |
 | `qumo_describe` | `topic`: gates \| gate \| errors \| error \| capabilities, `name`, `format`: json \| markdown | self-description JSON (`markdown`, topic `errors` only: the text of docs/ERRORS.md) |
-| `qumo_circuit_info` | `qasm`, `include_instructions`, `include_qasm`, `include_lint` | `summary`, `lint`, and optionally `circuit` and `qasm` |
-| `qumo_draw` | `qasm` \| `circuit`, `width`=80, `style`: ascii \| unicode | `drawing`: one line per qubit, columns of gates (also `qumo draw file.qasm`, `Circuit.draw()`) |
-| `qumo_convert` | `qasm` \| `circuit`, `to`: qasm3 \| qasm2 \| json, `params` | canonical QASM 3, portable QASM 2 (both also returned as plain text content) or circuit JSON |
+| `qumo_circuit_info` | `qasm` \| `program`, `include_instructions`, `include_qasm`, `include_lint` | `summary`, `lint`, and optionally `circuit` (`program` for a program) and `qasm` |
+| `qumo_draw` | `qasm` \| `circuit` \| `program`, `width`=80, `style`: ascii \| unicode | `drawing`: one line per qubit, columns of gates (also `qumo draw file.qasm`, `Circuit.draw()`); a program draws by blocks, under indented headers |
+| `qumo_convert` | `qasm` \| `circuit` \| `program`, `to`: qasm3 \| qasm2 \| json, `params` | canonical QASM 3, portable QASM 2 (both also returned as plain text content), or circuit JSON; a program gives QASM 3 or `qumo.program.v1`, and QM-E585 for QASM 2 |
 
 `params` binds `input float` parameters. Pass either an array in declaration
 order or an object such as `{"theta": 0.1}`.
+
+A tool that needs one circuit, such as `qumo_statevector` or `qumo_expectation`,
+answers QM-E585 for a program with runtime regions: it has no single final state.
 
 Module tools (`qumo/exec/tools.mojo`, registered by `full_registry()`):
 
 | Tool | Arguments | Result |
 |---|---|---|
-| `qumo_transpile` | `qasm` \| `circuit`, `target` (e.g. `grid:4x4/sc_cz`, `heavy_hex:5/rz,sx,x,ecr`, `trapped_ion:11`, `neutral_atom:4x4`) or `edges` + `basis`, `level` 0-3, `pipeline`, `seed` | compiled QASM 3, per-pass report, layouts, swaps, estimated fidelity |
+| `qumo_transpile` | `qasm` \| `circuit` \| `program`, `target` (e.g. `grid:4x4/sc_cz`, `heavy_hex:5/rz,sx,x,ecr`, `trapped_ion:11`, `neutral_atom:4x4`) or `edges` + `basis`, `level` 0-3, `pipeline`, `seed` | compiled QASM 3, per-pass report, layouts, swaps, estimated fidelity |
 | `qumo_estimate_resources` | `qasm`, `profile`: superconducting \| trapped_ion \| neutral_atom, `physical_error`, `error_budget` | logical, NISQ and fault-tolerant estimates |
 | `qumo_vqe`, `qumo_qaoa_maxcut` | Pauli-sum `hamiltonian` / edge-list `graph`, optimizer options, `seed` | energy or cut, parameters, convergence |
 | `qumo_qec_memory` | `code`: surface_z \| surface_x \| repetition, `distance`, `rounds`, `p`, `shots`, `decoder`, `seed`, `max_errors` | logical error rate, std error, Wilson interval, per-round rate, timing |
@@ -368,7 +414,7 @@ line without a newline. Tool latency is well under 1 ms for small circuits.
 ## 6. CLI
 
 ```
-qumo run <file|-> [--shots N] [--seed S] [--params JSON] [--json]
+qumo run <file|-> [--shots N] [--seed S] [--params JSON] [--max-iterations N] [--json]
 qumo statevector <file|-> [--max-amplitudes N] [--params JSON]
 qumo expect <file|-> "0.5*Z0 Z1 - X0" [more...] [--params JSON]
 qumo validate <file|->                 # exit 1 when invalid
@@ -473,8 +519,9 @@ file is stale.
 
 * The IR flattens registers and keeps no register names, so emitted QASM
   always uses a single `q` and a single `c`. Barriers are global.
-* Conditions test one classical bit. Multi-bit register comparisons, nested
-  ifs and compound conditions are rejected with QM-E541.
+* In a `Circuit`, conditions test one bit, a whole register or an `&&` chain of bits.
+  Anything else is QM-E541 in `parse_qasm`, and a `Program` takes it.
+* Programs do not run on hardware or on the GPU yet ([CONTROL_FLOW.md](CONTROL_FLOW.md#limits)).
 * `ctrl @` covers the gates that the IR's `controlled()` functor supports
   (everything needed for QPE and Hadamard tests). `ctrl @ ccx` and
   `ctrl @ U` with symbolic angles raise QM-E202, located at the QASM line.
@@ -482,8 +529,7 @@ file is stale.
   allocation-free).
 * OpenQASM 2 export needs bound parameters and cannot express single-bit
   conditions on multi-bit registers, a global phase (written as a comment) or
-  noise. OpenQASM 3 export comments out a register condition that does not
-  cover every clbit (QM-E552 note in the output).
+  noise. OpenQASM 3 export writes a condition on part of the bits as an `&&` chain.
 * Sampling tools dispatch automatically (Pauli frames, stabilizer tableau,
   CPU or GPU state vector). `qumo_statevector` and `qumo_expectation` always
   use the dense CPU state vector.

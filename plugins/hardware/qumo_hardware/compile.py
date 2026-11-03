@@ -279,8 +279,18 @@ def _qumo_error(exc: Exception, what: str, hint: str | None = None) -> HardwareE
                          hint or qumo_hint.strip() or "check the circuit with `build/qumo validate <file>`")
 
 
+def _refuse_program() -> HardwareError:
+    return HardwareError(
+        E_COMPILE,
+        "a Program with classical variables or control flow at run time cannot run on hardware yet",
+        "simulate it with qumo_py.sample_program or `qumo run`; providers take an OpenQASM 2 payload here, "
+        "and OpenQASM 2 has no loops",
+    )
+
+
 def _load_circuit(source: Any) -> tuple[Any, str]:
-    """-> (qumo_py.Circuit, source text or '')."""
+    """-> (qumo_py.Circuit, source text or ''). A program that needs a run-time
+    interpreter is refused here, by name, before anything reaches a provider."""
     q = load_qumo_py()
     if isinstance(source, str):
         text = source
@@ -289,7 +299,17 @@ def _load_circuit(source: Any) -> tuple[Any, str]:
         try:
             return q.load_qasm(text), text
         except Exception as exc:
-            raise _qumo_error(exc, "cannot parse the circuit") from None
+            try:
+                program = q.load_program(text)
+            except Exception:
+                raise _qumo_error(exc, "cannot parse the circuit") from None
+            if program.has_runtime_regions():
+                raise _refuse_program() from None
+            return program.to_circuit(), text
+    if isinstance(source, q.Program):
+        if source.has_runtime_regions():
+            raise _refuse_program()
+        return source.to_circuit(), ""
     return source, ""  # assume a qumo_py.Circuit
 
 
@@ -394,6 +414,7 @@ def compile_for_target(
     calibrate: bool = True,
 ) -> CompiledCircuit:
     """Compile `source` (OpenQASM 2/3 text, a path, or a qumo_py.Circuit) for `spec`.
+    A qumo_py.Program with runtime regions is QM-E954: nothing runs on hardware yet.
 
     `region`: "auto" restricts large coupling-map devices to the best
     calibrated connected subset of qubits (`select_region`) before QUMO places

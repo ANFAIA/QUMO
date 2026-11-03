@@ -17,7 +17,7 @@ change, CX ladder, rz or measure, undo) for simulation and equivalence checks.
 from std.math import pi
 from std.bit import pop_count
 from qumo.ir.gates import Op, op_name, op_is_unitary, op_is_annotation
-from qumo.ir.circuit import Circuit, Instruction
+from qumo.ir.circuit import Circuit, Instruction, QUARTER_TURN_LIMIT
 from qumo.compiler.pauli_simp import _Extract, _process
 from qumo.ai.json import JsonWriter
 
@@ -99,6 +99,8 @@ struct PauliProgram(Copyable):
                 continue
             rot += 1
             var r = op.angle / (pi / 4)
+            if not (abs(r) < 2.0 * QUARTER_TURN_LIMIT):
+                continue  # not a multiple of pi/8 that anyone can tell
             var m = Int(round(r))
             if abs(r - Float64(m)) < 1e-9 and m % 2 != 0:
                 pi8 += 1

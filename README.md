@@ -7,7 +7,7 @@ in one language and one binary:
 
 | Layer | What it does | Best-of origin |
 |---|---|---|
-| `qumo.ir` | Flat POD circuit IR, affine symbolic params, Stim-style measurement records/detectors/noise, functors (`inverse`, `controlled`, `power`), Pauli algebra, OpenQASM 2/3 I/O | Qiskit CircuitData, Stim, Q#, Braket |
+| `qumo.ir` | Flat POD circuit IR, `Program` for `while` and classical variables, affine symbolic params, Stim-style measurement records/detectors/noise, functors (`inverse`, `controlled`, `power`), Pauli algebra, OpenQASM 2/3 I/O | Qiskit CircuitData, Stim, Q#, Braket |
 | `qumo.compiler` | Vendor-neutral `Target` (any coupling map + basis), text-spec pass pipelines with per-pass reports, SABRE routing, phase folding, commutation, eject-Z, KAK, basis translation to every modality | Qiskit, TKET, Cirq, PennyLane |
 | `qumo.sim` | SIMD + multithreaded state vector with cache blocking and qubit reordering, stabilizer tableau, bit-packed Pauli-frame sampler, deterministic RNG | qsim/Aer/Lightning, cuStateVec, Stim |
 | `qumo.exec` | PUB primitives (Sampler/Estimator with broadcasting, exact or shot-based with QWC grouping), HEFT orchestration over CPU/GPU/QPU pools with cost model, resource estimation (logical, NISQ, fault-tolerant) | Qiskit V2 primitives, CUDA-Q mqpu, Braket ProgramSets, Q# QRE |
@@ -80,7 +80,7 @@ make cli py       # rebuild: binaries in build/ still come from the old toolchai
 ```bash
 build/qumo run examples/bell.qasm --shots 1000 --seed 7
 build/qumo validate examples/teleport.qasm --json
-build/qumo draw examples/teleport.qasm --unicode      # text drawing of a circuit
+build/qumo draw examples/teleport.qasm --unicode      # text drawing of a circuit, or of a program by blocks
 build/qumo describe gates
 build/qumo tool list                                   # every agent tool
 build/qumo tool qumo_transpile '{"qasm":"OPENQASM 2.0; include \"qelib1.inc\"; qreg q[3]; h q[0]; cx q[0],q[2];","target":"trapped_ion:3"}'
@@ -121,6 +121,15 @@ import qumo_py as q
 c = q.load_qasm(open("examples/bell.qasm").read())
 out, initial, final = q.transpile(c, 7, [[0,1],[1,2],[2,3],[3,4],[4,5],[5,6]], ["rz","sx","x","cz"], 2, 1)
 print(out.count_ops(), q.sample(c, 1000, 7))
+```
+
+**Programs** (`while`, `break`, classical variables, angles computed during the shot) run and
+compile on the CPU; nothing of the kind reaches hardware yet, and `device="gpu"` falls back to the
+CPU with QM-W020. See [docs/CONTROL_FLOW.md](docs/CONTROL_FLOW.md).
+
+```python
+p = q.load_program("OPENQASM 3.0; qubit[1] q; bit[1] c; output int n = 0; while (!c[0]) { h q[0]; c[0] = measure q[0]; n += 1; }")
+print(q.sample_program(p, 1000, 7)["outputs"]["n"][:5])
 ```
 
 ## Running on quantum hardware
@@ -181,7 +190,7 @@ Run the whole benchmark on a Google Colab GPU (T4, L4, A100, H100, G4) or any RO
 
 ```
 qumo/
-  ir/          circuit IR, gates (opcodes + metadata + matrices), Param, Pauli, OpenQASM 2/3
+  ir/          circuit IR, Program (control flow, classical variables), gates (opcodes + metadata + matrices), Param, Pauli, OpenQASM 2/3
   compiler/    Target (data), text pass pipelines, routing (VF2 + SABRE), KAK, pauli_simp, phase folding
   sim/         state vector (SIMD, threads, cache blocking + qubit reordering), stabilizer tableau + branching, Pauli frames, density matrix, RNG
   gpu/         MAX GPU kernels, GPU state vector, host emulator for kernel tests (opt-in: -D QUMO_GPU)
@@ -216,6 +225,7 @@ The benchmark venv needs `qiskit qiskit-aer qiskit-ibm-runtime pytket pytket-qis
 - [docs/ANALYSIS.md](docs/ANALYSIS.md) — deep analysis of the 8 frameworks and the synthesis
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — architecture and design decisions
 - Modules: [COMPILER](docs/COMPILER.md) · [SIMULATION](docs/SIMULATION.md) · [GPU](docs/GPU.md) · [QEC](docs/QEC.md) · [ALGORITHMS](docs/ALGORITHMS.md) · [QML](docs/QML.md) · [AI_TRANSPILER](docs/AI_TRANSPILER.md) · [FT](docs/FT.md) · [AI_NATIVE](docs/AI_NATIVE.md) · [HARDWARE_PLUGINS](docs/HARDWARE_PLUGINS.md) · [ERRORS](docs/ERRORS.md)
+- [docs/CONTROL_FLOW.md](docs/CONTROL_FLOW.md) — `Program`: `while`, classical variables, semantics, compiling, limits
 - [docs/FRAMEWORK_UPDATES.md](docs/FRAMEWORK_UPDATES.md) — reviewed framework updates: done, deferred, skipped
 - [docs/MOJO_GUIDE.md](docs/MOJO_GUIDE.md) — the exact Mojo 1.2 dialect QUMO uses
 - Benchmarking: [bias audit of Benchpress](docs/BENCHPRESS_BIAS_REPORT.md) · [QUMO on Benchpress](docs/BENCHPRESS_RESULTS.md) · [neutral benchmark](docs/NEUTRAL_BENCHMARK_REPORT.md) · [cloud GPUs](docs/BENCHMARKING_ON_CLOUD_GPUS.md)

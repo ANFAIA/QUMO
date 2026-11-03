@@ -48,7 +48,7 @@ Error codes: QM-E728 (invalid synthesis options).
 
 from std.math import pi, cos, sin, sqrt, log2, ceil, floor, tan, atan2
 
-from qumo.ir.circuit import Circuit
+from qumo.ir.circuit import Circuit, QUARTER_TURN_LIMIT
 from qumo.ir.gates import Op, M2, matrix_1q, op_name
 
 
@@ -83,6 +83,8 @@ def exact_rz_sequence(theta: Float64, mut out: List[Int]) -> Bool:
     a multiple of pi/4."""
     out.clear()
     var r = theta / (pi / 4)
+    if not (abs(r) < 2.0 * QUARTER_TURN_LIMIT):
+        return False  # past it the rounding of theta decides, so no multiple is exact
     var m = Int(round(r))
     if abs(r - Float64(m)) > 1e-12:
         return False

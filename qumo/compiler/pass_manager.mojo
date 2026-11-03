@@ -23,7 +23,7 @@ self-correct. `CompileResult.to_json()` is the machine-readable summary.
 from std.time import perf_counter_ns
 from qumo.ir.gates import Op, op_name, op_arity, op_is_unitary
 from qumo.ir.circuit import Circuit, Instruction
-from qumo.compiler.common import GateSet, fmt_num, basis_str, wrap_angle, TWO_PI
+from qumo.compiler.common import GateSet, fmt_num, basis_str, reduce_large_angles, wrap_angle, TWO_PI
 from qumo.compiler.target import Target, parse_basis, parse_angle_bound
 from qumo.compiler.optimize import (
     remove_identities, cancel_inverses, merge_rotations, commute_rotations,
@@ -625,11 +625,13 @@ struct _State(Movable):
     var dropped: Bool
     var seed: Int
     var routed: Bool
+    var exact: Bool  # a block of a Program: see GateSet.exact
     # running totals of the AI synthesis passes, per block kind (0..3):
     # blocks, proposed, verified, replaced, saved 2q cost, rejected
     var synth_totals: List[Int]
 
     def __init__(out self, n: Int, seed: Int):
+        self.exact = False
         self.init = List[Int](length=n, fill=0)
         for i in range(n):
             self.init[i] = i
@@ -681,12 +683,56 @@ def working_gate_set(c: Circuit, target: Target) -> GateSet:
     return GateSet(target.basis)
 
 
+def route_options(args: List[String], seed: Int, mut aopts: AIRouteOptions, mut star: Bool) raises -> RouteOptions:
+    """Options of a `route(...)` pass: the routing ones, and what is not routing
+    proper, the learned router in `aopts` and star pre-routing in `star`."""
+    var opts = RouteOptions()
+    opts.seed = seed
+    aopts.policy = "off"
+    for a in args:
+        var eq = a.find("=")
+        if eq < 0:
+            continue
+        var key = String(a[byte=0:eq].strip())
+        var val = String(a[byte=eq + 1:].strip())
+        if key == "layout": opts.layout = val
+        elif key == "seed": opts.seed = Int(val)
+        elif key == "trials": opts.trials = Int(val)
+        elif key == "iterations": opts.iterations = Int(val)
+        elif key == "lookahead": opts.lookahead = Int(val)
+        elif key == "weight": opts.weight = Float64(val)
+        elif key == "decay": opts.decay = Float64(val)
+        elif key == "vf2_steps": opts.vf2_steps = Int(val)
+        elif key == "valve": opts.valve = Int(val)
+        elif key == "star": star = val != "0" and val != "false" and val != "off"
+        elif key == "heuristic": opts.heuristic = val
+        elif key == "swap_trials": opts.swap_trials = Int(val)
+        elif key == "absorb": opts.absorb = Float64(val)
+        elif key == "absorb_alt": opts.absorb_alt = Float64(val)
+        elif key == "mirror":
+            opts.mirror_auto = val == "auto"
+            opts.mirror = val != "0" and val != "false" and val != "off"
+            if val == "free":
+                opts.mirror_gain = 1e9
+        elif key == "mirror_gain": opts.mirror_gain = Float64(val)
+        elif key == "commute":
+            opts.commute_auto = val == "auto"
+            opts.commute = val != "0" and val != "false" and val != "off"
+        elif key == "policy": aopts.policy = val
+        elif key == "ai_level": aopts.level = Int(val)
+        elif key == "layout_mode": aopts.layout_mode = val
+        elif key == "model_dir": aopts.model_dir = val
+    aopts.seed = opts.seed
+    return opts^
+
+
 def _apply(p: PassSpec, mut c: Circuit, target: Target, mut st: _State) raises -> String:
     """Run one pass in place; returns a short note."""
     var id = p.id
     var gs = working_gate_set(c, target)
+    gs.exact = st.exact
     if id == PassId.REMOVE_IDENTITIES:
-        return "removed " + String(remove_identities(c))
+        return "removed " + String(remove_identities(c, st.exact))
     if id == PassId.CANCEL:
         return "cancelled " + String(cancel_inverses(c, gs, _int_arg(p.args, 32))) + " pairs"
     if id == PassId.MERGE:
@@ -695,6 +741,7 @@ def _apply(p: PassSpec, mut c: Circuit, target: Target, mut st: _State) raises -
         return "merged " + String(commute_rotations(c, gs, _int_arg(p.args, 32)))
     if id == PassId.FUSE1Q:
         var g2 = _gs_from_args(p.args, c, target)
+        g2.exact = st.exact
         return "saved " + String(fuse_1q(c, g2)) + " 1q gates " + String(g2)
     if id == PassId.PHASE_FOLD:
         var t0 = c.t_count()
@@ -708,51 +755,16 @@ def _apply(p: PassSpec, mut c: Circuit, target: Target, mut st: _State) raises -
         var g2 = GateSet(target.basis)
         if len(p.args) > 0:
             g2 = _gs_from_args(p.args, c, target)
+        g2.exact = st.exact
         var dropped = False
         var r = translate_to_basis(c, g2, dropped)
         if dropped:
             st.dropped = True
         return "translated " + String(r) + " gates to " + String(g2) + (" (symbolic phase dropped)" if dropped else "")
     if id == PassId.ROUTE:
-        var opts = RouteOptions()
-        opts.seed = st.seed
         var aopts = AIRouteOptions()
-        aopts.policy = "off"
         var star = True
-        for a in p.args:
-            var eq = a.find("=")
-            if eq < 0:
-                continue
-            var key = String(a[byte=0:eq].strip())
-            var val = String(a[byte=eq + 1:].strip())
-            if key == "layout": opts.layout = val
-            elif key == "seed": opts.seed = Int(val)
-            elif key == "trials": opts.trials = Int(val)
-            elif key == "iterations": opts.iterations = Int(val)
-            elif key == "lookahead": opts.lookahead = Int(val)
-            elif key == "weight": opts.weight = Float64(val)
-            elif key == "decay": opts.decay = Float64(val)
-            elif key == "vf2_steps": opts.vf2_steps = Int(val)
-            elif key == "valve": opts.valve = Int(val)
-            elif key == "star": star = val != "0" and val != "false" and val != "off"
-            elif key == "heuristic": opts.heuristic = val
-            elif key == "swap_trials": opts.swap_trials = Int(val)
-            elif key == "absorb": opts.absorb = Float64(val)
-            elif key == "absorb_alt": opts.absorb_alt = Float64(val)
-            elif key == "mirror":
-                opts.mirror_auto = val == "auto"
-                opts.mirror = val != "0" and val != "false" and val != "off"
-                if val == "free":
-                    opts.mirror_gain = 1e9
-            elif key == "mirror_gain": opts.mirror_gain = Float64(val)
-            elif key == "commute":
-                opts.commute_auto = val == "auto"
-                opts.commute = val != "0" and val != "false" and val != "off"
-            elif key == "policy": aopts.policy = val
-            elif key == "ai_level": aopts.level = Int(val)
-            elif key == "layout_mode": aopts.layout_mode = val
-            elif key == "model_dir": aopts.model_dir = val
-        aopts.seed = opts.seed
+        var opts = route_options(p.args, st.seed, aopts, star)
         _ = unroll_3q(c)
         var star_map = List[Int]()
         var star_note = String()
@@ -814,6 +826,9 @@ def _apply(p: PassSpec, mut c: Circuit, target: Target, mut st: _State) raises -
         var blocks = 0
         var saved = 0
         var tgs = GateSet(target.basis)
+        tgs.exact = st.exact
+        var anyset = GateSet()
+        anyset.exact = st.exact
         var rounds = 4 if len(c.ops) < 20000 else 1
         for _ in range(rounds):
             var b2 = 0
@@ -822,7 +837,7 @@ def _apply(p: PassSpec, mut c: Circuit, target: Target, mut st: _State) raises -
             saved += s2
             if s2 <= 0:
                 break
-            _ = cancel_inverses(c, GateSet(), 32)
+            _ = cancel_inverses(c, anyset, 32)
         if not gs.any and saved > 0:
             var dropped = False
             _ = translate_to_basis(c, gs, dropped)
@@ -844,7 +859,9 @@ def _apply(p: PassSpec, mut c: Circuit, target: Target, mut st: _State) raises -
         var objective_t = False
         for a in p.args:
             objective_t = objective_t or a == "objective=t"
-        var saved = pauli_resynthesize(c, 64, GateSet(target.basis), objective_t)
+        var pgs = GateSet(target.basis)
+        pgs.exact = st.exact
+        var saved = pauli_resynthesize(c, 64, pgs, objective_t)
         if objective_t:
             return ("saved " + String(saved) + " T gates") if saved > 0 else "kept original"
         return ("saved " + String(saved) + " 2q gates") if saved > 0 else "kept original"
@@ -861,6 +878,7 @@ def _apply(p: PassSpec, mut c: Circuit, target: Target, mut st: _State) raises -
             parse_angle_bound(a, bounded)
         var changed = wrap_angles(c, bounded)
         var g2 = GateSet(target.basis)
+        g2.exact = st.exact
         if changed > 0 and len(target.basis) > 0:
             # Pauli corrections may be outside the basis
             var dropped = False
@@ -1125,11 +1143,13 @@ struct PassManager(Copyable, Writable):
     var spec: String
     var passes: List[PassSpec]
     var seed: Int
+    var exact: Bool  # no pass rounds off more than EXACT_TOL per gate: blocks of a Program
 
     def __init__(out self, spec: String, seed: Int = 7) raises:
         self.spec = spec
         self.passes = parse_pipeline(spec)
         self.seed = seed
+        self.exact = False
 
     @staticmethod
     def preset(level: Int, target: Target, seed: Int = 7) raises -> PassManager:
@@ -1147,7 +1167,9 @@ struct PassManager(Copyable, Writable):
         res.target_name = target.name
         res.basis = basis_str(target.basis)
         var c = circuit.copy()
+        reduce_large_angles(c)
         var st = _State(c.num_qubits, self.seed)
+        st.exact = self.exact
         var t0 = perf_counter_ns()
         try:
             _run_list(self.passes, c, target, st, res.reports)

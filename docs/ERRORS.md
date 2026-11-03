@@ -49,7 +49,7 @@ Machine-readable catalog: `qumo describe errors --json`, or the MCP tool
 | `QM-E9xx` | interface | JSON, MCP tools, CLI and device selection (qumo.ai, qumo.exec.tools, cli); QM-E999 = uncategorized |
 | `QM-E95x` | hardware | Hardware plugins (Python package plugins/hardware: IBM Quantum via Qiskit Runtime, Quantinuum via pytket/qnexus) |
 | `QM-E96x` | benchmark | Benchmark harness (bench/run_benchmarks.py, Python) |
-| `QM-W0xx` | warning | Warnings: lint findings QM-W001..W019 (qumo.ai.diagnostics.lint), execution notes QM-W020..W049, OpenQASM parser warnings QM-W050..W059 |
+| `QM-W0xx` | warning | Warnings: lint findings QM-W001..W019 (qumo.ai.diagnostics.lint), execution notes QM-W020..W049, OpenQASM parser warnings QM-W050..W053 and QM-W055, Program lint QM-W054 |
 
 A code belongs to the narrowest range that contains it (QM-E472 is in QM-E47x, not QM-E4xx).
 
@@ -223,6 +223,31 @@ Fix: Pass matrices with sum K^dag K = identity; run them on density_evolve() or 
 **Invalid cache-block size for execute_plan_reordered (need 1 <= nb <= num_qubits).**  
 Fix: Use execute_plan(), or pass nb in [1, num_qubits].
 
+### QM-E480
+
+**A shot of a Program passed its budget of loop iterations (max_iterations, default 65536 back-edges per shot).**  
+Fix: The loop may never exit; raise max_iterations if it is only long.
+
+### QM-E481
+
+**Division or remainder by zero, or an integer power with a negative exponent, while a shot of a Program ran. The message gives the shot and line.**  
+Fix: Guard the divisor with an if.
+
+### QM-E482
+
+**A float reached an integer or a gate angle as NaN, infinite or out of range of the target type, an input value is not finite, or a for-loop range holds a uint at or above 2^63 that it cannot read.**  
+Fix: Guard the value, or use a wider integer.
+
+### QM-E483
+
+**A simulation method that cannot run a Program ('density', 'ptsbe', 'frame': they need one fixed sequence of operations for all shots), or an unknown method name.**  
+Fix: Use 'auto', 'statevector', 'tableau' or 'branching'.
+
+### QM-E484
+
+**An opcode that a Program block cannot run: blocks take unitary gates, measure, reset, noise, barrier and tick.**  
+Fix: Report it: every other walker of the instruction list would skip such an opcode in silence.
+
 ### QM-E450
 
 **Invalid physical error rate (out of [0, 1], or above the surface-code threshold for fault-tolerant estimates).**  
@@ -311,8 +336,23 @@ Fix: Use 'OPENQASM 3.0;' or 'OPENQASM 2.0;'.
 
 ### QM-E504
 
-**OpenQASM feature outside QUMO's supported subset (subroutines, while, classical assignment, ...).**  
-Fix: Use the gate-level subset; see 'qumo describe capabilities'.
+**OpenQASM feature outside QUMO's supported subset, or one a Circuit cannot hold: subroutines, or, in parse_qasm, while and classical assignment.**  
+Fix: Parse with parse_qasm_program or load_any for while and classical variables; see 'qumo describe capabilities' for the rest.
+
+### QM-E505
+
+**An expression or a block nests deeper than 256 levels.**  
+Fix: Split it into smaller expressions or statements; a chain of else-if arms counts as nesting too.
+
+### QM-E506
+
+**The source expands past its budget: 8 million items plus its length in bytes, where an item is a declared wire, a statement run (gate bodies and unrolled loops run again), a target of a broadcast or slice, a control, a repeat of pow, or a classical expression node a program keeps.**  
+Fix: Write the operations out, or build the circuit through the API. A pow of x, h, cx, s, sx or t folds into one period and costs nothing.
+
+### QM-E507
+
+**The source declares more wires than its operations use: 4096 beyond 3 per operation, the same rule as circuit_from_json.**  
+Fix: Shrink the registers to the qubits and bits the circuit uses.
 
 ### QM-E510
 
@@ -391,8 +431,8 @@ Fix: Qubit and bit operands must have equal size.
 
 ### QM-E541
 
-**Unsupported condition (multi-bit register value, nested or compound if).**  
-Fix: QUMO conditions test one bit: if (c[i] == 1) ...
+**Unsupported condition: nested if, '||', 'else' after a register or '&&' test, a body that writes a bit it still tests, or a switch on a copy of bits measured since.**  
+Fix: Conditions test a bit, a whole register or an '&&' chain of bits; keep writes to tested bits at the end of the body.
 
 ### QM-E550
 
@@ -406,8 +446,48 @@ Fix: Gates must not call themselves.
 
 ### QM-E552
 
-**OpenQASM export cannot express a classical condition: a single-bit condition on a multi-bit register (OpenQASM 2), or a register condition that does not cover every clbit.**  
-Fix: Export OpenQASM 3 (to_qasm) for single-bit conditions; condition on single bits or on the whole register.
+**OpenQASM export cannot express something: a single-bit condition on a multi-bit register (OpenQASM 2), a register condition that does not cover every clbit, or a constant that is NaN or infinite.**  
+Fix: Export OpenQASM 3 (to_qasm) for single-bit conditions; condition on single bits or on the whole register; compute a non-finite value at run time.
+
+### QM-E580
+
+**Classical type error: a cast the OpenQASM table refuses, or operands that do not mix (int with uint, float with angle, shift of an int).**  
+Fix: Cast one operand explicitly; docs/CONTROL_FLOW.md has the rules.
+
+### QM-E581
+
+**A classical variable may be read before it is assigned, on some path through the program.**  
+Fix: Assign it on every path, for example where it is declared. Bits start at 0 and are exempt.
+
+### QM-E582
+
+**Classical type not representable: a width outside 1..64, float[32], or a mutable angle without a width.**  
+Fix: float is binary64; write angle[n] for a variable.
+
+### QM-E583
+
+**Malformed control flow: break or continue outside a loop, else or case without its opener, or a region left open.**  
+Fix: Check the nesting of the block.
+
+### QM-E584
+
+**A value known only at run time where a constant is needed: qubit index, size, modifier, const initializer.**  
+Fix: Use a constant, or a for loop that can unroll.
+
+### QM-E585
+
+**A Program with classical variables or runtime control flow was given to an operation that needs one Circuit: exact state vector, expectation value, density matrix, OpenQASM 2, resource estimates, device emulation, encoding.**  
+Fix: Sample it with qumo_run_qasm, or keep the part you need in a straight-line circuit.
+
+### QM-E586
+
+**Detector or observable in a program with runtime control flow: they index measurements as if each ran once, and no decoder takes a syndrome of varying length.**  
+Fix: Move the QEC circuit out of the loop.
+
+### QM-E587
+
+**Program JSON (qumo.program.v1) that cannot be read: a wrong format, a missing field, or an index outside its table.**  
+Fix: Pass the output of program_to_json or qumo_convert with to='json'; docs/CONTROL_FLOW.md has the format.
 
 ### QM-E560
 
@@ -531,6 +611,26 @@ Fix: Compile first, then add noise.
 **A constant angle cannot be brought into the target's angle bounds.**  
 Fix: A Pauli rotation needs an interval covering [0, pi/2] up to a period; widen the bounds or drop them.
 
+### QM-E630
+
+**A Program cannot use the AI presets, synthesis passes or the learned router, which need a whole circuit, nor a second route or a relabeling pass inside fixpoint.**  
+Fix: Use a preset level, or a pipeline with one route and none of these.
+
+### QM-E631
+
+**A compiled Program failed verification: a different control structure, two layouts meeting on a control-flow edge, or a block that does not equal its source.**  
+Fix: Report the program; run a lower optimization level meanwhile.
+
+### QM-E632
+
+**No SWAP network was found to bring a region of a Program back to its entry layout.**  
+Fix: Report the program; check that the target's coupling graph is what you meant.
+
+### QM-E633
+
+**A gate with target angle bounds takes an angle known only at run time, which cannot be wrapped into the bounds.**  
+Fix: Use a gate without bounds, or drop the bounds.
+
 ## QM-E7xx — Stabilizer simulation and QEC
 
 See [QEC.md](QEC.md).
@@ -594,6 +694,11 @@ Fix: Probabilities must lie in [0, 1].
 
 **Internal invariant violation in the sparse-blossom decoder (never raised per shot; counted in SparseBlossomDecoder.anomalies, which must stay 0).**  
 Fix: Report the syndrome; decode it with 'mwpm_dense' meanwhile.
+
+### QM-E713
+
+**Stabilizer tableau too large: 2n + 1 rows of 2n bits, about n^2 / 2 bytes. The limit is 262144 qubits (32 GiB).**  
+Fix: Split the circuit, or drop the wires no operation uses.
 
 ### QM-E720
 
@@ -1063,3 +1168,13 @@ Fix: Annotations carry no meaning in QUMO; the annotated statement still runs.
 
 **OpenQASM box duration is ignored.**  
 Fix: QUMO circuits have no timing model; the box still keeps its gates together.
+
+### QM-W054
+
+**The body of a while loop cannot change its condition and has no break: the loop never runs, or runs until QM-E480.**  
+Fix: Assign a variable the condition reads, measure into a bit it reads, or add a break.
+
+### QM-W055
+
+**An integer division loses a remainder in a constant used as an angle or a float (float t = 3 / 4 * pi is 0), or a literal-only gate argument keeps real division where OpenQASM 3 and Qiskit truncate (rz(3/4*pi) is 3 pi / 4 here, 0 there).**  
+Fix: Write it in floats, such as 3.0 / 4, so that every tool reads the same value.

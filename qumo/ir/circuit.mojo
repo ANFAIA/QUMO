@@ -2,8 +2,8 @@
 
 Design (best-of synthesis):
   * Flat, cache-friendly instruction list (struct-of-POD), like Qiskit's Rust
-    `CircuitData` - no Python objects per gate, no pointer-chasing DAG unless a
-    pass asks for one (`qumo.compiler.dag`).
+    `CircuitData` - no Python objects per gate and no pointer-chasing DAG;
+    compiler passes work on the list directly.
   * Symbolic affine parameters (`Param`) bound without allocation.
   * Stim-style measurement records + DETECTOR / OBSERVABLE annotations and
     noise channels live in the same IR, so the QEC stack and the algorithm
@@ -13,7 +13,7 @@ Design (best-of synthesis):
   * Explicit `global_phase` so compiler rewrites stay exactly unitary-equivalent.
 """
 
-from std.math import pi
+from std.math import isinf, isnan, pi
 from qumo.ir.gates import (
     Op,
     op_name,
@@ -30,6 +30,29 @@ from qumo.ir.gates import (
 from qumo.ir.param import Param
 from qumo.ir.draw import draw_circuit
 from qumo.ir.kraus import KrausChannel
+
+# Largest |theta / (pi/2)| read as a count of quarter turns. Past it the rounding of
+# the ratio alone is more than the 1e-9 tolerance of `quarter_turns`, so a ratio that
+# comes out whole no longer says the angle is near a multiple of pi/2: at 2^51, with
+# one fractional bit left, some such angles are 0.57 rad away from every one.
+comptime QUARTER_TURN_LIMIT = 4194304.0  # 2^22
+
+# Wires a circuit read from text (OpenQASM, JSON) may declare beyond 3 per operation.
+# A tableau over this many is 8 MB; past it, operations must justify the wires, so a
+# short document cannot ask for a large allocation further on.
+comptime UNUSED_WIRES = 4096
+
+
+def check_finite_values(values: List[Float64]) raises:
+    """Input values on entry: a NaN would otherwise run on as a NaN state."""
+    for i in range(len(values)):
+        if isnan(values[i]) or isinf(values[i]):
+            raise Error("QM-E482: input value " + String(i) + " is " + String(values[i]) + ". Hint: pass a finite number.")
+
+
+def check_shots(shots: Int) raises:
+    if shots < 0:
+        raise Error("QM-E913: argument 'shots' = " + String(shots) + " is out of range. Hint: ask for at least one shot.")
 
 
 @fieldwise_init
@@ -86,7 +109,7 @@ struct Instruction(ImplicitlyCopyable, Writable):
             if self.p0.is_symbolic():
                 return False
             var r = self.p0.value() / (pi / 2)
-            return abs(r - round(r)) < 1e-12
+            return abs(r) < QUARTER_TURN_LIMIT and abs(r - round(r)) < 1e-12
         return False
 
     def write_to(self, mut w: Some[Writer]):
@@ -436,6 +459,9 @@ struct Circuit(Copyable, Writable, Sized):
         var base = self.copy() if k >= 0 else self.inverse()
         var out = self.empty_like()
         out.global_phase = 0.0
+        if len(base.ops) == 0:  # a phase alone: no loop, however large k is
+            out.global_phase = base.global_phase * Float64(abs(k))
+            return out^
         for _ in range(abs(k)):
             out.compose(base)
         return out^
@@ -456,6 +482,8 @@ struct Circuit(Copyable, Writable, Sized):
         for g in self.ops:
             if op_is_annotation(g.kind):
                 continue
+            if g.cond >= 0:
+                raise Error("QM-E202: controlled() cannot control a classically-conditioned '" + op_name(g.kind) + "'. Hint: control the gates first, then add the condition.")
             if g.acts_on(control):
                 raise Error("QM-E203: control qubit " + String(control) + " is already used by the circuit.")
             var k = g.kind
@@ -531,6 +559,7 @@ struct Circuit(Copyable, Writable, Sized):
         """Replace every symbolic parameter by its numeric value."""
         if len(values) != len(self.param_names):
             raise Error("QM-E101: bind() got " + String(len(values)) + " values, circuit has " + String(len(self.param_names)) + " parameters " + self.param_names_str() + ".")
+        check_finite_values(values)
         var out = self.copy()
         out.param_names = List[String]()
         for ref g in out.ops:

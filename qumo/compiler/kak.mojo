@@ -452,7 +452,7 @@ def _iswap_core(kind: Int, z: Int, x: Float64, y: Float64, lo: Int, hi: Int,
 
 def _iswap_synthesize(u: M4, lo: Int, hi: Int, ra: Float64, rb: Float64, rc: Float64,
                       pre_lo: M2, pre_hi: M2, post_lo: M2, post_hi: M2,
-                      mut out: List[Instruction], mut phase: Float64) -> Int:
+                      mut out: List[Instruction], mut phase: Float64, verify_tol: Float64) -> Int:
     """Native iSWAP synthesis: 0, 1, 2 iSWAPs for c = 0 classes, 4 otherwise
     (Ud(a,b,c) = Ud(a,b,0) . Ud(0,0,c), both factors commute)."""
     var tol = 1e-9
@@ -507,7 +507,7 @@ def _iswap_synthesize(u: M4, lo: Int, hi: Int, ra: Float64, rb: Float64, rc: Flo
     for g in tmp:
         m = mm4(gate_m4(g, lo, hi), m)
     var ph = 0.0
-    if not m4_phase_to(u, m, ph, 1e-7):
+    if not m4_phase_to(u, m, ph, verify_tol):
         return -1
     for g in tmp:
         out.append(g)
@@ -516,11 +516,13 @@ def _iswap_synthesize(u: M4, lo: Int, hi: Int, ra: Float64, rb: Float64, rc: Flo
 
 
 def kak_synthesize(u: M4, lo: Int, hi: Int, mut out: List[Instruction], mut phase: Float64,
-                   native_rotations: Bool = False, iswap: Bool = False) -> Int:
+                   native_rotations: Bool = False, iswap: Bool = False, verify_tol: Float64 = 1e-7) -> Int:
     """Minimal-CX circuit for u on (lo, hi); returns #2q gates or -1 (nothing appended).
 
     native_rotations: emit the canonical core as rxx/ryy/rzz rotations (one per
     non-zero Weyl coordinate) for continuous-angle entanglers (ions, ZZ).
+    `verify_tol`: how far an entry of the result may be from u; a small Weyl coordinate
+    rounds to zero, and past this tolerance the block stays as it was.
     """
     var w = Weyl()
     if not weyl_decompose(u, w):
@@ -544,7 +546,7 @@ def kak_synthesize(u: M4, lo: Int, hi: Int, mut out: List[Instruction], mut phas
     var post_hi = w.k1hi
     var post_lo = w.k1lo
     if iswap:
-        return _iswap_synthesize(u, lo, hi, ra, rb, rc, pre_lo, pre_hi, post_lo, post_hi, out, phase)
+        return _iswap_synthesize(u, lo, hi, ra, rb, rc, pre_lo, pre_hi, post_lo, post_hi, out, phase, verify_tol)
     var tol = 1e-9
     var co = SIMD[DType.float64, 4](ra, rb, rc, 0)
     var nz = 0
@@ -632,7 +634,7 @@ def kak_synthesize(u: M4, lo: Int, hi: Int, mut out: List[Instruction], mut phas
     for g in tmp:
         m = mm4(gate_m4(g, lo, hi), m)
     var ph = 0.0
-    if not m4_phase_to(u, m, ph, 1e-7):
+    if not m4_phase_to(u, m, ph, verify_tol):
         return -1
     for g in tmp:
         out.append(g)
@@ -847,8 +849,9 @@ def consolidate_2q(mut c: Circuit, gs: GateSet, mut blocks_out: Int, threads: Bo
     var rpp = res_ph.unsafe_ptr().as_unsafe_any_origin()
     var rop = res_ops.unsafe_ptr().as_unsafe_any_origin()
     var nchunks = 1 if (ncand < 48 or not threads) else min(ncand // 16, 256)
+    var verify_tol = 1e-13 if gs.exact else 1e-7
 
-    def work(t: Int) {imm c, imm cand_list, imm ostart, imm oidx, imm b_lo, imm b_hi, imm b_cost, imm unit, imm native, imm iswap_mode, imm cx_family, imm ncand, imm nchunks, imm rkp, imm rlp, imm rpp, imm rop}:
+    def work(t: Int) {imm c, imm cand_list, imm ostart, imm oidx, imm b_lo, imm b_hi, imm b_cost, imm unit, imm native, imm iswap_mode, imm cx_family, imm ncand, imm nchunks, imm rkp, imm rlp, imm rpp, imm rop, imm verify_tol}:
         var lo_j = t * ncand // nchunks
         var hi_j = (t + 1) * ncand // nchunks
         var tmp = List[Instruction](capacity=_SLOT)
@@ -861,7 +864,7 @@ def consolidate_2q(mut c: Circuit, gs: GateSet, mut blocks_out: Int, threads: Bo
                 continue  # cannot beat the current cost
             tmp.clear()
             var ph = 0.0
-            var k = kak_synthesize(m, b_lo[b], b_hi[b], tmp, ph, native, iswap_mode)
+            var k = kak_synthesize(m, b_lo[b], b_hi[b], tmp, ph, native, iswap_mode, verify_tol)
             if k < 0 or len(tmp) > _SLOT:
                 continue
             rkp[unsafe_offset=j] = k

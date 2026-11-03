@@ -19,7 +19,7 @@ outcomes (QM-E409).
 from std.math import log
 from std.collections import Dict
 from qumo.ir.gates import Op, op_arity, op_is_noise, op_is_pauli_noise, op_is_annotation, op_is_unitary
-from qumo.ir.circuit import Circuit, Instruction
+from qumo.ir.circuit import Circuit, Instruction, check_finite_values, check_shots
 from qumo.sim.statevector import StateVector
 from qumo.sim.rng import Rng
 from qumo.sim.runner import (
@@ -202,7 +202,9 @@ struct _Walk(Movable):
                 res.record(self.mm.pack(o))
 
 
-def _static_checks(c: Circuit, params: List[Float64]) raises:
+def _static_checks(c: Circuit, shots: Int, params: List[Float64]) raises:
+    check_shots(shots)
+    check_finite_values(params)
     c.validate()
     check_statevector_size(c.num_qubits)
     if len(params) != c.num_params():
@@ -227,7 +229,7 @@ def _static_checks(c: Circuit, params: List[Float64]) raises:
 def plan_trajectories(c: Circuit, shots: Int, seed: UInt64 = 1234,
                       params: List[Float64] = List[Float64]()) raises -> TrajectoryPlan:
     """What `sample_ptsbe` would run, without simulating: distinct patterns among `shots`."""
-    _static_checks(c, params)
+    _static_checks(c, shots, params)
     var sites = _Sites()
     var plans = List[List[KOp]]()
     _segments(c, params, sites, plans)
@@ -246,7 +248,7 @@ def plan_trajectories(c: Circuit, shots: Int, seed: UInt64 = 1234,
 def sample_ptsbe(c: Circuit, shots: Int, seed: UInt64 = 1234, max_trajectories: Int = -1,
                  params: List[Float64] = List[Float64]()) raises -> SampleResult:
     """Sample a static noisy circuit with one simulation per distinct error pattern."""
-    _static_checks(c, params)
+    _static_checks(c, shots, params)
     var sites = _Sites()
     var plans = List[List[KOp]]()
     _segments(c, params, sites, plans)

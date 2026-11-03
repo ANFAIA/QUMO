@@ -25,7 +25,7 @@ al. 2022). Models: Ross-Selinger gridsynth (arXiv:1403.2975, ancilla-free,
 """
 
 from std.math import sqrt, ceil, log, log2, exp, pi
-from qumo.ir.circuit import Circuit, Instruction
+from qumo.ir.circuit import Circuit, Instruction, QUARTER_TURN_LIMIT
 from qumo.ir.gates import Op, op_arity, op_is_unitary, op_name
 
 
@@ -89,7 +89,7 @@ def t_cost(g: Instruction, mut exact: Int, mut rots: Int):
         rots = n
         return
     var r = g.p0.value() * scale / (pi / 4)
-    if abs(r - round(r)) < 1e-12:
+    if abs(r) < 2.0 * QUARTER_TURN_LIMIT and abs(r - round(r)) < 1e-12:
         if Int(round(r)) % 2 != 0:
             exact = n
         return

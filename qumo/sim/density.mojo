@@ -15,7 +15,7 @@ classical conditions raise QM-E411; `sample()` runs those.
 
 from std.math import sqrt
 from qumo.ir.gates import Op, M2, M4, op_arity, op_is_unitary, op_is_noise, op_is_annotation, matrix_1q, matrix_2q
-from qumo.ir.circuit import Circuit, Instruction
+from qumo.ir.circuit import Circuit, Instruction, check_finite_values, check_shots
 from qumo.ir.kraus import KrausChannel
 from qumo.ir.pauli import PauliSum
 from qumo.sim.statevector import StateVector
@@ -241,6 +241,7 @@ def _noise_channel(c: Circuit, g: Instruction, params: List[Float64]) raises -> 
 
 def density_evolve(c: Circuit, params: List[Float64] = List[Float64]()) raises -> DensityMatrix:
     """Final density matrix of `c` from |0...0>."""
+    check_finite_values(params)
     c.validate()
     check_density_size(c.num_qubits)
     if len(params) != c.num_params():
@@ -281,6 +282,7 @@ def density_evolve(c: Circuit, params: List[Float64] = List[Float64]()) raises -
 def sample_density(c: Circuit, shots: Int, seed: UInt64 = 1234,
                    params: List[Float64] = List[Float64]()) raises -> SampleResult:
     """Shots from the exact outcome distribution of a circuit with terminal measurements."""
+    check_shots(shots)
     if c.num_measurements == 0:
         raise Error("QM-E402: circuit has no measurements. Hint: call measure_all() or use density_evolve().")
     if c.num_clbits > 62:

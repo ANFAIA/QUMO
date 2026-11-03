@@ -32,6 +32,10 @@ comptime FOUR_PI = 12.56637061435917295385
 comptime HALF_PI = 1.5707963267948966192313
 comptime QUARTER_PI = 0.7853981633974483096157
 comptime ANG_TOL = 1e-10
+# What a pass may round off per gate in a block of a Program, in place of ANG_TOL and of
+# 1e-9 on a matrix. verify_program sees a distance of 1e-7, and small errors add up over
+# the gates of a block, so this leaves room for the longest block its budget takes.
+comptime EXACT_TOL = 1e-14
 
 # per-wire action axis
 comptime AX_OTHER = 0
@@ -49,12 +53,15 @@ struct GateSet(Copyable, Writable):
 
     var any: Bool
     var allowed: List[Bool]
+    var exact: Bool  # round off EXACT_TOL at most: see `angle_tol`
 
     def __init__(out self):
         self.any = True
         self.allowed = List[Bool](length=Op.NUM_OPS, fill=True)
+        self.exact = False
 
     def __init__(out self, kinds: List[Int]):
+        self.exact = False
         if len(kinds) == 0:
             self.any = True
             self.allowed = List[Bool](length=Op.NUM_OPS, fill=True)
@@ -64,6 +71,14 @@ struct GateSet(Copyable, Writable):
         for k in kinds:
             if k >= 0 and k < Op.NUM_OPS:
                 self.allowed[k] = True
+
+    def angle_tol(self) -> Float64:
+        """An angle this close to zero, or to a named gate's, counts as equal."""
+        return EXACT_TOL if self.exact else ANG_TOL
+
+    def matrix_tol(self) -> Float64:
+        """An entry of a resynthesised 1-qubit matrix may be this far off."""
+        return EXACT_TOL if self.exact else 1e-9
 
     @staticmethod
     def all_but_3q() -> GateSet:
@@ -122,6 +137,9 @@ def basis_str(kinds: List[Int]) -> String:
 # ----------------------------------------------------------------------------
 # Numbers
 # ----------------------------------------------------------------------------
+comptime ANGLE_REDUCE_FROM = 1e4  # above, `wrap_angle` starts to lose digits
+
+
 def wrap_angle(a: Float64, period: Float64) -> Float64:
     """Representative of `a` modulo `period` in (-period/2, period/2]."""
     var r = a - period * floor(a / period + 0.5)
@@ -132,8 +150,39 @@ def wrap_angle(a: Float64, period: Float64) -> Float64:
     return r
 
 
-def near_mod(a: Float64, target: Float64, period: Float64) -> Bool:
-    return abs(wrap_angle(a - target, period)) < ANG_TOL
+def reduce_angle(a: Float64) -> Float64:
+    """`a` in (-2 pi, 2 pi], from sin and cos of its half, which reduce exactly."""
+    if abs(a) < ANGLE_REDUCE_FROM:
+        return a
+    var half = a / 2.0
+    return 2.0 * atan2(sin(half), cos(half))
+
+
+def reduce_large_angles(mut c: Circuit):
+    """Bring huge constant angles into (-2 pi, 2 pi]. Passes add angles and wrap them
+    with `wrap_angle`, and at 2^63 the sum drops the smaller term and the wrap has no
+    bits left. Every QUMO rotation has a period that divides 4 pi, so the half-angle
+    pair gives the same matrix. A symbolic angle reduces its offset the same way;
+    a huge coefficient stays: its product with the value is a float, and no reduction
+    at compile time can help that."""
+    for ref g in c.ops:
+        if not op_is_unitary(g.kind):
+            continue
+        for j in range(op_num_params(g.kind)):
+            var p = g.param(j)
+            if abs(p.offset) < ANGLE_REDUCE_FROM:
+                continue
+            var reduced = Param(reduce_angle(p.offset), p.index, p.coeff)
+            if j == 0:
+                g.p0 = reduced
+            elif j == 1:
+                g.p1 = reduced
+            else:
+                g.p2 = reduced
+
+
+def near_mod(a: Float64, target: Float64, period: Float64, tol: Float64 = ANG_TOL) -> Bool:
+    return abs(wrap_angle(a - target, period)) < tol
 
 
 def fmt_num(x: Float64, digits: Int = 3) -> String:
@@ -489,28 +538,28 @@ def r_kind(axis: Int) -> Int:
     return Op.RY
 
 
-def _named_p(axis: Int, lam: Float64, mut k1: Int, mut k2: Int):
+def _named_p(axis: Int, lam: Float64, mut k1: Int, mut k2: Int, tol: Float64):
     """Named gate(s) equal to P_axis(lam) exactly; k1 = -1 when none."""
     k1 = -1
     k2 = -1
     if axis == AX_Z:
-        if near_mod(lam, pi, TWO_PI): k1 = Op.Z
-        elif near_mod(lam, HALF_PI, TWO_PI): k1 = Op.S
-        elif near_mod(lam, -HALF_PI, TWO_PI): k1 = Op.SDG
-        elif near_mod(lam, QUARTER_PI, TWO_PI): k1 = Op.T
-        elif near_mod(lam, -QUARTER_PI, TWO_PI): k1 = Op.TDG
-        elif near_mod(lam, 3 * QUARTER_PI, TWO_PI):
+        if near_mod(lam, pi, TWO_PI, tol): k1 = Op.Z
+        elif near_mod(lam, HALF_PI, TWO_PI, tol): k1 = Op.S
+        elif near_mod(lam, -HALF_PI, TWO_PI, tol): k1 = Op.SDG
+        elif near_mod(lam, QUARTER_PI, TWO_PI, tol): k1 = Op.T
+        elif near_mod(lam, -QUARTER_PI, TWO_PI, tol): k1 = Op.TDG
+        elif near_mod(lam, 3 * QUARTER_PI, TWO_PI, tol):
             k1 = Op.S
             k2 = Op.T
-        elif near_mod(lam, -3 * QUARTER_PI, TWO_PI):
+        elif near_mod(lam, -3 * QUARTER_PI, TWO_PI, tol):
             k1 = Op.SDG
             k2 = Op.TDG
     elif axis == AX_X:
-        if near_mod(lam, pi, TWO_PI): k1 = Op.X
-        elif near_mod(lam, HALF_PI, TWO_PI): k1 = Op.SX
-        elif near_mod(lam, -HALF_PI, TWO_PI): k1 = Op.SXDG
+        if near_mod(lam, pi, TWO_PI, tol): k1 = Op.X
+        elif near_mod(lam, HALF_PI, TWO_PI, tol): k1 = Op.SX
+        elif near_mod(lam, -HALF_PI, TWO_PI, tol): k1 = Op.SXDG
     else:
-        if near_mod(lam, pi, TWO_PI): k1 = Op.Y
+        if near_mod(lam, pi, TWO_PI, tol): k1 = Op.Y
 
 
 def _u_for(axis: Int, theta: Param, q: Int) -> Instruction:
@@ -525,11 +574,11 @@ def _u_for(axis: Int, theta: Param, q: Int) -> Instruction:
 def _emit_p_const(axis: Int, lam_in: Float64, q: Int, gs: GateSet,
                   mut out: List[Instruction], mut phase: Float64) -> Bool:
     var lam = wrap_angle(lam_in, TWO_PI)
-    if abs(lam) < ANG_TOL:
+    if abs(lam) < gs.angle_tol():
         return True
     var k1 = -1
     var k2 = -1
-    _named_p(axis, lam, k1, k2)
+    _named_p(axis, lam, k1, k2, gs.angle_tol())
     if k1 >= 0 and gs.has(k1) and (k2 < 0 or gs.has(k2)):
         out.append(Instruction.make(k1, q))
         if k2 >= 0:
@@ -565,9 +614,9 @@ def emit_rotation(axis: Int, is_r: Bool, angle: Param, q: Int, gs: GateSet,
         var a = angle.value()
         if is_r:
             a = wrap_angle(a, FOUR_PI)
-            if abs(a) < ANG_TOL:
+            if abs(a) < gs.angle_tol():
                 ok = True
-            elif abs(abs(a) - TWO_PI) < ANG_TOL:
+            elif abs(abs(a) - TWO_PI) < gs.angle_tol():
                 ph += pi
                 ok = True
             else:

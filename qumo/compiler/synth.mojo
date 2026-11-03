@@ -48,17 +48,17 @@ def _zrot(a: Param, q: Int, gs: GateSet) -> Instruction:
 
 def _push_z(mut seq: List[Instruction], a: Float64, q: Int, gs: GateSet):
     """Append a Z rotation unless it is the identity up to phase."""
-    if abs(wrap_angle(a, TWO_PI)) < ANG_TOL:
+    if abs(wrap_angle(a, TWO_PI)) < gs.angle_tol():
         return
     seq.append(_zrot(wrap_angle(a, TWO_PI), q, gs))
 
 
-def _consider(m: M2, seq: List[Instruction], mut best: List[Instruction],
+def _consider(m: M2, seq: List[Instruction], gs: GateSet, mut best: List[Instruction],
               mut best_phase: Float64, mut found: Bool):
     if found and len(seq) >= len(best):
         return
     var ph = 0.0
-    if m2_phase_to(m, seq_matrix_1q(seq), ph):
+    if m2_phase_to(m, seq_matrix_1q(seq), ph, gs.matrix_tol()):
         best = seq.copy()
         best_phase = ph
         found = True
@@ -71,7 +71,7 @@ def synth_1q(m: M2, q: Int, gs: GateSet, mut out: List[Instruction], mut phase: 
     Returns False (nothing appended) when `gs` cannot express `m`.
     """
     var ph = 0.0
-    if m2_identity_phase(m, ph):
+    if m2_identity_phase(m, ph, gs.angle_tol()):
         phase += ph
         return True
     var best = List[Instruction]()
@@ -83,7 +83,7 @@ def synth_1q(m: M2, q: Int, gs: GateSet, mut out: List[Instruction], mut phase: 
         if gs.has(k):
             var c = List[Instruction]()
             c.append(Instruction.make(k, q))
-            _consider(m, c, best, best_phase, found)
+            _consider(m, c, gs, best, best_phase, found)
             if found:
                 break
     var diag = abs(m.re[1]) + abs(m.im[1]) + abs(m.re[2]) + abs(m.im[2]) < 1e-12
@@ -93,8 +93,9 @@ def synth_1q(m: M2, q: Int, gs: GateSet, mut out: List[Instruction], mut phase: 
             var c = List[Instruction]()
             var dummy = 0.0
             if emit_rotation(AX_Z, False, Param(lam), q, gs, c, dummy):
-                _consider(m, c, best, best_phase, found)
-        var z = zyz_decompose(m)
+                _consider(m, c, gs, best, best_phase, found)
+        var small = 0.0 if gs.exact else 1e-12
+        var z = zyz_decompose(m, small)
         var theta = z.theta
         # pure X / Y rotations
         if not diag:
@@ -103,11 +104,11 @@ def synth_1q(m: M2, q: Int, gs: GateSet, mut out: List[Instruction], mut phase: 
                     var c = List[Instruction]()
                     var dummy = 0.0
                     if emit_rotation(axis, True, Param(sgn * theta), q, gs, c, dummy):
-                        _consider(m, c, best, best_phase, found)
+                        _consider(m, c, gs, best, best_phase, found)
         if gs.has(Op.U):
             var c = List[Instruction]()
             c.append(Instruction.make(Op.U, q, p0=z.theta, p1=z.phi, p2=z.lam))
-            _consider(m, c, best, best_phase, found)
+            _consider(m, c, gs, best, best_phase, found)
         var zr = gs.has_z_rot() and not (found and len(best) == 1)
         if zr:
             var phi = z.phi
@@ -118,33 +119,33 @@ def synth_1q(m: M2, q: Int, gs: GateSet, mut out: List[Instruction], mut phase: 
                 c.append(Instruction.make(Op.X, q))
                 var a = atan2(m.im[2], m.re[2]) - atan2(m.im[1], m.re[1])
                 _push_z(c, a, q, gs)
-                _consider(m, c, best, best_phase, found)
+                _consider(m, c, gs, best, best_phase, found)
             if gs.has(Op.RY):
                 var c = List[Instruction]()
                 _push_z(c, lam, q, gs)
                 c.append(Instruction.make(Op.RY, q, p0=theta))
                 _push_z(c, phi, q, gs)
-                _consider(m, c, best, best_phase, found)
+                _consider(m, c, gs, best, best_phase, found)
             if gs.has(Op.RX):
                 var c = List[Instruction]()
                 _push_z(c, lam - HALF_PI, q, gs)
                 c.append(Instruction.make(Op.RX, q, p0=theta))
                 _push_z(c, phi + HALF_PI, q, gs)
-                _consider(m, c, best, best_phase, found)
+                _consider(m, c, gs, best, best_phase, found)
             if gs.has(Op.SX):
                 if abs(theta - HALF_PI) < 1e-9:
                     var c = List[Instruction]()
                     _push_z(c, lam - HALF_PI, q, gs)
                     c.append(Instruction.make(Op.SX, q))
                     _push_z(c, phi + HALF_PI, q, gs)
-                    _consider(m, c, best, best_phase, found)
+                    _consider(m, c, gs, best, best_phase, found)
                 var c = List[Instruction]()
                 _push_z(c, lam, q, gs)
                 c.append(Instruction.make(Op.SX, q))
                 _push_z(c, theta + pi, q, gs)
                 c.append(Instruction.make(Op.SX, q))
                 _push_z(c, phi + pi, q, gs)
-                _consider(m, c, best, best_phase, found)
+                _consider(m, c, gs, best, best_phase, found)
             elif gs.has(Op.SXDG):
                 # sxdg = rz(pi) sx rz(pi) up to phase -> mirrored ZSX
                 var c = List[Instruction]()
@@ -153,7 +154,7 @@ def synth_1q(m: M2, q: Int, gs: GateSet, mut out: List[Instruction], mut phase: 
                 _push_z(c, theta + pi, q, gs)
                 c.append(Instruction.make(Op.SXDG, q))
                 _push_z(c, phi, q, gs)
-                _consider(m, c, best, best_phase, found)
+                _consider(m, c, gs, best, best_phase, found)
             if not found and gs.has(Op.H):
                 # rz . h . rz . h . rz  (ZXZ with rx(t) = h rz(t) h)
                 var c = List[Instruction]()
@@ -162,19 +163,19 @@ def synth_1q(m: M2, q: Int, gs: GateSet, mut out: List[Instruction], mut phase: 
                 _push_z(c, theta, q, gs)
                 c.append(Instruction.make(Op.H, q))
                 _push_z(c, phi + HALF_PI, q, gs)
-                _consider(m, c, best, best_phase, found)
+                _consider(m, c, gs, best, best_phase, found)
         if gs.has(Op.RX) and gs.has(Op.RY) and not (found and len(best) == 1):
             # XYX: conjugate by V = RY(pi/2) (V Z V^ = X, V Y V^ = Y)
             var v = matrix_1q(Op.RY, HALF_PI)
             var w = v.dagger() @ m @ v
-            var zw = zyz_decompose(w)
+            var zw = zyz_decompose(w, small)
             var c = List[Instruction]()
-            if abs(wrap_angle(zw.lam, TWO_PI)) > ANG_TOL:
+            if abs(wrap_angle(zw.lam, TWO_PI)) > gs.angle_tol():
                 c.append(Instruction.make(Op.RX, q, p0=wrap_angle(zw.lam, TWO_PI)))
             c.append(Instruction.make(Op.RY, q, p0=zw.theta))
-            if abs(wrap_angle(zw.phi, TWO_PI)) > ANG_TOL:
+            if abs(wrap_angle(zw.phi, TWO_PI)) > gs.angle_tol():
                 c.append(Instruction.make(Op.RX, q, p0=wrap_angle(zw.phi, TWO_PI)))
-            _consider(m, c, best, best_phase, found)
+            _consider(m, c, gs, best, best_phase, found)
     if not found:
         return False
     for g in best:

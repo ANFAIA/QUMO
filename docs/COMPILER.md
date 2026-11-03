@@ -209,6 +209,50 @@ two-qubit gates, so it stays out of O0-O3. On the Feynman circuits against
   parameter-dependent part of a global phase (rz ↔ p) cannot be stored in
   `Circuit.global_phase` and is reported as `symbolic_phase_dropped`.
 
+* Constant angles of magnitude 1e4 or more are reduced through sin and cos before
+  any pass (`reduce_large_angles` in `PassManager.run`). Merging sums angles, and at
+  2^63 the sum drops the smaller term and `wrap_angle` has no bits left: `transpile`
+  at level 2 used to change `sx rz(1) p(2^63-1) sx rz(1) p(2^63-1)`. The verifier of
+  programs found it. Output changes only for such angles. The offset of a symbolic
+  angle reduces the same way; a huge coefficient on a symbol stays a float limit.
+* **`transpile` drops small rotations:** a rotation below about 2e-6 is within the
+  1e-12 infidelity of `remove_identities` and goes, so many such gates can add up to
+  more than each one. Program blocks compile in exact mode instead, below.
+* Past 2^22 quarter turns an angle is not Clifford (`QUARTER_TURN_LIMIT`), in
+  `Instruction.is_clifford` and in the helpers that read a count of quarter turns.
+
+## Programs
+
+`compile_program(p, target, level, seed)` and `compile_spec_program(p, target, spec,
+seed)` compile a `Program` block by block on one layout, in
+`qumo/compiler/program_compile.mojo`. A program without runtime regions goes through
+`transpile`.
+
+* Each block compiles in exact mode (`PassManager.exact`, `GateSet.exact`): angle and
+  matrix tolerances are 1e-14 (`EXACT_TOL`) and the KAK check 1e-13, far below the 1e-7
+  of `verify_program`, so nothing it can see is dropped.
+* The pipeline splits at its `route`. Passes around it run on each block, without
+  `elide_swaps`, `post_layout` and `star`, which relabel qubits going forward only.
+  A second `route`, a relabeling pass inside `fixpoint`, synthesis passes and the AI
+  presets are QM-E630.
+* One layout comes from a summary circuit that weighs loop bodies, and each block
+  routes from it with `RouteOptions.initial_layout`.
+* A region exits with the layout it entered with: each branch, `break` and `continue`
+  restores the header's layout with a SWAP network, chosen inside each connected
+  component. If none exists, QM-E632.
+* A runtime angle on a gate with target angle bounds is QM-E633.
+* `verify_program` runs on every result (QM-E631): skeleton, layouts on every edge,
+  `l_out == perm(l_in)`, a compiled block at the place of each reachable source block,
+  no reset, noise or conditional gate that the source lacks, and each block against its
+  source on two seeded random states, with measurements deferred onto ancillas. Blocks
+  whose source has a reset, noise or a conditional gate, and blocks over the budget
+  (gates x 2^wires x 2 up to 2^27 per block and 2^29 per compile, 22 wires at most), are
+  not checked, and the result counts them: `blocks_checked`, `blocks_unchecked`.
+* `ProgramMetrics` gives base gates plus a cost per loop iteration. There is no global
+  depth, which would be a misleading number.
+
+The rules, the numbers and what stays out are in [CONTROL_FLOW.md](CONTROL_FLOW.md).
+
 ## Error codes
 
 | Code | Meaning |
@@ -231,6 +275,10 @@ two-qubit gates, so it stays out of O0-O3. On the Feynman circuits against
 | QM-E618 | block too wide for the requested synthesis method |
 | QM-E619 | synthesized block not equivalent to the original (`strict=1` only; otherwise the original is kept) |
 | QM-E620 | AI model incompatible with the request (kind, size, topology or gate set) |
+| QM-E630 | a `Program` cannot use the AI presets, synthesis passes, a second `route` or a relabeling pass inside `fixpoint` |
+| QM-E631 | a compiled `Program` failed verification |
+| QM-E632 | no SWAP network brings a region back to its entry layout |
+| QM-E633 | a gate with target angle bounds takes an angle known only at run time |
 
 ## Benchmarks
 
