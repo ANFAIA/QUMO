@@ -45,6 +45,20 @@ bench-neutral: py  ## hardware-neutral compiler benchmark (QUMO, Qiskit, TKET, C
 	$(PY) bench/neutral/run_neutral.py --circuits bench/neutral/circuits --out bench/results/neutral.jsonl
 	$(PY) bench/neutral/report.py bench/results/neutral.jsonl > docs/NEUTRAL_BENCHMARK_REPORT.md
 
+# ---------------------------------------------------------------- AI agents (docs/AGENTS.md)
+AGENTS_PY ?= agents/.venv/bin/python
+.PHONY: setup-agents test-agents agents-doctor
+
+setup-agents:  ## agents/.venv: deepagents, LangChain OpenAI + MCP adapters (the QUMO agent layer)
+	[ -x $(AGENTS_PY) ] || uv venv agents/.venv --python 3.12
+	uv pip install --python $(AGENTS_PY) -e "agents[test]"
+
+test-agents:  ## agent layer tests (offline; the MCP tests need build/qumo from `make cli`)
+	cd agents && .venv/bin/python -m pytest -q tests
+
+agents-doctor:  ## check keys, the MCP server and the back-end CLIs the agents need
+	bin/qumo-agents doctor
+
 # ---------------------------------------------------------------- AI transpiler (docs/AI_TRANSPILER.md)
 # Models live in models/ai_transpiler/{synth,route}/ with an INDEX.json
 # registry (sha256 per file); the Mojo loader re-checks an FNV-1a checksum.

@@ -20,6 +20,8 @@ started by a person; nothing runs on a schedule, commits or pushes.
 Modules the agents know (`qumo_agents/modules.py`): ir, sim, gpu, compiler, algorithms,
 qec, ft, exec, ai. Each lists its code, docs, tests, alternative SDKs and paper queries.
 
+Full guide: [docs/AGENTS.md](../docs/AGENTS.md). Entry point: `bin/qumo-agents` (any directory).
+
 ## Setup
 
 ```bash
@@ -40,12 +42,12 @@ Environment (keys are read from the environment only, never written):
 ## Use
 
 ```bash
-cd agents
-.venv/bin/python -m qumo_agents list
-.venv/bin/python -m qumo_agents run research-watch "What changed in the last 90 days?" --module compiler
-.venv/bin/python -m qumo_agents run qumo-operator "Build a 4-qubit GHZ, simulate 1000 shots, check the counts"
-.venv/bin/python -m qumo_agents run code-review "Review the OpenQASM parser" --module ir --backend claude-code
-.venv/bin/python -m qumo_agents run autoresearch "Reduce SWAP count on heavy-hex" --module compiler --dry-run
+bin/qumo-agents doctor
+bin/qumo-agents list
+bin/qumo-agents run research-watch "What changed in the last 90 days?" --module compiler
+bin/qumo-agents run qumo-operator "Build a 4-qubit GHZ, simulate 1000 shots, check the counts"
+bin/qumo-agents run code-review "Review the OpenQASM parser" --module ir --backend claude-code
+bin/qumo-agents run autoresearch "Reduce SWAP count on heavy-hex" --module compiler --dry-run
 ```
 
 Reports land in `agents/reports/<date>-<name>.md`.
