@@ -1,0 +1,35 @@
+{
+  "schema": "qumo.agents.v1",
+  "comment": "Models and back ends for the QUMO agent layer. OpenRouter is the default back end; every model id is an OpenRouter id (checked against examples/heterogeneous/llm_profiles.json, 2026-10-13; see https://openrouter.ai/models). The API key is read only from the environment variable named in api_key_env and is never written anywhere. Override any model with --model or QUMO_AGENTS_MODEL.",
+  "default_backend": "openrouter",
+  "openrouter": {
+    "base_url": "https://openrouter.ai/api/v1",
+    "api_key_env": "OPENROUTER_API_KEY",
+    "headers": {"X-Title": "QUMO agents"},
+    "timeout": 300,
+    "max_retries": 2
+  },
+  "default_model": "anthropic/claude-opus-5.5",
+  "models": {
+    "research-watch": "anthropic/claude-sonnet-5.5",
+    "code-review": "openai/gpt-6.1-sol",
+    "autoresearch": "anthropic/claude-opus-5.5",
+    "qumo-operator": "anthropic/claude-sonnet-5.5",
+    "algorithm-research": "anthropic/claude-opus-5.5",
+    "qec-research": "anthropic/claude-opus-5.5",
+    "compiler-research": "anthropic/claude-opus-5.5",
+    "execution": "anthropic/claude-sonnet-5.5",
+    "orchestrator": "anthropic/claude-opus-5.5"
+  },
+  "claude_code": {
+    "command": "claude",
+    "model": "",
+    "max_budget_usd": 5,
+    "permission_mode": "default"
+  },
+  "codex": {
+    "command": "codex",
+    "model": "",
+    "sandbox": "read-only"
+  }
+}
