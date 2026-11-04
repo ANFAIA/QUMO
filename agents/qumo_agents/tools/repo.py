@@ -12,6 +12,7 @@ from __future__ import annotations
 import datetime as _dt
 import fnmatch
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -30,6 +31,11 @@ _state = {"sandbox": None}  # Path of the sandbox worktree opened in this proces
 
 
 def _resolve(path: str, root: Path) -> Path:
+    # The path as written is checked first, so a forbidden directory is refused by its own
+    # rule even when it is a symlink that resolves outside the repository (.venv often is).
+    lexical = Path(os.path.normpath(path))
+    if set(lexical.parts) & SKIP_DIRS or SECRET_NAMES.search(lexical.name):
+        raise ValueError(f"{path} is not readable by agents")
     p = (root / path).resolve()
     if p != root and root not in p.parents:
         raise ValueError(f"{path} is outside {root}")
