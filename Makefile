@@ -19,7 +19,7 @@ setup:  ## create .venv, or update an existing one, to the pinned Mojo toolchain
 setup-py:  ## bench/.venv: Python 3.12 + latest Qiskit, Aer, TKET, Cirq, Stim, PyMatching (examples, benchmarks, plugin tests)
 	[ -x bench/.venv/bin/python ] || uv venv bench/.venv --python 3.12
 	uv pip install --python bench/.venv/bin/python -U qiskit qiskit-aer qiskit-ibm-runtime pytket pytket-qiskit \
-		cirq-core ply stim pymatching numpy scipy matplotlib psutil pytest nbformat "openqasm3[parser]"
+		cirq-core ply stim pymatching numpy scipy matplotlib altair vl-convert-python psutil pytest nbformat "openqasm3[parser]"
 	uv pip install --python bench/.venv/bin/python -U "./plugins/hardware[all]"
 
 test:  ## run every Mojo test file
