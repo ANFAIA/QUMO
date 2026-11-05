@@ -6,6 +6,7 @@ Source: https://nvidia.github.io/cuda-quantum/latest/using/backends/sims/mqpusim
 Source: https://quantum.cloud.ibm.com/docs/en/guides/execution-modes
 Source: https://docs.aws.amazon.com/braket/latest/developerguide/braket-jobs.html
 Source: https://docs.pennylane.ai/projects/lightning/en/stable/lightning_gpu/device.html
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 
 A model picks *what* to run (algorithm, hyperparameters, stage tasks) from
 QUMO's catalogue; QUMO decides *where* each stage runs and whether anything

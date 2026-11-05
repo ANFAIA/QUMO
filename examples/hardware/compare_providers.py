@@ -1,7 +1,7 @@
 """Compile one circuit for several real devices with QUMO and compare them side by side.
 
     python examples/hardware/compare_providers.py                       # GHZ-6, plans only (no account, no cost)
-    python examples/hardware/compare_providers.py --circuit examples/ghz.qasm
+    python examples/hardware/compare_providers.py --circuit examples/foundations/ghz.qasm
     python examples/hardware/compare_providers.py --qv 5                # quantum-volume style circuit (QUMO generator)
     python examples/hardware/compare_providers.py --provider-compilers   # also Qiskit's / TKET's own compilers
     python examples/hardware/compare_providers.py --run-local           # + noisy IBM snapshot and Quantinuum local emulator
@@ -15,8 +15,10 @@ Nothing is ever submitted by this script.
 --circuit takes any OpenQASM 2/3 file the hardware plugins accept: bound
 parameters, no simulation-only noise pragmas, and classical conditions only on
 whole registers (`if(c==k)`). Circuits with single-bit conditions, such as
-examples/teleport.qasm, are refused with QM-E954 (see the limitations in
+examples/foundations/teleport.qasm, are refused with QM-E954 (see the limitations in
 docs/HARDWARE_PLUGINS.md); a refused device is reported in its row.
+
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 """
 
 from __future__ import annotations

@@ -6,6 +6,7 @@ Source: https://github.com/PennyLaneAI/qml/blob/master/demonstrations_v2/tutoria
 Reproduces: PennyLane - Alleviating barren plateaus with local cost functions
 Source: https://pennylane.ai/qml/demos/tutorial_local_cost_functions
 Source: https://github.com/PennyLaneAI/qml/blob/master/demonstrations_v2/tutorial_local_cost_functions/demo.py (Apache-2.0)
+Framework: PennyLane (Xanadu) - https://github.com/PennyLaneAI/pennylane
 
 The random circuit: RY(pi/4) on every qubit, then a random gate in {RX, RY, RZ}
 with a random angle on each qubit, then a CZ ladder. The global cost is the

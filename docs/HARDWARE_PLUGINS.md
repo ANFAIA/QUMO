@@ -10,11 +10,11 @@ account.
 ```bash
 make py                                                    # build/qumo_py.so: the QUMO compiler used by the plugins
 export PYTHONPATH=plugins/hardware                         # or: pip install -e 'plugins/hardware[ibm,quantinuum]'
-python -m qumo_hardware run examples/bell.qasm             # QUMO simulator, all-to-all
-python -m qumo_hardware run examples/ghz.qasm -p ibm -b fake_torino            # IBM snapshot + Aer noise, no account
-python -m qumo_hardware run examples/ghz.qasm -p quantinuum -b H2-1 --dry-run  # native payload + HQC estimate
-python -m qumo_hardware run examples/ghz.qasm -p ibm -b ibm_fez                # prints the plan, does NOT submit (exit 3)
-python -m qumo_hardware run examples/ghz.qasm -p ibm -b ibm_fez --yes          # submits (credentials needed)
+python -m qumo_hardware run examples/foundations/bell.qasm             # QUMO simulator, all-to-all
+python -m qumo_hardware run examples/foundations/ghz.qasm -p ibm -b fake_torino            # IBM snapshot + Aer noise, no account
+python -m qumo_hardware run examples/foundations/ghz.qasm -p quantinuum -b H2-1 --dry-run  # native payload + HQC estimate
+python -m qumo_hardware run examples/foundations/ghz.qasm -p ibm -b ibm_fez                # prints the plan, does NOT submit (exit 3)
+python -m qumo_hardware run examples/foundations/ghz.qasm -p ibm -b ibm_fez --yes          # submits (credentials needed)
 python -m qumo_hardware result <job-id> --wait
 ```
 
@@ -96,7 +96,7 @@ This snippet runs from the repository root without any account (`make py` first)
 import sys; sys.path.insert(0, "plugins/hardware")
 from qumo_hardware import runner, HardwareError
 
-qasm = open("examples/ghz.qasm").read()
+qasm = open("examples/foundations/ghz.qasm").read()
 plan = runner.plan(qasm, "quantinuum", "H2-1", shots=200)            # never submits, needs no login
 print(plan.to_dict()["cost_summary"], plan.compiled.two_qubit_gates)
 out = runner.run(qasm, "local", "qumo-sim:ibm:fake_torino", shots=1000)   # local: runs now
@@ -309,9 +309,9 @@ A noise model named after a hardware *modality*, not a vendor, so examples can
 show "what a noisy QPU does to this circuit" without picking a company:
 
 ```bash
-python -m qumo_hardware run examples/ghz.qasm -p local -b 'qumo-sim:grid:4x4/sc_cz+noise:superconducting' --shots 2000
-python -m qumo_hardware run examples/ghz.qasm -p local -b 'qumo-sim:all:16/ion_zz+noise:trapped_ion'
-python -m qumo_hardware run examples/ghz.qasm -p local -b 'qumo-sim+noise:custom(1e-4,1e-3,2e-2)'
+python -m qumo_hardware run examples/foundations/ghz.qasm -p local -b 'qumo-sim:grid:4x4/sc_cz+noise:superconducting' --shots 2000
+python -m qumo_hardware run examples/foundations/ghz.qasm -p local -b 'qumo-sim:all:16/ion_zz+noise:trapped_ion'
+python -m qumo_hardware run examples/foundations/ghz.qasm -p local -b 'qumo-sim+noise:custom(1e-4,1e-3,2e-2)'
 ```
 
 | Modality | 1q gate error | 2q gate error | readout error |
@@ -490,7 +490,7 @@ Notes for the next ones:
   batches yet); parameters are bound once before submission.
 * Dynamic circuits: mid-circuit measurements and conditions on whole classical
   registers (`if(c==k)`) compile and run locally and on H2 (registers up to 63
-  bits); single-bit conditions (e.g. `examples/teleport.qasm`) are refused
+  bits); single-bit conditions (e.g. `examples/foundations/teleport.qasm`) are refused
   with QM-E954 because the bridges use OpenQASM 2 (an OpenQASM 3 bridge is the
   fix); Helios refuses conditions (QM-E955, see section 5). Dynamic circuits
   are untested on IBM and Quantinuum hardware.

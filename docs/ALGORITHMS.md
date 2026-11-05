@@ -21,11 +21,11 @@ Run the tests and examples from the repo root:
 .venv/bin/mojo run -I . tests/test_algorithms.mojo     # prints "test_algorithms OK"
 .venv/bin/mojo run -I . tests/test_algorithms_ext.mojo # permutation oracles, order finding, subspace projection
 .venv/bin/mojo run -I . tests/test_mitigation.mojo     # folding + zero-noise extrapolation
-.venv/bin/mojo run -I . examples/vqe_h2.mojo
-.venv/bin/mojo run -I . examples/qaoa_maxcut.mojo
-.venv/bin/mojo run -I . examples/grover.mojo
-.venv/bin/mojo run -I . examples/qpe.mojo
-.venv/bin/mojo run -I . examples/gradient_bench.mojo  # adjoint vs parameter-shift timing
+.venv/bin/mojo run -I . examples/chemistry_and_physics/vqe_h2.mojo
+.venv/bin/mojo run -I . examples/optimization/qaoa_maxcut.mojo
+.venv/bin/mojo run -I . examples/algorithms/grover.mojo
+.venv/bin/mojo run -I . examples/algorithms/qpe.mojo
+.venv/bin/mojo run -I . examples/qml/gradient_bench.mojo  # adjoint vs parameter-shift timing
 ```
 
 ## Conventions
@@ -149,7 +149,7 @@ U(theta, phi, lam) is peeled as RZ(phi) RY(theta) RZ(lam) (its global phase canc
 
 Measured (tests): the three methods agree to 2e-10 on random 4-qubit circuits
 containing every parametric gate kind with affine and shared parameters.
-Benchmark (`examples/gradient_bench.mojo`, 16 qubits, 96 params, 126 gates,
+Benchmark (`examples/qml/gradient_bench.mojo`, 16 qubits, 96 params, 126 gates,
 TFIM): one evaluation 2.3 ms, adjoint gradient 11 ms (4.8 evaluations),
 parameter-shift 470 ms (193 executions), adjoint 42x faster, max difference 3e-14.
 
@@ -212,7 +212,7 @@ Measured (tests/examples):
 * Subspace projection: the full basis reproduces `ground_energy` to 4e-15 (10- and
   12-qubit Heisenberg, complex random Hamiltonians on 6 and 8 qubits); SKQD on a
   12-qubit Heisenberg chain with fields reaches 0.55% at Krylov dimension 8
-  (examples/frameworks/qiskit/skqd_heisenberg.mojo).
+  (examples/chemistry_and_physics/skqd_heisenberg.mojo).
 
 ## Multi-controlled gates (`qumo.ir.mc`)
 
@@ -357,7 +357,9 @@ Every error starts with a stable code and ends with a `Hint:` where a fix is kno
 
 ## Framework examples
 
-`examples/frameworks/qiskit`, `braket` and `qsharp` reproduce signature examples
+The Qiskit, Braket, Q#, TKET, CUDA-Q, Cirq, Qibo and Classiq examples reproduce signature examples
 of those SDKs with this module (QAOA, CHSH, Shor N = 15/21, SKQD, Simon, DJ/BV,
-noise simulation, ZNE, Grover, QPE/IQPE, hidden shift, resource estimation); each
-folder's README lists the original, the URL and the checked reference numbers.
+noise simulation, ZNE, Grover, QPE/IQPE, hidden shift, resource estimation). They live in
+`examples/` by category (`algorithms/`, `foundations/`, `optimization/`, ...), and each header names
+its origin and links the original. `examples/origins/<framework>/README.md` lists the original,
+the URL and the checked reference numbers; `examples/CATALOG.md` indexes everything.

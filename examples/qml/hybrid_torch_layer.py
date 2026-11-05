@@ -4,6 +4,7 @@
 Reproduces: PennyLane - Turning quantum nodes into Torch Layers
 Source: https://pennylane.ai/qml/demos/tutorial_qnn_module_torch
 Source: https://github.com/PennyLaneAI/qml/blob/master/demonstrations_v2/tutorial_qnn_module_torch/demo.py (Apache-2.0)
+Framework: PennyLane (Xanadu) - https://github.com/PennyLaneAI/pennylane
 
 Moons data (examples/qml/data/moons_200.csv = make_moons(200, noise=0.1,
 random_state=42)); model Linear(2, 2) -> QUMO layer -> Linear(2, 2) -> softmax.

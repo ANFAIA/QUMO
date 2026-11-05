@@ -3,6 +3,7 @@
 Reproduces: PennyLane - Quantum models as Fourier series
 Source: https://pennylane.ai/qml/demos/tutorial_expressivity_fourier_series
 Source: https://github.com/PennyLaneAI/qml/blob/master/demonstrations_v2/tutorial_expressivity_fourier_series/demo.py (Apache-2.0)
+Framework: PennyLane (Xanadu) - https://github.com/PennyLaneAI/pennylane
 
 A model f(x) = <Z0> whose data enters through RX(x) can only express a
 truncated Fourier series: one encoding gate gives frequencies {-1, 0, 1}, r

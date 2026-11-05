@@ -2,6 +2,7 @@
 
 Reproduces: Guppy FT 0.5 - QECStyle.Reichardt, Iceberg pauli_exp, Helix (arXiv:2609.03194, 1804.06995)
 Source: https://github.com/Quantinuum/guppyft/blob/main/docs/CHANGELOG.md (Apache-2.0)
+Framework: Guppy FT (Quantinuum) - https://github.com/Quantinuum/guppyft
 
 The `reichardt` style measures all six Steane stabilizers with 3 ancillas instead
 of fresh logical blocks. Iceberg's block-wide Paulis are single weight-2 rotations

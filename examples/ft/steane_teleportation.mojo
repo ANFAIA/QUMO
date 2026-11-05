@@ -3,6 +3,7 @@
 Reproduces: Guppy FT - Getting started (encoding with Steane) and Writing logical programs directly
 Source: https://github.com/Quantinuum/guppyft/blob/main/docs/getting_started.md (Apache-2.0)
 Source: https://github.com/Quantinuum/guppyft/blob/main/examples/logical_program.ipynb (Apache-2.0)
+Framework: Guppy FT (Quantinuum) - https://github.com/Quantinuum/guppyft
 
 Guppy FT's first example writes teleportation as a QEC-agnostic program
 (source in |1>, Bell pair, Bell measurement, `if measure(src): z(tgt)`,

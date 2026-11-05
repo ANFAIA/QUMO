@@ -3,6 +3,7 @@
 Reproduces: heterogeneous CPU+GPU+QPU workflow pattern - CUDA-Q multi-QPU (mqpu) asynchronous execution
 Source: https://nvidia.github.io/cuda-quantum/latest/using/backends/sims/mqpusims.html
 Source: https://github.com/NVIDIA/cuda-quantum (Apache-2.0); QUMO design notes in qumo/exec/orchestrator.mojo
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 
 What it shows (all offline, deterministic):
 1. Offline rules select QAOA (p=1) for the deterministic 16-node 3-regular graph of

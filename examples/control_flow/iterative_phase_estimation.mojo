@@ -2,6 +2,7 @@
 
 Reproduces: Dobsicek, Johansson, Shumeiko, Wendin - Arbitrary accuracy iterative phase estimation algorithm as a two qubit benchmark
 Source: https://arxiv.org/abs/quant-ph/0610214
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 
 Textbook phase estimation of U = P(2 pi phi) on its eigenstate |1> takes one ancilla
 per bit. The iterative form takes one: it reuses the ancilla n times, least

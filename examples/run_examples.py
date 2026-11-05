@@ -7,7 +7,13 @@ Python, `//` comments for OpenQASM):
     <title>
     Reproduces: <Framework> - <original title>
     Source: <exact URL of the original>          (one or more)
+    Framework: <name> - <home page of the SDK or framework the example comes from>
     example-meta: {"framework": "qiskit", "tier": "fast", "timeout": 60, "requires": [], "args": []}
+
+The Framework line is the origin of the example. Its link must be the one this file lists for
+the framework named in example-meta (FRAMEWORK_URLS); QUMO's own examples say QUMO. Examples are
+organised by category (examples/<category>/), not by framework: `--framework NAME` selects the
+ones that come from one SDK, and examples/CATALOG.md lists every example with its origin.
 
 and prints machine-readable `CHECK <label>: PASS|FAIL ...` lines through
 qumo.testing.checks.CheckLog (Mojo) or examples/_checks.py (Python), ending with
@@ -17,7 +23,9 @@ Usage (from the repository root):
 
     bench/.venv/bin/python examples/run_examples.py                 # fast tier, -j 2
     bench/.venv/bin/python examples/run_examples.py --tier all
-    bench/.venv/bin/python examples/run_examples.py --only examples/frameworks/qiskit/chsh.mojo
+    bench/.venv/bin/python examples/run_examples.py --only examples/foundations/chsh.mojo
+    bench/.venv/bin/python examples/run_examples.py --only examples/algorithms      # one category
+    bench/.venv/bin/python examples/run_examples.py --framework qiskit              # one origin
     bench/.venv/bin/python examples/run_examples.py --gpu           # -D QUMO_GPU, build/gpu/*
     bench/.venv/bin/python examples/run_examples.py --list
     bench/.venv/bin/python examples/run_examples.py --write-index   # regenerate the README indexes
@@ -69,13 +77,37 @@ EXCLUDED_DIRS = {"colab", "__pycache__", ".ipynb_checkpoints"}
 # example-meta line and are not owned by the example infrastructure).
 LEGACY_OVERRIDES: dict[str, list[str]] = {
     # symbolic `input float` parameters: evaluate an expectation with values
-    "examples/vqe_ansatz.qasm": ["expect", "{file}", "Z0 Z1 + Z1 Z2 + 0.5*X0", "--params",
+    "examples/chemistry_and_physics/vqe_ansatz.qasm": ["expect", "{file}", "Z0 Z1 + Z1 Z2 + 0.5*X0", "--params",
                                  "[0.1, 0.2, 0.3, 0.4, 0.5, 0.6]", "--json"],
 }
+
+# QUMO's original smoke tests (no example-meta, no CHECK lines): exit status 0 within LEGACY_TIMEOUT.
+# Filled in by the migration that moved them into categories; new examples must carry metadata.
+LEGACY_OK: frozenset[str] = frozenset({
+    "examples/algorithms/grover.mojo",
+    "examples/algorithms/qpe.mojo",
+    "examples/chemistry_and_physics/vqe_ansatz.qasm",
+    "examples/chemistry_and_physics/vqe_h2.mojo",
+    "examples/compilation/compile_demo.mojo",
+    "examples/error_correction/qec_custom_decoder.mojo",
+    "examples/error_correction/qec_memory_experiment.mojo",
+    "examples/foundations/bell.qasm",
+    "examples/foundations/bell_qasm2.qasm",
+    "examples/foundations/ghz.qasm",
+    "examples/foundations/teleport.qasm",
+    "examples/hardware/compare_providers.py",
+    "examples/hardware/ibm_bell.py",
+    "examples/hardware/quantinuum_ghz.py",
+    "examples/noise_and_mitigation/noisy_bell.qasm",
+    "examples/noise_and_mitigation/qec_characterization.mojo",
+    "examples/optimization/qaoa_maxcut.mojo",
+    "examples/qml/gradient_bench.mojo",
+})
 
 _RE_META = re.compile(r"example-meta:\s*(\{.*\})\s*$")
 _RE_SOURCE = re.compile(r"^\s*(?:#|//|\*)?\s*Source:\s*(\S+)(.*)$")
 _RE_REPRO = re.compile(r"^\s*(?:#|//|\*)?\s*Reproduces:\s*(.+?)\s*$")
+_RE_ORIGIN = re.compile(r"^\s*(?:#|//|\*)?\s*Framework:\s*(?P<name>.+?)\s+-\s+(?P<url>https?://\S+)\s*$")
 _RE_CHECK = re.compile(r"^CHECK (?P<label>.+?): (?P<status>PASS|FAIL)(?: (?P<detail>.*))?$")
 _RE_ALL = re.compile(r"^ALL CHECKS PASSED \((\d+)\)\s*$")
 
@@ -91,7 +123,44 @@ FRAMEWORK_NAMES = {
     "cirq": "Cirq (Google)",
     "qibo": "Qibo",
     "pennylane": "PennyLane (Xanadu)",
+    "classiq": "Classiq",
+    "guppyft": "Guppy FT (Quantinuum)",
     "qumo": "QUMO",
+}
+
+# Home page of each origin: what the `Framework:` header line must link to. Checked to exist on
+# 2026-11-04 (TKET moved to Quantinuum/tket, Q# to microsoft/qdk; Classiq's SDK is closed source,
+# so its public home is the library the notebooks come from).
+FRAMEWORK_URLS = {
+    "qiskit": "https://github.com/Qiskit/qiskit",
+    "braket": "https://github.com/amazon-braket/amazon-braket-sdk-python",
+    "qsharp": "https://github.com/microsoft/qdk",
+    "tket": "https://github.com/Quantinuum/tket",
+    "cudaq": "https://github.com/NVIDIA/cuda-quantum",
+    "cirq": "https://github.com/quantumlib/Cirq",
+    "qibo": "https://github.com/qiboteam/qibo",
+    "pennylane": "https://github.com/PennyLaneAI/pennylane",
+    "classiq": "https://github.com/Classiq/classiq-library",
+    "guppyft": "https://github.com/Quantinuum/guppyft",
+    "qumo": "https://github.com/ANFAIA/QUMO",
+}
+
+# Example categories, in display order. A folder under examples/ that is not listed here is
+# still indexed, under its own name.
+CATEGORIES = {
+    "foundations": "Bell, GHZ, teleportation, CHSH and the textbook oracle algorithms",
+    "algorithms": "Search, phase estimation, QFT, factoring, linear systems, amplitude methods, quantum walks",
+    "optimization": "QAOA and combinatorial problems (MaxCut, cover, independent set, colouring)",
+    "chemistry_and_physics": "VQE, Hamiltonian simulation, adiabatic evolution, lattice models, molecules",
+    "qml": "Quantum machine learning: embeddings, classifiers, kernels, gradients, barren plateaus",
+    "error_correction": "Surface-code memory experiments, custom decoders, Stim interoperability",
+    "ft": "Fault-tolerant programming on stabilizer codes: Steane, Iceberg, Helix, magic states",
+    "noise_and_mitigation": "Noise models, error mitigation, benchmarking (XEB, RB, quantum volume), calibration",
+    "compilation": "Compiling for targets, resource estimation, Pauli-based computation, measurement grouping",
+    "simulation": "Simulators and execution paths: CPU vs GPU, stabilizer branching, device emulation, batching",
+    "control_flow": "Programs with while loops and classical variables",
+    "heterogeneous": "A model chooses the algorithm; QUMO splits it across CPU, GPU and QPU",
+    "hardware": "Running QUMO-compiled circuits on quantum hardware providers (dry run by default)",
 }
 
 
@@ -103,6 +172,7 @@ class Example:
     title: str = ""
     sources: list[str] = field(default_factory=list)
     reproduces: str = ""
+    origin: tuple[str, str] | None = None  # (name, url) of the `Framework:` header line
     meta: dict | None = None
     meta_error: str = ""
     legacy: bool = False
@@ -164,14 +234,14 @@ def _title_from(text: str, kind: str) -> str:
         s = ln.strip()
         if s.startswith("//"):
             body = _strip_comment(s)
-            if body and not body.lower().startswith(("example-meta", "source:", "reproduces:")):
+            if body and not body.lower().startswith(("example-meta", "source:", "reproduces:", "framework:")):
                 return body.rstrip(".")
     return ""
 
 
 def parse_header(text: str, kind: str) -> dict:
     """Title, Source URLs, Reproduces text and example-meta of one example file."""
-    out: dict = {"title": _title_from(text, kind), "sources": [], "reproduces": "", "meta": None,
+    out: dict = {"title": _title_from(text, kind), "sources": [], "reproduces": "", "origin": None, "meta": None,
                  "meta_error": "", "meta_lines": 0, "has_main": False}
     for ln in text.splitlines()[:200]:
         m = _RE_META.search(ln)
@@ -192,6 +262,10 @@ def parse_header(text: str, kind: str) -> dict:
         m = _RE_REPRO.match(ln)
         if m and not out["reproduces"]:
             out["reproduces"] = m.group(1)
+            continue
+        m = _RE_ORIGIN.match(ln)
+        if m and out["origin"] is None:
+            out["origin"] = (m.group("name"), m.group("url"))
     if out["meta_lines"] > 1:
         out["meta_error"] = f"{out['meta_lines']} example-meta lines (exactly one expected)"
     out["has_main"] = "__main__" in text or "def main()" in text
@@ -249,7 +323,7 @@ def discover(root: Path = EXAMPLES, include_hardware: bool = False, include_refe
             path = f.relative_to(repo).as_posix()
         except ValueError:
             path = f.as_posix()
-        ex = Example(path, kind, h["title"], h["sources"], h["reproduces"], h["meta"], h["meta_error"])
+        ex = Example(path, kind, h["title"], h["sources"], h["reproduces"], h["origin"], h["meta"], h["meta_error"])
         if ex.meta is None and not ex.meta_error:
             in_subdir = len(rel.parts) > 1
             if kind == "py" and in_subdir and "__main__" not in text:
@@ -469,8 +543,10 @@ def run_one(ex: Example, gpu: bool = False, python: str | None = None, repo: Pat
     return res
 
 
-def select(examples: list[Example], tier: str, only: list[str] | None) -> list[Example]:
+def select(examples: list[Example], tier: str, only: list[str] | None, framework: str | None = None) -> list[Example]:
     out = [e for e in examples if not e.helper]
+    if framework:
+        out = [e for e in out if e.framework == framework]
     if only:
         wanted = []
         for o in only:
@@ -544,71 +620,71 @@ def _sources_md(ex: Example) -> str:
     return ", ".join(parts)
 
 
-def frameworks_index(examples: list[Example]) -> str:
-    """examples/frameworks/README.md (fully generated)."""
-    base = EXAMPLES / "frameworks"
-    fw = [e for e in examples if e.path.startswith("examples/frameworks/") and not e.helper and e.meta]
+def _origin_md(e: Example) -> str:
+    name, url = e.origin or (FRAMEWORK_NAMES.get(e.framework, e.framework), FRAMEWORK_URLS.get(e.framework, ""))
+    return f"[{_cell(name)}]({url})" if url else _cell(name)
+
+
+def _category(e: Example) -> str:
+    parts = Path(e.path).parts
+    return parts[1] if len(parts) > 2 else "."
+
+
+def _grouped(examples: list[Example]) -> tuple[dict[str, list[Example]], list[str]]:
     by: dict[str, list[Example]] = {}
-    for e in fw:
-        by.setdefault(Path(e.path).parts[2] if len(Path(e.path).parts) > 3 else e.framework, []).append(e)
+    for e in examples:
+        if not e.helper:
+            by.setdefault(_category(e), []).append(e)
+    order = [c for c in CATEGORIES if c in by] + sorted(c for c in by if c not in CATEGORIES)
+    return by, order
+
+
+def catalog_index(examples: list[Example]) -> str:
+    """examples/CATALOG.md (fully generated): every example by category, with its origin."""
+    by, order = _grouped(examples)
     lines = [
-        "# Framework examples reproduced with QUMO",
+        "# QUMO examples by category",
         "",
         "<!-- Generated by `bench/.venv/bin/python examples/run_examples.py --write-index`; do not edit by hand. -->",
         "",
-        "Each file re-implements a published tutorial or demo from another quantum framework on QUMO's own",
-        "API, cites the original (`Source:`), and verifies its numbers with machine-readable `CHECK` lines",
-        "(page values, analytic values or a pinned reference run). No framework is a dependency: the",
-        "originals' SDKs are only used, optionally, by the scripts in `reference/` folders.",
+        "Examples are grouped by what they show, not by the SDK they come from. The Origin column is the",
+        "SDK or framework each one comes from (the `Framework:` line of its header, linked to its home page);",
+        "Source links the exact original page or notebook. Examples whose origin is QUMO are original. No SDK",
+        "is a dependency: the originals are only used, optionally, by the scripts in",
+        "`origins/<framework>/reference/`, which also hold each framework's notes and reference numbers.",
         "",
-        "Run one: `.venv/bin/mojo run -I . examples/frameworks/<framework>/<file>.mojo`.",
-        "Run all: `bench/.venv/bin/python examples/run_examples.py --only examples/frameworks`.",
+        "Run one category: `bench/.venv/bin/python examples/run_examples.py --only examples/<category>`.",
+        "Run one origin: `bench/.venv/bin/python examples/run_examples.py --framework <name>`.",
         "",
     ]
-    if not by:
-        lines += ["_No framework examples yet._", ""]
-    for key in sorted(by):
-        lines += [f"## {FRAMEWORK_NAMES.get(key, key)}", "", "| Example | Reproduces | Tier | Original |",
-                  "|---|---|---|---|"]
-        for e in sorted(by[key], key=lambda x: x.path):
-            lines.append(f"| {_md_link(e, base)} — {_cell(e.title)} | {_cell(e.reproduces)} | {e.tier} | "
-                         f"{_sources_md(e)} |")
+    for cat in order:
+        lines += [f"## `{cat}/`" if cat != "." else "## `examples/`", ""]
+        if cat in CATEGORIES:
+            lines += [CATEGORIES[cat] + ".", ""]
+        lines += ["| Example | Origin | Reproduces | Tier | Source |", "|---|---|---|---|---|"]
+        for e in sorted(by[cat], key=lambda x: x.path):
+            lines.append(f"| {_md_link(e, EXAMPLES)} — {_cell(e.title)} | {_origin_md(e)} | {_cell(e.reproduces)} | "
+                         f"{e.tier} | {_sources_md(e)} |")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
 
 def readme_table(examples: list[Example]) -> str:
-    """The generated block inside examples/README.md."""
-    base = EXAMPLES
-    groups: dict[str, list[Example]] = {}
-    for e in examples:
-        if e.helper:
-            continue
-        parts = Path(e.path).parts
-        folder = parts[1] if len(parts) > 2 else "."
-        groups.setdefault(folder, []).append(e)
+    """The generated block inside examples/README.md: one row per category."""
+    by, order = _grouped(examples)
     lines = [INDEX_BEGIN, "",
              "Every example below is run and verified by `bench/.venv/bin/python examples/run_examples.py`",
              "(`--tier fast` by default; `--tier all` adds the slow tier). Status lines are `CHECK <label>: PASS|FAIL ...`.", "",
-             "| Folder | Examples | Frameworks | Fast / slow |", "|---|---|---|---|"]
-    for folder in sorted(groups):
-        es = groups[folder]
-        fws = sorted({e.framework for e in es if not e.legacy}) or ["qumo (legacy smoke tests)"]
+             "| Folder | Examples | Origins | Fast / slow |", "|---|---|---|---|"]
+    for folder in order:
+        es = by[folder]
+        origins = sorted({FRAMEWORK_NAMES.get(e.framework, e.framework) for e in es})
         fast = sum(1 for e in es if e.tier == "fast")
         slow = sum(1 for e in es if e.tier == "slow")
         link = "[`examples/`](.)" if folder == "." else f"[`{folder}/`]({folder}/)"
-        lines.append(f"| {link} | {len(es)} | {', '.join(fws)} | {fast} / {slow} |")
-    lines.append("")
-    new = [e for e in examples if not e.helper and not e.legacy and not e.path.startswith("examples/frameworks/")]
-    if new:
-        lines += ["| Example | Framework | Tier | Reproduces |", "|---|---|---|---|"]
-        for e in sorted(new, key=lambda x: x.path):
-            rel = Path(e.path).relative_to("examples").as_posix()
-            lines.append(f"| [`{rel}`]({rel}) — {_cell(e.title)} | {e.framework} | {e.tier} | "
-                         f"{_cell(e.reproduces)} |")
-        lines.append("")
-    lines += ["Framework reproductions (Qiskit, Braket, Q#, TKET, CUDA-Q, Cirq, Qibo) are indexed in",
-              "[`frameworks/README.md`](frameworks/README.md).", "", INDEX_END]
+        lines.append(f"| {link} | {len(es)} | {', '.join(origins)} | {fast} / {slow} |")
+    lines += ["", "Every example with its origin, its original and what it reproduces: [`CATALOG.md`](CATALOG.md).",
+              "", INDEX_END]
     return "\n".join(lines)
 
 
@@ -629,9 +705,17 @@ def header_problems(examples: list[Example]) -> list[str]:
         if e.meta_error:
             errs.append(f"{e.path}: {e.meta_error}")
             continue
+        fw = e.framework
+        if fw not in FRAMEWORK_URLS:
+            errs.append(f"{e.path}: unknown framework {fw!r} (add it to FRAMEWORK_URLS)")
+        elif e.origin is None:
+            errs.append(f"{e.path}: no 'Framework: <name> - <url>' line")
+        elif e.origin != (FRAMEWORK_NAMES.get(fw, fw), FRAMEWORK_URLS[fw]):
+            errs.append(f"{e.path}: Framework line {e.origin} is not "
+                        f"{(FRAMEWORK_NAMES.get(fw, fw), FRAMEWORK_URLS[fw])} (framework {fw!r})")
         if e.legacy:
-            # legacy top-level examples predate the header convention; new folders must comply
-            if len(Path(e.path).parts) > 2:
+            # smoke tests predate the header convention: only the original ones are allowed without metadata
+            if len(Path(e.path).parts) > 2 and e.path not in LEGACY_OK:
                 errs.append(f"{e.path}: no example-meta line")
             continue
         for msg in validate_meta(e.meta or {}):
@@ -649,7 +733,7 @@ def index_outputs(examples: list[Example]) -> dict[Path, str]:
     readme = EXAMPLES / "README.md"
     current = readme.read_text(encoding="utf-8") if readme.is_file() else "# QUMO examples\n"
     return {
-        EXAMPLES / "frameworks" / "README.md": frameworks_index(examples),
+        EXAMPLES / "CATALOG.md": catalog_index(examples),
         readme: splice_readme(current, readme_table(examples)),
     }
 
@@ -662,7 +746,7 @@ def check_urls(examples: list[Example], timeout: float = 15.0) -> list[str]:
     bad = []
     seen: set[str] = set()
     for e in examples:
-        for url in e.sources:
+        for url in [*e.sources, *([e.origin[1]] if e.origin else [])]:
             if url in seen:
                 continue
             seen.add(url)
@@ -692,6 +776,8 @@ def main(argv: list[str] | None = None) -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--tier", choices=["fast", "slow", "all"], default="fast")
     ap.add_argument("--only", nargs="+", metavar="PATH", help="run only these files or folders")
+    ap.add_argument("--framework", choices=sorted(FRAMEWORK_URLS), metavar="NAME",
+                    help="run only the examples that come from this SDK or framework (" + ", ".join(sorted(FRAMEWORK_URLS)) + ")")
     ap.add_argument("--gpu", action="store_true", help="-D QUMO_GPU for Mojo, build/gpu/ for the CLI and qumo_py")
     ap.add_argument("-j", "--jobs", type=int, default=2)
     ap.add_argument("--list", action="store_true", help="list the selected examples and exit")
@@ -738,7 +824,7 @@ def main(argv: list[str] | None = None) -> int:
         print("urls OK" if not bad else f"{len(bad)} bad URL(s)")
         return 1 if bad else 0
 
-    chosen = select(examples, a.tier, a.only)
+    chosen = select(examples, a.tier, a.only, a.framework)
     if a.list:
         for e in chosen:
             flag = "legacy" if e.legacy else e.tier
@@ -762,7 +848,7 @@ def main(argv: list[str] | None = None) -> int:
     print(format_table(results))
     print(f"wall time {wall:.1f} s with -j {a.jobs}")
     out = Path(a.json)
-    write_report(results, out, {"tier": a.tier, "only": a.only, "gpu": a.gpu, "jobs": a.jobs,
+    write_report(results, out, {"tier": a.tier, "only": a.only, "framework": a.framework, "gpu": a.gpu, "jobs": a.jobs,
                                 "wall_seconds": round(wall, 3)})
     print(f"report: {out}")
     return 1 if any(r.status in ("FAIL", "TIMEOUT") for r in results) else 0

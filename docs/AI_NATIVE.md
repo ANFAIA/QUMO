@@ -19,8 +19,8 @@ other QUMO modules plug their features into it.
 
 ```bash
 .venv/bin/mojo build -I . -o build/qumo cli/main.mojo
-./build/qumo run examples/bell.qasm --shots 1000
-./build/qumo validate examples/teleport.qasm --json
+./build/qumo run examples/foundations/bell.qasm --shots 1000
+./build/qumo validate examples/foundations/teleport.qasm --json
 ./build/qumo mcp            # MCP server on stdio
 ```
 

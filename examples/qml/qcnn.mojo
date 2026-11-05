@@ -3,6 +3,7 @@
 Reproduces: PennyLane - Generalization in QML from few training data
 Source: https://pennylane.ai/qml/demos/tutorial_learning_few_data
 Source: https://github.com/PennyLaneAI/qml/blob/master/demonstrations_v2/tutorial_learning_few_data/demo.py (Apache-2.0)
+Framework: PennyLane (Xanadu) - https://github.com/PennyLaneAI/pennylane
 
 Digits 0 and 1 of the UCI/sklearn 8x8 digits (360 images, examples/qml/data/digits01.csv),
 each image L2-normalised and amplitude-encoded on 6 qubits. QUMO loads the

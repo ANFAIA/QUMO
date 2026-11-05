@@ -19,7 +19,7 @@ var out = r.circuit                                   # physical-qubit circuit
 var r2 = compile_spec(circuit, t, "remove_identities,cancel,route(sabre,trials=20),kak,basis,fuse1q,check")
 ```
 
-Run `.venv/bin/mojo run -I . examples/compile_demo.mojo` for a tour and
+Run `.venv/bin/mojo run -I . examples/compilation/compile_demo.mojo` for a tour and
 `.venv/bin/mojo run -I . tests/test_compiler.mojo` for the statevector-verified tests.
 
 ## Targets (`target.mojo`)

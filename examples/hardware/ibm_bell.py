@@ -6,6 +6,8 @@
 
 Real backends need IBM Quantum credentials (QISKIT_IBM_TOKEN + QISKIT_IBM_INSTANCE,
 or QiskitRuntimeService.save_account); see docs/HARDWARE_PLUGINS.md.
+
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 """
 
 from __future__ import annotations

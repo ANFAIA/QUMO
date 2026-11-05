@@ -3,6 +3,7 @@
 Reproduces: Guppy FT - Clifford verification
 Source: https://github.com/Quantinuum/guppyft/blob/main/examples/clifford_verification.ipynb (Apache-2.0)
 Source: https://github.com/Quantinuum/guppyft/blob/main/tests/verifier/ops/nonCSS_4q.py (Apache-2.0)
+Framework: Guppy FT (Quantinuum) - https://github.com/Quantinuum/guppyft
 
 The notebook checks physical gadgets against their intended logical action with
 `valid_clifford_implementation(semantic, impl, code)` and
