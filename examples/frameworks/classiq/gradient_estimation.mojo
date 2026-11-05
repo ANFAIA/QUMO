@@ -3,11 +3,13 @@
 Reproduces: Classiq library - Fast Quantum Algorithm for Numerical Gradient Estimation
 Source: https://github.com/Classiq/classiq-library/blob/main/algorithms/quantum_primitives/gradient_estimation/gradient_estimation.ipynb (Classiq Library, MIT)
 
-The notebook estimates the gradient at the origin with one query: Hadamards on a signed n-bit register of N = 2^n grid points, the phase 2 pi f_norm(delta) with f_norm(delta) = N f(l delta / N) / (l m), then an inverse QFT whose outcome k gives the gradient m k / N. The file runs the notebook's defaults (n = 3, N = 8, l = 0.5, m = 2) on its examples: the phase table of f = 0.5 x + 0.25, the linear slopes -0.5 and 0.55, the quadratic 0.6 x^2 + 0.25 x + 0.1 at l = 0.1 and l = 1, the 2-D quadratic, and the m sweep of the performance section. Checks: the phase state equals the notebook's printed phase table, every output law equals a brute-force Fourier sum of the notebook's own f_norm, the majority gradients and the notebook's asserts hold, and the success rates match the notebook's printed sampling frequencies (2048 shots).
+The notebook estimates the gradient at the origin with one query: Hadamards on a signed n-bit register of N = 2^n grid points, the phase 2 pi f_norm(delta) with f_norm(delta) = N f(l delta / N) / (l m), then an inverse QFT whose outcome k gives the gradient m k / N. The file runs the notebook's defaults (n = 3, N = 8, l = 0.5, m = 2) on its examples: the phase table of f = 0.5 x + 0.25, the linear slopes -0.5 and 0.55, the quadratic 0.6 x^2 + 0.25 x + 0.1 at l = 0.1 and l = 1, the 2-D quadratic, and the m sweep (all 17 printed points) and l sweep (all 9) of the performance section. Checks: the phase state equals the notebook's printed phase table, every output law (including every point of both sweeps) equals a brute-force Fourier sum of the notebook's own f_norm, the majority gradients and the notebook's asserts hold, and the success rates match the notebook's printed sampling frequencies (2048 shots).
 
 Deviations from the notebook:
 - The phase oracle phase(f_norm(x), 2 pi) is compiled by hand instead of by Classiq synthesis. f_norm is a polynomial of degree 2 in the signed index delta, so its phase is exactly a product of P gates on single bits and CP gates on bit pairs, with angles from the polynomial coefficients. Bit p of a signed n-bit register has weight 2^p, and -2^(n-1) for the sign bit.
-- Probabilities are exact state-vector values, not Classiq sampling. A printed notebook frequency is compared with the exact value within 4 binomial standard errors at 2048 shots; a printed 0.00% is compared with the rule-of-three bound 3/2048.
+- The phase oracle is applied directly; the notebook's phase-kickback construction (cells 11-15, appendix 1) is not built, and the phase-table check is against the table the notebook prints for it. Printed circuit width, depth and gate counts (cells 13, 20, 24, 26) are not reproduced.
+- Sweep points where the notebook prints 0.00% (m = 0.05, 0.1, 3.67, 4, 6, 10) have no grid outcome inside the epsilon = 0.2 window, so a success-rate check there cannot fail; they are covered only by the full-law comparison with the brute-force sum.
+- Probabilities are exact state-vector values, not Classiq sampling. A printed notebook frequency is compared with the exact value within 3 binomial standard errors at 2048 shots; a printed 0.00% is compared with the rule-of-three bound 3/2048.
 - The notebook's majority outcome at l = 1 is not checked: the exact probabilities of k = 0 and k = 2 are slightly above that of k = 1, so the notebook's "correct" there depends on sampling.
 - The helper module's params defaults (l = 0.5, m = 2, n = 3) and success rule (|estimate - gradient| < 0.5 m / N, or the notebook's epsilon in the sweep) are copied here.
 
@@ -189,13 +191,13 @@ def success_2d(probs: List[Float64], n: Int, m: Float64, gx: Float64, gy: Float6
 def match_notebook(mut log: CheckLog, label: String, value: Float64, printed: Float64) -> Bool:
     """Compare an exact probability with a frequency the notebook printed from 2048 shots.
 
-    PASS iff the exact value lies within 4 binomial standard errors of the printed frequency.
+    PASS iff the exact value lies within 3 binomial standard errors of the printed frequency.
     A printed 0.00% means no hit in 2048 shots: PASS iff the exact value is below the
     rule-of-three bound 3/2048.
     """
     if printed == 0.0:
         return log.within(label, value, 0.0, 3.0 / 2048.0)
-    var band = 4.0 * sqrt(printed * (1.0 - printed) / 2048.0)
+    var band = 3.0 * sqrt(printed * (1.0 - printed) / 2048.0)
     return log.within(label, value, printed - band, printed + band)
 
 
@@ -283,13 +285,31 @@ def main() raises:
     _ = log.check("2-D success above 0.9 (notebook assert)", succ_e > 0.9, "success=" + String(succ_e))
     print("2-D: majority gradient", gx, gy, "success", succ_e)
 
-    # ---- m sweep (cell 44): quadratic at l = 0.1, success within epsilon = 0.2 ----
-    var sweep_m: List[Float64] = [0.5, 1.0, 2.0, 3.0, 3.67, 10.0]
-    var sweep_nb: List[Float64] = [0.1094, 0.9941, 0.9878, 0.6704, 0.0, 0.0]
+    # ---- m sweep (cell 44): quadratic at l = 0.1, success within epsilon = 0.2, all 17 printed points ----
+    var sweep_m: List[Float64] = [0.05, 0.1, 0.33, 0.5, 0.67, 1.0, 1.33, 1.67, 2.0, 2.33, 2.67, 3.0, 3.33, 3.67, 4.0, 6.0, 10.0]
+    var sweep_nb: List[Float64] = [0.0, 0.0, 0.0088, 0.1094, 0.9375, 0.9941, 0.8052, 0.9502, 0.9878, 0.9097, 0.7739, 0.6704, 0.5386, 0.0, 0.0, 0.0, 0.0]
     for i in range(len(sweep_m)):
         var mm = sweep_m[i]
         var pm = evolve(phase_circuit(n, 1, q_quad, lin_quad, 0.0, 0.1, mm, True)).probabilities()
-        var sm = success_1d(pm, n, mm, 0.25, 0.2)
-        _ = match_notebook(log, "m sweep m=" + String(mm) + " success matches the notebook", sm, sweep_nb[i])
+        _ = log.close(
+            "m sweep m=" + String(mm) + " law equals the brute-force Fourier sum",
+            max_abs_diff(pm, reference_1d(0.6, 0.25, 0.1, 0.1, mm, n)), 0.0, 1e-9,
+        )
+        if sweep_nb[i] > 0.0:
+            var sm = success_1d(pm, n, mm, 0.25, 0.2)
+            _ = match_notebook(log, "m sweep m=" + String(mm) + " success matches the notebook", sm, sweep_nb[i])
+
+    # ---- l sweep (cell 46): quadratic at m = 1, default tolerance 0.5 m / N, nine printed points ----
+    var sweep_l: List[Float64] = [0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 1.5, 2.0, 3.0]
+    var sweep_lnb: List[Float64] = [0.9429, 0.7915, 0.5596, 0.3906, 0.2480, 0.0972, 0.1616, 0.1460, 0.2617]
+    for i in range(len(sweep_l)):
+        var ll = sweep_l[i]
+        var pl = evolve(phase_circuit(n, 1, q_quad, lin_quad, 0.0, ll, 1.0, True)).probabilities()
+        _ = log.close(
+            "l sweep l=" + String(ll) + " law equals the brute-force Fourier sum",
+            max_abs_diff(pl, reference_1d(0.6, 0.25, 0.1, ll, 1.0, n)), 0.0, 1e-9,
+        )
+        var sl = success_1d(pl, n, 1.0, 0.25, tolerance(1.0, n))
+        _ = match_notebook(log, "l sweep l=" + String(ll) + " success matches the notebook", sl, sweep_lnb[i])
 
     log.finish()

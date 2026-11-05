@@ -3,7 +3,7 @@
 Reproduces: Classiq library - Quantum Monte Carlo Integration (QMCI)
 Source: https://github.com/Classiq/classiq-library/blob/main/algorithms/amplitude_amplification_and_estimation/qmc_user_defined/qmc_user_defined.ipynb (Classiq Library, MIT)
 
-The notebook estimates a = sum_i p_i f_i with p_i = i/28 on 3 qubits and f_i = sin^2(0.25 i + 0.2), exact value 0.83384. It loads A|0> = sum_i sqrt(p_i)|i>(sqrt(f_i)|1> + sqrt(1 - f_i)|0>), builds the Grover operator from A, the zero reflection and the good-state reflection, and runs 3-qubit QPE on it. QUMO builds the same construction on 7 qubits. Checks: the joint law of (x, ind) after A against p_i f_i, P(ind = 1) against the notebook's exact amplitude, the exact QPE phase distribution against the ideal QPE kernel of the eigenphases +-arcsin(sqrt(a))/pi, the seeded sampled histogram against that distribution (5 sigma), and the notebook's printed measured amplitude 0.8535533905932737 with its |measured - exact| < 0.1 assertion.
+The notebook estimates a = sum_i p_i f_i with p_i = i/28 on 3 qubits and f_i = sin^2(0.25 i + 0.2), exact value 0.83384. It loads A|0> = sum_i sqrt(p_i)|i>(sqrt(f_i)|1> + sqrt(1 - f_i)|0>), builds the Grover operator from A, the zero reflection and the good-state reflection, and runs 3-qubit QPE on it. QUMO builds the same construction on 7 qubits. Checks: the joint law of (x, ind) after A against p_i f_i, P(ind = 1) against the notebook's exact amplitude, the exact QPE phase distribution against the ideal QPE kernel of the eigenphases +-arcsin(sqrt(a))/pi, every one of the 8 seeded sampled histogram bins against that distribution (3 sigma each, sigma = sqrt(p (1 - p) / shots)), and the notebook's printed measured amplitude 0.8535533905932737 with its |measured - exact| < 0.1 assertion.
 
 Deviations from the notebook:
 * sqrt(p_i) is loaded with QUMO's amplitude embedding (a Mottonen RY tree), not inplace_prepare_state. The controlled rotations of linear_pauli_rotations (RY(0.5 * 2^k) controlled on x_k) are each written as RY, CX, RY, CX, because Circuit.controlled(), which qpe() uses, does not accept CRY.
@@ -11,6 +11,8 @@ Deviations from the notebook:
 * The notebook's phase(pi) is the global phase of the Grover operator (Circuit.global_phase = pi). qpe() turns it into a controlled phase, which QPE needs.
 * The notebook's text writes Q as -S_psi1 A^dag S_0 A. Its code runs invert(state_loading) first and state_loading last (within_apply), which is -A S_0 A^dag S_good. This file implements the code's order.
 * Qubit labels: ind is qubit 0 of the system register and x bit k is qubit 1 + k, mirroring the notebook's state[0] and state[1:].
+* The notebook's phase register is signed, QNum[3, SIGNED, 3]: bin 5/8 is read as -3/8 there. This file uses unsigned bins 0..7 (k/8) and checks the signed reading separately. sin^2(pi * phase) is the same for +3/8 and -3/8.
+* The notebook's assertion |measured - exact| < 0.1 is its own bound, not noise-derived; it is repeated here for fidelity and adds no coverage beyond the two exact 1e-12 comparisons.
 * The notebook's sampling settings are not printed. This file samples 4000 shots with seed 2026. Bins 3/8 and 5/8 have equal exact probability (about 0.49 each), so the top sampled bin can be either; both give the same amplitude sin^2(3 pi / 8).
 
 Run: .venv/bin/mojo run -I . examples/frameworks/classiq/qmc_user_defined.mojo
@@ -150,7 +152,7 @@ def main() raises:
         dev_qpe = max(dev_qpe, abs(dist[k] - pk))
     print("QUMO exact phase distribution:", dist[0], dist[1], dist[2], dist[3], dist[4], dist[5], dist[6], dist[7])
     print("ideal phase distribution:     ", ideal[0], ideal[1], ideal[2], ideal[3], ideal[4], ideal[5], ideal[6], ideal[7])
-    _ = log.close("QPE phase distribution matches the ideal kernel (max deviation)", dev_qpe, 0.0, 1e-9)
+    _ = log.close("QPE phase distribution matches the ideal kernel (max deviation)", dev_qpe, 0.0, 1e-12)
 
     # ---- sampled phase register (the notebook's sample(qprog_3)) ----
     var res = sample(qpe(grover_operator(), N_QPE, a.copy(), True), SHOTS, UInt64(2026))
@@ -163,13 +165,23 @@ def main() raises:
             top = k
     print("sampled counts per phase bin (k/8):", freq[0], freq[1], freq[2], freq[3], freq[4], freq[5], freq[6], freq[7])
     _ = log.check("most frequent sampled phase bin is 3/8 or 5/8 (notebook prints 0.375)", top == 3 or top == 5, "top=" + String(top))
+    for k in range(1 << N_QPE):
+        var pk = ideal[k]
+        var fk = Float64(freq[k]) / Float64(SHOTS)
+        var sk = sqrt(pk * (1.0 - pk) / Float64(SHOTS))
+        _ = log.close("sampled frequency of phase bin " + String(k) + "/8 matches the ideal (3 sigma)", fk, pk, 3.0 * sk)
     var p35 = ideal[3] + ideal[5]
     var f35 = Float64(freq[3] + freq[5]) / Float64(SHOTS)
     var sigma = sqrt(p35 * (1.0 - p35) / Float64(SHOTS))
-    _ = log.close("sampled probability of bins 3 and 5 matches the ideal (5 sigma)", f35, p35, 5.0 * sigma)
+    _ = log.close("sampled probability of bins 3 and 5 matches the ideal (3 sigma)", f35, p35, 3.0 * sigma)
 
     # ---- the notebook's measured amplitude sin^2(pi * phase) from the top bin ----
     var phase_top = Float64(top) / Float64(1 << N_QPE)
+    var phase_signed = phase_top
+    if top >= (1 << (N_QPE - 1)):
+        phase_signed = phase_top - 1.0  # the notebook's SIGNED register: 5/8 reads as -3/8
+    print("top bin as the notebook's signed phase:", phase_signed)
+    _ = log.close("signed phase of the top bin is +-0.375 as in the notebook", abs(phase_signed), 0.375, 1e-12)
     var measured = sin(pi * phase_top) * sin(pi * phase_top)
     print("measured amplitude =", measured, " exact amplitude =", a_exact)
     _ = log.close("measured amplitude from the top bin matches the notebook print", measured, 0.8535533905932737, 1e-12)

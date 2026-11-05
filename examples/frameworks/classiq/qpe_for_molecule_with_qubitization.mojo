@@ -3,9 +3,9 @@
 Reproduces: Classiq library - Qubitization Based Quantum Phase Estimation (QPE) for Solving Molecular Energies
 Source: https://github.com/Classiq/classiq-library/blob/main/algorithms/quantum_phase_estimation/qpe_with_qubitization/qpe_for_molecule_with_qubitization.ipynb (Classiq Library, MIT)
 
-The notebook takes H2 (STO-3G, 0.735 Angstrom), block-encodes its 15-term Pauli Hamiltonian with scaling s = sum |c| = 1.98507 as U = PREP^dag SEL PREP, forms the walk W = (2 Pi_0 - I) U, and runs 5-bit QPE on W from the Hartree-Fock state. This file builds the same objects from QUMO gates on 13 qubits (data q0-q3, LCU block q4-q7, phase q8-q12) and simulates them exactly. Both QPE designs of the notebook are built: the naive one with controlled W^(2^j), and the optimized one, which applies W^(2^i) uncontrolled inside the phase flip I - 2 Pi(phase bit i+1 = 0, block = 0). The checks compare the block encoding with H/s on all 16 data inputs, U^2 = I, the walk powers with T_k(H/s) for k = 1, 2, 3, 15, both output distributions with closed-form QPE kernels built from the Hamiltonian's own eigendecomposition, and the notebook's printed FCI energy, scaling, error bound, most probable energy and block-zero probabilities.
+The notebook takes H2 (STO-3G, 0.735 Angstrom), block-encodes its 15-term Pauli Hamiltonian with scaling s = sum |c| = 1.98507 as U = PREP^dag SEL PREP, forms the walk W = (2 Pi_0 - I) U, and runs 5-bit QPE on W from the Hartree-Fock state. This file builds the same objects from QUMO gates on 13 qubits (data q0-q3, LCU block q4-q7, phase q8-q12) and simulates them exactly. Both QPE designs of the notebook are built: the naive one with controlled W^(2^j), and the optimized one, which applies W^(2^i) uncontrolled inside the phase flip I - 2 Pi(phase bit i+1 = 0, block = 0). The checks compare the block encoding with H/s on all 16 data inputs, U^2 = I (amplitudes, so a sign or phase would be caught), the walk powers with T_k(H/s) for k = 1, 2, 3, 15, both output distributions with closed-form QPE kernels built from the Hamiltonian's own eigendecomposition, and the notebook's printed FCI energy, scaling, error bound, most probable energy and block-zero probabilities.
 
-Deviations from the notebook: the 15 Pauli coefficients are copied from its printed output (openfermion and PySCF are not run), and the FCI energy is recomputed by Jacobi diagonalisation of the printed 16 x 16 matrix. The Hartree-Fock state is the lowest-energy two-electron basis state of that matrix (qubits 0 and 2 occupied), not the notebook's get_hf_state call. There is no Classiq synthesis, prepare_select, qubitize or cloud simulator: PREP is QUMO's Mottonen real amplitude embedding, SEL is written as controlled Pauli gates with controlled_by, and the minus sign of the walk is an explicit -I. The notebook's transpiled depths (26347 and 6670) come from Classiq's transpiler and are not reproduced. The notebook's block-zero probabilities are sampled; the exact QUMO probabilities are compared with the closed-form kernel at 1e-9, and the printed values with three binomial standard deviations for 4096 shots (the printed values are multiples of 2^-12).
+Deviations from the notebook: the 15 Pauli coefficients are copied from its printed output (openfermion and PySCF are not run), and the FCI energy is recomputed by Jacobi diagonalisation of a 16 x 16 matrix that QUMO rebuilds from the printed Pauli strings (the notebook prints no matrix). The Hartree-Fock state is the lowest-energy two-electron basis state of that matrix (qubits 0 and 2 occupied, consistent with the equal positive Z0 and Z2 coefficients), inferred and not the notebook's get_hf_state call. The circuits and the closed-form weights are both derived from that one inferred index hf, and the energy checks at the end (printed most probable energy, FCI gap) are what tie it to the notebook. There is no Classiq synthesis, prepare_select, qubitize or cloud simulator: PREP is QUMO's Mottonen real amplitude embedding, SEL is written as controlled Pauli gates with controlled_by, and the minus sign of the walk is an explicit -I. The notebook's transpiled depths (26347 and 6670) come from Classiq's transpiler and are not reproduced. The notebook's block-zero probabilities are sampled; the exact QUMO probabilities are compared with the closed-form kernel at 1e-12, and the printed values with three binomial standard deviations. The notebook never states its shot count (sample() takes no argument): the printed values 1019/2048 and 1018/2048 are multiples of 2^-11, so N is a multiple of 2048 and the band uses the smallest, N = 2048 (an assumption, not a figure the notebook states); a larger N would only narrow the true band. The notebook's phase_var is a signed QNum fraction, while here the readout y is unsigned in [0, 32) with energy s cos(2 pi y / 32); the two agree because cos is even and 2 pi periodic. The block-zero probability checks are weak: they do not identify the Hartree-Fock state (the other five two-electron basis states also pass them); the energy checks do, and only index 5 reproduces the printed most probable energy.
 
 Run: .venv/bin/mojo run -I . examples/frameworks/classiq/qpe_for_molecule_with_qubitization.mojo
 example-meta: {"framework": "classiq", "tier": "fast", "timeout": 120, "requires": [], "args": []}
@@ -33,7 +33,7 @@ comptime NOTEBOOK_QPE_ERR = 0.07603996508423008
 comptime NOTEBOOK_E_MAX = -1.1028469887726742
 comptime NOTEBOOK_P0_NAIVE = 0.49755859375
 comptime NOTEBOOK_P0_OPT = 0.4970703125
-comptime SHOT_TOL = 0.0234375  # 3 sqrt(0.25 / 4096): binomial band at p = 1/2 for 4096 shots
+comptime SHOT_TOL = 0.0331786  # 3 sqrt(0.25 / 2048): binomial band at p = 1/2 for N = 2048, the smallest shot count the printed values allow
 
 
 def pauli_letters() -> List[Int]:
@@ -286,11 +286,12 @@ def basis_prep(x: Int) raises -> Circuit:
     return c^
 
 
-def qpe_naive(walk: Circuit) raises -> Circuit:
-    """Hartree-Fock state, H on the phase register, controlled W^(2^j) from phase qubit j, inverse QFT."""
+def qpe_naive(walk: Circuit, hf: Int) raises -> Circuit:
+    """Reference basis state hf (data qubit q set when bit q of hf is 1), H on the phase register, controlled W^(2^j) from phase qubit j, inverse QFT."""
     var c = Circuit(NQ, name="qpe_naive")
-    c.x(0)
-    c.x(2)
+    for q in range(NDATA):
+        if ((hf >> q) & 1) == 1:
+            c.x(q)
     for j in range(NPH):
         c.h(PH0 + j)
     for j in range(NPH):
@@ -300,12 +301,13 @@ def qpe_naive(walk: Circuit) raises -> Circuit:
     return c^
 
 
-def qpe_optimized(walk: Circuit) raises -> Circuit:
+def qpe_optimized(walk: Circuit, hf: Int) raises -> Circuit:
     """The notebook's optimized design: controlled W on phase qubit 0, then for i = 0..3 the phase flip V_i,
     W^(2^i) uncontrolled, and V_i again. V_i W^k V_i = W^(+k) when phase qubit i+1 is 1 and W^(-k) when it is 0."""
     var c = Circuit(NQ, name="qpe_optimized")
-    c.x(0)
-    c.x(2)
+    for q in range(NDATA):
+        if ((hf >> q) & 1) == 1:
+            c.x(q)
     for j in range(NPH):
         c.h(PH0 + j)
     var ctrl0: List[Int] = [PH0]
@@ -386,7 +388,7 @@ def main() raises:
     var fci = lam[0]
     for k in range(16):
         fci = min(fci, lam[k])
-    _ = log.close("classical ground energy from the printed Hamiltonian is the notebook's FCI -1.1373060357534004", fci, NOTEBOOK_FCI, 1e-9)
+    _ = log.close("classical ground energy from the printed Hamiltonian is the notebook's FCI -1.1373060357534004", fci, NOTEBOOK_FCI, 1e-12)
 
     var hf = -1
     var hf_e = 1.0e9
@@ -397,13 +399,13 @@ def main() raises:
         if pc == 2 and m[x * 16 + x] < hf_e:
             hf_e = m[x * 16 + x]
             hf = x
-    _ = log.check("Hartree-Fock state is the lowest two-electron basis state: index 5, qubits 0 and 2", hf == 5, "index=" + String(hf))
+    _ = log.check("Hartree-Fock state is the lowest two-electron basis state, index 5 with qubits 0 and 2", hf == 5, "index=" + String(hf))
 
     # Overlaps of |HF> with the eigenvectors of H, and the walk phases theta_k = arccos(lambda_k / s).
     var w = List[Float64]()
     var theta = List[Float64]()
     for k in range(16):
-        var ck = vec[5 * 16 + k]
+        var ck = vec[hf * 16 + k]
         w.append(ck * ck)
         var a = max(-1.0, min(1.0, lam[k] / s))
         theta.append(acos(a))
@@ -432,9 +434,12 @@ def main() raises:
     for x in range(16):
         var prep = basis_prep(x)
         prep.compose(uu)
-        var pr = evolve(prep).probabilities()
-        err_u2 = max(err_u2, abs(pr[x] - 1.0))
-    _ = log.close("U_H squared is the identity on block 0 (max error in probability)", err_u2, 0.0, 1e-12)
+        var sv2 = evolve(prep)
+        for y in range(len(sv2.re)):
+            var want = 1.0 if y == x else 0.0
+            err_u2 = max(err_u2, abs(sv2.re[y] - want))
+            err_u2 = max(err_u2, abs(sv2.im[y]))
+    _ = log.close("U_H squared is the identity on all 16 data inputs (max amplitude error, phase included)", err_u2, 0.0, 1e-12)
 
     var walk = Circuit(NQ, name="walk")
     append_walk(walk)
@@ -451,7 +456,7 @@ def main() raises:
             for y in range(16):
                 err_k = max(err_k, abs(sv.re[y] - cheb_all[x][k][y]))
                 err_k = max(err_k, abs(sv.im[y]))
-        _ = log.close("walk power W^" + String(k) + " on block 0 equals T_" + String(k) + "(H / s) (max error)", err_k, 0.0, 1e-9)
+        _ = log.close("walk power W^" + String(k) + " on block 0 equals T_" + String(k) + "(H / s) (max error)", err_k, 0.0, 1e-12)
 
     # ---- Closed-form QPE distributions from the eigendecomposition and |HF> ----
     var ref_ph = List[Float64](length=32, fill=0.0)
@@ -480,11 +485,11 @@ def main() raises:
     _ = log.close("closed-form QPE phase distribution sums to one", ref_ph_sum, 1.0, 1e-12)
 
     # ---- QUMO simulation of the two QPE designs ----
-    var pr_n = evolve(qpe_naive(walk)).probabilities()
+    var pr_n = evolve(qpe_naive(walk, hf)).probabilities()
     var split_n = phase_and_block_zero(pr_n)
     var ph_n = split_n[0].copy()
     var p0_n = split_n[1].copy()
-    var pr_o = evolve(qpe_optimized(walk)).probabilities()
+    var pr_o = evolve(qpe_optimized(walk, hf)).probabilities()
     var split_o = phase_and_block_zero(pr_o)
     var ph_o = split_o[0].copy()
     var p0_o = split_o[1].copy()
@@ -494,8 +499,8 @@ def main() raises:
     for i in range(len(pr_n)):
         norm_n += pr_n[i]
         norm_o += pr_o[i]
-    _ = log.close("naive QPE state is normalised", norm_n, 1.0, 1e-10)
-    _ = log.close("optimized QPE state is normalised", norm_o, 1.0, 1e-10)
+    _ = log.close("naive QPE state is normalised", norm_n, 1.0, 1e-12)
+    _ = log.close("optimized QPE state is normalised", norm_o, 1.0, 1e-12)
 
     var dev_ph_n = 0.0
     var dev_ph_o = 0.0
@@ -506,10 +511,10 @@ def main() raises:
         dev_ph_o = max(dev_ph_o, abs(ph_o[y] - ref_ph[y]))
         dev_p0_n = max(dev_p0_n, abs(p0_n[y] - ref_n[y]))
         dev_p0_o = max(dev_p0_o, abs(p0_o[y] - ref_o[y]))
-    _ = log.close("naive QPE phase distribution matches the closed form (max error)", dev_ph_n, 0.0, 1e-9)
-    _ = log.close("optimized QPE phase distribution matches the closed form (max error)", dev_ph_o, 0.0, 1e-9)
-    _ = log.close("naive QPE block-zero distribution matches the closed form (max error)", dev_p0_n, 0.0, 1e-9)
-    _ = log.close("optimized QPE block-zero distribution matches the closed form (max error)", dev_p0_o, 0.0, 1e-9)
+    _ = log.close("naive QPE phase distribution matches the closed form (max error)", dev_ph_n, 0.0, 1e-12)
+    _ = log.close("optimized QPE phase distribution matches the closed form (max error)", dev_ph_o, 0.0, 1e-12)
+    _ = log.close("naive QPE block-zero distribution matches the closed form (max error)", dev_p0_n, 0.0, 1e-12)
+    _ = log.close("optimized QPE block-zero distribution matches the closed form (max error)", dev_p0_o, 0.0, 1e-12)
 
     var total_n = 0.0
     var total_o = 0.0
@@ -517,8 +522,8 @@ def main() raises:
         total_n += p0_n[y]
         total_o += p0_o[y]
     print("block-zero probability: naive", total_n, " optimized", total_o)
-    _ = log.close("naive block-zero probability matches the notebook's printed 0.49755859375 within 3 sd (4096 shots)", total_n, NOTEBOOK_P0_NAIVE, SHOT_TOL)
-    _ = log.close("optimized block-zero probability matches the notebook's printed 0.4970703125 within 3 sd (4096 shots)", total_o, NOTEBOOK_P0_OPT, SHOT_TOL)
+    _ = log.close("naive block-zero probability matches the notebook's printed 0.49755859375 within 3 sd at N = 2048", total_n, NOTEBOOK_P0_NAIVE, SHOT_TOL)
+    _ = log.close("optimized block-zero probability matches the notebook's printed 0.4970703125 within 3 sd at N = 2048", total_o, NOTEBOOK_P0_OPT, SHOT_TOL)
 
     var y_n = argmax(p0_n)
     var y_o = argmax(p0_o)
@@ -526,8 +531,8 @@ def main() raises:
     var e_o = energy_of(s, y_o)
     print("most probable block-zero bin: naive", y_n, "energy", e_n, " optimized", y_o, "energy", e_o)
     _ = log.check("most probable bin of both designs is y = 11 or 21 (phase +-11/32)", (y_n == 11 or y_n == 21) and (y_o == 11 or y_o == 21), "naive=" + String(y_n) + " optimized=" + String(y_o))
-    _ = log.close("naive energy with maximal probability is the notebook's -1.1028469887726742", e_n, NOTEBOOK_E_MAX, 1e-9)
-    _ = log.close("optimized energy with maximal probability is the notebook's -1.1028469887726742", e_o, NOTEBOOK_E_MAX, 1e-9)
+    _ = log.close("naive energy with maximal probability is the notebook's -1.1028469887726742", e_n, NOTEBOOK_E_MAX, 1e-12)
+    _ = log.close("optimized energy with maximal probability is the notebook's -1.1028469887726742", e_o, NOTEBOOK_E_MAX, 1e-12)
     _ = log.check("maximal-probability energy lies within the QPE error of the FCI energy", abs(e_n - fci) < qpe_err and abs(e_o - fci) < qpe_err, "gap=" + String(abs(e_n - fci)))
 
     log.finish()

@@ -3,13 +3,14 @@
 Reproduces: Classiq library - Solving Elliptic Curve Discrete Logarithm Problem with Shor's Algorithm
 Source: https://github.com/Classiq/classiq-library/blob/main/algorithms/number_theory_and_cryptography/elliptic_curves/elliptic_curve_discrete_log.ipynb (Classiq Library, MIT)
 
-The curve is y^2 = x^3 + 5x + 4 over F_7, G = (0, 5) has order 5, the notebook's start point is P0 = (4, 2) and its target is P = (0, 2) = 4G, so -P = G. Two 3-qubit registers x1 and x2 are put in uniform superposition, the point register starts at P0 and receives x1 G and x2 (-P) = x2 G by controlled point additions (bit i adds 2^i G), then inverse QFTs act on x1 and x2 and the registers are measured. The point register holds P0 + (x1 + x2) G, so the outcomes concentrate on y1 = y2 (mod 5), and the logarithm -y1 y2^-1 (mod 5) is 4.
-The checks compare QUMO with the notebook's worked example [4,2] + [0,5] = [4,5], with the multiples 2G = [2,1] and 4G = [0,2] it prints, with its frequencies (2048 shots, its top ten rows), and with its assert that the top outcomes decode to 4. The exact law is checked against a brute-force Fourier sum over the oracle values computed from the definition, and the ancillas, the coset invariant and seeded samples are checked too.
+The curve is y^2 = x^3 + 5x + 4 over F_7, G = (0, 5) has order 5, the notebook's start point is P0 = (4, 2) and its target is P = (0, 2) = 4G, so -P = G. Two 3-qubit registers x1 and x2 are put in uniform superposition, the point register starts at P0 and receives x1 G and x2 (-P) = x2 G by controlled point additions (bit i adds 2^i G), then inverse QFTs act on x1 and x2 and the registers are measured. The point register holds P0 + (x1 + x2) G, so the outcomes concentrate on y1 = y2 (mod 5), and the logarithm is -a1 a2^-1 (mod 5) with a = round(5 y / 8) taken mod 5 (ties to even, as in the notebook's closest_fraction), which is 4. Only the pairs whose a2 is coprime to 5 are kept, and about 78% of those decode to 4 (exactly 0.7836 in QUMO's law); the other outcomes are the algorithm's usual noise.
+The checks compare QUMO with the notebook's worked example [4,2] + [0,5] = [4,5], with the multiples 2G = [2,1] and 4G = [0,2] it prints, with its frequencies (2048 shots, its top ten printed rows, in the printed order), and with its assert that the top outcomes decode to 4. The exact law is checked against a brute-force Fourier sum over the oracle values computed from the definition, and the ancillas, the coset invariant and seeded samples are checked too.
 
 Deviations from the notebook:
+* The notebook's printed table appears to come from the version with the mock modular inverse (mock_modular_inverse, upstream cell 13), since the Kaliski ec_point_add cell has no execution count. QUMO uses neither the mock nor Kaliski's modular_inverse_inplace; the point arithmetic agrees on the nonzero inputs used.
 * ec_point_add is not a reversible modular-arithmetic circuit. QUMO has no quantum modular multiply, square or inverse (the notebook's modular_multiply, modular_square and Kaliski's modular_inverse_inplace). Each controlled addition of 2^i G is a controlled permutation table on the 6-qubit point register (append_controlled_permutation, as QUMO's order finding does for modular multiplication). The table is the notebook's generic-case point addition (the case its own text says it implements) on the coset P0 + <G>, the only set of points the register ever reaches from P0, and the identity elsewhere. The notebook's circuit was not run here; its printed rows and worked example are the check. The ancillas return to |0>.
 * The circuit has 16 qubits: 12 data qubits and 4 clean ancillas. Classiq's synthesized 23-qubit circuit (54,420 CX gates, depth 69,538), its cloud synthesis, its job links and the full Kaliski inverse circuit are not reproduced.
-* The exact law comes from QUMO's statevector. Sampling uses QUMO's seeded sampler with the notebook's 2048 shots, and the notebook's printed frequencies are compared with the exact probabilities within 4 sigma.
+* The exact law comes from QUMO's statevector. Sampling uses QUMO's seeded sampler with the notebook's 2048 shots, and the notebook's printed frequencies are compared with the exact probabilities within 4 sigma per row (a ten-row noise budget; the exact law's largest deviation is under 2 sigma, while a wrong state or oracle gives 10 sigma or more).
 * As in the notebook's code (not its markdown), each 3-bit register takes a full Hadamard over the values 0..7; the trimmed uniform state is not used.
 * The notebook's closest_fraction rounds with ties to even, as Python's round does; decode() does the same.
 
@@ -29,7 +30,7 @@ comptime CURVE_A = 5
 comptime EVAL = 3  # bits per scalar register: x1 and x2 range over 0..7
 comptime NDATA = 12  # x1 = qubits 0..2, x2 = 3..5, ecp.x = 6..8, ecp.y = 9..11
 comptime ECP0 = 6  # first qubit of the point register; its value is x + 8 y
-comptime SHOTS = 2048  # the notebook's shot count (its printed counts sum to 2048)
+comptime SHOTS = 2048  # the notebook's shot count; each printed row has counts / probability = 2048.0 (the printed top ten alone sum to 731)
 
 
 # ---------------------------------------------------------------------------
@@ -322,11 +323,12 @@ def main() raises:
     _ = log.close("B ecp marginal matches the brute-force count of (x1, x2) per point (max deviation)", dev_e, 0.0, 1e-10)
 
     # the notebook's printed rows: (y1, y2, ecp.x, ecp.y, frequency), y = 0.375 -> 3 and 0.625 -> 5
+
     notebook_row(log, probs, 1, 0, 0, 3, 2, 0.045410)
     notebook_row(log, probs, 2, 0, 0, 4, 5, 0.042480)
-    notebook_row(log, probs, 3, 3, 3, 3, 2, 0.035645)
-    notebook_row(log, probs, 4, 5, 5, 3, 2, 0.035645)
-    notebook_row(log, probs, 5, 0, 0, 3, 5, 0.039551)
+    notebook_row(log, probs, 3, 0, 0, 3, 5, 0.039551)
+    notebook_row(log, probs, 4, 3, 3, 3, 2, 0.035645)
+    notebook_row(log, probs, 5, 5, 5, 3, 2, 0.035645)
     notebook_row(log, probs, 6, 0, 0, 5, 0, 0.033203)
     notebook_row(log, probs, 7, 5, 5, 3, 5, 0.032715)
     notebook_row(log, probs, 8, 3, 3, 4, 5, 0.031738)

@@ -3,12 +3,13 @@
 Reproduces: Classiq library - Shor's Factoring Algorithm
 Source: https://github.com/Classiq/classiq-library/blob/main/algorithms/number_theory_and_cryptography/shor/shor.ipynb (Classiq Library, MIT)
 
-The notebook finds the order r of 11 mod 21 by quantum phase estimation of multiplication by a^(2^j) mod N: a 10-qubit phase register (twice the 5 work qubits), an inverse QFT, continued-fraction post-processing with denominator limit N, and then the factors gcd(a^(r/2) +- 1, N). QUMO's order_finding builds the same circuit: phase qubit j controls the permutation x -> a^(2^j) x mod N of the work register (Gray-code chains of multi-controlled X gates with clean ancillas), then the inverse QFT. The exact phase-register law is a sum of Fejer kernels, one per eigenphase s/r with weight 1/r; this file evaluates that sum by brute force and compares it with QUMO's statevector to 1e-9. The other checks compare QUMO with the notebook's printed output: its continued-fraction table for N = 18 and the 15 fractions it prints for N = 21, its five printed histogram rows (2048 shots, binomial z-scores against the exact law), and the factors 3 and 7. A seeded 2048-shot run of QUMO's sampler is checked against the analytic law, and the period r = 6 is checked against a brute-force order.
+The notebook finds the order r of 11 mod 21 by quantum phase estimation of multiplication by a mod N (the notebook calls qpe_flexible with the powered unitary a**p; the textbook schedule p = 2^j, used here, is assumed and not shown in the notebook text): a 10-qubit phase register (twice the 5 work qubits), an inverse QFT, continued-fraction post-processing with denominator limit N, and then the factors gcd(a^(r/2) +- 1, N). QUMO's order_finding implements the same QPE structure (phase qubit j controls the permutation x -> a^(2^j) x mod N of the work register, then the inverse QFT) but not the same gates: the permutations are Gray-code chains of multi-controlled X gates with clean ancillas, not Classiq's modular_multiply_constant_inplace circuit, which is not reproduced. The exact phase-register law is a sum of Fejer kernels, one per eigenphase s/r with weight 1/r; this file evaluates that sum by brute force and compares it with QUMO's statevector to 1e-12. The other checks compare QUMO with the notebook's printed output: its continued-fraction table for N = 18 and the 15 fractions it prints for N = 21, its five printed histogram rows (2048 shots, binomial z-scores against the exact law), and the factors 3 and 7. A seeded 2048-shot run of QUMO's sampler is checked against the analytic law on the six outcomes with exact probability above 0.05 only (the seed 2048 is arbitrary, the shot count, and was not tuned), and the period r = 6 is checked against a brute-force order.
 
 Deviations from the notebook:
 * Classiq's flexible_qpe and modular_multiply_constant_inplace are replaced by QUMO's order_finding. Its work register starts in |1> and only ever holds values below N, where x -> a^(2^j) x mod N is the notebook's modular multiplication; the controlled permutations use clean ancillas (3 qubits).
 * The Classiq synthesis, cloud job and 2048-shot sample are not reproduced. QUMO's statevector gives the exact probabilities, and the notebook's printed histogram rows are compared with them. The notebook's output shows only five histogram rows, so those are the only counts used.
 * The notebook's get_factors uses Python's ^ (XOR) where a power is meant: a ^ (r // 2) + 1 evaluates to 11 XOR 4 = 15. Its printed "3 and 7" comes out of that. This file computes a^(r/2) mod N by modular exponentiation and takes gcd(a^(r/2) +- 1, N); both give 3 and 7.
+* The notebook keeps the outcomes with more than 10 counts in its own 2048-shot sample (15 outcomes). This file has no such sample for QUMO, so it keeps the outcomes whose exact Fejer probability exceeds 10/2048 (14 outcomes; the notebook's extra one is y = 343, exact P 0.00456). The period does not depend on this: the denominators of all the notebook's 15 fractions divide 6 too.
 * a = 11 is fixed as in the notebook. The notebook's np.random.seed(0) and random_coprime draw are not run.
 
 Run: .venv/bin/mojo run -I . examples/frameworks/classiq/shor.mojo
@@ -160,14 +161,14 @@ def main() raises:
     for i in range(len(probs)):
         p[i & (GRID - 1)] += probs[i]
         total += probs[i]
-    _ = log.close("total probability", total, 1.0, 1e-9)
+    _ = log.close("total probability", total, 1.0, 1e-12)
 
     var exact = fejer_law(r_true)
     var dev = 0.0
     for y in range(GRID):
         dev = max(dev, abs(p[y] - exact[y]))
     print("  max |P_QUMO(y) - P_Fejer(y)| over 1024 outcomes =", dev)
-    _ = log.close("phase law equals the Fejer-kernel sum (max deviation)", dev, 0.0, 1e-9)
+    _ = log.close("phase law equals the Fejer-kernel sum (max deviation)", dev, 0.0, 1e-12)
 
     # ---- C: the notebook's printed 2048-shot histogram rows against the exact law ----
     var nb_y: List[Int] = [512, 0, 853, 341, 683]
@@ -176,9 +177,9 @@ def main() raises:
     for i in range(len(nb_y)):
         var y = nb_y[i]
         var f = Float64(nb_count[i]) / Float64(SHOTS)
-        var z = (f - p[y]) / sqrt(p[y] * (1.0 - p[y]) / Float64(SHOTS))
+        var z = (f - exact[y]) / sqrt(exact[y] * (1.0 - exact[y]) / Float64(SHOTS))
         max_z_nb = max(max_z_nb, abs(z))
-        print("  notebook y =", y, " count", nb_count[i], " exact P =", p[y], " z =", z)
+        print("  notebook y =", y, " count", nb_count[i], " exact P =", exact[y], " z =", z)
     _ = log.within("notebook 2048-shot histogram rows max |z| against exact law", max_z_nb, 0.0, 4.0)
 
     # QUMO's own seeded 2048-shot sampler on the phase register, against the analytic law
@@ -201,12 +202,13 @@ def main() raises:
     _ = log.within("QUMO seeded 2048-shot sample max |z| on the six peaks", max_z_s, 0.0, 4.0)
 
     # ---- D: period from the phase-register outcomes, then the factors ----
-    var threshold = 10.0 / Float64(SHOTS)  # the notebook keeps outcomes with more than 10 of 2048 shots
+    # the notebook keeps outcomes with more than 10 of 2048 sampled counts; here: exact probability above 10/2048
+    var threshold = 10.0 / Float64(SHOTS)
     var r_qpe = 1
     var n_freq = 0
     var divides = True
     for y in range(GRID):
-        if p[y] > threshold:
+        if exact[y] > threshold:
             n_freq += 1
             var fr = post_process(y, N_MOD)
             if fr[1] == 0:

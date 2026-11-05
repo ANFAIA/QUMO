@@ -9,8 +9,9 @@ the measurement channel, giving 3 U^dag |b><b| U - I per qubit, or (2^n + 1) U^d
 <Z x Z> is estimated by median of means. The checks: the Bell matrix; the QUMO outcome law of the nine Pauli basis pairs; the exact
 ensemble average of the Pauli snapshots (it is the Bell matrix, <ZZ> = 1, E[X^2] = 9); the sample counts of Eq. (5) for accuracy
 0.2 and failure probability 0.01 (81065 Pauli, 108086 Clifford, K = 10); and Monte Carlo runs of those sizes through QUMO's
-sampler, whose median of means lies within 0.2 of <ZZ> = 1 and whose mean lies within five standard errors. The sampled Clifford
-unitaries are checked to be unitary, and every sampled snapshot to have trace one.
+sampler, whose median of means lies within 0.2 of <ZZ> = 1 and whose mean lies within five standard errors of the exact value
+(1 for Pauli; 1.03697 for the notebook's depth-20 Clifford sampler, from an independent enumeration, see below; 1 for an extra
+depth-60 run). The sampled Clifford unitaries are checked to be unitary, and every sampled snapshot to have trace one.
 
 Deviations from the notebook:
 - Classiq synthesis, cloud sampling and prepare_bell_state are replaced by QUMO circuits. Phi^- is H on qubit 0, CX(0, 1), then Z on
@@ -22,11 +23,18 @@ Deviations from the notebook:
   compare with analytic values and with the notebook's own accuracy target instead.
 - The Clifford sampler is the notebook's: H or S on a uniform qubit, or CX on a uniformly ordered pair. It draws from Rng, and the
   unitary is taken from QUMO statevector columns instead of dense numpy matrices.
-- Depth 20 is not enough for this sampler to reach the 2-design moments that its estimator relies on (the notebook says it is
-  past the mixing time). At the Eq. (5) size the depth-20 mean of <ZZ> is about 1.04 with standard error 0.006 (1.04 in the
-  run printed below), against 1 for the exact Clifford group. The Monte Carlo check therefore uses depth 60, where the mean is 1
-  to within noise. The depth-20 result is printed for comparison and not checked. The 50-snapshot run keeps depth 20, as in the
-  notebook.
+- The notebook's Clifford sampler is biased, and the notebook's claim that depth 20 is past the mixing time is wrong. Every depth-d
+  walk over {H0, H1, S0, S1, CX(0,1), CX(1,0)} stays in one coset of the 11520-element two-qubit Clifford group (mod global
+  phase) fixed by d mod 2, so it reaches only 5760 elements and never samples the whole group, at any depth. Exact enumeration of
+  the walk (numpy, independent of QUMO, 2x2 and 4x4 matrices of the six gates; the script is not in the repository) gives the exact
+  expectation of the <ZZ> estimator on the Bell state: 1.036973 at depth 20, 1.000649 at depth 40, 1.0000115 at depth 60, and
+  1.0000000000 as the uniform average over the 5760 reachable elements. The depth-20 estimator therefore has bias 0.037 (small
+  against the notebook's accuracy 0.2, so the notebook's accuracy conclusion survives). The Monte Carlo check at the Eq. (5)
+  size runs the notebook's depth 20 and compares its sample mean with 1.036973 (five standard errors), and also checks the median
+  of means against 1 to 0.2. An extra, separately labeled run at depth 60 checks the mean against 1.0000115. That depth only
+  converges within the half-group the walk can reach; it is not the full Clifford group. The 50-snapshot run keeps depth 20.
+- The Eq. (5) shadow-norm constants are computed from the observable as in the notebook's error_bound_pauli and
+  error_bound_clifford (Pauli: (|c| 3^(weight/2))^2; Clifford: 3 tr(O0^2) with O0 = O - tr(O) I / 4), not hard-coded.
 - Median of means uses K chunks of floor(N/K) snapshots (Eq. (1)). The notebook's slicing range(0, N, N // K) gives K + 1 chunks
   when K does not divide N, which happens at N = 81065.
 - The notebook's 400 Pauli and 50 Clifford runs are repeated at their own sizes and printed. Their random values are not checked.
@@ -338,7 +346,7 @@ def pauli_run(n: Int, seed: UInt64, bmats: List[List[Cx]]) raises -> ShadowRun:
 
 
 def clifford_run(n: Int, seed: UInt64, depth: Int) raises -> ShadowRun:
-    """Run N Clifford snapshots. Each draws its own random depth-20 circuit, applies it after the Bell state, and takes one QUMO shot."""
+    """Run N Clifford snapshots. Each draws its own random circuit of the given depth, applies it after the Bell state, and takes one QUMO shot (depth 20 in the notebook)."""
     var rng = Rng(seed)
     var xs = List[Float64](capacity=n)
     var rho = zeros(16)
@@ -443,8 +451,14 @@ def main() raises:
     # 3. Sample sizes of Eq. (5): accuracy 0.2, failure probability 0.01, one observable ZZ (M = 1).
     var eps = 0.2
     var kdiv = 2.0 * log(2.0 / 0.01)
-    var pauli_norm2 = Float64(3 * 3)  # (|c| 3^(weight/2))^2 for weight 2
-    var clif_norm2 = 3.0 * 4.0  # 3 tr(O0^2) with O0 = ZZ and tr((ZZ)^2) = 4
+    var weight = 2  # ZZ has two non-identity Paulis, coefficient 1
+    var pauli_norm2 = pow(1.0 * pow(3.0, Float64(weight) / 2.0), 2.0)
+    var tr_o = 0.0  # tr(ZZ) and tr(ZZ^2) from the eigenvalues of Z x Z
+    var tr_o2 = 0.0
+    for j in range(4):
+        tr_o += zz_sign(j)
+        tr_o2 += zz_sign(j) * zz_sign(j)
+    var clif_norm2 = 3.0 * (tr_o2 - tr_o * tr_o / 4.0)  # 3 tr(O0^2), O0 = O - tr(O) I / 4
     var n_pauli = Int(ceil(34.0 * pauli_norm2 / (eps * eps) * kdiv))
     var n_clif = Int(ceil(34.0 * clif_norm2 / (eps * eps) * kdiv))
     _ = chk.check("Eq. (5) Pauli sample count is the notebook's 81065", n_pauli == 81065, "N*K=" + String(n_pauli))
@@ -471,22 +485,27 @@ def main() raises:
     _ = chk.close("Pauli sample mean of <ZZ> is within 5 standard errors of 1", mean_bp, 1.0, 5.0 * sqrt(var_p / Float64(len(big_p.xs))))
     _ = chk.check("Pauli snapshots have trace one at the Eq. (5) size", big_p.trace_dev <= 1e-12, "max deviation=" + String(big_p.trace_dev))
 
-    # The notebook's depth 20 at the Eq. (5) size: printed for comparison, see the deviation note above.
+    # The notebook's depth 20 at the Eq. (5) size: biased sampler, exact expectation 1.0369728090 from the independent
+    # numpy enumeration of the gate walk (see the deviation note).
     var nb_c = clifford_run(n_clif, UInt64(556), 20)
+    var est_nb = median_of_means(nb_c.xs, 10)
+    var mean_nb = mean(nb_c.xs)
     var se_nb = sqrt(sample_var(nb_c.xs) / Float64(len(nb_c.xs)))
-    print("Clifford depth 20 (notebook), ", len(nb_c.xs), "snapshots: median of 10 means =", median_of_means(nb_c.xs, 10), " sample mean =", mean(nb_c.xs), " standard error =", se_nb)
+    print("Clifford depth 20 (notebook),", len(nb_c.xs), "snapshots: median of 10 means =", est_nb, " sample mean =", mean_nb, " standard error =", se_nb)
+    _ = chk.close("Clifford depth-20 median of 10 means of <ZZ> at the Eq. (5) size is within 0.2 of 1", est_nb, 1.0, 0.2)
+    _ = chk.close("Clifford depth-20 sample mean of <ZZ> is within 5 standard errors of the exact walk value 1.0369728090", mean_nb, 1.0369728090, 5.0 * se_nb)
     _ = chk.check("Clifford depth-20 snapshots have trace one at the Eq. (5) size", nb_c.trace_dev <= 1e-12, "max deviation=" + String(nb_c.trace_dev))
     _ = chk.check("sampled depth-20 Clifford unitaries are unitary at the Eq. (5) size", nb_c.unit_dev <= 1e-12, "max deviation=" + String(nb_c.unit_dev))
 
-    # Clifford check at depth 60, past the mixing of this sampler (see the deviation note).
+    # Extra, not in the notebook: depth 60, where the walk's exact expectation is 1.0000114510 (half-group only).
     var big_c = clifford_run(n_clif, UInt64(555), 60)
     var est_bc = median_of_means(big_c.xs, 10)
     var mean_bc = mean(big_c.xs)
     var se_bc = sqrt(sample_var(big_c.xs) / Float64(len(big_c.xs)))
-    print("Clifford depth 60,", len(big_c.xs), "snapshots: median of 10 means =", est_bc, " sample mean =", mean_bc, " standard error =", se_bc)
-    _ = chk.close("Clifford depth-60 median of 10 means of <ZZ> at the Eq. (5) size is within 0.2 of 1", est_bc, 1.0, 0.2)
-    _ = chk.close("Clifford depth-60 sample mean of <ZZ> is within 5 standard errors of 1", mean_bc, 1.0, 5.0 * se_bc)
-    _ = chk.check("Clifford depth-60 snapshots have trace one at the Eq. (5) size", big_c.trace_dev <= 1e-12, "max deviation=" + String(big_c.trace_dev))
-    _ = chk.check("sampled depth-60 Clifford unitaries are unitary at the Eq. (5) size", big_c.unit_dev <= 1e-12, "max deviation=" + String(big_c.unit_dev))
+    print("Clifford depth 60 (extra),", len(big_c.xs), "snapshots: median of 10 means =", est_bc, " sample mean =", mean_bc, " standard error =", se_bc)
+    _ = chk.close("extra: Clifford depth-60 median of 10 means of <ZZ> is within 0.2 of 1", est_bc, 1.0, 0.2)
+    _ = chk.close("extra: Clifford depth-60 sample mean of <ZZ> is within 5 standard errors of the exact walk value 1.0000114510", mean_bc, 1.0000114510, 5.0 * se_bc)
+    _ = chk.check("extra: Clifford depth-60 snapshots have trace one", big_c.trace_dev <= 1e-12, "max deviation=" + String(big_c.trace_dev))
+    _ = chk.check("extra: sampled depth-60 Clifford unitaries are unitary", big_c.unit_dev <= 1e-12, "max deviation=" + String(big_c.unit_dev))
 
     chk.finish()

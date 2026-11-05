@@ -1,12 +1,12 @@
 """Quantum counting: the notebook's (a + b) <= 2 oracle, counted by QPE and by iterative amplitude estimation.
 
-Reproduces: Classiq library - Quantum Counting Using the Iterative Quantum Amplitude Estimation Algorithm
+Adapted from: Classiq library - Quantum Counting Using the Iterative Quantum Amplitude Estimation Algorithm
 Source: https://github.com/Classiq/classiq-library/blob/main/algorithms/amplitude_amplification_and_estimation/quantum_counting/quantum_counting.ipynb (Classiq Library, MIT)
 
-The notebook counts the six solutions of (a + b) <= 2 over 2-bit a and b (16 inputs). QPE with 5 phase qubits on the Grover operator reads out the two equal peaks 7/32 and 25/32 (the notebook's 0.21875), and 16 sin^2(pi 7/32) = 6.4393. Iterative amplitude estimation (IQAE) on an indicator qubit gives the count with a confidence interval. The checks compare the exact Grover powers with sin^2((2m+1) theta), the exact QPE distribution with the analytic QPE kernel, the sampled readouts with the same analytic values, and the IQAE count with the exact count 6 at the notebook's own tolerance 1/15.
+The notebook counts the six solutions of (a + b) <= 2 over 2-bit a and b (16 inputs). QPE with 5 phase qubits on the Grover operator reads out the two equal peaks 7/32 and 25/32 (the notebook's 0.21875), and 16 sin^2(pi 7/32) = 6.4393. Iterative amplitude estimation (IQAE) on an indicator qubit gives the count with a confidence interval. The checks compare the exact Grover powers with sin^2((2m+1) theta), the exact QPE distribution with the analytic QPE kernel, the sampled frequencies of readouts 7 and 25 and the pooled frequency of the other 30 bins with the same analytic values, the notebook's worst-case QPE precision 1.5681 with an independent numpy-style recomputation, and the IQAE count with the exact count 6 at the notebook's own tolerance 1/15. The notebook's IQAE run itself (counts, 5.9748, accuracy 0.1202) is not reproduced, only its tolerance is checked.
 
 Deviations from the notebook:
-* The notebook calls Classiq's IQAE class, which QUMO does not have. The loop is written in this file, following Grinko et al. (npj Quantum Inf. 7, 52, 2021), the paper the notebook cites: the Grover power is the largest one whose angle window has no turning point of sin^2, each round turns the observed frequency into an angle window with Hoeffding bounds at confidence alpha / 2^(k+1), and each round uses 2048 shots as the notebook does. The Grover powers depend on the sampled outcomes, and QUMO's sampler is not Classiq's, so the notebook's printed counts (1325/723, 697/1351) and its estimate 5.9748 are not reproduced; the IQAE check uses the exact count 6. In the checked run the second round uses 6 Grover iterations where the notebook uses 5.
+* The notebook calls Classiq's IQAE class, which QUMO does not have. The loop is written in this file, following Grinko et al. (npj Quantum Inf. 7, 52, 2021), the paper the notebook cites: the Grover power is the largest m with (2m+1)(theta_u - theta_l) <= pi/2 whose angle window (2m+1)[theta_l, theta_u] has no turning point of sin^2, each round turns the observed frequency into an angle window with Hoeffding bounds at confidence alpha / 2^(k+1), and each round uses 2048 shots as the notebook does. The Grover powers depend on the sampled outcomes, and QUMO's sampler is not Classiq's, so the notebook's printed counts (1325/723, 697/1351), its estimate 5.9748 and its interval width 0.1202 are not reproduced; the IQAE check uses the exact count 6. QUMO's interval is wider (about 0.1 for the checked seed, up to about 0.25 for other seeds) because this loop stops as soon as the half-width of a is at most 1/32, with Hoeffding bounds, while Classiq's IQAE class may use tighter intervals; the only precision claim checked is the stopping rule (count interval width at most 1). In the checked run the second round uses 6 Grover iterations where the notebook uses 5.
 * Sign: QUMO's grover_diffusion() is I - 2|s><s|, minus the textbook reflection 2|s><s| - I. The notebook's grover_operator is the textbook -A S0 A^dag S_chi, so the QPE unitary carries global phase pi. Without it the readouts move to 9/32 and 23/32 and the count to 9.56 instead of 6.44.
 * QPE is built as qumo.algorithms.library.qpe() builds it, except that the controlled powers use controlled_by(): controlled() rejects the CCX gates of the MCZ ladder inside the Grover operator.
 * The two QPE peaks 7/32 and 25/32 have exactly equal probability (the state is real), so the notebook's pick of 0.21875 is one of two equal bins; the checks accept either.
@@ -339,6 +339,13 @@ def main() raises:
     print("QPE solution count from the top readout:", count_qpe)
     _ = log.close("QPE count 16 sin^2(pi k / 32) at the top readout matches the notebook's 6.4393", count_qpe, 6.439277423870974, 1e-9)
 
+    # notebook cell 11: worst-case precision of 5 phase qubits, recomputed independently
+    var worst_prec = 0.0
+    for i in range(100):
+        var xx = Float64(i) / 99.0
+        worst_prec = max(worst_prec, abs(sin2(pi * xx) - sin2(pi * (xx - 1.0 / 32.0))))
+    _ = log.close("QPE worst-case precision 16 max|sin^2(pi x) - sin^2(pi (x - 1/32))| matches the notebook's 1.5681", 16.0 * worst_prec, 1.5681439279637486, 1e-9)
+
     var meas = sample(build_qpe(u, True), QPE_SHOTS, seed=UInt64(41))
     var top_readout = bitstring_to_int(meas.most_frequent())
     _ = log.check("sampled QPE most frequent readout is 7 or 25", top_readout == 7 or top_readout == 25,
@@ -348,6 +355,16 @@ def main() raises:
     var sigma7 = sqrt(want7 * (1.0 - want7) / Float64(QPE_SHOTS))
     _ = log.within("sampled readout 7 frequency within 4 sigma of the analytic probability", f7,
                    want7 - 4.0 * sigma7, want7 + 4.0 * sigma7)
+    var want25 = analytic_readout(25)
+    var f25 = meas.probability(bitstring(25, QPE_BITS))
+    var sigma25 = sqrt(want25 * (1.0 - want25) / Float64(QPE_SHOTS))
+    _ = log.within("sampled readout 25 frequency within 4 sigma of the analytic probability", f25,
+                   want25 - 4.0 * sigma25, want25 + 4.0 * sigma25)
+    var want_rest = 1.0 - want7 - want25
+    var f_rest = 1.0 - f7 - f25
+    var sigma_rest = sqrt(want_rest * (1.0 - want_rest) / Float64(QPE_SHOTS))
+    _ = log.within("sampled pooled frequency of the other 30 bins within 4 sigma of the analytic mass", f_rest,
+                   want_rest - 4.0 * sigma_rest, want_rest + 4.0 * sigma_rest)
 
     # ---- D: IQAE on the indicator qubit ----
     var powers = List[Int]()
@@ -368,6 +385,8 @@ def main() raises:
     _ = log.check("IQAE first round uses no Grover iteration, as in the notebook", powers[0] == 0,
                   "powers0=" + String(powers[0]))
     _ = log.close("IQAE count within the notebook tolerance 1/15 of the exact count 6", est, 6.0, 1.0 / 15.0)
+    _ = log.check("IQAE stopping rule: count interval width at most 2 * 16 * epsilon = 1", ci_hi - ci_lo <= 32.0 * IQAE_EPS + 1e-12,
+                  "width=" + String(ci_hi - ci_lo))
     _ = log.check("IQAE confidence interval contains the exact count 6", ci_lo <= 6.0 and 6.0 <= ci_hi)
 
     log.finish()

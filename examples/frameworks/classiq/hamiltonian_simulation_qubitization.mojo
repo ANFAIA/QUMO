@@ -3,9 +3,9 @@
 Reproduces: Classiq library - Hamiltonian Simulation with Qubitization (Chebyshev LCU)
 Source: https://github.com/Classiq/classiq-library/blob/main/algorithms/hamiltonian_simulation/hamiltonian_simulation_with_block_encoding/hamiltonian_simulation_qubitization.ipynb (Classiq Library, MIT)
 
-The notebook block-encodes H = 0.4 I + 0.1 Z1 + 0.05 X0 X1 + 0.2 Z0 Z1 with scaling 0.75, forms the Szegedy walk W = R U_H (R = I - 2|0><0| on the block), and writes exp(-iHt), t = 22, as a linear combination of the powers W^k, k <= 33, with Jacobi-Anger weights. This file builds the same circuits from QUMO gates: U_H = PREP^dag SEL PREP with a Toffoli-controlled Pauli select, the controlled powers W^(2^i) from controlled_by(), and the complex weights (-i)^k c_k split into a signed real PREP_R, phases i^k on the exponent bits, and PREP_L^dag built from |c_k|. The checks compare the block encoding with H psi / 0.75, every walk power W^k with (-1)^k T_k(H/0.75) on all four data basis inputs, the sum of |weights| with the notebook's printed 5.6264790337731325, the projected LCU state with the degree-33 Chebyshev sum, and the rescaled state with exp(-iHt) psi from a Taylor series, at the notebook's tolerance 1e-7.
+The notebook block-encodes H = 0.4 I + 0.1 Z1 + 0.05 X0 X1 + 0.2 Z0 Z1 with scaling 0.75, forms the Szegedy walk W = Pi U_H (Pi reflects about |0> on the block), and writes exp(-iHt), t = 22, as a linear combination of the powers W^k, k <= 33, with Jacobi-Anger weights. This file builds the same circuits from QUMO gates (QUMO's amplitude embedding and controlled_by helpers are used for PREP and the controlled powers; everything else is explicit gates): U_H = PREP^dag SEL PREP with a Toffoli-controlled Pauli select, the controlled powers W^(2^i) from controlled_by(), and the complex weights (-i)^k c_k split into a signed real PREP_R, phases i^k on the exponent bits, and PREP_L^dag built from |c_k|. The checks compare the block encoding with H psi / 0.75, every walk power W^k, k = 1..33, with (-1)^k T_k(H/0.75) on all four data basis inputs, the sum of |weights| with the notebook's printed 5.6264790337731325, the projected LCU state with the degree-33 Chebyshev sum, and the rescaled state with exp(-iHt) psi from a Taylor series, at the notebook's tolerance 1e-7. A second run uses the notebook's own random state, recovered from its printed H psi (cell 21, 8 digits; real, unit norm to 2e-9), and compares the block encoding with the printed cell-21 vector and the rescaled LCU state with the printed cell-32 exp(-iHt) psi.
 
-Deviations from the notebook: no Classiq synthesis, BlockEncoding, qubitize or prepare_select, and no cloud simulator; every gate is written out and run on the QUMO statevector simulator. The Jacobi-Anger weights come from Bessel's integral J_n(z) = (1/2 pi) int cos(n tau - z sin tau) by the trapezoid rule, not from poly_jacobi_anger_*; the degree is fixed at 33, the value the notebook prints. The notebook's random initial state is replaced by a fixed real vector with a negative entry (it prints no reference values for its random state, so the reference is the exact evolution). The reference exp(-iHt) psi is a Taylor series on the 4-dimensional space, not scipy.linalg.expm. Register layout (little-endian): data q0-q1, block of H q2-q3, exponent q4-q9.
+Deviations from the notebook: no Classiq synthesis, BlockEncoding, qubitize or prepare_select, and no cloud simulator; the circuits run on the QUMO statevector simulator. The walk uses Pi = I - 2|0><0| (R = X X CZ X X), the opposite sign of the notebook's eq. (2) convention Pi = 2|0><0| - I, so the top-left block of W^k here is (-1)^k T_k(H/0.75); the LCU compensates with the phases i^k on the exponent bits (-i)^k (-1)^k = i^k, so the evolved state is unchanged. The Jacobi-Anger weights come from Bessel's integral J_n(z) = (1/2 pi) int cos(n tau - z sin tau) by the trapezoid rule, not from poly_jacobi_anger_*; the degree is fixed at 33, the value the notebook prints. The notebook's initial state is np.random.rand, unseeded, so it cannot be regenerated from the source; the main run uses a fixed real vector with a negative entry against the exact evolution, and the second run uses the state recovered from the printed values (limit: that state is only known to about 4e-8, which sets the 1e-7 tolerance of the cell-32 comparison). The reference exp(-iHt) psi is a Taylor series on the 4-dimensional space, not scipy.linalg.expm. Register layout (little-endian): data q0-q1, block of H q2-q3, exponent q4-q9.
 
 Run: .venv/bin/mojo run -I . examples/frameworks/classiq/hamiltonian_simulation_qubitization.mojo
 example-meta: {"framework": "classiq", "tier": "fast", "timeout": 120, "requires": [], "args": []}
@@ -184,7 +184,7 @@ def append_uh(mut c: Circuit) raises:
 
 
 def append_walk(mut c: Circuit) raises:
-    """Szegedy walk W = R U_H with R = I - 2|0><0| on the block (q2, q3): R = X X CZ X X."""
+    """Szegedy walk W = Pi U_H with Pi = R = I - 2|0><0| on the block (q2, q3): R = X X CZ X X."""
     append_uh(c)
     c.x(2)
     c.x(3)
@@ -260,8 +260,7 @@ def main() raises:
         var e = List[Float64](length=4, fill=0.0)
         e[x] = 1.0
         cheb_basis.append(cheb_vectors(e, DEGREE))
-    var ks: List[Int] = [1, 2, 3, 6, 33]
-    for k in ks:
+    for k in range(1, DEGREE + 1):
         var worst = 0.0
         for x in range(4):
             var prep = Circuit(NQ, name="basis_prep")
@@ -282,7 +281,7 @@ def main() raises:
     var weight_sum = 0.0
     for c in coefs:
         weight_sum += abs(c)
-    _ = log.close("sum of Jacobi-Anger weights equals the notebook's 5.6264790337731325", weight_sum, NOTEBOOK_WEIGHT_SUM, 1e-9)
+    _ = log.close("sum of Jacobi-Anger weights equals the notebook's 5.6264790337731325", weight_sum, NOTEBOOK_WEIGHT_SUM, 1e-12)
     var exp_bits = 0
     while (1 << exp_bits) < len(coefs):
         exp_bits += 1
@@ -301,7 +300,7 @@ def main() raises:
     var err_sum = 0.0
     for x in range(4):
         err_sum = max(err_sum, max(abs(pr[x] - sum_ref[0][x]), abs(pim[x] - sum_ref[1][x])))
-    _ = log.close("LCU projection times the weight sum equals the degree-33 Chebyshev sum (max error)", err_sum, 0.0, 1e-10)
+    _ = log.close("LCU projection times the weight sum equals the degree-33 Chebyshev sum (max error)", err_sum, 0.0, 1e-12)
 
     var exact = exact_evolve(psi, EVOLUTION_TIME)
     var dist = 0.0
@@ -321,6 +320,27 @@ def main() raises:
     var overlap = sqrt(inner_re * inner_re + inner_im * inner_im) / sqrt(norm_e * norm_r)
     print("weight sum", weight_sum, "| rescaled vs exact distance", dist_norm, "| overlap", overlap)
     _ = log.close("rescaled LCU state matches exp(-iHt) psi within the notebook's 1e-7", dist_norm, 0.0, EPS)
-    _ = log.close("overlap of the rescaled LCU state with exp(-iHt) psi is 1", overlap, 1.0, 1e-9)
+    _ = log.close("overlap of the rescaled LCU state with exp(-iHt) psi is 1", overlap, 1.0, 1e-12)
+
+    # 5. The notebook's own initial state, recovered from its printed H psi (cell 21).
+    var nb_psi: List[Float64] = [0.63334593, 0.45804844, 0.15101498, 0.60519339]
+    var nb_h: List[Float64] = [0.47360182, 0.14496528, 0.03800392, 0.33426399]
+    var nb_exp_re: List[Float64] = [-0.70865551, 0.39552212, 0.07788126, -0.28234406]
+    var nb_exp_im: List[Float64] = [-0.1340818, -0.24595992, -0.09805291, 0.40926443]
+    var uh2 = Circuit(NQ, name="uh_nb")
+    append_amplitude_embedding_real(uh2, nb_psi, data_wires())
+    append_uh(uh2)
+    var sv_u2 = evolve(uh2)
+    var err_nb_h = 0.0
+    for x in range(4):
+        err_nb_h = max(err_nb_h, abs(sv_u2.re[x] * ab - nb_h[x]))
+    _ = log.close("notebook state: U_H block 0 times 0.75 equals the printed cell-21 H psi (max error)", err_nb_h, 0.0, 1e-8)
+    var sv_l2 = evolve(lcu_circuit(nb_psi, coefs, walk))
+    var dist2 = 0.0
+    for x in range(4):
+        var dr = weight_sum * sv_l2.re[x] - nb_exp_re[x]
+        var di = weight_sum * sv_l2.im[x] - nb_exp_im[x]
+        dist2 += dr * dr + di * di
+    _ = log.close("notebook state: rescaled LCU state matches the printed cell-32 exp(-iHt) psi within 1e-7", sqrt(dist2), 0.0, EPS)
 
     log.finish()
