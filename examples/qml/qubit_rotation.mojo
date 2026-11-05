@@ -3,6 +3,7 @@
 Reproduces: PennyLane - Basic tutorial: qubit rotation
 Source: https://pennylane.ai/qml/demos/tutorial_qubit_rotation
 Source: https://github.com/PennyLaneAI/qml/blob/master/demonstrations_v2/tutorial_qubit_rotation/demo.py (Apache-2.0)
+Framework: PennyLane (Xanadu) - https://github.com/PennyLaneAI/pennylane
 
 One qubit, RX(phi1) then RY(phi2), cost <Z> = cos(phi1) cos(phi2). Plain
 gradient descent (stepsize 0.4, 100 steps from [0.011, 0.012]) rotates |0>

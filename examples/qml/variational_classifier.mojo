@@ -5,6 +5,7 @@ Source: https://pennylane.ai/qml/demos/tutorial_variational_classifier
 Source: https://github.com/PennyLaneAI/qml/blob/master/demonstrations_v2/tutorial_variational_classifier/demo.py (Apache-2.0)
 Reproduces: Qibo - Variational quantum classifier (3-class Iris, 4 qubits, 5 layers)
 Source: https://qibo.science/qibo/stable/code-examples/tutorials/variational_classifier/README.html
+Framework: PennyLane (Xanadu) - https://github.com/PennyLaneAI/pennylane
 
 Part 1, parity (4 qubits): BasisState(x) (QUMO: RX(pi x)), two layers of Rot on
 every wire plus a CNOT ring, prediction <Z0> + bias, square loss, Nesterov

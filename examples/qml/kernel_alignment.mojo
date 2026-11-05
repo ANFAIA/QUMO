@@ -3,6 +3,7 @@
 Reproduces: PennyLane - Training and evaluating quantum kernels
 Source: https://pennylane.ai/qml/demos/tutorial_kernels_module
 Source: https://github.com/PennyLaneAI/qml/blob/master/demonstrations_v2/tutorial_kernels_module/demo.py (Apache-2.0)
+Framework: PennyLane (Xanadu) - https://github.com/PennyLaneAI/pennylane
 
 DoubleCake (6 points, two rings of 3 sectors). The embedding is 6 layers on 5
 qubits of [H, RZ(x_(i mod 2)), RY(theta)] on every wire plus a ring of CRZ(theta)

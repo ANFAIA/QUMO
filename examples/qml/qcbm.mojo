@@ -3,6 +3,7 @@
 Reproduces: PennyLane - Quantum Circuit Born Machines
 Source: https://pennylane.ai/qml/demos/tutorial_qcbm
 Source: https://github.com/PennyLaneAI/qml/blob/master/demonstrations_v2/tutorial_qcbm/demo.py (Apache-2.0)
+Framework: PennyLane (Xanadu) - https://github.com/PennyLaneAI/pennylane
 
 Nine qubits (one per pixel), six StronglyEntanglingLayers (ranges 1, 162
 angles, the demo's seed-42 initial weights from the fixture). The model

@@ -78,9 +78,9 @@ make cli py       # rebuild: binaries in build/ still come from the old toolchai
 **CLI** (human output by default, `--json` for machines; exit codes 0 ok / 1 failed / 2 usage):
 
 ```bash
-build/qumo run examples/bell.qasm --shots 1000 --seed 7
-build/qumo validate examples/teleport.qasm --json
-build/qumo draw examples/teleport.qasm --unicode      # text drawing of a circuit, or of a program by blocks
+build/qumo run examples/foundations/bell.qasm --shots 1000 --seed 7
+build/qumo validate examples/foundations/teleport.qasm --json
+build/qumo draw examples/foundations/teleport.qasm --unicode      # text drawing of a circuit, or of a program by blocks
 build/qumo describe gates
 build/qumo tool list                                   # every agent tool
 build/qumo tool qumo_transpile '{"qasm":"OPENQASM 2.0; include \"qelib1.inc\"; qreg q[3]; h q[0]; cx q[0],q[2];","target":"trapped_ion:3"}'
@@ -118,7 +118,7 @@ def main() raises:
 ```python
 import sys; sys.path.insert(0, "build")
 import qumo_py as q
-c = q.load_qasm(open("examples/bell.qasm").read())
+c = q.load_qasm(open("examples/foundations/bell.qasm").read())
 out, initial, final = q.transpile(c, 7, [[0,1],[1,2],[2,3],[3,4],[4,5],[5,6]], ["rz","sx","x","cz"], 2, 1)
 print(out.count_ops(), q.sample(c, 1000, 7))
 ```
@@ -138,9 +138,9 @@ print(q.sample_program(p, 1000, 7)["outputs"]["n"][:5])
 
 ```bash
 export PYTHONPATH=plugins/hardware        # after `make py`
-python -m qumo_hardware run examples/ghz.qasm -p ibm -b fake_torino              # local, noisy IBM snapshot
-python -m qumo_hardware run examples/ghz.qasm -p quantinuum -b H2-1 --dry-run    # native payload + HQC estimate
-python -m qumo_hardware run examples/ghz.qasm -p ibm -b ibm_fez --yes            # real QPU (QISKIT_IBM_TOKEN / saved account)
+python -m qumo_hardware run examples/foundations/ghz.qasm -p ibm -b fake_torino              # local, noisy IBM snapshot
+python -m qumo_hardware run examples/foundations/ghz.qasm -p quantinuum -b H2-1 --dry-run    # native payload + HQC estimate
+python -m qumo_hardware run examples/foundations/ghz.qasm -p ibm -b ibm_fez --yes            # real QPU (QISKIT_IBM_TOKEN / saved account)
 ```
 
 Credentials, costs, safety model, error codes (QM-E950–E959) and how to add Braket/IonQ/IQM: [docs/HARDWARE_PLUGINS.md](docs/HARDWARE_PLUGINS.md); examples in [examples/hardware](examples/hardware).
@@ -177,7 +177,7 @@ xcrun metal --version                                         # must print a ver
 
 Every example cites its original source and checks its own results (`CHECK ...: PASS` lines); `make examples` runs the fast tier ([examples/README.md](examples/README.md)).
 
-- [examples/frameworks](examples/frameworks/README.md): signature tutorials of Qiskit, Braket, Q#, TKET, CUDA-Q, Cirq and Qibo re-implemented on QUMO.
+- [examples/CATALOG.md](examples/CATALOG.md): every example by category, each with the SDK it comes from (Qiskit, Braket, Q#, TKET, CUDA-Q, Cirq, Qibo, Classiq, PennyLane, Guppy FT) and a link to the original.
 - [examples/qml](examples/qml/): PennyLane-style quantum machine learning (embeddings, variational classifier, data re-uploading, quantum kernels + SVM, kernel alignment, quantum natural gradient, barren plateaus, Fourier expressivity, QCBM, QCNN) checked against PennyLane reference numbers; library in [docs/QML.md](docs/QML.md).
 - **Heterogeneous pipelines** ([examples/heterogeneous](examples/heterogeneous/README.md)): four workflows where each device does what the others cannot — SQD/SKQD (QPU sampling → CPU configuration recovery → multi-core subspace diagonalisation), circuit cutting across an ion and a superconducting QPU (CPU cut finder, GPU full-width reference), decoding while sampling (QPU syndrome stream → CPU sparse-blossom pool under an emulated real-time budget) and warm-started QAOA with escalation (CPU Goemans-Williamson → GPU adjoint training → superconducting shots → ion verification). All QPUs are local noisy emulators by default; the AI planner (or offline rules) picks the pipeline. Python: `qumo_py.value_and_gradient(..., device="gpu")`, `expectation(s)_device`, `subspace_ground_state`, `QecMemory`, `schedule` (HEFT with device pinning).
 - [examples/heterogeneous](examples/heterogeneous/README.md): an LLM (OpenRouter, a local model via Ollama / LM Studio / llama.cpp / vLLM, or offline rules) selects the algorithm for a problem; QUMO builds it, trains on the GPU, refines on the CPU and samples on a QPU (a vendor-neutral noisy emulator by default; real IBM / Quantinuum only with `--allow-remote --submit --yes --max-cost`).

@@ -6,6 +6,7 @@ Source: https://github.com/Qiskit/qiskit-addon-sqd
 Source: https://arxiv.org/abs/2405.05068
 Source: https://arxiv.org/abs/2501.09702
 Source: https://quantum.cloud.ibm.com/docs/tutorials/sample-based-krylov-quantum-diagonalization
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 
 Pipeline (each device does what the others cannot):
   QPU  (superconducting emulator, 2x8 grid, noisy): sample Krylov states

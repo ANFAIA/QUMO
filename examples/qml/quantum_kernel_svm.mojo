@@ -3,6 +3,7 @@
 Reproduces: PennyLane - Kernel-based training of quantum models with scikit-learn
 Source: https://pennylane.ai/qml/demos/tutorial_kernel_based_training
 Source: https://github.com/PennyLaneAI/qml/blob/master/demonstrations_v2/tutorial_kernel_based_training/demo.py (Apache-2.0)
+Framework: PennyLane (Xanadu) - https://github.com/PennyLaneAI/pennylane
 
 Iris classes 0 and 1 (100 points), standard-scaled, split 75/25 with the
 fixture's sklearn train_test_split(random_state=42) indices. The kernel is the

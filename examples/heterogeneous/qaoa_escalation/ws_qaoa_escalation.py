@@ -5,6 +5,7 @@ Reproduces: Warm-starting quantum optimization (Egger, Marecek, Woerner, Quantum
 Source: https://quantum-journal.org/papers/q-2021-06-17-479/
 Source: https://arxiv.org/abs/2009.10095
 Source: https://dl.acm.org/doi/10.1145/227683.227684
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 
 Pipeline (each device does what the others cannot):
   CPU  Goemans-Williamson: the MaxCut SDP solved by a Burer-Monteiro low-rank

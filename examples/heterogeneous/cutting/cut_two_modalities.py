@@ -5,6 +5,7 @@ Reproduces: Qiskit addon cutting / CutQC - wire cutting with quasi-probability r
 Source: https://github.com/Qiskit/qiskit-addon-cutting
 Source: https://arxiv.org/abs/2012.02333
 Source: https://arxiv.org/abs/1904.00102
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 
 The circuit (18 qubits) is a 6-qubit all-to-all block (15 RZZ couplings:
 natural on an all-to-all trapped-ion register, many SWAPs on a grid) followed

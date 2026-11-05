@@ -48,12 +48,12 @@ Conventions an agent must know:
 
 ## Examples
 
-- [examples/bell.qasm](examples/bell.qasm): Bell pair
-- [examples/ghz.qasm](examples/ghz.qasm): GHZ state built with a constant `for` loop
-- [examples/teleport.qasm](examples/teleport.qasm): teleportation with mid-circuit measurement and feed-forward
-- [examples/vqe_ansatz.qasm](examples/vqe_ansatz.qasm): parametric ansatz using `input float`
-- [examples/bell_qasm2.qasm](examples/bell_qasm2.qasm): OpenQASM 2.0 input
-- [examples/noisy_bell.qasm](examples/noisy_bell.qasm): `#pragma qumo` noise and a detector
+- [examples/foundations/bell.qasm](examples/foundations/bell.qasm): Bell pair
+- [examples/foundations/ghz.qasm](examples/foundations/ghz.qasm): GHZ state built with a constant `for` loop
+- [examples/foundations/teleport.qasm](examples/foundations/teleport.qasm): teleportation with mid-circuit measurement and feed-forward
+- [examples/chemistry_and_physics/vqe_ansatz.qasm](examples/chemistry_and_physics/vqe_ansatz.qasm): parametric ansatz using `input float`
+- [examples/foundations/bell_qasm2.qasm](examples/foundations/bell_qasm2.qasm): OpenQASM 2.0 input
+- [examples/noise_and_mitigation/noisy_bell.qasm](examples/noise_and_mitigation/noisy_bell.qasm): `#pragma qumo` noise and a detector
 - [examples/control_flow/repeat_until_success.mojo](examples/control_flow/repeat_until_success.mojo): a rotation that retries in a `while` loop over a measured value
 - [examples/control_flow/iterative_phase_estimation.mojo](examples/control_flow/iterative_phase_estimation.mojo): one ancilla, and a gate angle computed from the bits read so far
 

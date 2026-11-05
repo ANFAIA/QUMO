@@ -34,5 +34,5 @@ Credentials (only needed for real devices):
 * Quantinuum: `python -c "import qnexus as qnx; qnx.login()"` once.
 
 The same flows are available from the CLI:
-`python -m qumo_hardware run examples/ghz.qasm -p quantinuum -b H2-1 --dry-run`
+`python -m qumo_hardware run examples/foundations/ghz.qasm -p quantinuum -b H2-1 --dry-run`
 (with `PYTHONPATH=plugins/hardware`).

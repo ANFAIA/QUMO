@@ -22,13 +22,19 @@ from _checks import CheckLog, fmt  # noqa: E402
 META_OK = '{"framework": "qumo", "tier": "fast", "timeout": 30, "requires": [], "args": []}'
 
 
+ORIGIN_OK = "Framework: QUMO - https://github.com/ANFAIA/QUMO"
+
+
 def _example(body: str, meta: str | None = META_OK, title: str = "Demo example",
-             source: str = "https://example.org/demo", repro: str = "Demo - original") -> str:
+             source: str = "https://example.org/demo", repro: str = "Demo - original",
+             origin: str | None = ORIGIN_OK) -> str:
     hdr = [f'"""{title}.', ""]
     if repro:
         hdr.append(f"Reproduces: {repro}")
     if source:
         hdr.append(f"Source: {source}")
+    if origin:
+        hdr.append(origin)
     if meta is not None:
         hdr.append(f"example-meta: {meta}")
     hdr.append('"""')
@@ -90,8 +96,8 @@ def tree(tmp_path, monkeypatch):
     (ex / "colab" / "nb.py").write_text("raise SystemExit(1)\n")
     (ex / "hardware").mkdir()
     (ex / "hardware" / "hw.py").write_text("if __name__ == '__main__':\n    raise SystemExit(1)\n")
-    (ex / "legacy.py").write_text("print('legacy ok')\n")
-    (ex / "legacy_broken.py").write_text("raise SystemExit(2)\n")
+    (ex / "legacy.py").write_text(f'"""Legacy smoke test.\n\n{ORIGIN_OK}\n"""\nprint("legacy ok")\n')
+    (ex / "legacy_broken.py").write_text(f'"""Legacy broken.\n\n{ORIGIN_OK}\n"""\nraise SystemExit(2)\n')
     (ex / "badmeta.py").write_text('"""Bad.\nexample-meta: {"framework": "qumo", tier: fast}\n"""\n')
     return tmp_path
 
@@ -291,8 +297,9 @@ def test_index_idempotent(tree):
     twice = rx.splice_readme(once, block)
     assert once == twice
     assert once.count(rx.INDEX_BEGIN) == 1 and once.startswith("# QUMO examples\n\nIntro text.\n")
-    fw1 = rx.frameworks_index(exs)
-    assert fw1 == rx.frameworks_index(rx.discover(tree / "examples", repo=tree))
+    cat1 = rx.catalog_index(exs)
+    assert cat1 == rx.catalog_index(rx.discover(tree / "examples", repo=tree))
+    assert "## `demo/`" in cat1 and "[QUMO](https://github.com/ANFAIA/QUMO)" in cat1
 
 
 def test_header_problems(tree):
@@ -306,12 +313,53 @@ def test_header_problems(tree):
     assert "nosrc.py: no 'Source: <url>' line" in errs and "nosrc.py: no 'Reproduces:' line" in errs
 
 
+def test_origin_line_is_parsed_and_checked(tree):
+    h = rx.parse_header(_example("pass\n"), "py")
+    assert h["origin"] == ("QUMO", "https://github.com/ANFAIA/QUMO")
+    q = rx.parse_header("// GHZ.\n// Framework: Qiskit (IBM) - https://github.com/Qiskit/qiskit\nOPENQASM 3.0;\n", "qasm")
+    assert q["origin"] == ("Qiskit (IBM)", "https://github.com/Qiskit/qiskit") and q["title"] == "GHZ"
+    d = tree / "examples" / "demo"
+    (d / "noorigin.py").write_text(_example("pass\n", origin=None))
+    wrong_link = ORIGIN_OK.replace("ANFAIA/QUMO", "someone/else")
+    (d / "wronglink.py").write_text(_example("pass\n", origin=wrong_link))
+    other = _example("pass\n", origin="Framework: Qiskit (IBM) - https://github.com/Qiskit/qiskit")
+    (d / "mismatch.py").write_text(other)  # meta says qumo, header says Qiskit
+    (d / "unknown.py").write_text(_example("pass\n", meta=META_OK.replace('"qumo"', '"nosuchsdk"')))
+    errs = "\n".join(rx.header_problems(rx.discover(tree / "examples", repo=tree)))
+    assert "noorigin.py: no 'Framework: <name> - <url>' line" in errs
+    assert "wronglink.py: Framework line" in errs and "mismatch.py: Framework line" in errs
+    assert "unknown.py: unknown framework 'nosuchsdk'" in errs
+    assert "good.py" not in errs
+
+
+def test_select_by_framework(tree):
+    d = tree / "examples" / "demo"
+    (d / "from_qiskit.py").write_text(_example(
+        "pass\n", meta=META_OK.replace('"qumo"', '"qiskit"'),
+        origin="Framework: Qiskit (IBM) - https://github.com/Qiskit/qiskit"))
+    exs = rx.discover(tree / "examples", repo=tree)
+    names = {Path(e.path).name for e in rx.select(exs, "fast", None, "qiskit")}
+    assert names == {"from_qiskit.py"}
+    assert "from_qiskit.py" not in {Path(e.path).name for e in rx.select(exs, "fast", None, "qumo")}
+    assert "good.py" in {Path(e.path).name for e in rx.select(exs, "fast", None, "qumo")}
+
+
 def test_repo_examples_have_valid_headers():
-    """Every example in this repository parses (metadata JSON is valid)."""
-    exs = rx.discover()
+    """Every example in this repository has valid metadata and an origin that matches the framework table."""
+    exs = rx.discover(include_hardware=True)
     bad = [f"{e.path}: {e.meta_error}" for e in exs if e.meta_error]
     bad += [f"{e.path}: {m}" for e in exs if e.meta for m in rx.validate_meta(e.meta)]
+    bad += rx.header_problems(exs)
     assert not bad, "\n".join(bad)
+
+
+def test_repo_examples_are_in_categories_not_frameworks():
+    exs = rx.discover(include_hardware=True)
+    assert exs
+    assert not any("/frameworks/" in e.path for e in exs)
+    for e in exs:
+        parts = Path(e.path).parts
+        assert len(parts) >= 3 or e.helper, f"{e.path} sits at the top of examples/: put it in a category"
 
 
 def test_cli_list_runs():

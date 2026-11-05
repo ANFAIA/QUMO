@@ -4,6 +4,7 @@ Reproduces: Guppy FT - Custom T injection (logical program) and Comparator-based
 Source: https://github.com/Quantinuum/guppyft/blob/main/examples/logical_program.ipynb (Apache-2.0)
 Source: https://github.com/Quantinuum/guppyft/blob/main/examples/comparator_rz_steane.ipynb (Apache-2.0)
 Source: https://arxiv.org/abs/2404.05618 (single-qubit rotation algorithm with logarithmic Toffoli count)
+Framework: Guppy FT (Quantinuum) - https://github.com/Quantinuum/guppyft
 
 Part 1 (logical program notebook): a qubit is put in |+>_L, four logical T
 gates are applied by magic-state injection (prepare T|+>_L, CX, measure,

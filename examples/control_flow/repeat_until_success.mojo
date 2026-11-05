@@ -2,6 +2,7 @@
 
 Reproduces: Paetznick, Svore - Repeat-Until-Success: non-deterministic decomposition of single-qubit unitaries (the method, on a textbook circuit)
 Source: https://arxiv.org/abs/1311.1074
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 
 One trial conjugates S on the target by a Toffoli, between Hadamards on all three
 qubits. Worked out by hand (and checked below): the two controls read 00 with

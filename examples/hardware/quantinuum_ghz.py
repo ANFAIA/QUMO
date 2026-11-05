@@ -7,6 +7,8 @@
     python examples/hardware/quantinuum_ghz.py --backend Helios-1 --submit --max-cost 20
 
 Remote devices need a Nexus login once: python -c "import qnexus as qnx; qnx.login()".
+
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 """
 
 from __future__ import annotations

@@ -6,6 +6,7 @@ Source: https://nvidia.github.io/cudaq-qec/components/qec/introduction.html
 Source: https://developer.nvidia.com/blog/nvidia-nvqlink-architecture-integrates-accelerated-computing-with-quantum-processors/
 Source: https://arxiv.org/abs/2410.05202
 Source: https://arxiv.org/abs/2303.15933
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 
 Pipeline (each device does what the others cannot):
   QPU  stand-in: QUMO's Pauli-frame sampler (GPU or CPU frames, whichever

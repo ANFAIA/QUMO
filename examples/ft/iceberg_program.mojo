@@ -3,6 +3,7 @@
 Reproduces: Guppy FT - Iceberg logical API (Block[N], rotations, measure_all, measure_syndrome)
 Source: https://github.com/Quantinuum/guppyft/blob/main/src/guppyft/code/iceberg/logical.py (Apache-2.0)
 Source: https://arxiv.org/abs/2211.06703 (Self, Benedetti, Amaro - Iceberg code)
+Framework: Guppy FT (Quantinuum) - https://github.com/Quantinuum/guppyft
 
 Guppy FT's Iceberg architecture keeps N logical qubits in one [[N+2,N,2]]
 block (`Block[N]`), applies logical rotations as physical ZZ/XX-phase gates on

@@ -3,6 +3,7 @@
 Reproduces: Guppy FT - Steane encoding emulated with Stim (logical vs unencoded behaviour)
 Source: https://github.com/Quantinuum/guppyft/blob/main/examples/steane_encoding.ipynb (Apache-2.0)
 Source: https://github.com/Quantinuum/guppyft/blob/main/docs/getting_started.md (Apache-2.0)
+Framework: Guppy FT (Quantinuum) - https://github.com/Quantinuum/guppyft
 
 Guppy FT emulates encoded programs with Stim through Selene. QUMO emulates
 them on its own tableau simulator: the encoded circuit gets Stim-style

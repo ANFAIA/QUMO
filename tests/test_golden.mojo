@@ -35,7 +35,7 @@ def _walk(dir: String, ext: String, mut files: List[String]) raises:
     for name in listdir(dir):
         var path = dir + "/" + name
         if isdir(path):
-            continue
+            _walk(path, ext, files)  # examples/ is organised in category folders
         elif path.endswith(ext):
             files.append(path)
 

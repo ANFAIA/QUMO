@@ -1,51 +1,45 @@
 # QUMO examples
 
 Run everything from the repository root after `make setup` (Mojo toolchain in `.venv`). Mojo examples:
-`.venv/bin/mojo run -I . examples/<file>.mojo`. OpenQASM files: `build/qumo run examples/<file>.qasm`
-(after `make cli`).
+`.venv/bin/mojo run -I . examples/<category>/<file>.mojo`. OpenQASM files:
+`build/qumo run examples/<category>/<file>.qasm` (after `make cli`).
 
-## Algorithms and compilation (Mojo)
+Examples are organised **by category**, by what they show, not by the SDK they come from. Every
+example says where it comes from in its header:
 
-| File | What it shows |
-|---|---|
-| [`compile_demo.mojo`](compile_demo.mojo) | QFT and Clifford+T circuits compiled for several hardware modalities |
-| [`grover.mojo`](grover.mojo) | Grover search: success probability vs problem size, exact and sampled |
-| [`qpe.mojo`](qpe.mojo) | Quantum phase estimation built from the IR functors `power()` and `controlled()` |
-| [`qaoa_maxcut.mojo`](qaoa_maxcut.mojo) | QAOA for MaxCut: approximation ratio vs depth, with a brute-force reference |
-| [`vqe_h2.mojo`](vqe_h2.mojo) | VQE for H2 (STO-3G): optimisers and gradient methods vs exact diagonalisation |
-| [`gradient_bench.mojo`](gradient_bench.mojo) | Adjoint differentiation vs parameter shift: time for one full gradient |
+```
+Reproduces: Qiskit - CHSH inequality                         what it reproduces
+Source: https://quantum.cloud.ibm.com/docs/tutorials/...      the exact original page or notebook
+Framework: Qiskit (IBM) - https://github.com/Qiskit/qiskit    the SDK or framework it comes from
+```
 
-## Error correction and characterisation (Mojo)
+Examples that are QUMO's own say `Framework: QUMO`. [`CATALOG.md`](CATALOG.md) lists every example with
+its origin and original. To run the ones that come from one SDK, use `--framework qiskit` (also `braket`,
+`cirq`, `classiq`, `cudaq`, `guppyft`, `pennylane`, `qibo`, `qsharp`, `tket`, `qumo`). Each SDK's notes,
+reference numbers and optional cross-check scripts are in [`origins/<framework>/`](origins/).
 
-| File | What it shows |
-|---|---|
-| [`qec_memory_experiment.mojo`](qec_memory_experiment.mojo) | Surface-code memory experiment end to end (sampling, detector error model, matching) |
-| [`qec_custom_decoder.mojo`](qec_custom_decoder.mojo) | Plugging your own decoder into the parallel sample+decode loop |
-| [`qec_characterization.mojo`](qec_characterization.mojo) | Calibration -> noise model -> RB, T1/T2, readout mitigation, QEC under that noise |
-
-## OpenQASM inputs
-
-| File | What it shows |
-|---|---|
-| [`bell.qasm`](bell.qasm), [`bell_qasm2.qasm`](bell_qasm2.qasm) | Bell pair in OpenQASM 3 and 2 |
-| [`ghz.qasm`](ghz.qasm) | n-qubit GHZ state with a constant `for` loop |
-| [`teleport.qasm`](teleport.qasm) | Teleportation with mid-circuit measurement and feed-forward |
-| [`noisy_bell.qasm`](noisy_bell.qasm) | QUMO noise / detector extensions carried in pragmas |
-| [`vqe_ansatz.qasm`](vqe_ansatz.qasm) | Hardware-efficient ansatz with symbolic parameters (`qumo expect ... --params`) |
-
-## Folders
+## Categories
 
 | Folder | What it holds |
 |---|---|
-| [`colab/`](colab/) | Benchmark QUMO on cloud GPUs: Google Colab notebook (NVIDIA), ROCm notebook (AMD), headless script for any GPU host or a Mac, result comparison |
-| [`hardware/`](hardware/) | Running QUMO-compiled circuits on quantum hardware providers through the `qumo_hardware` plugins (dry-run by default) |
-| [`frameworks/`](frameworks/) | Tutorials from Qiskit, Braket, Q#, TKET, CUDA-Q, Cirq and Qibo re-implemented on QUMO, each citing its original and verified by `CHECK` lines ([index](frameworks/README.md)) |
-| [`control_flow/`](control_flow/) | Programs with `while` and classical variables: repeat-until-success, and iterative phase estimation with a gate angle computed during the shot ([docs/CONTROL_FLOW.md](../docs/CONTROL_FLOW.md)) |
+| [`foundations/`](foundations/) | Bell pair, GHZ and teleportation as OpenQASM inputs; CHSH, Deutsch-Jozsa, Bernstein-Vazirani, Simon, the swap and Hadamard tests, textbook algorithms |
+| [`algorithms/`](algorithms/) | Grover, phase estimation, QFT, Shor and order finding, discrete logarithms, HHL, hidden shift, amplitude amplification, quantum walks |
+| [`optimization/`](optimization/) | QAOA and combinatorial problems: MaxCut, vertex cover, independent set, colouring, set cover |
+| [`chemistry_and_physics/`](chemistry_and_physics/) | VQE for H2, Hamiltonian simulation and product formulas, adiabatic evolution, lattice models, sample-based Krylov and SQD |
 | [`qml/`](qml/) | Quantum machine learning, following PennyLane's demos (embeddings, variational classifiers, data re-uploading, kernels, QNG, barren plateaus, QCNN, QCBM), verified against pinned PennyLane reference numbers ([docs/QML.md](../docs/QML.md)) |
+| [`error_correction/`](error_correction/) | Surface-code memory experiment end to end, plugging in your own decoder, Stim interoperability |
+| [`ft/`](ft/) | Fault-tolerant programming on stabilizer codes: Steane, Iceberg, Helix, magic-state T gates, logical-error sweeps ([docs/FT.md](../docs/FT.md)) |
+| [`noise_and_mitigation/`](noise_and_mitigation/) | Pauli-channel noise, trajectories, zero-noise extrapolation, readout mitigation, XEB, randomized benchmarking, quantum volume, calibration to noise model |
+| [`compilation/`](compilation/) | Compiling for several hardware modalities, noise-aware layout, Pauli-based computation, measurement reduction, resource estimation |
+| [`simulation/`](simulation/) | CPU vs GPU sampling, batched expectation values and parallel gradients, stabilizer branching beyond the state vector, device emulation |
+| [`control_flow/`](control_flow/) | Programs with `while` and classical variables: repeat-until-success, and iterative phase estimation with a gate angle computed during the shot ([docs/CONTROL_FLOW.md](../docs/CONTROL_FLOW.md)) |
 | [`heterogeneous/`](heterogeneous/) | A model (OpenRouter, a local Ollama / LM Studio server, or offline rules) chooses the algorithm; QUMO runs it partly on a GPU, partly on a CPU and partly on a QPU (local noisy emulator by default) ([README](heterogeneous/README.md)) |
+| [`hardware/`](hardware/) | Running QUMO-compiled circuits on quantum hardware providers through the `qumo_hardware` plugins (dry-run by default) |
+| [`colab/`](colab/) | Benchmark QUMO on cloud GPUs: Google Colab notebook (NVIDIA), ROCm notebook (AMD), headless script for any GPU host or a Mac, result comparison |
+| [`origins/`](origins/) | Not examples: per-framework notes (original, URL, what is checked, reference numbers and their provenance) and the optional `reference/` scripts that rerun an original with its own SDK |
 
-Verify any of them: `bench/.venv/bin/python examples/run_examples.py --only examples/<folder>`
-(`--tier fast|slow|all`, `--gpu`, `--list`; see [`run_examples.py`](run_examples.py) `--help`).
+Verify any of them: `bench/.venv/bin/python examples/run_examples.py --only examples/<category>`
+(`--tier fast|slow|all`, `--framework NAME`, `--gpu`, `--list`; see [`run_examples.py`](run_examples.py) `--help`).
 
 ## Index
 
@@ -54,44 +48,21 @@ Verify any of them: `bench/.venv/bin/python examples/run_examples.py --only exam
 Every example below is run and verified by `bench/.venv/bin/python examples/run_examples.py`
 (`--tier fast` by default; `--tier all` adds the slow tier). Status lines are `CHECK <label>: PASS|FAIL ...`.
 
-| Folder | Examples | Frameworks | Fast / slow |
+| Folder | Examples | Origins | Fast / slow |
 |---|---|---|---|
-| [`examples/`](.) | 15 | qumo (legacy smoke tests) | 15 / 0 |
-| [`control_flow/`](control_flow/) | 2 | qumo | 2 / 0 |
-| [`frameworks/`](frameworks/) | 39 | braket, cirq, cudaq, pennylane, qibo, qiskit, qsharp, tket | 36 / 3 |
-| [`ft/`](ft/) | 6 | guppyft | 5 / 1 |
-| [`heterogeneous/`](heterogeneous/) | 6 | qumo | 6 / 0 |
-| [`qml/`](qml/) | 11 | pennylane | 11 / 0 |
+| [`foundations/`](foundations/) | 15 | Amazon Braket, Cirq (Google), Classiq, QUMO, Qiskit (IBM), TKET (Quantinuum) | 15 / 0 |
+| [`algorithms/`](algorithms/) | 24 | Cirq (Google), Classiq, Q# / Azure Quantum, QUMO, Qibo, Qiskit (IBM), TKET (Quantinuum) | 24 / 0 |
+| [`optimization/`](optimization/) | 9 | CUDA-Q (NVIDIA), Classiq, QUMO, Qiskit (IBM) | 9 / 0 |
+| [`chemistry_and_physics/`](chemistry_and_physics/) | 17 | CUDA-Q (NVIDIA), Cirq (Google), Classiq, QUMO, Qibo, Qiskit (IBM), TKET (Quantinuum) | 16 / 1 |
+| [`qml/`](qml/) | 14 | PennyLane (Xanadu), QUMO, Qibo | 14 / 0 |
+| [`error_correction/`](error_correction/) | 3 | Cirq (Google), QUMO | 3 / 0 |
+| [`ft/`](ft/) | 6 | Guppy FT (Quantinuum) | 5 / 1 |
+| [`noise_and_mitigation/`](noise_and_mitigation/) | 8 | Amazon Braket, CUDA-Q (NVIDIA), Cirq (Google), Classiq, QUMO, Qiskit (IBM) | 7 / 1 |
+| [`compilation/`](compilation/) | 6 | Q# / Azure Quantum, QUMO, Qiskit (IBM), TKET (Quantinuum) | 6 / 0 |
+| [`simulation/`](simulation/) | 4 | Amazon Braket, CUDA-Q (NVIDIA), Q# / Azure Quantum | 3 / 1 |
+| [`control_flow/`](control_flow/) | 2 | QUMO | 2 / 0 |
+| [`heterogeneous/`](heterogeneous/) | 6 | QUMO | 6 / 0 |
 
-| Example | Framework | Tier | Reproduces |
-|---|---|---|---|
-| [`control_flow/iterative_phase_estimation.mojo`](control_flow/iterative_phase_estimation.mojo) — Iterative phase estimation: one ancilla, and a gate angle computed from its own results | qumo | fast | Dobsicek, Johansson, Shumeiko, Wendin - Arbitrary accuracy iterative phase estimation algorithm as a two qubit benchmark |
-| [`control_flow/repeat_until_success.mojo`](control_flow/repeat_until_success.mojo) — Repeat-until-success: a rotation that retries in a `while` loop until it works | qumo | fast | Paetznick, Svore - Repeat-Until-Success: non-deterministic decomposition of single-qubit unitaries (the method, on a textbook circuit) |
-| [`ft/clifford_verification.mojo`](ft/clifford_verification.mojo) — Verifying logical Clifford gadgets and state preparations with the stabilizer tableau | guppyft | fast | Guppy FT - Clifford verification |
-| [`ft/iceberg_program.mojo`](ft/iceberg_program.mojo) — Multi-logical-qubit Iceberg program: native rotations, block allocation and error detection | guppyft | fast | Guppy FT - Iceberg logical API (Block[N], rotations, measure_all, measure_syndrome) |
-| [`ft/logical_error_sweep.mojo`](ft/logical_error_sweep.mojo) — Logical versus physical error rate of an encoded Steane program under circuit-level noise | guppyft | fast | Guppy FT - Steane encoding emulated with Stim (logical vs unencoded behaviour) |
-| [`ft/magic_t_and_comparator_rz.mojo`](ft/magic_t_and_comparator_rz.mojo) — Magic-state T gates on Steane, and Rz synthesis for known and run-time angles | guppyft | slow | Guppy FT - Custom T injection (logical program) and Comparator-based Rz synthesis with the Steane architecture |
-| [`ft/reichardt_iceberg_helix.mojo`](ft/reichardt_iceberg_helix.mojo) — Reichardt QEC cycles, Iceberg Pauli exponentials, the Helix code | guppyft | fast | Guppy FT 0.5 - QECStyle.Reichardt, Iceberg pauli_exp, Helix (arXiv:2609.03194, 1804.06995) |
-| [`ft/steane_teleportation.mojo`](ft/steane_teleportation.mojo) — Encoded teleportation with feed-forward on the Steane code, three QEC architectures | guppyft | fast | Guppy FT - Getting started (encoding with Steane) and Writing logical programs directly |
-| [`heterogeneous/ai_gpu_qpu.py`](heterogeneous/ai_gpu_qpu.py) — AI-selected algorithm, run partly on a GPU and partly on a QPU (with an offline selector) | qumo | fast | heterogeneous CPU+GPU+QPU workflow pattern - CUDA-Q multi-QPU, Qiskit execution modes, Braket Hybrid Jobs, PennyLane device swaps |
-| [`heterogeneous/cutting/cut_two_modalities.py`](heterogeneous/cutting/cut_two_modalities.py) — Circuit cutting across two QPU modalities: a dense fragment on a trapped-ion QPU, a wide shallow fragment on a superconducting QPU | qumo | fast | Qiskit addon cutting / CutQC - wire cutting with quasi-probability reconstruction, here with each fragment compiled for a different QPU modality |
-| [`heterogeneous/orchestrate_cpu_gpu_qpu.mojo`](heterogeneous/orchestrate_cpu_gpu_qpu.mojo) — Mojo twin of ai_gpu_qpu.py: rule-based selection, HEFT over CPU + GPU, final job on a QPU pool | qumo | fast | heterogeneous CPU+GPU+QPU workflow pattern - CUDA-Q multi-QPU (mqpu) asynchronous execution |
-| [`heterogeneous/qaoa_escalation/ws_qaoa_escalation.py`](heterogeneous/qaoa_escalation/ws_qaoa_escalation.py) — Warm-started QAOA with escalation: CPU warm start, GPU adjoint training, superconducting sampling, trapped-ion verification, CPU polish | qumo | fast | Warm-starting quantum optimization (Egger, Marecek, Woerner, Quantum 5, 479 (2021)) - WS-QAOA for MaxCut from a Goemans-Williamson cut, with a two-QPU escalation step |
-| [`heterogeneous/realtime_qec/stream_decode.py`](heterogeneous/realtime_qec/stream_decode.py) — Decoding while sampling: a surface-code memory experiment streamed from a QPU stand-in to a CPU decoder pool under a real-time budget | qumo | fast | CUDA-Q QEC real-time decoding / NVQLink and Riverlane-style streaming decoding (syndromes decoded concurrently with their generation), with QUMO's sparse-blossom decoder |
-| [`heterogeneous/sqd/sqd_hubbard.py`](heterogeneous/sqd/sqd_hubbard.py) — Sample-based Krylov quantum diagonalisation of a Fermi-Hubbard chain: QPU sampling, CPU configuration recovery, HPC diagonalisation | qumo | fast | Qiskit addon SQD - configuration recovery and subsampled diagonalisation (IBM + RIKEN quantum-centric supercomputing), on a Krylov (SKQD) Hubbard instance |
-| [`qml/barren_plateaus.mojo`](qml/barren_plateaus.mojo) — Barren plateaus: gradient variance of random circuits, global versus local cost | pennylane | fast | PennyLane - Barren plateaus in quantum neural networks |
-| [`qml/data_reuploading.mojo`](qml/data_reuploading.mojo) — Data re-uploading: a single-qubit universal classifier for points inside a circle | pennylane | fast | PennyLane - Data-reuploading classifier |
-| [`qml/fourier_expressivity.mojo`](qml/fourier_expressivity.mojo) — Quantum models as Fourier series: serial and parallel data encoding | pennylane | fast | PennyLane - Quantum models as Fourier series |
-| [`qml/hybrid_torch_layer.py`](qml/hybrid_torch_layer.py) — Hybrid classical-quantum model: a Torch layer backed by QUMO adjoint gradients | pennylane | fast | PennyLane - Turning quantum nodes into Torch Layers |
-| [`qml/kernel_alignment.mojo`](qml/kernel_alignment.mojo) — Training a quantum embedding kernel by kernel-target alignment (DoubleCake data) | pennylane | fast | PennyLane - Training and evaluating quantum kernels |
-| [`qml/qcbm.mojo`](qml/qcbm.mojo) — Quantum circuit Born machine: learning the 3x3 bars-and-stripes distribution with an MMD loss | pennylane | fast | PennyLane - Quantum Circuit Born Machines |
-| [`qml/qcnn.mojo`](qml/qcnn.mojo) — Quantum convolutional neural network: generalisation from few training digits | pennylane | fast | PennyLane - Generalization in QML from few training data |
-| [`qml/quantum_kernel_svm.mojo`](qml/quantum_kernel_svm.mojo) — Kernel-based training: a quantum-kernel SVM on Iris, and what it costs on a QPU | pennylane | fast | PennyLane - Kernel-based training of quantum models with scikit-learn |
-| [`qml/quantum_natural_gradient.mojo`](qml/quantum_natural_gradient.mojo) — Quantum natural gradient: the Fubini-Study metric versus plain gradient descent | pennylane | fast | PennyLane - Quantum natural gradient |
-| [`qml/qubit_rotation.mojo`](qml/qubit_rotation.mojo) — Qubit rotation: gradient descent from \|0> to cost -1 | pennylane | fast | PennyLane - Basic tutorial: qubit rotation |
-| [`qml/variational_classifier.mojo`](qml/variational_classifier.mojo) — Variational classifier: parity of bitstrings and Iris classes, plus a Qibo-style 3-class Iris model | pennylane | fast | PennyLane - Variational classifier |
-
-Framework reproductions (Qiskit, Braket, Q#, TKET, CUDA-Q, Cirq, Qibo) are indexed in
-[`frameworks/README.md`](frameworks/README.md).
+Every example with its origin, its original and what it reproduces: [`CATALOG.md`](CATALOG.md).
 
 <!-- END EXAMPLES INDEX -->

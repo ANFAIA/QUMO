@@ -3,6 +3,7 @@
 Reproduces: PennyLane - Quantum natural gradient
 Source: https://pennylane.ai/qml/demos/tutorial_quantum_natural_gradient
 Source: https://github.com/PennyLaneAI/qml/blob/master/demonstrations_v2/tutorial_quantum_natural_gradient/demo.py (Apache-2.0)
+Framework: PennyLane (Xanadu) - https://github.com/PennyLaneAI/pennylane
 
 Three qubits, fixed RY(pi/4), RY(pi/3), RY(pi/7), then two parametrized
 layers (RZ RZ | CNOT CNOT | RY RX | CNOT CNOT), cost <Y0>, start

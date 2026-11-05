@@ -8,10 +8,10 @@ offline emulators for both.
 ```bash
 make py                                            # build/qumo_py.so (the compiler) at the repo root
 pip install -e 'plugins/hardware[ibm,quantinuum,test]'   # or: PYTHONPATH=plugins/hardware
-python -m qumo_hardware run examples/bell.qasm                                     # local QUMO simulator
-python -m qumo_hardware run examples/ghz.qasm -p ibm -b fake_torino                # IBM snapshot + Aer noise
-python -m qumo_hardware run examples/ghz.qasm -p quantinuum -b H2-1 --dry-run      # plan + HQC estimate
-python -m qumo_hardware run examples/ghz.qasm -p ibm -b ibm_fez --yes              # real QPU (credentials needed)
+python -m qumo_hardware run examples/foundations/bell.qasm                                     # local QUMO simulator
+python -m qumo_hardware run examples/foundations/ghz.qasm -p ibm -b fake_torino                # IBM snapshot + Aer noise
+python -m qumo_hardware run examples/foundations/ghz.qasm -p quantinuum -b H2-1 --dry-run      # plan + HQC estimate
+python -m qumo_hardware run examples/foundations/ghz.qasm -p ibm -b ibm_fez --yes              # real QPU (credentials needed)
 python -m pytest plugins/hardware/tests -q                                         # no accounts needed
 ```
 

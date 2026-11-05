@@ -5,6 +5,7 @@ Source: https://pennylane.ai/qml/demos/tutorial_data_reuploading_classifier
 Source: https://github.com/PennyLaneAI/qml/blob/master/demonstrations_v2/tutorial_data_reuploading_classifier/demo.py (Apache-2.0)
 Reproduces: Qibo - Data reuploading for a universal quantum classifier
 Source: https://qibo.science/qibo/stable/code-examples/tutorials/reuploading_classifier/README.html
+Framework: PennyLane (Xanadu) - https://github.com/PennyLaneAI/pennylane
 
 One qubit, three layers of [Rot(x1, x2, 0), Rot(p_l)]: the data point is
 "re-uploaded" before every trainable rotation. The label states are |0>

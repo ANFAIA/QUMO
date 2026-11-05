@@ -23,9 +23,9 @@ Run the tests / examples / benchmarks:
 .venv/bin/mojo run -I . tests/test_stabilizer.mojo      # tableau vs state vector
 .venv/bin/mojo run -I . tests/test_qec.mojo             # whole QEC stack
 .venv/bin/mojo run -I . tests/test_qec_sparse_blossom.mojo  # sparse blossom exactness suite
-.venv/bin/mojo run -I . examples/qec_memory_experiment.mojo
-.venv/bin/mojo run -I . examples/qec_characterization.mojo
-.venv/bin/mojo run -I . examples/qec_custom_decoder.mojo
+.venv/bin/mojo run -I . examples/error_correction/qec_memory_experiment.mojo
+.venv/bin/mojo run -I . examples/noise_and_mitigation/qec_characterization.mojo
+.venv/bin/mojo run -I . examples/error_correction/qec_custom_decoder.mojo
 .venv/bin/mojo run -I . bench/bench_qec.mojo 200000     # throughput + LER grid
 bench/.venv/bin/python bench/bench_qec.py --shots 1000000   # cross-check vs Stim + PyMatching (parts A + B)
 bench/.venv/bin/python bench/bench_qec.py --part B --tp-shots 30000 --reps 5   # identical-syndrome decoder table
