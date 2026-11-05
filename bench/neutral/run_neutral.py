@@ -7,7 +7,10 @@
 Each (circuit, target, sdk, level) record contains: status (ok / unsupported /
 invalid / incorrect / error / timeout), metrics (n2q, depth2q, depth, runs1q,
 duration_us, esp), fidelity (when verified), wall/cpu compile time and parse
-time. Runs are sequential so timings do not interfere.
+time, and memory: rss_idle_mb (resident set of the worker after warm-up, i.e. the
+SDK's import footprint), rss_base_mb and rss_peak_mb (resident set just before and
+at the peak during the compile call; sampled, see PeakRss). Runs are sequential so
+timings do not interfere.
 """
 import argparse
 import json
@@ -15,11 +18,13 @@ import math
 import multiprocessing as mp  # noqa: F401
 import os
 import sys
+import threading
 import traceback
 
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "build"))
 
+import psutil  # noqa: E402
 from qiskit import qasm2  # noqa: E402
 
 from targets import ALL_TARGETS, make_target  # noqa: E402
@@ -134,14 +139,55 @@ def stress_circuits(seed=2026, max_qubits=60):
     return out
 
 
+MB = 1024 * 1024
+IDLE_RSS_MB = None  # set in worker_loop after warm-up: the worker's footprint before any job
+
+
+class PeakRss:
+    """Resident set of this process sampled from a thread while a block runs.
+
+    The worker is persistent, so the figure is the RSS seen during the call, not
+    memory allocated by the call alone: allocator reuse and memory kept from
+    earlier jobs are included. base is the RSS on entry; peak is the largest
+    sample, with a final sample on exit. Jobs shorter than the sampling interval
+    can miss their own peak, so the peak is a lower bound for very fast jobs.
+    """
+
+    def __init__(self, interval=0.001):
+        self.proc = psutil.Process()
+        self.interval = interval
+
+    def __enter__(self):
+        self.base = self.proc.memory_info().rss
+        self.peak = self.base
+        self._stop = threading.Event()
+
+        def poll():
+            while not self._stop.is_set():
+                self.peak = max(self.peak, self.proc.memory_info().rss)
+                self._stop.wait(self.interval)
+
+        self._thread = threading.Thread(target=poll, daemon=True)
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc):
+        self._stop.set()
+        self._thread.join()
+        self.peak = max(self.peak, self.proc.memory_info().rss)
+        return False
+
+
 def one_job(args):
     sdk, qasm_text, tkind, level, seed = args
     try:
         original = qasm2.loads(qasm_text, custom_instructions=qasm2.LEGACY_CUSTOM_INSTRUCTIONS)
         target = make_target_ext(tkind, original.num_qubits)
-        out = SDKS[sdk](qasm_text, target, level, seed)
+        with PeakRss() as mem:
+            out = SDKS[sdk](qasm_text, target, level, seed)
         rec = {"status": "ok", "wall_s": out.wall_s, "cpu_s": out.cpu_s, "parse_s": out.parse_s,
-               "version": out.sdk_version, "width": out.circuit.num_qubits}
+               "version": out.sdk_version, "width": out.circuit.num_qubits,
+               "rss_idle_mb": IDLE_RSS_MB, "rss_base_mb": mem.base / MB, "rss_peak_mb": mem.peak / MB}
         rec.update(out.extra or {})
         bad = check_native(out.circuit, target)
         if bad:
@@ -171,7 +217,9 @@ def worker_loop(sdk, inq, outq):
     """Persistent per-SDK worker: warm up once (imports, plugin discovery,
     JIT/first-call costs), then serve jobs. Started with 'spawn' so SDKs with
     native thread pools (e.g. Qiskit's Rust/rayon) never run in a forked child."""
+    global IDLE_RSS_MB
     warm_up(sdk)
+    IDLE_RSS_MB = psutil.Process().memory_info().rss / MB
     outq.put("ready")
     while True:
         job = inq.get()

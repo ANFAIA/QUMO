@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# QUMO agents CLI. Works from any directory:
+#   bin/qumo-agents list
+#   bin/qumo-agents run qumo-operator "Simulate a 3-qubit GHZ with 1000 shots"
+#   bin/qumo-agents doctor
+# The first run creates agents/.venv with uv (Python 3.12) and installs the agent layer.
+# Set QUMO_AGENTS_PYTHON to use another interpreter that already has the dependencies.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+AGENTS="$ROOT/agents"
+PY="${QUMO_AGENTS_PYTHON:-$AGENTS/.venv/bin/python}"
+
+if [[ ! -x "$PY" ]]; then
+  if ! command -v uv >/dev/null 2>&1; then
+    echo "qumo-agents: uv not found; install it (https://docs.astral.sh/uv/) or set QUMO_AGENTS_PYTHON" >&2
+    exit 2
+  fi
+  echo "qumo-agents: creating $AGENTS/.venv (first run)" >&2
+  uv venv "$AGENTS/.venv" --python 3.12 -q
+  uv pip install --python "$AGENTS/.venv/bin/python" -q -e "$AGENTS[test]"
+fi
+
+if [[ ! -x "$ROOT/build/qumo" && "${1:-}" == "run" ]]; then
+  echo "qumo-agents: build/qumo not found; agents that use QUMO's MCP tools need it (make cli)" >&2
+fi
+
+cd "$AGENTS"
+exec "$PY" -m qumo_agents "$@"
