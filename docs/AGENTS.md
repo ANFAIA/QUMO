@@ -171,3 +171,12 @@ The tests run offline. They check the module table, the safety limits of the too
 Claude Code and Codex command lines (keys never appear), the arXiv parser, network
 failures, and that every agent compiles. A scripted model also drives the operator through
 QUMO's real MCP server.
+
+## 11. Mojo agents (experiment)
+
+`qumo-operator` and `execution` also exist as a native Mojo executable,
+`build/qumo-agent` (`make agents-mojo`), with no Python at run time. Each agent can serve
+itself over MCP (`build/qumo-agent serve <agent>`), so other agents, Claude Code or the
+launcher (`build/qumo-agent call`) use it like a library. Prompts and tool guides come
+from `agents/prompts/`, exported from the Python code. Details, measurements and
+limits: [agents/mojo/README.md](../agents/mojo/README.md).

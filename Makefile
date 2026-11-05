@@ -62,6 +62,20 @@ test-agents:  ## agent layer tests (offline; the MCP tests need build/qumo from 
 agents-doctor:  ## check keys, the MCP server and the back-end CLIs the agents need
 	bin/qumo-agents doctor
 
+# Mojo agents (agents/mojo): qumo-operator and execution as a native executable, no Python at run time.
+AGENTS_MOJO_TESTS := $(wildcard agents/mojo/tests/test_*.mojo)
+.PHONY: agents-mojo test-agents-mojo
+
+agents-mojo:  ## build/qumo-agent: the Mojo agents (run / serve / call); needs build/qumo from `make cli`
+	@mkdir -p build
+	$(MOJO) build -I . -I agents/mojo -o build/qumo-agent agents/mojo/main.mojo
+
+test-agents-mojo: agents-mojo  ## Mojo agent tests (offline: replayed model, real build/qumo MCP server)
+	@fail=0; for t in $(AGENTS_MOJO_TESTS); do \
+		out=$$($(MOJO) run -I . -I agents/mojo $$t 2>&1 | grep -v Crashpad | tail -1); \
+		case "$$out" in *OK*) echo "PASS $$t";; *) echo "FAIL $$t: $$out"; fail=1;; esac; \
+	done; exit $$fail
+
 # ---------------------------------------------------------------- AI transpiler (docs/AI_TRANSPILER.md)
 # Models live in models/ai_transpiler/{synth,route}/ with an INDEX.json
 # registry (sha256 per file); the Mojo loader re-checks an FNV-1a checksum.

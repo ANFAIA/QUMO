@@ -86,6 +86,16 @@ def cmd_doctor(_args, settings: Settings) -> int:
     return 0 if checks[0][1] and usable else 1
 
 
+def cmd_export_prompts(_args, _settings: Settings) -> int:
+    from qumo_agents import export
+
+    changed = export.write()
+    for path in changed:
+        print(f"wrote {path.relative_to(export.AGENTS_DIR.parent)}")
+    print(f"{len(changed)} file(s) changed in {export.PROMPTS_DIR.relative_to(export.AGENTS_DIR.parent)}")
+    return 0
+
+
 def cmd_reports(args, _settings: Settings) -> int:
     from qumo_agents.config import REPORTS_DIR
 
@@ -122,10 +132,12 @@ def main(argv: list[str] | None = None) -> int:
     rp = sub.add_parser("reports", help="list saved reports, or print one")
     rp.add_argument("--show", metavar="TEXT", help="print the newest report whose name contains TEXT")
     rp.add_argument("--limit", type=int, default=20)
+    sub.add_parser("export-prompts", help="write prompts, specs and MCP tool guides to agents/prompts/ (read by the Mojo agents)")
     args = ap.parse_args(argv)
     settings = Settings.load()
     try:
-        return {"list": cmd_list, "run": cmd_run, "doctor": cmd_doctor, "reports": cmd_reports}[args.cmd](args, settings)
+        return {"list": cmd_list, "run": cmd_run, "doctor": cmd_doctor, "reports": cmd_reports,
+                "export-prompts": cmd_export_prompts}[args.cmd](args, settings)
     except (ValueError, RuntimeError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2

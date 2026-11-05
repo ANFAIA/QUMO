@@ -132,3 +132,9 @@ def test_network_failures_become_tool_errors(monkeypatch):
              (research.github_release_notes, {"repo": "Qiskit/qiskit"}), (research.fetch_page, {"url": "https://x.org"})]
     for t, args in calls:
         assert "error" in json.loads(t.invoke(args)), t.name
+
+
+def test_exported_prompts_are_current():
+    """agents/prompts/ is what the Mojo agents read; regenerate with `python -m qumo_agents export-prompts`."""
+    from qumo_agents import export
+    assert not export.stale(), [str(p) for p in export.stale()]
