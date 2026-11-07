@@ -29,7 +29,7 @@ returns (`String(from_utf8_lossy=Span(buf)[0:n])`) and keep the buffer alive pas
 the call (`_ = len(buf)` after the last use of an address taken from it).
 """
 
-from std.ffi import external_call, c_int, get_errno, OwnedDLHandle, RTLD
+from std.ffi import external_call, c_int, c_char, get_errno, OwnedDLHandle, RTLD
 from std.sys import CompilationTarget
 from std.memory import OpaquePointer
 
@@ -481,9 +481,8 @@ def c_poll(fds: Int, n: Int, timeout_ms: Int) -> Int:
     return Int(external_call["poll", c_int](_p(fds), UInt(n), c_int(timeout_ms)))
 
 
-def c_signal(sig: Int, handler: Int) -> Int:
-    """Only used with SIG_IGN (1) for SIGPIPE; returns the previous handler."""
-    return Int(external_call["signal", _VP](c_int(sig), _p(handler)))
+# `signal` is called only from native/shutdown.mojo (a C-ABI handler function cannot be
+# passed through an Int, and one program may declare `signal` with a single signature).
 
 
 def c_ns_get_environ() -> Int:
@@ -641,3 +640,42 @@ def c_regfree(re: Int):
 def c_fnmatch(pattern: Int, s: Int, flags: Int) -> Int:
     """0 = match, FNM_NOMATCH (1) = no match."""
     return Int(external_call["fnmatch", c_int](_p(pattern), _p(s), c_int(flags)))
+
+
+# ---------------------------------------------------------------------------
+# Helpers for the shutdown signal handler (native/shutdown.mojo)
+# ---------------------------------------------------------------------------
+def c_calloc(n: Int, size: Int) -> Int:
+    return Int(external_call["calloc", _VP](UInt(n), UInt(size)))
+
+
+def c_getenv_addr(name_addr: Int) -> Int:
+    """Address of the value of the environment variable whose NUL-terminated name is at
+    `name_addr`, or 0."""
+    # The return type must match the one `std.os.getenv` declares for the same symbol.
+    var v = external_call["getenv", Optional[UnsafePointer[c_char, ImmutAnyOrigin]]](_p(name_addr))
+    if v:
+        return Int(v.value())
+    return 0
+
+
+def c_strtoll(addr: Int) -> Int:
+    """Base-10 `strtoll` of the NUL-terminated text at `addr`."""
+    return Int(external_call["strtoll", Int](_p(addr), _p(0), c_int(10)))
+
+
+def c_usleep(us: Int) -> Int:
+    return Int(external_call["usleep", c_int](c_int(us)))
+
+
+def c_exit_now(code: Int):
+    """`_exit(code)`: no atexit handlers, async-signal-safe."""
+    external_call["_exit", NoneType](c_int(code))
+
+
+def c_fork() -> Int:
+    return Int(external_call["fork", c_int]())
+
+
+def c_getpid() -> Int:
+    return Int(external_call["getpid", c_int]())

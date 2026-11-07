@@ -47,3 +47,14 @@ docs/AI_TRANSPILER.md):
   Reinforcement Learning", arXiv:2503.14448; P. D. Nation et al.,
   "Benchmarking the performance of quantum computing software"
   (Benchpress), arXiv:2409.08844.
+
+Agent harness (agents/mojo/qumo_agent/harness/ and the texts in agents/mojo/qumo_agent/harness/texts.mojo):
+
+- The virtual file system tools, large-result eviction, task/subagent delegation,
+  summarization, tool-call patching and their prompt and tool-description texts are
+  ported from deepagents 0.7.32, with the summarization prompt, token-count heuristic
+  and message formatting from langchain 1.4.8 and langchain-core 1.7.4
+  (Copyright (c) LangChain, Inc., MIT License,
+  https://github.com/langchain-ai/deepagents,
+  https://github.com/langchain-ai/langchain). The license text is in
+  agents/mojo/LICENSES/langchain-MIT.txt; ported files carry a header naming it.

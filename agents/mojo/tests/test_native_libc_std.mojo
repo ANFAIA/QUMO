@@ -17,6 +17,7 @@ from std.ffi import get_errno
 from std.random import random_ui64
 from std.tempfile import mkdtemp, gettempdir
 
+from qumo_agent.native.shutdown import ignore_sigpipe_signal
 from qumo_agent.native.libc import *
 
 
@@ -115,7 +116,7 @@ def use_every_wrapper() raises:
     assert_equal(c_prctl(-1, 0, 0, 0, 0), -1)
     assert_equal(c_syscall4(-1, 0, 0, 0), -1)
     _ = c_ns_get_environ()
-    _ = c_signal(SIGPIPE, SIG_IGN)
+    ignore_sigpipe_signal()
     assert_true(strerror_text(EPIPE).byte_length() > 0)
     # fds.
     var fds = List[UInt8](length=8, fill=0)

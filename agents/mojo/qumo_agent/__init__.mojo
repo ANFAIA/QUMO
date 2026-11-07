@@ -1,8 +1,11 @@
-"""QUMO agents in Mojo: native executables that run the qumo-operator and execution
-agents without Python, talk to QUMO's MCP server as a client, and serve themselves
-over MCP so other agents (or any MCP client) can call them like a library.
+"""QUMO agents in Mojo: a native port of the minimal deepagents harness (virtual file system,
+large-result eviction, subagents, summarization, tool-call patching), the QUMO agent tools,
+a Mojo toolsmith that builds new tools, and the `qumo-agent` command line. No Python
+or external helpers at run time. The design is in agents/mojo/DESIGN.md.
 
-Modules: proc (child processes over pipes), mcp_client, llm (OpenRouter through curl,
-plus an offline replay provider), config (agents.json, prompts, specs, tool guides),
-agent (the tool-calling loop), server (the agent as an MCP stdio server).
+Subpackages: native (libc, spawn, fs, sandbox), util, core (messages, replay, errors), net
+(HTTP and TLS), llm (OpenAI-compatible client), mcp (stdio and HTTP clients, stdio server),
+harness (the agent loop and its middleware), tools (QUMO, repository and research tools),
+toolsmith (generated tools: manifest, build, review) and app (CLI, serve, call, doctor).
+`tool_sdk` is the library compiled into every generated tool.
 """

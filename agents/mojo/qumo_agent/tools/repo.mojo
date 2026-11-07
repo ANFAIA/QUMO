@@ -542,7 +542,13 @@ def tool_run_check(st: RepoState, argv: List[String], timeout_s: Int) -> String:
                         home = realpath_strict(h)
                     except:
                         home = h
-                var c = Confinement(CONF_CHECK, write_dirs^, List[String](), home, 0, CHECK_FSIZE_BYTES)
+                var read_allow = List[String]()
+                for rp in [st.repo_root, st.repo_root + "/.venv"]:
+                    try:
+                        read_allow.append(realpath_strict(rp))
+                    except:
+                        pass
+                var c = Confinement(CONF_CHECK, write_dirs^, read_allow^, home, 0, CHECK_FSIZE_BYTES)
                 spec = confine(spec, c, st.self_binary)
         except e:
             if tmp.byte_length() > 0:

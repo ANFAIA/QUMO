@@ -227,7 +227,7 @@ struct Agent[E: AgentEnv](Movable):
         if st.steps > self.spec.recursion_limit:
             var text = "QA-E110: " + fmt1(RECURSION_LIMIT, "limit", String(self.spec.recursion_limit))
             if len(self.ancestors) == 0:
-                text += ". Hint: raise --recursion-limit"
+                text += " Hint: raise --recursion-limit"
             raise Error(text)
 
     # -----------------------------------------------------------------------

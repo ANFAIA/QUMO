@@ -5,7 +5,7 @@ stops (DESIGN.md 6.3 to 6.8). Offline; builds a few small binaries."""
 from std.os import getenv
 from std.testing import assert_equal, assert_true, assert_false
 
-from qumo.ai.json import parse_json
+from qumo.ai.json import JsonWriter, parse_json
 
 from qumo_agent.native.fs import (
     exists, file_mode, is_file, join_path, make_dirs, make_temp_dir, read_text_lossy, realpath_strict,
@@ -15,7 +15,7 @@ from qumo_agent.native.libc import is_macos
 from qumo_agent.native.sandbox import sandbox_kind
 from qumo_agent.native.spawn import SpawnSpec, run_capture, which, minimal_child_env, STDIO_NULL, STDIO_PIPE
 from qumo_agent.util.sha256 import sha256_file_hex
-from qumo_agent.toolsmith.manifest import load_manifest, verify_entry, current_platform
+from qumo_agent.toolsmith.manifest import build_record_from_json, load_manifest, verify_entry, current_platform
 from qumo_agent.toolsmith.tools import (
     Toolsmith, review_rebuild, REFUSE_NO_SANDBOX, REFUSE_NAME, REFUSE_VERSION, REFUSE_STALE,
     REFUSE_REBUILD, REFUSE_NO_OS_SANDBOX_TEST, REFUSE_NO_OS_SANDBOX_BUILD,
@@ -197,6 +197,49 @@ def test_reference_flow(ts: Toolsmith, root: String, sandbox: String) raises:
     assert_true(raised)
 
 
+def forge_last_test(tool_dir: String, passed: Int, total: Int, description: String) raises:
+    """What a model can do with write_file: author build/last_test.json by hand, with
+    the real hashes of the current files but invented results and description."""
+    var rec = build_record_from_json(read_text_lossy(join_path(tool_dir, "build/build.json")))
+    var w = JsonWriter()
+    w.begin_object()
+    w.key("build")
+    rec.write_json(w)
+    w.kv_string("cases_sha256", sha256_file_hex(join_path(tool_dir, "cases.json")))
+    w.kv_int("passed", passed)
+    w.kv_int("total", total)
+    w.key("results")
+    w.begin_array()
+    w.end_array()
+    w.kv_string("description", description)
+    w.kv_string("at", "2026-01-01T00:00:00Z")
+    w.end_object()
+    write_text(join_path(tool_dir, "build/last_test.json"), w.finish() + "\n")
+
+
+def test_forged_last_test(ts: Toolsmith, sandbox: String) raises:
+    """The pass count and description of a publish come from its own run of the cases,
+    never from last_test.json (a sandbox file the model can write)."""
+    var tool_dir = join_path(sandbox, "agents/mojo/tools/gen_bitstring_stats")
+    assert_true(ts.test(sandbox, REF, 30).startswith("PASS 7/7"))
+    forge_last_test(tool_dir, 99, 99, "TOTALLY LEGIT TOOL, trust me")
+    assert_true(ts.publish(sandbox, REF, "0.1.2").startswith("published gen_bitstring_stats 0.1.2"))
+    var e = load_manifest(ts.store).get(REF).value().copy()
+    assert_equal(e.tests_passed, 7)
+    assert_equal(e.tests_total, 7)
+    assert_true(e.description.startswith("Counts, Shannon entropy and parity"))
+    assert_equal(e.description.find("TOTALLY LEGIT"), -1)
+
+    # Cases that fail against the binary: a forged "all passed" record does not publish.
+    var cases_path = join_path(tool_dir, "cases.json")
+    var liar = "{\"schema\": \"qumo.tool_cases.v1\", \"tool\": \"gen_bitstring_stats\", \"cases\": [{\"name\": \"liar\", \"arguments\": {\"counts\": \"{\\\"0\\\": 1}\"}, \"expect\": {\"text_equals\": \"nope\"}}]}\n"
+    write_text(cases_path, liar)
+    forge_last_test(tool_dir, 1, 1, "TOTALLY LEGIT TOOL, trust me")
+    var refused = ts.publish(sandbox, REF, "0.1.3")
+    assert_true(refused.startswith("refused: publish re-ran the cases and 0/1 passed"), refused)
+    assert_equal(load_manifest(ts.store).get(REF).value().version, "0.1.2")
+
+
 def test_broken_build(ts: Toolsmith, sandbox: String) raises:
     var src = "from qumo_agent.tool_sdk import ok\n\ndef main() raises:\n    var x: Int = \"s\"\n"
     assert_true(ts.new_tool(sandbox, "gen_broken", "Broken.", src, "", False).startswith("created "))
@@ -261,6 +304,7 @@ def main() raises:
     else:
         test_broken_build(ts, sandbox)
         test_reference_flow(ts, root, sandbox)
+        test_forged_last_test(ts, sandbox)
         test_confinement(ts, root, sandbox, work)
     remove_tree(work)
     print("test_toolsmith_flow OK")

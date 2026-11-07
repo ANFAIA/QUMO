@@ -54,6 +54,13 @@ def _q(s: String) -> String:
     return '"' + s + '"'
 
 
+def _has(items: List[String], p: String) -> Bool:
+    for i in items:
+        if i == p:
+            return True
+    return False
+
+
 def test_json_round_trip() raises:
     var c = Confinement(CONF_TOOL, ["/tmp/a b", "/x\"y"], ["/lib\\z"], "/Users/u", 14, 67108864)
     var j = c.to_json()
@@ -77,6 +84,9 @@ def test_json_round_trip() raises:
 def test_profiles() raises:
     var home = realpath_strict(make_temp_dir("qumo-home-"))
     mkdir(home + "/.ssh")
+    mkdir(home + "/.some-new-cli")
+    mkdir(home + "/.local")
+    mkdir(home + "/visible")
     mkdir(home + "/real_config")
     std_symlink(home + "/real_config", home + "/.config")
     var tool = Confinement(CONF_TOOL, ["/w/one", "/w/q\"uote\\d"], ["/r/lib"], home, 0, 0)
@@ -98,11 +108,17 @@ def test_profiles() raises:
         home + "/.docker", home + "/.kube", home + "/.netrc", home + "/.git-credentials", home + "/.pypirc",
         home + "/.npmrc", home + "/.zsh_history", home + "/.bash_history", home + "/Library/Keychains",
     ]
-    assert_equal(len(sens), len(want))
+    # The fixed names come first (existing ones as realpaths), then the other dot entries.
     for i in range(len(want)):
         assert_equal(sens[i], want[i])
+    for extra in [".codex", ".claude", ".claude.json", ".gemini", ".hf-cli", ".qiskit", ".cache", ".gitconfig",
+                  ".zshrc", "Library/Application Support"]:
+        assert_true(_has(sens, home + "/" + extra), "not denied: " + extra)
+    assert_true(_has(sens, home + "/.some-new-cli"), "an unlisted dot directory must be denied")
+    assert_false(_has(sens, home + "/.local"))
+    assert_false(_has(sens, home + "/visible"))
     var deny = String("(deny file-read*")
-    for p in want:
+    for p in sens:
         deny += " (subpath " + _q(p) + ")"
     deny += ")"
     for prof in [CONF_CHECK, CONF_BUILD]:
@@ -111,6 +127,13 @@ def test_profiles() raises:
             macos_profile(c),
             '(version 1)(allow default)(deny network*)(deny file-write*)(allow file-write* (literal "/dev/null") (subpath "/sandbox"))' + deny,
         )
+    # What the caller names below $HOME stays readable even inside a denied directory.
+    var inner = Confinement(CONF_BUILD, [home + "/.cache/work"], [home + "/.local/lib", "/elsewhere"], home, 0, 0)
+    assert_equal(
+        macos_profile(inner),
+        '(version 1)(allow default)(deny network*)(deny file-write*)(allow file-write* (literal "/dev/null") (subpath ' + _q(home + "/.cache/work") + '))'
+        + deny + '(allow file-read* (subpath ' + _q(home + "/.cache/work") + ') (subpath ' + _q(home + "/.local/lib") + '))',
+    )
     assert_equal(len(sensitive_home_paths("")), 0)
     try:
         _ = macos_profile(Confinement(CONF_TOOL, ["/a\nb"], List[String](), "", 0, 0))
@@ -215,6 +238,32 @@ def test_confined_runs(tramp: String, work: String) raises:
     else:
         print("note: repository not under $HOME; the $HOME read check was skipped")
 
+    # CONF_CHECK/CONF_BUILD: credential files other CLIs keep under $HOME are not readable
+    # (a fake home, so no real secret is involved); the toolchain dirs and the caller's
+    # allowed paths stay readable.
+    if is_macos():
+        var fake = realpath_strict(make_temp_dir("qumo-conf-home-"))
+        for d in [".codex", ".some-new-cli", ".cache/huggingface", ".local/share", "plain"]:
+            make_dirs(fake + "/" + d)
+        write_text(fake + "/.codex/auth.json", "secret")
+        write_text(fake + "/.some-new-cli/token", "secret")
+        write_text(fake + "/.cache/huggingface/token", "secret")
+        write_text(fake + "/.claude.json", "secret")
+        write_text(fake + "/.local/share/ok", "fine")
+        write_text(fake + "/plain/ok", "fine")
+        for prof in [CONF_CHECK, CONF_BUILD]:
+            var fc = Confinement(prof, [inside], List[String](), fake, 0, 0)
+            for f in [".codex/auth.json", ".some-new-cli/token", ".cache/huggingface/token", ".claude.json"]:
+                r = run_capture(confine(_spec("/bin/cat", ["cat", fake + "/" + f], env), fc, tramp), 20000, 4000, "")
+                assert_true(r.exit_code != 0 and r.stdout.find("secret") < 0, "profile " + String(prof) + " read " + f)
+            for f in [".local/share/ok", "plain/ok"]:
+                r = run_capture(confine(_spec("/bin/cat", ["cat", fake + "/" + f], env), fc, tramp), 20000, 4000, "")
+                assert_equal(r.stdout, "fine")
+        var fa = Confinement(CONF_CHECK, [inside], [fake + "/.some-new-cli"], fake, 0, 0)
+        r = run_capture(confine(_spec("/bin/cat", ["cat", fake + "/.some-new-cli/token"], env), fa, tramp), 20000, 4000, "")
+        assert_equal(r.stdout, "secret")
+        remove_tree(fake)
+
     # A reference Mojo binary copied to a temp dir runs under CONF_TOOL with an empty
     # environment, and cannot connect to a local listener.
     var tool_dir = realpath_strict(make_temp_dir("qumo-conf-tool-"))
@@ -258,6 +307,13 @@ def test_confined_runs(tramp: String, work: String) raises:
     assert_false(r.timed_out)
     assert_true(r.exit_code == -SIGXCPU or r.exit_code == -SIGKILL, "exit " + String(r.exit_code))
     assert_true(dt < 15000)
+
+    # The Linux trampoline forks and mirrors the child's status (an exit code, or the
+    # signal that killed it); the same helper is exercised here on every platform.
+    r = run_capture(_spec(tramp, [tramp, "fork-mirror", "exit 7"], env), 20000, 4000, "")
+    assert_equal(r.exit_code, 7)
+    r = run_capture(_spec(tramp, [tramp, "fork-mirror", "kill -9 $$"], env), 20000, 4000, "")
+    assert_equal(r.exit_code, -SIGKILL)
 
     # __confine failures exit 125 with QA-E163 on stderr.
     r = run_capture(_spec(tramp, [tramp, "__confine", "not json", "/bin/true"], env), 20000, 4000, "")

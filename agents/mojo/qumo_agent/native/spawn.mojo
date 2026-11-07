@@ -21,6 +21,7 @@ writes a lot to stderr never blocks while the parent waits for stdout.
 from std.os import getenv, setenv
 from std.pathlib import cwd
 
+from qumo_agent.native.shutdown import ignore_sigpipe_signal, register_child, unregister_child
 from qumo_agent.native.libc import (
     CStr,
     CStrArray,
@@ -59,7 +60,6 @@ from qumo_agent.native.libc import (
     c_read,
     c_write,
     c_poll,
-    c_signal,
     c_ns_get_environ,
     c_access,
     POSIX_SPAWN_SETPGROUP,
@@ -69,7 +69,6 @@ from qumo_agent.native.libc import (
     SIGPIPE,
     SIGTERM,
     SIGKILL,
-    SIG_IGN,
     WNOHANG,
     O_RDONLY,
     O_WRONLY,
@@ -494,6 +493,7 @@ struct Child(Movable):
             if r == self.pid:
                 self._code = _decode_status(load_i32(buf_addr(st)))
                 self._reaped = True
+                unregister_child(self.pid, self._group)
                 _ = len(st)
                 return self._code
             if r == 0:
@@ -514,6 +514,7 @@ struct Child(Movable):
             if r == self.pid:
                 self._code = _decode_status(load_i32(buf_addr(st)))
                 self._reaped = True
+                unregister_child(self.pid, self._group)
                 _ = len(st)
                 return self._code
             var e = errno()
@@ -570,6 +571,7 @@ struct Child(Movable):
                 if r >= 0 or errno() != EINTR:
                     break
             _ = len(st)
+            unregister_child(self.pid, self._group)
 
 
 # ---------------------------------------------------------------------------
@@ -724,6 +726,7 @@ def spawn(spec: SpawnSpec) raises -> Child:
         if use_chdir_action and err == ENOENT and not is_dir(spec.cwd):
             shown = spec.cwd
         raise Error("QA-E160: " + py_oserror(err, shown))
+    register_child(pid, spec.new_process_group)
     return Child(pid, in_w, out_r, err_r, spec.new_process_group)
 
 
@@ -993,8 +996,8 @@ def harness_child_env(api_key_env: String) -> List[String]:
 
 
 def ignore_sigpipe():
-    """signal(SIGPIPE, SIG_IGN): writes to a closed pipe or socket return EPIPE."""
-    _ = c_signal(SIGPIPE, SIG_IGN)
+    """Writes to a closed pipe or socket return EPIPE instead of raising SIGPIPE."""
+    ignore_sigpipe_signal()
 
 
 # ---------------------------------------------------------------------------

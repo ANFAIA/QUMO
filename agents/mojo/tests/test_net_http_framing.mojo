@@ -143,6 +143,21 @@ def test_errors() raises:
     _error_all_splits("HTTP/1.1 200 OK\r\nContent-Le", "GET", strict, False,
                       "QA-E104: connection closed inside the response headers")
     _error_all_splits("SSH-2.0-OpenSSH\r\n\r\n", "GET", strict, False, "QA-E104: invalid HTTP status line: SSH-2.0-OpenSSH")
+    # A malformed status line with multi-byte characters is cut at a code point boundary
+    # (a cut inside one used to abort the process).
+    var accents = String()
+    for _ in range(45):
+        accents += "é"
+    var want_accents = String()
+    for _ in range(35):
+        want_accents += "é"
+    _error_all_splits("XTTP/1.1 " + accents + "\r\n\r\n", "GET", strict, False,
+                      "QA-E104: invalid HTTP status line: XTTP/1.1 " + want_accents)
+    _error_all_splits("HTTP/1.1 20" + accents + "\r\n\r\n", "GET", strict, False,
+                      "QA-E104: invalid HTTP status line: HTTP/1.1 20" + String("é") * 34)
+    var multibyte_reason = _read("HTTP/1.1 200é ok\r\nContent-Length: 0\r\n\r\n", 100, "GET", strict, False)
+    assert_equal(multibyte_reason.status, 200)
+    assert_equal(multibyte_reason.reason, "é ok")
     _error_all_splits("HTTP/1.1 200 OK\r\nContent-Length: 3\r\nContent-Length: 4\r\n\r\nabcd", "GET", strict, False,
                       "QA-E104: conflicting Content-Length headers")
     # Close-delimited body on a TLS stream that ended without close_notify (X15).

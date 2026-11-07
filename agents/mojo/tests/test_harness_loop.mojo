@@ -181,7 +181,7 @@ def test_recursion() raises:
     var v0 = FileRoutes(False, False)
     var r = run("rec25", _looping(30, 0), 25, False, v0)
     assert_equal(len(r.requests), 12)
-    assert_equal(r.error, "QA-E110: Recursion limit of 25 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.. Hint: raise --recursion-limit")
+    assert_equal(r.error, "QA-E110: Recursion limit of 25 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key. Hint: raise --recursion-limit")
     r = run("rec200", _looping(120, 0), 200, False, v0)
     assert_equal(len(r.requests), 100)
     assert_true(r.error.startswith("QA-E110: Recursion limit of 200 reached"))

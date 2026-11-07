@@ -6,7 +6,8 @@
         exit(main_entry(args))
 
 It dispatches the two trampolines first (`__confine`, `__exec-in`: they must run before any
-other work), then ignores SIGPIPE and runs the command. Exit codes (7.3): 0 success, 1 the
+other work), then ignores SIGPIPE, installs the shutdown handlers (SIGINT, SIGTERM and SIGHUP end
+every child process group, native/shutdown.mojo) and runs the command. Exit codes (7.3): 0 success, 1 the
 run failed, 2 usage error, 3 configuration error (QA-E140, QA-E105).
 
 Commands: list, run, serve, call, tools, doctor, reports, help, and the internal
@@ -39,6 +40,7 @@ from qumo_agent.native.fs import (
 )
 from qumo_agent.native.libc import is_macos
 from qumo_agent.native.sandbox import Confinement, confine_main
+from qumo_agent.native.shutdown import install_shutdown_handlers
 from qumo_agent.native.spawn import (
     STDIO_INHERIT, exec_in_main, harness_child_env, ignore_sigpipe, set_chdir_trampoline, which,
 )
@@ -685,6 +687,7 @@ def main_entry(args: List[String]) -> Int:
     if len(args) >= 2 and args[1] == "__exec-in":
         return exec_in_main(args)
     ignore_sigpipe()
+    install_shutdown_handlers()
     try:
         return _dispatch(args)
     except e:

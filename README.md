@@ -202,6 +202,7 @@ qumo/
   bench/       benchmark circuit generators (QV, EfficientSU2, DTC, ...)
 cli/main.mojo  qumo CLI entry point
 python/        CPython extension (qumo_py)
+agents/        AI agents: Python (agents/qumo_agents) and the native Mojo harness (agents/mojo, build/qumo-agent)
 tests/         one test_<module>.mojo per module (make test)
 plugins/       hardware providers: IBM Quantum (Qiskit Runtime), Quantinuum (Nexus) — Python package qumo_hardware
 examples/      OpenQASM / Mojo samples, colab/ (cloud GPU benchmark notebooks), hardware/ (provider examples)
@@ -225,6 +226,7 @@ The benchmark venv needs `qiskit qiskit-aer qiskit-ibm-runtime pytket pytket-qis
 - [docs/ANALYSIS.md](docs/ANALYSIS.md) — deep analysis of the 8 frameworks and the synthesis
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — architecture and design decisions
 - Modules: [COMPILER](docs/COMPILER.md) · [SIMULATION](docs/SIMULATION.md) · [GPU](docs/GPU.md) · [QEC](docs/QEC.md) · [ALGORITHMS](docs/ALGORITHMS.md) · [QML](docs/QML.md) · [AI_TRANSPILER](docs/AI_TRANSPILER.md) · [FT](docs/FT.md) · [AI_NATIVE](docs/AI_NATIVE.md) · [HARDWARE_PLUGINS](docs/HARDWARE_PLUGINS.md) · [ERRORS](docs/ERRORS.md)
+- [docs/AGENTS.md](docs/AGENTS.md) — AI agents that use and maintain QUMO: Python (`bin/qumo-agents`) and a native Mojo version with no Python at run time (`make agents-mojo`, [agents/mojo](agents/mojo/README.md)), including a toolsmith agent that builds new Mojo tools for the others
 - [docs/CONTROL_FLOW.md](docs/CONTROL_FLOW.md) — `Program`: `while`, classical variables, semantics, compiling, limits
 - [docs/FRAMEWORK_UPDATES.md](docs/FRAMEWORK_UPDATES.md) — reviewed framework updates: done, deferred, skipped
 - [docs/MOJO_GUIDE.md](docs/MOJO_GUIDE.md) — the exact Mojo 1.2 dialect QUMO uses

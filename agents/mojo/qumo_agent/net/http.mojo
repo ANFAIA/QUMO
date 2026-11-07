@@ -232,21 +232,37 @@ struct _Head(Copyable):
     var values: List[String]
 
 
+def _boundary_at_or_before(s: String, n: Int) -> Int:
+    """The largest code point boundary <= n (a server may send anything, and a byte
+    cut inside a multi-byte character aborts the process)."""
+    var bs = s.as_bytes()
+    var i = min(n, len(bs))
+    while i > 0 and i < len(bs) and (Int(bs[i]) & 0xC0) == 0x80:
+        i -= 1
+    return i
+
+
+def _status_excerpt(line: String) -> String:
+    """At most the first 80 bytes of `line`, cut at a code point boundary."""
+    return String(line[byte=0:_boundary_at_or_before(line, 80)])
+
+
 def _parse_status(line: String) raises -> Tuple[Int, String]:
     if not line.startswith("HTTP/1.") or line.byte_length() < 12:
-        raise Error(E_NETWORK + ": invalid HTTP status line: " + String(line[byte=0:min(line.byte_length(), 80)]))
+        raise Error(E_NETWORK + ": invalid HTTP status line: " + _status_excerpt(line))
     var bs = line.as_bytes()
     if Int(bs[8]) != 0x20:
-        raise Error(E_NETWORK + ": invalid HTTP status line: " + String(line[byte=0:min(line.byte_length(), 80)]))
+        raise Error(E_NETWORK + ": invalid HTTP status line: " + _status_excerpt(line))
     var code = 0
     for i in range(9, 12):
         var c = Int(bs[i])
         if c < 0x30 or c > 0x39:
-            raise Error(E_NETWORK + ": invalid HTTP status line: " + String(line[byte=0:min(line.byte_length(), 80)]))
+            raise Error(E_NETWORK + ": invalid HTTP status line: " + _status_excerpt(line))
         code = code * 10 + (c - 0x30)
     var reason = String()
-    if line.byte_length() > 13:
-        reason = String(String(line[byte=13:]).strip())
+    if line.byte_length() > 12:
+        var from_byte = _boundary_at_or_before(line, 12)   # byte 12 is not checked: it may start a multi-byte character
+        reason = String(String(line[byte=from_byte:]).strip())
     return (code, reason^)
 
 

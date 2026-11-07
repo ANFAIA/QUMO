@@ -70,6 +70,7 @@ comptime REFUSE_NO_SANDBOX = "refused: call open_sandbox first; the main checkou
 comptime REFUSE_NAME = "refused: tool names must match gen_[a-z0-9_]{2,40}"
 comptime REFUSE_VERSION = "refused: version must look like 1.2.3 or 1.2.3-rc1"
 comptime REFUSE_STALE = "refused: tool.mojo, cases.json or the binary changed after the last passing toolsmith_test; build and test again"
+comptime PUBLISH_CASE_TIMEOUT_S = 30    # per case, for the re-run inside toolsmith_publish
 comptime REFUSE_REBUILD = "refused: build the tool again"
 comptime REFUSE_NO_OS_SANDBOX_TEST = "refused: no OS sandbox on this machine, so unreviewed tools cannot be tested. Hint: a human can pass --allow-unsandboxed-tool-tests"
 comptime REFUSE_NO_OS_SANDBOX_BUILD = "refused: no OS sandbox on this machine, so model-written code cannot be built. Hint: a human can pass --allow-unsandboxed-tool-tests"
@@ -373,6 +374,18 @@ def mojo_version(mojo_bin: String) -> String:
 # ---------------------------------------------------------------------------
 # Hermetic build (6.4)
 # ---------------------------------------------------------------------------
+def _build_read_allow(repo_root: String) -> List[String]:
+    """Subtrees the compiler reads that must stay readable even below a denied $HOME
+    directory: the main checkout and its toolchain (`.venv` may be a symlink)."""
+    var out = List[String]()
+    for p in [repo_root, join_path(repo_root, ".venv")]:
+        try:
+            out.append(realpath_strict(p))
+        except:
+            pass
+    return out^
+
+
 def hermetic_build(repo_root: String, mojo_bin: String, source_path: String, name: String, timeout_s: Int, self_binary: String) raises -> Tuple[Int, String, String, BuildRecord]:
     """Compile `source_path` alone in a fresh temporary directory against the main
     checkout's include paths. Returns (exit code, diagnostics, temporary binary path,
@@ -399,7 +412,7 @@ def hermetic_build(repo_root: String, mojo_bin: String, source_path: String, nam
         env = _env_with(env, "MODULAR_CACHE_DIR", cache)
         var spec = SpawnSpec(mojo_bin, argv^, env^, tmp_real, STDIO_NULL, STDIO_PIPE, STDIO_PIPE, True)
         if self_binary.byte_length() > 0:
-            var conf = Confinement(CONF_BUILD, [tmp_real], List[String](), _home_realpath(), 0, BUILD_FSIZE_BYTES)
+            var conf = Confinement(CONF_BUILD, [tmp_real], _build_read_allow(repo_root), _home_realpath(), 0, BUILD_FSIZE_BYTES)
             spec = confine(spec, conf, self_binary)
         var t = _clamp(timeout_s, BUILD_TIMEOUT_MIN, BUILD_TIMEOUT_MAX)
         var res = run_capture(spec, t * 1000, CAPTURE_MAX_BYTES, String())
@@ -793,11 +806,12 @@ struct Toolsmith(Copyable):
             var binary = self._path(sandbox, name, "build/" + name)
             if not is_file(last_path):
                 return "refused: no toolsmith_test result for " + name + "; build and test the tool first"
+            if not self._may_run_code():
+                return REFUSE_NO_OS_SANDBOX_TEST
+            # last_test.json is an ordinary file in the open sandbox, so the model can write
+            # it by hand. It only proves that toolsmith_test was called; its hashes bind the
+            # current files, and nothing it says about results or the description is trusted.
             var last = parse_json(read_text_lossy(last_path))
-            var passed = last.get_int("passed", 0)
-            var total = last.get_int("total", 0)
-            if total <= 0 or passed != total:
-                return "refused: the last toolsmith_test passed " + String(passed) + "/" + String(total) + " cases; fix the tool and test again"
             var rec = build_record_from_value(last.get("build"))
             if not is_file(src) or not is_file(cases_path) or not is_file(binary):
                 return REFUSE_STALE
@@ -806,10 +820,25 @@ struct Toolsmith(Copyable):
             var cases_sha = sha256_file_hex(cases_path)
             if bin_sha != rec.binary_sha256 or src_sha != rec.source_sha256 or cases_sha != last.get_string("cases_sha256", ""):
                 return REFUSE_STALE
+            # The pass count and the description come from a fresh, confined run of the
+            # stored cases against the binary that will be published (its tools/list answer).
+            var cases: List[ToolCase]
+            try:
+                cases = parse_cases(read_text_lossy(cases_path), name)
+            except err:
+                return "refused: cases.json " + String(err)
+            var run = run_case_list(binary, name, cases, PUBLISH_CASE_TIMEOUT_S, bin_sha, self.self_binary,
+                                    self._confined(), self.repo_root)
+            var passed = run.passed()
+            var total = len(run.results)
+            if total <= 0 or passed != total:
+                return "refused: publish re-ran the cases and " + String(passed) + "/" + String(total) + " passed; fix the tool and run toolsmith_test again\n" + cp_head(run.lines(), REPORT_CAP)
+            if sha256_file_hex(binary) != bin_sha or sha256_file_hex(src) != src_sha or sha256_file_hex(cases_path) != cases_sha:
+                return REFUSE_STALE
             make_dirs(self.store)
             var store_real = realpath_strict(self.store)
             var e = ToolEntry(
-                name, version, last.get_string("description", ""), entry_dir(name, version, bin_sha),
+                name, version, run.tool_description, entry_dir(name, version, bin_sha),
                 src_sha, cases_sha, bin_sha, rec.sdk_sha256, rec.mojo_version, current_platform(),
                 DEFAULT_TOOL_TIMEOUT_S, DEFAULT_MAX_OUTPUT_BYTES, utc_iso_now(), PUBLISHED_BY,
                 _publish_branch(sandbox), passed, total, False, String(), String())

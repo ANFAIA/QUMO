@@ -428,7 +428,7 @@ def env_subset(names: List[String]) -> List[String]       # "NAME=value" for tho
 def minimal_child_env() -> List[String]
 def mcp_server_env() -> List[String]
 def harness_child_env(api_key_env: String) -> List[String]   # K4: subagent children and the serve child of call
-def ignore_sigpipe()                                       # signal(SIGPIPE, SIG_IGN), once at startup
+def ignore_sigpipe()                                       # a no-op SIGPIPE handler, once at startup
 def is_secret_env_name(name: String) -> Bool
 ```
 
@@ -622,19 +622,30 @@ def confine_main(args: List[String]) -> Int              # body of `qumo-agent _
     `<repo>/.venv/lib/python3.12/site-packages/modular/lib`), while `cat ~/.zshrc` and a write
     to `<repo>/build/` fail with `Operation not permitted`; `.venv/bin/mojo run` works under
     the `CONF_CHECK` profile with `MODULAR_CACHE_DIR` pointing into a writable directory.
-  - Linux: `unshare(CLONE_NEWUSER | CLONE_NEWNET)` (the new network namespace has only a down
+  - Linux: `fork`, then in the child (the only thread: `unshare(CLONE_NEWUSER)` fails with EINVAL in a
+    multithreaded process and a Mojo binary starts runtime threads before `main`) `setrlimit`,
+    `unshare(CLONE_NEWUSER | CLONE_NEWNET)` (the new network namespace has only a down
     loopback, so no network), `prctl(PR_SET_NO_NEW_PRIVS, 1)`, a Landlock ruleset handling every
     file-system right of the running ABI (>= 1) with `LANDLOCK_RULE_PATH_BENEATH` rules: read and
     execute on `/` (`CONF_CHECK`, `CONF_BUILD`) or only on `/usr /lib /lib64 /bin /etc /proc
     /sys/devices/system/cpu` plus `read_allow` (`CONF_TOOL`); all rights on `write_dirs` and
-    `/dev/null`; `landlock_restrict_self`; then `execve(PATH, ARGV, environ)`.
+    `/dev/null`; `landlock_restrict_self`; then `execve(PATH, ARGV, environ)`. The parent trampoline waits and
+    ends with the child's exit code, or with the signal that killed it (`wait_and_mirror`).
   Any failure prints `QA-E163: OS confinement failed: <detail>` on stderr and exits 125.
 - `macos_profile`: `(version 1)(allow default)(deny network*)(deny file-write*)(allow
   file-write* (literal "/dev/null") (subpath "<w>")...)`; `CONF_TOOL` adds `(deny
   process-fork)(deny file-read* (subpath "<home>"))(allow file-read* (subpath "<r>")...)`;
   `CONF_CHECK` and `CONF_BUILD` add `(deny file-read* (subpath "<p>")...)` for
-  `sensitive_home_paths(home)` = `.ssh .aws .azure .gnupg .config .docker .kube .netrc
-  .git-credentials .pypirc .npmrc .zsh_history .bash_history Library/Keychains` under `home`.
+  `sensitive_home_paths(home)` = the named credential stores and shell files (`.ssh .aws .azure
+  .gnupg .config .docker .kube .netrc .git-credentials .pypirc .npmrc .zsh_history .bash_history
+  .codex .claude .claude.json .gemini .hf-cli .huggingface .qiskit .cache .cargo .gitconfig .zshrc
+  .zprofile .zshenv .profile .bashrc .bash_profile Library/Keychains Library/Application Support
+  Library/Cookies Library/Safari Library/Mail Library/Messages Library/Containers Library/Group
+  Containers`) plus every other existing top-level dot entry of `home` except the toolchain
+  locations `.local .modular .pixi .pyenv .rustup .CFUserTextEncoding` (deny by default for the
+  places CLIs keep tokens), followed by `(allow file-read* ...)` for the `write_dirs` and
+  `read_allow` entries below `home` (the caller passes the main checkout and its `.venv`; the last
+  rule wins).
   Paths are realpaths (the sandbox matches resolved vnodes, so writes through the sandbox's
   `.venv`/`build` symlinks land outside `write_dirs` and are refused); `"` and `\` are escaped.
 - `sandbox_kind`: macOS: `/usr/bin/sandbox-exec` is executable. Linux: spawns
@@ -1045,7 +1056,7 @@ struct Url(Copyable):
     def to_string(self) -> String
 
 def parse_url(url: String) raises -> Url                       # rejects userinfo, fragments are dropped, CR/LF/space refused
-def resolve_reference(base: Url, ref: String) raises -> Url    # RFC 3986 section 5.2 (redirect Location)
+def resolve_reference(base: Url, reference: String) raises -> Url    # RFC 3986 section 5.2 (redirect Location)
 def quote(s: String, safe: String) -> String                   # urllib.parse.quote (always-safe: A-Za-z0-9_.-~)
 def quote_plus(s: String) -> String                            # urllib.parse.quote_plus (space -> "+", safe "")
 def urlencode(names: List[String], values: List[String]) -> String
@@ -2306,6 +2317,9 @@ struct AppOptions(Copyable):
     var verbose: Bool
     var self_binary: String           # for subagent children and `call`
     var deterministic: Bool           # $QUMO_AGENT_DETERMINISTIC=1: fixed clock and ids (tests)
+    var api_key_env: String           # the model endpoint's key variable ("" until the registry is read)
+    # defined in app/options.mojo (so subproc.mojo and env.mojo need not import each other),
+    # re-exported by app/env.mojo; child_flags() gives a child its parent's options (7.1)
 
 struct AppShared(Movable):            # one per process, held as ArcPointer[AppShared]
     var opts: AppOptions
@@ -2321,11 +2335,14 @@ struct AppShared(Movable):            # one per process, held as ArcPointer[AppS
     var alphaxiv: Optional[ArcPointer[AlphaXiv]]
     var alphaxiv_specs: List[ToolSpec]
     var generated: Optional[ArcPointer[GeneratedTools]]   # one per process with every loadable tool; agents filter with specs_for
+    var research: Optional[ArcPointer[ResearchTools]]
     var sandbox_kind: String                               # sandbox_kind(opts.self_binary), probed once
     var toolsmith: Toolsmith
-    var transport: RunStats
+    var transport: RunStats                                # transport counters already reported
     var clock_tick: Int
     var id_counter: Int
+    var tree: List[String]                                 # the top agent and every agent reachable through subagents
+    var secrets: List[String]                              # variable names whose values are redacted from logs
 
 struct AppEnv(AgentEnv):
     var shared: ArcPointer[AppShared]
@@ -2335,9 +2352,12 @@ struct AppEnv(AgentEnv):
     def __init__(out self, shared: ArcPointer[AppShared], agent: String) raises
 
 def make_shared(var opts: AppOptions, top_agent: String) raises -> ArcPointer[AppShared]   # loads config; starts QUMO MCP / alphaXiv / generated tools lazily for the agent tree
+def make_shared_offline(var opts: AppOptions, top_agent: String) raises -> ArcPointer[AppShared]   # the same without a model: `--dry-run`, `list`, `doctor`
+def run_agent_once(shared: ArcPointer[AppShared], agent: String, task: String) raises -> AgentResult  # a fresh run in this process: `run`, each `serve` call, the tests
+def shutdown_shared(shared: ArcPointer[AppShared])         # closes the QUMO MCP session (stdin, SIGTERM, SIGKILL); never raises
 
 # app/commands.mojo
-def main_entry(args: List[String]) -> Int                  # exit code; main.mojo calls exit(main_entry(argv))
+def main_entry(args: List[String]) -> Int                  # exit code; main.mojo calls exit(main_entry(argv)); run_cli is an alias
 
 # app/server.mojo
 struct AgentMcpHandler(McpToolHandler):
@@ -2385,6 +2405,48 @@ when `--replay` was given, else the shared `LlmClient`. `run_subagents` calls
 `run_subagent_children`. The tree's tools are prepared lazily: the QUMO MCP session starts on the
 first agent that needs MCP tools; alphaXiv specs load once when any agent of the delegation tree
 has `research` and the key is set.
+
+### 2.11 As built: additions and deviations reported by the components
+
+Public names the implementation added to the signatures above, and where it differs from the
+text of this document. Everything else in section 2 holds as written.
+
+| Module | Addition or deviation |
+|---|---|
+| `native/spawn` | `resolve_program(path, env, cwd)` (the absolute program a `SpawnSpec` will execute, PATH searched in the child's `env`); `exec_in_main(args)` is the `__exec-in DIR PATH ARG...` trampoline (`chdir` then `execve`) used where `posix_spawn_file_actions_addchdir_np` is missing. |
+| `native/libc` | A `CStr`/`CStrArray` is kept alive with `.keep()` after the C call (4.1 rule 3). Extra constants and `load_*`/`store_*` helpers for the layouts of 4.2; `c_open` and `c_readlink` wrappers. |
+| `net/url` | The parameter of `resolve_reference` is named `reference` (`ref` is a keyword in Mojo 1.2). |
+| `net/fdutil` | `now_ms`, `set_io_timeouts`, `set_cloexec`, `set_nosigpipe`, `poll_one`, `ip_literal_family`: socket helpers shared by `socket.mojo` and `tls.mojo`. |
+| `llm/client` | Retry constants public (`INITIAL_RETRY_DELAY_S`, `MAX_RETRY_DELAY_S`, `MAX_RETRY_AFTER_S`), `MAX_MODEL_BODY_BYTES`, `USER_AGENT`; error messages are clipped to `ERROR_MESSAGE_CODE_POINTS` before redaction. |
+| `mcp/protocol`, `mcp/results` | `tools_list_params_json(cursor)`, `call_params_json(name, args_json)`, `block_text(block)`, `MCP_CLIENT_NAME`/`MCP_CLIENT_VERSION`, `MCP_EMPTY_ERROR_TEXT` (the text of an `isError` result with no content). |
+| `mcp/server` | `handler_rpc_error(code, message)`: a handler raises a JSON-RPC error with it (envelope errors stay inside `handle_line`). |
+| `mcp/stdio_client` | `redact_mcp_text(text)` redacts the secrets of this process from any MCP-derived text; `MAX_TOOL_PAGES` (a server that never ends `tools/list` paging is refused), `CLOSE_GRACE_MS`. |
+| `mcp/http_client` | Timeouts and caps are public constants (`MCP_CONNECT_TIMEOUT_MS`, `MCP_IO_TIMEOUT_MS`, `MCP_SSE_READ_TIMEOUT_MS`, `MCP_MAX_MESSAGE_BYTES`, `MCP_CLOSE_TIMEOUT_MS`); a 404 on a session maps to `SESSION_TERMINATED_CODE`. |
+| `harness/_fmt` | `fmt`, `fmt1`, `fmt2`, `fmt3`: Python `str.format` for the verbatim templates of `texts.mojo` (named fields, one pass, `{{`/`}}`). |
+| `harness/patch` | `malformed_call_message(name, call_id)`: the tool message for a call whose arguments are not a JSON object (B2). |
+| `harness/eviction` | `LARGE_TOOL_RESULTS_PREFIX`, `write_overwrite`, `offload_text`: the single place that writes an evicted result to the virtual file system. |
+| `harness/fs_tools` | The pagination and truncation limits (`TOOL_RESULT_CHARS`, `READ_BUDGET_CHARS`, `MAX_LINE_LENGTH`, `GREP_DEFAULT_MAX_COUNT`) and the helpers `splitlines_keepends`, `media_kind`, `count_occurrences`, `looks_like_regex` are public for the tests. |
+| `harness/tokens` | `count_tokens_list(messages, tools, use_scaling)` and `py_json_dumps_string_ascii`. |
+| `harness/subagents` | `SUBAGENT_RECURSION_LIMIT` (9999) and `count_json_for(name, description, count_parameters)`. |
+| `harness/env` | `SUBAGENT_REQUEST_SCHEMA` and `SUBAGENT_RESULT_SCHEMA` (B.7) are public constants. |
+| `harness/testing` | `FakeEnv` (2.7.12) plus `FakeAgent`, `parse_fake_agents`, `fake_tool_spec`. |
+| `harness/loop` | The recursion error is `QA-E110: ` + A.9 text + ` Hint: raise --recursion-limit` (one period, A.13). |
+| `tools/qumo_mcp` | `default_qumo_bin(root)`: `$QUMO_BIN`, else `<root>/build/qumo`. |
+| `tools/catalog` | `TOOLSMITH_GROUP` and `toolsmith_tool_names()` (the four `toolsmith_*` names, in wire order). |
+| `tools/config` | `SPECS_SCHEMA`, `MODULES_SCHEMA`, `TOOLS_SCHEMA`, `AGENTS_SCHEMA` (the export files are checked against them) and `EXPORT_HINT`. |
+| `tools/repo` | `run_check_refusal(argv, allowed)` and the refusal texts `REFUSED_NO_SANDBOX`, `REFUSED_ARGS`, `REFUSED_UNSANDBOXED`; caps `MAX_LIST_ENTRIES`, `MAX_SEARCH_HITS`, `CHECK_MAX_BYTES`, `CHECK_FSIZE_BYTES`. |
+| `tools/research` | `py_net_error(e)` (urllib-style messages), `error_json`, `research_get_prefixed`, `pypi_info_json`, `is_github_repo`, `github_releases_json`; the golden tests call them without a network. |
+| `toolsmith/manifest` | `MANIFEST_FILE`, `DEFAULT_TOOL_TIMEOUT_S`, `DEFAULT_MAX_OUTPUT_BYTES`, `empty_manifest(store)`, `tool_entry_from_json`, `build_record_from_value`, `display_name`, `is_inside(path, root)`. |
+| `toolsmith/generated` | `generated_suffix(entry)` (B.3), `entry_timeout_s`, `entry_max_output_bytes`, the message-cap bounds, `HINT_REVIEW`, `HINT_UNSANDBOXED`. |
+| `toolsmith/tools` | `ToolCase`, `parse_cases`, `json_equal`, `check_expectation`, `CaseResult`, `CaseRun`, `run_case_list`, `tool_read_allow(repo_root)` and the limits `MAX_CASES`, `BUILD_TIMEOUT_MIN/MAX`, `TEST_TIMEOUT_MIN/MAX`, `BUILD_FSIZE_BYTES`, `TOOL_FSIZE_BYTES`, `REPORT_CAP`, `STDERR_TAIL_CAP`; `SANDBOX_KIND_UNSANDBOXED` is the only value that lets a test run without an OS sandbox. |
+| `toolsmith/templates` | `mojo_string_escape(s)`. |
+| `tool_sdk` | `call_result_json`, `initialize_result_json`, `too_long_reply` and the caps `SDK_MAX_LINE_BYTES` (4 MiB), `SDK_MAX_TEXT_BYTES`, `SDK_TRUNCATION_NOTE`. |
+| `util/jsonx` | `NOT_AN_OBJECT`: the text for "arguments must be a JSON object" (X13). |
+| `app/options` | `AppOptions` lives here (2.10); `DEFAULT_RECURSION_LIMIT`, `DEFAULT_PARALLEL`, `default_options(root, self_binary)`. |
+| `app/env` | `log_line`, `warn_line` (the latter ignores `--quiet`), `tree_of`, `ensure_tls`, `ensure_qumo_mcp`, `make_shared_offline`, `run_agent_once`, `shutdown_shared`; `AppShared` also holds `research`, `tree` and `secrets`. |
+| `app/commands` | `Cli`, `parse_cli`, `usage_error`, `report_error`, `resolve_self_binary` (`$QUMO_AGENT_BIN`, then argv[0], then PATH, then `<root>/build/qumo-agent`), `make_options`, `read_task`, one `cmd_*` per command, `run_cli` (alias of `main_entry`). Errors print through `redact_mcp_text`. |
+| `app/tools_cmd` | `run_tools_command(opts, args, yes)` and `TOOLS_USAGE`. |
+| `app/testing` | `app_binary()` (the test `qumo-agent`, built on demand from `tests/fixtures/app/main_app.mojo`), `app_env`, `run_app`, replay builders. |
 
 ## 3. The harness loop, step by step
 
@@ -2567,7 +2629,9 @@ cut). The third truncation, `read_file`'s 80,000-character page cut, lives in `v
    (`external_call` to OpenSSL fails under both `mojo run` and `mojo build` without
    `-lcrypto`, [tls §2 rule 1]).
 3. Pointers are `Int` addresses; NULL is `Int(0)`. C strings are `CStr` buffers kept alive past
-   the call. C-returned `char*` are copied with `c_string_at` (never via `Optional[CStringSpan]`,
+   the call: Mojo destroys a value right after its last use, even inside the expression that
+   passes `addr()` to C, so every `CStr` and `CStrArray` gets a `.keep()` call after the C call
+   (and a `List[UInt8]` buffer is read back before the end of the function that owns it). C-returned `char*` are copied with `c_string_at` (never via `Optional[CStringSpan]`,
    which crashed in [tls §11 p1c]).
 4. Variadic C functions (`fcntl`, `open`) use `num_fixed_args`.
 5. Weak or optional symbols (`posix_spawn_file_actions_addchdir_np`,
@@ -2612,7 +2676,7 @@ All wrappers return `Int` (C `int`, `ssize_t`, `size_t`, pointers) and take `Int
 | `ssize_t read(int, void*, size_t)` | `def c_read(fd: Int, buf: Int, n: Int) -> Int` | |
 | `ssize_t write(int, const void*, size_t)` | `def c_write(fd: Int, buf: Int, n: Int) -> Int` | EPIPE instead of SIGPIPE (ignored) |
 | `int poll(struct pollfd*, nfds_t, int)` | `def c_poll(fds: Int, n: Int, timeout_ms: Int) -> Int` | `pollfd` 8 bytes `{int fd; short events; short revents}`; `nfds_t` passed as `UInt` (64-bit is safe for macOS `unsigned int`) |
-| `void (*signal(int, void (*)(int)))(int)` | `def c_signal(sig: Int, handler: Int) -> Int` | only `SIG_IGN` (1) for SIGPIPE |
+| `void (*signal(int, void (*)(int)))(int)` | called only in `native/shutdown.mojo` with `abi("C")` handler functions | a no-op handler stands in for `SIG_IGN` on SIGPIPE; a program may declare `signal` with one signature only |
 | `char ***_NSGetEnviron(void)` | `def c_ns_get_environ() -> Int` | macOS only (comptime) |
 | `int access(const char*, int)` | `def c_access(path: Int, mode: Int) -> Int` | `which` |
 | `char *realpath(const char*, char*)` | `def c_realpath(path: Int, out_buf: Int) -> Int` | out buffer of 4096 bytes (PATH_MAX 1024 macOS, 4096 Linux) |
@@ -2762,6 +2826,14 @@ Handshake per connection:
    `QA-E104: TLS handshake with <host> failed: <reason>` where `<reason>` includes the verify
    string (e.g. `certificate has expired (10)`, `hostname mismatch (62)`) and the error queue.
    There is no switch that disables verification.
+
+Shutdown: every child leads its own process group, so the terminal's Ctrl-C never reaches it and a
+`kill` of the parent skips `Child.__deinit__`. `native/shutdown.mojo` keeps a registry of live child
+groups (`spawn` registers, reaping unregisters; a `calloc` block whose address lives in the
+environment variable `QUMO_AGENT_CHILD_REGISTRY`, because a C-ABI handler cannot reach Mojo globals)
+and `main_entry` installs SIGINT, SIGTERM and SIGHUP handlers that send SIGTERM to every registered
+group (a child `qumo-agent` runs the same handler), wait up to 2 s reaping, SIGKILL the rest and
+`_exit(128 + signal)`.
 
 SIGPIPE: `ignore_sigpipe()` at startup on both platforms (OpenSSL's socket BIO uses `write(2)`,
 and child-process pipes raise SIGPIPE on macOS too); macOS sockets also get `SO_NOSIGPIPE`.
@@ -2927,7 +2999,7 @@ against: the hash of the main checkout's `tool_sdk.mojo`, `qumo/ai/json.mojo` an
 | `<sandbox>/agents/mojo/tools/<name>/cases.json` | `toolsmith_new` | test cases |
 | `<sandbox>/agents/mojo/tools/<name>/build/<name>` | `toolsmith_build` | binary (gitignored by the existing `build/` rule) |
 | `<sandbox>/agents/mojo/tools/<name>/build/build.json` | `toolsmith_build` | `BuildRecord {source_sha256, sdk_sha256, binary_sha256, mojo_version, built_at}` |
-| `<sandbox>/agents/mojo/tools/<name>/build/last_test.json` | `toolsmith_test` | `{build: <BuildRecord>, cases_sha256, passed, total, results, at}` |
+| `<sandbox>/agents/mojo/tools/<name>/build/last_test.json` | `toolsmith_test` | `{build: <BuildRecord>, cases_sha256, passed, total, results, at}`; an ordinary file in the open sandbox, so `toolsmith_publish` only uses it as proof that a test was run and for its hashes, never for `passed`, `total` or `description` |
 | `<store>/<name>/<version>-<sha12>/{tool.mojo,cases.json,<name>}` | `toolsmith_publish`, replaced by `tools review` | frozen copy of what was tested; after review, the binary rebuilt from the stored `tool.mojo` |
 | `<store>/manifest.json` | `toolsmith_publish`, `qumo-agent tools review/revoke/remove` | manifest |
 
@@ -2959,7 +3031,7 @@ for agents`) and a valid name (`refused: tool names must match gen_[a-z0-9_]{2,4
 | `toolsmith_new(name, description, source="", cases="", overwrite=false)` | writes `tool.mojo` (template with the name and description when `source` is empty) and `cases.json` (template when empty; must parse as `qumo.tool_cases.v1` with `tool == name`); existing files need `overwrite` | `created agents/mojo/tools/<name>/tool.mojo and cases.json (<n> cases)` or `refused: ...` |
 | `toolsmith_build(name, timeout_s=600)` | `hermetic_build`: `make_temp_dir("qumo-build-")`; copy `<tool dir>/tool.mojo` alone into it; `rec.source_sha256` = hash of that copy; `rec.sdk_sha256 = sdk_sha256(repo_root)`; `run_capture(confine([<repo_root>/.venv/bin/mojo, build, -I, <repo_root>, -I, <repo_root>/agents/mojo, -o, <tmp>/<name>, <tmp>/tool.mojo], CONF_BUILD with write_dirs = [<tmp>, <repo_root>/build/agent-sandbox-cache]), minimal env + TMPDIR=<tmp>/ + MODULAR_CACHE_DIR, cwd = <tmp>, timeout 60..1800 s)`. Never `-I <sandbox>`: the include paths are the main checkout, which no agent can write, so editing the sandbox's `qumo/ai/json.mojo` or `tool_sdk.mojo` changes nothing in the binary. On success copies the binary to `<tool dir>/build/<name>` (`0755`), sets `rec.binary_sha256`, writes `build.json`; the temp dir is removed | `exit <rc>\n<tail 12,000 of stdout+stderr, temp paths shown as agents/mojo/tools/<name>/>`, plus on success `\nbinary: agents/mojo/tools/<name>/build/<name>\nsha256: <hex>` |
 | `toolsmith_test(name, timeout_s=30)` | needs the binary and `build.json` whose `binary_sha256` equals the binary's hash (else `refused: build the tool again`); `run_cases`: per case a fresh `make_temp_dir("qumo-tool-")`, the binary copied into it and hashed (must equal `build.json`), spawned through `McpStdioSession` with empty env, new process group, `stderr = STDIO_PIPE`, `confinement = CONF_TOOL` (6.8); `initialize`, `tools/list` (exactly one tool named `name`, else FAIL), `tools/call`, compare, `close`, remove the dir; per-case timeout 1..120 s; a failing case's line ends with `; stderr: <last 2,000 code points of stderr_tail()>` when non-empty; writes `last_test.json` = `{build, cases_sha256 (of the cases.json used), passed, total, results, at}`. Without an OS sandbox: `refused: no OS sandbox on this machine, so unreviewed tools cannot be tested. Hint: a human can pass --allow-unsandboxed-tool-tests` unless that flag was given | `PASS <p>/<t>` or `FAIL <p>/<t>`, then one line per case `- <name>: ok (<ms> ms)` / `- <name>: <reason>`, capped at 12,000 |
-| `toolsmith_publish(name, version="0.1.0")` | `valid_tool_version(version)` else `refused: version must look like 1.2.3 or 1.2.3-rc1`; needs `last_test.json` with every case passing, `build.binary_sha256` equal to the current binary, `build.source_sha256` equal to the hash of the current `tool.mojo` and `cases_sha256` equal to the hash of the current `cases.json` (else `refused: tool.mojo, cases.json or the binary changed after the last passing toolsmith_test; build and test again`); target `realpath(store) + "/" + entry_dir(name, version, binary_sha256)` must stay inside the store (`check_entry_shape`); copies source, cases and binary there (`0755` binary); adds or replaces the manifest entry with `reviewed: false`, `source_sha256`/`sdk_sha256`/`binary_sha256` from the build record, `published_by = "mojo-toolsmith"`, `sandbox_branch` from `git -C <sandbox> rev-parse --abbrev-ref HEAD` | `published <name> <version> (unreviewed). A human must run: qumo-agent tools review <name>` |
+| `toolsmith_publish(name, version="0.1.0")` | `valid_tool_version(version)` else `refused: version must look like 1.2.3 or 1.2.3-rc1`; needs a `last_test.json` (the hand-writable record: only its hashes count), `build.binary_sha256` equal to the current binary, `build.source_sha256` equal to the hash of the current `tool.mojo` and `cases_sha256` equal to the hash of the current `cases.json` (else `refused: tool.mojo, cases.json or the binary changed after the last passing toolsmith_test; build and test again`); then it re-runs every case itself against the binary (`run_case_list`, confined like `toolsmith_test`, `refused: no OS sandbox ...` when there is none; any failure gives `refused: publish re-ran the cases and <p>/<t> passed`) and takes `tests_passed`, `tests_total` and `description` from that run (the description is the binary's own `tools/list` answer); target `realpath(store) + "/" + entry_dir(name, version, binary_sha256)` must stay inside the store (`check_entry_shape`); copies source, cases and binary there (`0755` binary); adds or replaces the manifest entry with `reviewed: false`, `source_sha256`/`sdk_sha256`/`binary_sha256` from the build record, `published_by = "mojo-toolsmith"`, `sandbox_branch` from `git -C <sandbox> rev-parse --abbrev-ref HEAD` | `published <name> <version> (unreviewed). A human must run: qumo-agent tools review <name>` |
 
 `check_entry_shape(store, e)` (used by publish, `load_manifest`, `verify_entry`, every `tools`
 subcommand and loading): `valid_tool_name(e.name)`, `valid_tool_version(e.version)`, `e.dir ==
@@ -3087,8 +3159,9 @@ Consequences: no confined process can write `<store>/manifest.json`, a store bin
 `build/qumo-agent`, the main checkout or anything else outside its write list, so it cannot
 mark a tool reviewed, swap a reviewed binary or run a privileged `qumo-agent tools review`
 that persists anything; it cannot exfiltrate over the network. Residual exposure: `CONF_CHECK`
-and `CONF_BUILD` can still read non-sensitive files under `$HOME` (the repository lives there),
-and their output reaches the model; on Linux, Landlock is an allow-list, so reads are allowed
+and `CONF_BUILD` can still read files under `$HOME` that are neither a top-level dot entry nor on
+the named `Library` list (the repository lives there; ordinary documents), and their output
+reaches the model; on Linux, Landlock is an allow-list, so reads are allowed
 on `/` for those two profiles and `sensitive_home_paths` are not denied there (documented in
 risk 10.1.8). Without any OS sandbox (`sandbox_kind == "none"`), confined runs are refused unless
 a human passes `--allow-unsandboxed-tool-tests` on the command line (it is never accepted from
@@ -3244,7 +3317,11 @@ retyped). Goldens are committed; regenerating them needs `agents/.venv`.
 
 ### 8.3 Live checks (end of integration, need network and keys)
 
-Run on macOS arm64 and on one Linux machine (x86_64, glibc >= 2.29):
+Run on macOS arm64 and on one Linux machine (x86_64, glibc >= 2.29). `make agents-mojo-live`
+runs `tests/test_live_net.mojo` (1, 2), `test_live_runs.mojo` (3 to 6) and
+`test_live_orchestration.mojo` (7 to 10; 8 needs `QUMO_LIVE_AUTORESEARCH=1`, 9 needs
+`QUMO_LIVE_TOOLSMITH=1`). Each prints `SKIP` without `QUMO_LIVE=1`, its keys or a network;
+`make test-agents-mojo` never runs them. Item 11 is a manual comparison.
 
 1. `build/qumo-agent doctor` prints only `[ok]` (with `ALPHAXIV_API_KEY` and `GITHUB_TOKEN` set).
 2. TLS with the default trust store to `openrouter.ai`, `pypi.org`, `api.github.com`,
@@ -3285,7 +3362,7 @@ of every caller, before code changes.
 | T | QUMO tools, config, Python export | `qumo_agent/tools/*`; `agents/qumo_agents/export.py`, `agents/qumo_agents/registry.py`, `agents/qumo_agents/tools/alphaxiv.py`, `agents/tests/test_agents.py`; regenerated `agents/prompts/*`; `tests/test_tools_*.mojo`; `tests/fixtures/tools/` |
 | S | Toolsmith | `qumo_agent/tool_sdk.mojo`, `qumo_agent/toolsmith/*`; `specs/mojo-toolsmith.json`, `prompts/mojo-toolsmith.role.md`; `tools/README.md`, `tools/gen_bitstring_stats/*`; `tests/test_toolsmith_*.mojo`; `tests/fixtures/toolsmith/` |
 | A | App and CLI | `qumo_agent/app/*`; `tests/test_app_*.mojo`; `tests/fixtures/app/` (including a copy of `replay_bell.jsonl`) |
-| I | Integration (last) | `main.mojo`, `qumo_agent/__init__.mojo`, `LICENSES/langchain-MIT.txt`, `README.md` (agents/mojo); repository `Makefile`, `NOTICE`, `README.md`, `docs/AGENTS.md`, `docs/ERRORS.md`; deletion of `qumo_agent/{agent,config,llm,mcp_client,proc,server}.mojo` and `tests/test_{agent_replay,guided,llm,mcp_client,proc,serve_call}.mojo`, `tests/fixtures/{guided_descriptions.json,replay_bell.jsonl}` |
+| I | Integration (last) | `main.mojo`, `qumo_agent/__init__.mojo`, `LICENSES/langchain-MIT.txt`, `README.md` (agents/mojo), `tests/test_live_*.mojo`, `tests/support/live.mojo`; repository `Makefile`, `NOTICE`, `README.md`, `docs/AGENTS.md`, `docs/ERRORS.md` (generated: its `QA-E1xx` section is written in `qumo/ai/describe.mojo`, `_agent_errors_markdown`, and regenerated with `QUMO_UPDATE_DOCS=1 .venv/bin/mojo run -I . tests/test_mcp.mojo`); deletion of `qumo_agent/{agent,config,llm,mcp_client,proc,server}.mojo` and `tests/test_{agent_replay,guided,llm,mcp_client,proc,serve_call}.mojo`, `tests/fixtures/{guided_descriptions.json,replay_bell.jsonl}` |
 
 Each subpackage's `__init__.mojo` is owned by the subpackage's component and contains only a
 docstring.
@@ -3356,7 +3433,7 @@ Makefile changes (I): `test-agents-mojo` builds `build/qumo-agent` and
 | 5 | Concurrency differs: tools of one turn run sequentially; only `task` fans out (processes). Wall time can exceed Python for turns with several slow network tools. | Results are identical by construction (X1); a later version can fan out other slow tools to children the same way. |
 | 6 | Persistent QUMO MCP session (X3) could diverge from Python if the server ever keeps state between calls. | Test 8.2 compares results of the same call sequence with a fresh session per call. |
 | 7 | Subagent children cost a process start and a fresh QUMO MCP server each. | Small next to model latency; `--parallel 1` falls back to inline. |
-| 8 | Model-written code runs before any human review: `toolsmith_test` runs the binary the agent just built, `toolsmith_build` runs the compiler over agent-written source, and `run_check` inside a sandbox runs agent-written files (`mojo run`, pytest). Unconfined, that code could rewrite the manifest (`reviewed: true`), run `tools review`, replace store binaries or `build/qumo-agent`, read dotfiles and use the network. Reviewed tools also run with the user's privileges. | K5/6.8: the toolsmith has no `run_check`; every such run is confined (`sandbox-exec` on macOS, user+network namespaces and Landlock on Linux) with writes limited to temp dirs (and the sandbox for `run_check`), no network, no fork for tools, CPU/file-size rlimits; hermetic builds against the main checkout; review rebuilds the binary from the displayed source; private hashed copies are executed. Residual: on a machine without either sandbox, unreviewed code runs only with the human flag `--allow-unsandboxed-tool-tests` and reviewed tools run unconfined; `CONF_CHECK`/`CONF_BUILD` can read non-sensitive files under `$HOME` (and on Linux the sensitive ones too) and return them to the model; `sandbox-exec` is deprecated by Apple and could disappear (then `sandbox_kind` is `none`). |
+| 8 | Model-written code runs before any human review: `toolsmith_test` runs the binary the agent just built, `toolsmith_build` runs the compiler over agent-written source, and `run_check` inside a sandbox runs agent-written files (`mojo run`, pytest). Unconfined, that code could rewrite the manifest (`reviewed: true`), run `tools review`, replace store binaries or `build/qumo-agent`, read dotfiles and use the network. Reviewed tools also run with the user's privileges. | K5/6.8: the toolsmith has no `run_check`; every such run is confined (`sandbox-exec` on macOS, user+network namespaces and Landlock on Linux) with writes limited to temp dirs (and the sandbox for `run_check`), no network, no fork for tools, CPU/file-size rlimits; hermetic builds against the main checkout; review rebuilds the binary from the displayed source; private hashed copies are executed. Residual: on a machine without either sandbox, unreviewed code runs only with the human flag `--allow-unsandboxed-tool-tests` and reviewed tools run unconfined; `CONF_CHECK`/`CONF_BUILD` can read ordinary files under `$HOME` that are not top-level dot entries or the named `Library` directories (and on Linux the sensitive ones too) and return them to the model; `sandbox-exec` is deprecated by Apple and could disappear (then `sandbox_kind` is `none`). |
 | 9 | Recursion limit 9999 for subagents allows very long, costly runs (parity). | Stats on stderr; a cost cap is an open question. |
 | 10 | Mojo dialect drift (1.2 pinned) and the "one FFI signature per symbol" rule: a std module could bind a libc symbol differently. | Harness no longer uses `std.os.process`/`std.subprocess`; lint test; the guide is pinned. |
 | 11 | The token heuristic must count tools as Python's `tool_call_schema` form, which differs from the wire form for every tool (property `title`s of pydantic tools, raw MCP `inputSchema`). | `ToolSpec.count_json` (2.7.6) from the export's `count_parameters`, the golden `COUNT_PARAMETERS` and the raw MCP schemas; `token_counts.json` includes tools. Remaining gap: a QUMO MCP or alphaXiv server whose `tool.description` differs from the guided wire description in Python (not observed); bounded and harmless at 170,000. |
@@ -3906,8 +3983,9 @@ extensions (lower-cased suffix; `.mkv` is video):
 
 ### A.13 Recursion limit
 
-`RECURSION_LIMIT` in A.9, raised as `QA-E110: ` + that text + `. Hint: raise --recursion-limit`
-(top level) or as is inside subagents (limit 9999).
+`RECURSION_LIMIT` in A.9 already ends with a period, so the error is `QA-E110: ` + that text +
+` Hint: raise --recursion-limit` (top level; one period, not two) or the text as is inside
+subagents (limit 9999).
 
 ## Appendix B. New texts written for this port
 

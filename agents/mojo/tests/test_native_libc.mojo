@@ -3,6 +3,7 @@
 from std.testing import assert_equal, assert_true, assert_false
 from std.os import rmdir, getenv
 
+from qumo_agent.native.shutdown import ignore_sigpipe_signal
 from qumo_agent.native.libc import *
 
 
@@ -195,7 +196,7 @@ def test_pipes_poll_sigpipe() raises:
     assert_equal(c_read(p[0], buf_addr(buf), 16), -1)
     assert_equal(errno(), EAGAIN)
     # With SIGPIPE ignored, writing to a pipe without readers fails with EPIPE.
-    _ = c_signal(SIGPIPE, SIG_IGN)
+    ignore_sigpipe_signal()
     _ = c_close(p[0])
     assert_equal(c_write(p[1], msg.addr(), 4), -1)
     assert_equal(errno(), EPIPE)

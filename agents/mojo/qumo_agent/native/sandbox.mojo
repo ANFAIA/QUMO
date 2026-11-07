@@ -7,15 +7,19 @@ shell): `confine(spec, c, self)` rewrites a `SpawnSpec` into
 
 - macOS: `setrlimit`, then `execve("/usr/bin/sandbox-exec", ["sandbox-exec", "-p",
   macos_profile(c), PATH, ARGV...], environ)`.
-- Linux: `setrlimit`, `unshare(CLONE_NEWUSER | CLONE_NEWNET)` (no network: the new
+- Linux: `fork`; in the child (the only thread: `unshare(CLONE_NEWUSER)` fails with
+  EINVAL in a multithreaded process and a Mojo binary starts runtime threads before
+  `main`) `setrlimit`, `unshare(CLONE_NEWUSER | CLONE_NEWNET)` (no network: the new
   namespace has only a down loopback), `prctl(PR_SET_NO_NEW_PRIVS)`, a Landlock
   ruleset over every file-system right of the running ABI, `landlock_restrict_self`,
-  then `execve(PATH, [PATH, ARGV...], environ)`.
+  then `execve(PATH, [PATH, ARGV...], environ)`. The trampoline waits and ends with the
+  child's exit code, or with the signal that killed it (`wait_and_mirror`).
 
 Profiles (6.8): `CONF_TOOL` (generated tool binaries: writes only to `write_dirs`,
 no reads under `$HOME` except `read_allow`, no network, no fork on macOS),
 `CONF_BUILD` and `CONF_CHECK` (writes only to `write_dirs`, no network, no reads of
-`sensitive_home_paths` on macOS). Any failure in the trampoline prints
+`sensitive_home_paths` on macOS: named credential stores plus every other top-level
+dot entry of `$HOME` except a few toolchain locations). Any failure in the trampoline prints
 `QA-E163: OS confinement failed: <detail>` on stderr and exits 125.
 
 RLIMIT_CPU caveat (measured on macOS 26 with Mojo 1.2): a Mojo-built program
@@ -45,11 +49,16 @@ from qumo_agent.native.libc import (
     c_access,
     c_close,
     c_execve,
+    c_exit_now,
+    c_fork,
+    c_getpid,
+    c_kill,
     c_open,
     c_prctl,
     c_setrlimit,
     c_syscall4,
     c_unshare,
+    c_waitpid,
     c_write,
     X_OK,
     EINTR,
@@ -61,6 +70,7 @@ from qumo_agent.native.libc import (
     CLONE_NEWUSER,
     CLONE_NEWNET,
     PR_SET_NO_NEW_PRIVS,
+    load_i32,
     SYS_LANDLOCK_CREATE_RULESET,
     SYS_LANDLOCK_ADD_RULE,
     SYS_LANDLOCK_RESTRICT_SELF,
@@ -101,7 +111,7 @@ comptime _LL_RULE_PATH_BENEATH = 1
 struct Confinement(Copyable):
     var profile: Int               # CONF_*
     var write_dirs: List[String]   # realpaths of the only subtrees the child may write (plus /dev/null)
-    var read_allow: List[String]   # CONF_TOOL: the only subtrees readable below `home`
+    var read_allow: List[String]   # CONF_TOOL: the only subtrees readable below `home`; CONF_CHECK/CONF_BUILD: kept readable inside a denied dir
     var home: String               # realpath of $HOME of this process ("" when unset)
     var cpu_s: Int                 # RLIMIT_CPU soft and hard, 0 = unchanged
     var fsize_bytes: Int           # RLIMIT_FSIZE soft and hard, 0 = unchanged
@@ -164,30 +174,67 @@ def confinement_from_json(text: String) raises -> Confinement:
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
+comptime _SENSITIVE_HOME_NAMES: List[String] = [
+    ".ssh", ".aws", ".azure", ".gnupg", ".config", ".docker", ".kube", ".netrc",
+    ".git-credentials", ".pypirc", ".npmrc", ".zsh_history", ".bash_history", "Library/Keychains",
+    # Credential stores of other CLIs and shells (found readable on a typical developer Mac).
+    ".codex", ".claude", ".claude.json", ".claude.json.backup", ".gemini", ".hf-cli", ".huggingface",
+    ".qiskit", ".cache", ".cargo", ".gitconfig", ".zshrc", ".zprofile", ".zshenv", ".profile",
+    ".bashrc", ".bash_profile",
+    "Library/Application Support", "Library/Cookies", "Library/Safari", "Library/Mail",
+    "Library/Messages", "Library/Containers", "Library/Group Containers",
+]
+
+# Top-level entries of $HOME that start with "." and are not denied: language and
+# toolchain locations a confined build or check has to read (uv-managed Python lives in
+# ~/.local/share/uv) and a file CoreFoundation reads.
+comptime _HOME_DOT_ALLOWED: List[String] = [".local", ".modular", ".pixi", ".pyenv", ".rustup", ".CFUserTextEncoding"]
+
+
+def _home_deny_entry(base: String, rel: String, mut out: List[String]):
+    var p = base + "/" + rel
+    var shown = p
+    if exists(p):
+        try:
+            shown = realpath_strict(p)
+        except:
+            pass
+    out.append(shown)
+    if shown != p:
+        out.append(p)
+
+
 def sensitive_home_paths(home: String) -> List[String]:
     """Paths under `home` denied for reads under CONF_CHECK and CONF_BUILD (macOS):
-    .ssh .aws .azure .gnupg .config .docker .kube .netrc .git-credentials .pypirc
-    .npmrc .zsh_history .bash_history Library/Keychains. An existing path is given as
+    the named credential stores and shell files in `_SENSITIVE_HOME_NAMES` (.ssh .aws
+    .config .codex .claude .gemini .cache ... Library/Keychains ...), then every other
+    existing top-level dotfile or dot directory of `home` except `_HOME_DOT_ALLOWED`
+    (deny by default for the places CLIs keep tokens). An existing path is given as
     its realpath (the sandbox matches resolved paths); a missing one as `home/name`."""
     var out = List[String]()
     if home.byte_length() == 0:
         return out^
-    var names: List[String] = [
-        ".ssh", ".aws", ".azure", ".gnupg", ".config", ".docker", ".kube", ".netrc",
-        ".git-credentials", ".pypirc", ".npmrc", ".zsh_history", ".bash_history", "Library/Keychains",
-    ]
     var base = home if not home.endswith("/") else String(home[byte = 0 : home.byte_length() - 1])
+    for n in materialize[_SENSITIVE_HOME_NAMES]():
+        _home_deny_entry(base, n, out)
+    var names: List[String]
+    try:
+        names = listdir(base)
+    except:
+        names = List[String]()
+    sort(names)
     for n in names:
-        var p = base + "/" + n
-        var shown = p
-        if exists(p):
-            try:
-                shown = realpath_strict(p)
-            except:
-                pass
-        out.append(shown)
-        if shown != p:
-            out.append(p)
+        if not n.startswith("."):
+            continue
+        var known = False
+        for k in materialize[_SENSITIVE_HOME_NAMES]():
+            if k == n:
+                known = True
+        for k in materialize[_HOME_DOT_ALLOWED]():
+            if k == n:
+                known = True
+        if not known:
+            _home_deny_entry(base, n, out)
     return out^
 
 
@@ -239,7 +286,8 @@ def macos_profile(c: Confinement) raises -> String:
     (literal "/dev/null") (subpath "<w>")...)`, then for CONF_TOOL `(deny
     process-fork)(deny file-read* (subpath "<home>"))(allow file-read* (subpath
     "<r>")...)`, for CONF_CHECK and CONF_BUILD `(deny file-read* (subpath "<p>")...)`
-    over `sensitive_home_paths(home)`."""
+    over `sensitive_home_paths(home)`, then `(allow file-read* ...)` for the `write_dirs` and
+    `read_allow` entries below `home`."""
     if c.profile != CONF_CHECK and c.profile != CONF_BUILD and c.profile != CONF_TOOL:
         raise Error(_CONFINE_FAILED + "unknown profile " + String(c.profile))
     var s = String("(version 1)(allow default)(deny network*)(deny file-write*)")
@@ -263,6 +311,21 @@ def macos_profile(c: Confinement) raises -> String:
             for p in paths:
                 s += " (subpath " + _sbpl_string(p) + ")"
             s += ")"
+            # What the caller names (the sandbox, temp and cache dirs, the toolchain) stays
+            # readable even when it lies inside a denied directory; the last rule wins.
+            var reallow = List[String]()
+            var prefix = c.home if c.home.endswith("/") else c.home + "/"
+            for w in c.write_dirs:
+                if w.startswith(prefix):
+                    reallow.append(w)
+            for r in c.read_allow:
+                if r.startswith(prefix):
+                    reallow.append(r)
+            if len(reallow) > 0:
+                s += "(allow file-read*"
+                for r in reallow:
+                    s += " (subpath " + _sbpl_string(r) + ")"
+                s += ")"
     return s^
 
 
@@ -448,12 +511,62 @@ def _linux_confine(c: Confinement) raises:
     _ = c_close(ruleset)
 
 
+def wait_and_mirror(pid: Int) -> Int:
+    """Waits for the forked child `pid` and ends like it did: returns its exit code, or
+    when it was killed by a signal sends that signal to this process (then, should it
+    survive, returns 128 + signal), so the caller of the trampoline sees the same wait
+    status as with a direct exec (an RLIMIT_CPU kill is `-SIGKILL`, not 125)."""
+    var st = List[UInt8](length=8, fill=0)
+    while True:
+        var r = c_waitpid(pid, buf_addr(st), 0)
+        if r == pid:
+            break
+        if r < 0 and errno() != EINTR:
+            _ = len(st)
+            return _fail(_errno_text("waitpid", errno()))
+    var status = load_i32(buf_addr(st))
+    _ = len(st)
+    var sig = status & 0x7F
+    if sig == 0:
+        return (status >> 8) & 0xFF
+    _ = c_kill(c_getpid(), sig)
+    return 128 + sig
+
+
+def _linux_exec_confined(conf: Confinement, path: String, rest: List[String]) -> Int:
+    """Linux: runs in a freshly forked, single-threaded child (see `confine_main`):
+    rlimits, user and network namespaces, Landlock, then execve. Never returns on
+    success; returns 125 after printing QA-E163."""
+    try:
+        if conf.cpu_s > 0:
+            _set_limit(RLIMIT_CPU, conf.cpu_s)
+        if conf.fsize_bytes > 0:
+            _set_limit(RLIMIT_FSIZE, conf.fsize_bytes)
+        _linux_confine(conf)
+    except e:
+        return _fail(String(e))
+    var env = CStrArray(environ_list())
+    var argv = List[String]()
+    argv.append(path)
+    for r in rest:
+        argv.append(r)
+    var p = CStr(path)
+    var av = CStrArray(argv)
+    _ = c_execve(p.addr(), av.addr(), env.addr())
+    var e = errno()
+    p.keep()
+    av.keep()
+    env.keep()
+    return _fail(_errno_text("execve " + path, e))
+
+
 def confine_main(args: List[String]) -> Int:
     """Body of `qumo-agent __confine CONF_JSON PATH ARGV...`. `args` is the full argv
     (`args[1] == "__confine"`) or starts at "__confine". Applies the rlimits and the
     OS sandbox, then execs PATH with argv [PATH, ARGV...] and this process's
     environment. Returns only on failure: 125, after printing
-    `QA-E163: OS confinement failed: <detail>` on stderr."""
+    `QA-E163: OS confinement failed: <detail>` on stderr. On Linux the work happens in
+    a forked child and the return value mirrors the child's exit status."""
     var k = -1
     if len(args) > 1 and args[1] == "__confine":
         k = 1
@@ -473,6 +586,17 @@ def confine_main(args: List[String]) -> Int:
     var rest = List[String]()
     for i in range(k + 3, len(args)):
         rest.append(args[i])
+    if not is_macos():
+        # unshare(CLONE_NEWUSER) fails with EINVAL in a multithreaded process, and a Mojo
+        # binary starts runtime threads before main. A forked child has only the calling
+        # thread, so the namespaces, Landlock and the exec happen there; this process
+        # waits and mirrors the child's status (the harness kills the whole process group).
+        var child = c_fork()
+        if child < 0:
+            return _fail(_errno_text("fork", errno()))
+        if child == 0:
+            c_exit_now(_linux_exec_confined(conf, path, rest))
+        return wait_and_mirror(child)
     try:
         if conf.cpu_s > 0:
             _set_limit(RLIMIT_CPU, conf.cpu_s)
@@ -481,39 +605,22 @@ def confine_main(args: List[String]) -> Int:
     except e:
         return _fail(String(e))
     var env = CStrArray(environ_list())
-    if is_macos():
-        var profile: String
-        try:
-            profile = macos_profile(conf)
-        except e:
-            var t = String(e)
-            if t.startswith(_CONFINE_FAILED):
-                return _fail(String(t[byte = _CONFINE_FAILED.byte_length() :]))
-            return _fail(t)
-        var argv: List[String] = ["sandbox-exec", "-p", profile, path]
-        for r in rest:
-            argv.append(r)
-        var p = CStr(_SANDBOX_EXEC)
-        var av = CStrArray(argv)
-        _ = c_execve(p.addr(), av.addr(), env.addr())
-        var e = errno()
-        p.keep()
-        av.keep()
-        env.keep()
-        return _fail(_errno_text("execve " + String(_SANDBOX_EXEC), e))
+    var profile: String
     try:
-        _linux_confine(conf)
+        profile = macos_profile(conf)
     except e:
-        return _fail(String(e))
-    var argv = List[String]()
-    argv.append(path)
+        var t = String(e)
+        if t.startswith(_CONFINE_FAILED):
+            return _fail(String(t[byte = _CONFINE_FAILED.byte_length() :]))
+        return _fail(t)
+    var argv: List[String] = ["sandbox-exec", "-p", profile, path]
     for r in rest:
         argv.append(r)
-    var p = CStr(path)
+    var p = CStr(_SANDBOX_EXEC)
     var av = CStrArray(argv)
     _ = c_execve(p.addr(), av.addr(), env.addr())
     var e = errno()
     p.keep()
     av.keep()
     env.keep()
-    return _fail(_errno_text("execve " + path, e))
+    return _fail(_errno_text("execve " + String(_SANDBOX_EXEC), e))
