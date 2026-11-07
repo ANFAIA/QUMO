@@ -3,7 +3,8 @@
 `ppo/rollout_stats.json` was produced offline with the real qiskit-gym environments and the real twisterl collector and
 evaluator on fixed explicit f32 weights, for `permutation line:4`, `linear_function ring:4`, `clifford line:3` and
 `pauli_network line:3` at three difficulties each. This test loads the same weights, runs the Mojo `collect` (5,000
-episodes) and `evaluate` (20,000 episodes, deterministic and sampled with 10 searches, as 20 blocks of 1,000), and
+episodes) and `evaluate` (20,000 episodes, deterministic and sampled with 10 searches, as 20 blocks of 1,000; 200,000
+for `pauli_network line:3` d=16, whose reference holds 200,000 deterministic and 1,000,000 sampled episodes), and
 requires, at 4 sigma:
 
   * every collector mean (`rets`, `advs`, `values`, `rewards`, `old_lp`, fraction of all-masked rows): two-sample
@@ -37,6 +38,7 @@ from qumo.rl.testutil import (
 )
 
 comptime Z_MAX = 4.0
+comptime MAX_EVAL_BLOCKS = 200
 
 
 def make_env(kind_name: String, topo: String, difficulty: Int) raises -> TrainEnv:
@@ -210,8 +212,11 @@ def check_collector(
 def check_eval(
     env: TrainEnv, net: BasicNet, rf: JsonValue, tag: String, deterministic: Bool, searches: Int, seed: UInt64, mut zl: Zlog
 ) raises:
-    var blocks = rf.get("blocks").as_int()
-    var per = rf.get("episodes").as_int() // blocks
+    # The reference runs 20 blocks of 1,000 episodes, except pauli_network line:3 d=16 (200 deterministic, 1,000 sampled
+    # blocks: its success rate is about 5.5e-4, so 20,000 episodes see only about 11 successes). Our side runs at most
+    # 200 blocks (200,000 episodes, about 15 s sampled on 4 cores); the two-sample z uses each side's own error.
+    var per = rf.get("episodes").as_int() // rf.get("blocks").as_int()
+    var blocks = min(rf.get("blocks").as_int(), MAX_EVAL_BLOCKS)
     var cfg = PPOConfig()
     cfg.seed = seed
     cfg.num_cores = 4

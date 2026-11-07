@@ -50,7 +50,7 @@ Trims: `envs/reset_exact.json` keeps every scramble case, `pauli_tableau` cases 
 | `ppo/policy_forward.json` | trimmed copy of `rlport/ppo_golden/policy_forward.json` | d9f99464827ff074 | 18372 | 9727 |  | `8000446664ea61ac` |
 | `ppo/ppo_update.json` | trimmed copy of `rlport/ppo_golden/ppo_update.json` | cac98d8d28f02b2d | 42116 | 19078 |  | `03b8c79ef9d04163` |
 | `ppo/py_curve.json` | Python synth/train.py 400 s runs (--seed 1 --cores 4, defaults otherwise) of perm grid:3x3 and lf grid:2x3, promotions read from log.jsonl | - | - | 6143 | oracle (f) | `2aa3dd03d15ddbf7` |
-| `ppo/rollout_stats.json` | real qiskit-gym 0.4.1 env + real twisterl 0.5.1 PPOCollector / evaluate on fixed explicit f32 weights (E=12, common [8], torch default init x3, torch.manual_seed 101..104); 5,000 single-episode collect() calls and 20 x 1000 evaluate() episodes per (config, difficulty), deterministic and sampled x10 | - | - | 46078 | oracle (b) | `a61797e49959f8f5` |
+| `ppo/rollout_stats.json` | real qiskit-gym 0.4.1 env + real twisterl 0.5.1 PPOCollector / evaluate on fixed explicit f32 weights (E=12, common [8], torch default init x3, torch.manual_seed 101..104); 5,000 single-episode collect() calls and 20 x 1000 evaluate() episodes per (config, difficulty), deterministic and sampled x10 (pauli_network line:3 d=16: 200 x 1000 deterministic and 1000 x 1000 sampled, regenerated later with the same weights and protocol) | - | - | 46369 | oracle (b) | `6f7a8566f4e32855` |
 | `ppo/safetensors_header.json` | trimmed copy of `rlport/ppo_golden/safetensors_header.json` | 1c83d48bc157f0ee | 1130 | 739 |  | `08330bcb836c028b` |
 | `ppo/tiny_policy.safetensors` | verbatim copy of `rlport/ppo_golden/tiny_policy.safetensors` | 9d66dc76f30f14ae | 1252 | 1252 | verbatim | `9d66dc76f30f14ae` |
 | `route/jobs_stats.json` | Python route/circuits.py build_jobs(31, 2000, max_n=30, scale=S) for S = 0.5 and 1.0, summarised as ECDF knots and exact histograms | - | - | 32578 | oracle (c) | `7b26e2245aa16107` |
@@ -63,7 +63,7 @@ Trims: `envs/reset_exact.json` keeps every scramble case, `pauli_tableau` cases 
 | `torch/ppo_route_golden.json` | trimmed copy of `rlport/torch_golden/ppo_route_golden.json` | aee551081c2cce5d | 268562 | 166746 |  | `02372b954a557394` |
 | `torch/synth_ppo_golden.json` | trimmed copy of `rlport/torch_golden/synth_ppo_golden.json` | d184a63f4f4d340b | 50670 | 32536 |  | `337351afbf5ef064` |
 
-Total fixture payload: 1501089 bytes (budget 2,000,000).
+Total fixture payload: 1501380 bytes (budget 2,000,000).
 
 Spec archive: `training/ai_transpiler/spec/{ENVS,PPO,TORCH,REPO}.md` are verbatim copies of the research reports `envs.md`, `ppo.md`, `torch.md`, `repo.md`.
 
