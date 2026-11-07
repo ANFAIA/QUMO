@@ -118,6 +118,21 @@ seeding and JSON conventions.
   and keeps one layout: a region exits with the layout it entered with, and
   `verify_program` checks the skeleton, every edge and the blocks it can.
 
+## 3b. AI-transpiler training (`qumo/rl`)
+
+Training-only library, never imported by `qumo/compiler` (the runtime inference stack stays
+untouched by it). It is pure Mojo, with no Python, Rust, torch or numpy: portable SIMD f32
+kernels (`tensor`, `optim`, `rlrng`), the synthesis network and its PPO loss (`nn`, `loss`),
+native ports of the four synthesis environments (`topology`, `symmetry`, `gateset`,
+`synth_env`), the PPO collector, evaluator and trainer (`ppo`), the model-container writer
+with atomic directory swaps, INDEX writer and verifier (`container`, `digest`, `f16`), run
+directories, checkpoints and exporters (`checkpoint`, `export_synth`, `export_route`), the
+router's behaviour-cloning and PPO trainers (`teacher_data`, `router_net`, `router_loss`, `bc`,
+`route_ppo`), circuit-family and topology generators (`targets`, `jobs`), block evaluation
+(`eval_blocks`) and the synthesis driver and campaign (`synth_train`, `campaign`). The drivers
+are thin mains in `training/ai_transpiler` (`make train-ai`). Results are independent of the
+core count (fixed seed tree and reduction order). Design: `training/ai_transpiler/MOJO_PORT.md`.
+
 ## 4. Execution (`qumo/exec`)
 
 * **Primitives**: `EstimatorPub(circuit, observables, parameter_sets, precision)`

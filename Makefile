@@ -1,7 +1,8 @@
 # QUMO build & test entry points.
 MOJO ?= .venv/bin/mojo
 PY ?= bench/.venv/bin/python
-TESTS := $(wildcard tests/test_*.mojo)
+# make test skips the slow statistical and end-to-end RL files (make test-rl-slow runs them)
+TESTS := $(filter-out %_slow.mojo tests/test_rl_smoke.mojo tests/test_rl_e2e.mojo,$(wildcard tests/test_*.mojo))
 
 .PHONY: all setup setup-py test cli py bench-sv bench-neutral bench-charts benchpress clean examples examples-all examples-gpu test-py
 
@@ -63,127 +64,86 @@ agents-doctor:  ## check keys, the MCP server and the back-end CLIs the agents n
 	bin/qumo-agents doctor
 
 # ---------------------------------------------------------------- AI transpiler (docs/AI_TRANSPILER.md)
-# Models live in models/ai_transpiler/{synth,route}/ with an INDEX.json
-# registry (sha256 per file); the Mojo loader re-checks an FNV-1a checksum.
-# Training needs a separate venv with qiskit-gym 0.4.1 / twisterl 0.5.1 / torch
-# (AI_TRAIN_PY); it is never part of `make test`.
-AI_TRAIN_PY ?= training/ai_transpiler/.venv/bin/python
-# hard wall-clock caps: all synthesis models 8 h, the router 3 h
+# Models live in models/ai_transpiler/{synth,route}/ with an INDEX.json registry (sha256 per file); the Mojo
+# loader re-checks an FNV-1a checksum. Training is native Mojo (qumo/rl, training/ai_transpiler): the training
+# targets run no Python, no Rust and no torch (`make check-pure-mojo` enforces it). None of this is part of
+# `make test` except the fast `tests/test_rl_*.mojo` files.
+AI_BUILD ?= build/ai_train
+AI_CORES ?= 4
+# two lanes share the same pool threads and each runs about 0.69x slower (MOJO_PORT.md section 3, rule 8)
+AI_LANES ?= 1
+# hard wall-clock cap of the whole synthesis campaign (the shipped budgets total 22,200 s)
 AI_SYNTH_BUDGET_S ?= 28800
-AI_ROUTE_BUDGET_S ?= 10800
+# behaviour-cloning wall-clock budget per round (train_route stops after the epoch that crosses it)
+AI_ROUTE_BC_BUDGET_S ?= 1800
+AI_ROUTE_WORK ?= $(AI_BUILD)/route
+AI_ROUTE_ID ?= route_mlp_h64_v1
 AI_BENCH_ARGS ?= --sdks qumo,qumo-ai,qiskit,tket --levels default,max --max-qubits 14
+AI_TOOLS := route_tool train_route export_route train_synth export_synth eval_synth eval_blocks train_all models_verify train_route_ppo make_fixtures
 
-.PHONY: models-verify train-ai train-ai-synth train-ai-route bench-ai
+.PHONY: models-verify train-ai train-ai-synth train-ai-route train-ai-smoke train-ai-route-ppo ai-tools bench-ai \
+	test-rl test-rl-slow check-pure-mojo bench-rl
 
-define MODELS_VERIFY_PY
-import hashlib, json, os, sys
-root = os.environ.get("QUMO_MODEL_DIR") or "models/ai_transpiler"
-def sha(p):
-    h = hashlib.sha256()
-    with open(p, "rb") as f:
-        for b in iter(lambda: f.read(1 << 20), b""):
-            h.update(b)
-    return h.hexdigest()
-def pairs(node, base, out):
-    # collect (path, sha256) pairs from any INDEX.json layout:
-    # {"dir": d, "sha256": h} (h of d/weights.bin, the qumo registry layout),
-    # {"path"|"file": p, "sha256": h}, {"dir": d, "sha256": {name: h}},
-    # {"files": {p: h}} or {"files": [{"path": p, "sha256": h}]}
-    if isinstance(node, list):
-        for x in node:
-            pairs(x, base, out)
-        return
-    if not isinstance(node, dict):
-        return
-    d = node.get("dir") or node.get("path_dir") or ""
-    h = node.get("sha256")
-    p = node.get("path") or node.get("file")
-    if isinstance(h, str) and isinstance(p, str):
-        out.append((os.path.join(base, p), h))
-    elif isinstance(h, str) and isinstance(d, str) and d:
-        # qumo INDEX.json entry {id, kind, ..., dir, sha256 (of dir/weights.bin), bytes}
-        out.append((os.path.join(base, d, node.get("weights_file", "weights.bin")), h))
-    elif isinstance(h, dict):
-        for k, v in h.items():
-            out.append((os.path.join(base, d, k), v))
-    f = node.get("files")
-    if isinstance(f, dict):
-        for k, v in f.items():
-            if isinstance(v, str):
-                out.append((os.path.join(base, d, k), v))
-            elif isinstance(v, dict) and isinstance(v.get("sha256"), str):
-                out.append((os.path.join(base, d, v.get("path", k)), v["sha256"]))
-    elif isinstance(f, list):
-        for x in f:
-            if isinstance(x, dict) and isinstance(x.get("sha256"), str):
-                out.append((os.path.join(base, d, x.get("path") or x.get("file")), x["sha256"]))
-    for k, v in node.items():
-        if k not in ("sha256", "files") and isinstance(v, (dict, list)):
-            pairs(v, base, out)
-bad, ok, idx = 0, 0, 0
-if not os.path.isdir(root):
-    print("models-verify: no model directory '%s' (nothing to verify)" % root)
-    sys.exit(0)
-listed = set()
-for dp, _, fs in os.walk(root):
-    if "INDEX.json" not in fs:
-        continue
-    idx += 1
-    ip = os.path.join(dp, "INDEX.json")
-    try:
-        index = json.load(open(ip))
-    except Exception as e:
-        print("FAIL %s: unreadable (%s)" % (ip, e)); bad += 1; continue
-    out = []
-    pairs(index, dp, out)
-    for p, h in out:
-        p = os.path.normpath(p)
-        listed.add(p)
-        if not os.path.isfile(p):
-            print("FAIL %s: missing (listed in %s)" % (p, ip)); bad += 1
-        elif sha(p) != h.lower():
-            print("FAIL %s: sha256 mismatch (QM-E617)" % p); bad += 1
-        else:
-            ok += 1
-unlisted = []
-for dp, _, fs in os.walk(root):
-    for f in fs:
-        p = os.path.normpath(os.path.join(dp, f))
-        if f.endswith(".bin") and p not in listed:
-            unlisted.append(p)
-for p in unlisted:
-    print("FAIL %s: weights not listed in any INDEX.json" % p); bad += 1
-size = sum(os.path.getsize(os.path.join(dp, f)) for dp, _, fs in os.walk(root) for f in fs)
-print("models-verify: %d INDEX.json, %d files ok, %d problems, %.2f MB total" % (idx, ok, bad, size / 1e6))
-sys.exit(1 if bad else 0)
-endef
-export MODELS_VERIFY_PY
+vpath %.mojo training/ai_transpiler/synth training/ai_transpiler/route training/ai_transpiler/common
+AI_SRC := $(shell find qumo -name '*.mojo' 2>/dev/null)
 
-models-verify:  ## sha256 of every model file under models/ai_transpiler against its INDEX.json
-	@python3 -c "$$MODELS_VERIFY_PY"
+# one tool per main file; vpath finds the main in synth/, route/ or common/
+$(AI_BUILD)/bin/%: %.mojo $(AI_SRC)
+	@mkdir -p $(dir $@)
+	$(MOJO) build -I . -o $@ $<
 
-train-ai: train-ai-synth train-ai-route  ## retrain the AI-transpiler models (hours; budgets above; not part of make test)
+ai-tools: $(addprefix $(AI_BUILD)/bin/,$(AI_TOOLS))  ## build every training tool into $(AI_BUILD)/bin
+
+models-verify: $(AI_BUILD)/bin/models_verify  ## sha256 of every model file under models/ai_transpiler (QUMO_MODEL_DIR) against its INDEX.json
+	@$<
+
+train-ai: train-ai-synth train-ai-route  ## retrain the AI-transpiler models (hours; no Python, no Rust, no torch; not part of make test)
 	@$(MAKE) --no-print-directory models-verify
 
-train-ai-synth:  ## qiskit-gym synthesis models (budget AI_SYNTH_BUDGET_S)
-	@if [ -x training/ai_transpiler/synth/train_all.sh ]; then \
-		AI_TRAIN_PY=$(AI_TRAIN_PY) BUDGET_S=$(AI_SYNTH_BUDGET_S) training/ai_transpiler/synth/train_all.sh; \
-	else echo "training/ai_transpiler/synth/train_all.sh not found (see training/ai_transpiler/README.md)"; exit 1; fi
+train-ai-synth: $(addprefix $(AI_BUILD)/bin/,train_all train_synth export_synth eval_synth)  ## synthesis models of training/ai_transpiler/synth/campaign.json (cap AI_SYNTH_BUDGET_S)
+	@pids=; for k in $$(seq 1 $(AI_LANES)); do \
+	  $(AI_BUILD)/bin/train_all --campaign training/ai_transpiler/synth/campaign.json --lane $$k/$(AI_LANES) \
+	      --cores $(AI_CORES) --budget-cap-s $(AI_SYNTH_BUDGET_S) --work $(AI_BUILD)/synth & pids="$$pids $$!"; done; \
+	  rc=0; for p in $$pids; do wait $$p || rc=1; done; exit $$rc
 
-AI_ROUTE_WORK ?= build/ai_train/route
-AI_ROUTE_ID ?= route_mlp_h64_v1
-
-train-ai-route:  ## learned routing policy: teacher data + BC + DAgger round (~45 min on an M5; training/ai_transpiler/route/README.md)
+train-ai-route: $(addprefix $(AI_BUILD)/bin/,route_tool train_route export_route)  ## learned routing policy: teacher data + BC + one DAgger round (training/ai_transpiler/route/README.md)
 	@mkdir -p $(AI_ROUTE_WORK)/stage
-	$(MOJO) build -I . -o build/route_tool training/ai_transpiler/route/route_tool.mojo
-	$(AI_TRAIN_PY) training/ai_transpiler/route/parity.py $(AI_ROUTE_WORK)/parity build/route_tool
-	$(AI_TRAIN_PY) -c "import sys,json; sys.path.insert(0,'training/ai_transpiler/route'); import circuits as C; json.dump(C.build_jobs(31, 1000, max_n=30, scale=0.5), open('$(AI_ROUTE_WORK)/jobs0.json','w')); json.dump(C.build_jobs(32, 1000, max_n=30, scale=0.5), open('$(AI_ROUTE_WORK)/jobs1.json','w'))"
-	ROUTE_TOOL_CAP=96 build/route_tool gen $(AI_ROUTE_WORK)/jobs0.json $(AI_ROUTE_WORK)/d0.bin - 1.0 401 heuristic 16
-	$(AI_TRAIN_PY) training/ai_transpiler/route/train_route.py --data $(AI_ROUTE_WORK)/d0.bin --out $(AI_ROUTE_WORK)/run0 --hidden 64 --tau 0.5 --epochs 30 --seed 0
-	$(AI_TRAIN_PY) training/ai_transpiler/route/export_npz.py $(AI_ROUTE_WORK)/run0 $(AI_ROUTE_WORK)/stage round0 --default
-	ROUTE_TOOL_CAP=96 build/route_tool gen $(AI_ROUTE_WORK)/jobs1.json $(AI_ROUTE_WORK)/d1.bin $(AI_ROUTE_WORK)/stage/round0 0.3 402 heuristic 16
-	$(AI_TRAIN_PY) training/ai_transpiler/route/train_route.py --data $(AI_ROUTE_WORK)/d0.bin $(AI_ROUTE_WORK)/d1.bin --out $(AI_ROUTE_WORK)/run1 --hidden 64 --tau 0.5 --epochs 30 --seed 0
-	$(AI_TRAIN_PY) training/ai_transpiler/route/export_npz.py $(AI_ROUTE_WORK)/run1 models/ai_transpiler/route $(AI_ROUTE_ID) --default
+	$(AI_BUILD)/bin/route_tool gen-jobs 31 1000 30 0.5 $(AI_ROUTE_WORK)/jobs0.json
+	$(AI_BUILD)/bin/route_tool gen-jobs 32 1000 30 0.5 $(AI_ROUTE_WORK)/jobs1.json
+	ROUTE_TOOL_CAP=96 $(AI_BUILD)/bin/route_tool gen $(AI_ROUTE_WORK)/jobs0.json $(AI_ROUTE_WORK)/d0.bin - 1.0 401 heuristic 16
+	$(AI_BUILD)/bin/train_route --data $(AI_ROUTE_WORK)/d0.bin --out $(AI_ROUTE_WORK)/run0 --hidden 64 --tau 0.5 --epochs 30 --seed 0 --budget-s $(AI_ROUTE_BC_BUDGET_S)
+	$(AI_BUILD)/bin/export_route $(AI_ROUTE_WORK)/run0 --root $(AI_ROUTE_WORK)/stage --id round0 --default
+	ROUTE_TOOL_CAP=96 $(AI_BUILD)/bin/route_tool gen $(AI_ROUTE_WORK)/jobs1.json $(AI_ROUTE_WORK)/d1.bin $(AI_ROUTE_WORK)/stage/round0 0.3 402 heuristic 16
+	$(AI_BUILD)/bin/train_route --data $(AI_ROUTE_WORK)/d0.bin $(AI_ROUTE_WORK)/d1.bin --out $(AI_ROUTE_WORK)/run1 --hidden 64 --tau 0.5 --epochs 30 --seed 0 --budget-s $(AI_ROUTE_BC_BUDGET_S)
+	$(AI_BUILD)/bin/export_route $(AI_ROUTE_WORK)/run1 --root models/ai_transpiler/route --id $(AI_ROUTE_ID) --default
+
+train-ai-smoke: $(addprefix $(AI_BUILD)/bin/,train_synth export_synth eval_synth route_tool train_route export_route models_verify)  ## ~5 min end-to-end into $(AI_BUILD)/smoke (synth learns and beats greedy, router BC, export + verify); never writes models/
+	training/ai_transpiler/smoke.sh $(AI_BUILD)
+
+train-ai-route-ppo: $(addprefix $(AI_BUILD)/bin/,train_route_ppo export_route)  ## optional router PPO fine-tune: make train-ai-route-ppo INIT=<router dir> BUDGET_S=<s>; never part of train-ai
+	@test -n "$(INIT)" -a -n "$(BUDGET_S)" || { echo "usage: make train-ai-route-ppo INIT=<router dir> BUDGET_S=<seconds>"; exit 2; }
+	$(AI_BUILD)/bin/train_route_ppo --init $(INIT) --out $(AI_ROUTE_WORK)/ppo_run --budget-s $(BUDGET_S)
+
+test-rl:  ## fast RL tests only (tests/test_rl_*.mojo except *_slow, smoke, e2e); prints the wall time per file, each must stay under 30 s
+	@fail=0; for t in $(filter-out %_slow.mojo tests/test_rl_smoke.mojo tests/test_rl_e2e.mojo,$(wildcard tests/test_rl_*.mojo)); do \
+	  s=$$(date +%s); out=$$($(MOJO) run -I . $$t 2>&1 | grep -v Crashpad | tail -1); e=$$(( $$(date +%s) - s )); \
+	  case "$$out" in *OK*) echo "PASS $$t ($${e}s)";; *) echo "FAIL $$t: $$out"; fail=1;; esac; \
+	done; exit $$fail
+
+test-rl-slow:  ## statistical and end-to-end RL tests (*_slow, smoke, e2e) and test_rl_tensor with -D ASSERT=all
+	@fail=0; for t in $(wildcard tests/test_rl_*_slow.mojo) tests/test_rl_smoke.mojo tests/test_rl_e2e.mojo; do \
+	  s=$$(date +%s); out=$$($(MOJO) run -I . $$t 2>&1 | grep -v Crashpad | tail -1); e=$$(( $$(date +%s) - s )); \
+	  case "$$out" in *OK*) echo "PASS $$t ($${e}s)";; *) echo "FAIL $$t: $$out"; fail=1;; esac; \
+	done; \
+	out=$$($(MOJO) run -D ASSERT=all -I . tests/test_rl_tensor.mojo 2>&1 | grep -v Crashpad | tail -1); \
+	case "$$out" in *OK*) echo "PASS tests/test_rl_tensor.mojo (-D ASSERT=all)";; *) echo "FAIL tests/test_rl_tensor.mojo: $$out"; fail=1;; esac; exit $$fail
+
+check-pure-mojo:  ## fails if the training path invokes or names python/pip/uv/torch/numpy/qiskit/twisterl/rustworkx/safetensors/cargo/rustc (CHECK_PURE_SMOKE=1 also runs train-ai-smoke in a clean environment)
+	training/ai_transpiler/check_pure_mojo.sh
+
+bench-rl:  ## performance gates G1-G10 of MOJO_PORT.md section 15, one JSON line each (bench/bench_rl.mojo; run on an otherwise idle machine)
+	@mkdir -p build
+	$(MOJO) build -I . -o build/bench_rl bench/bench_rl.mojo && ./build/bench_rl
 
 bench-ai: py  ## hardware-neutral benchmark of the AI transpiler (qumo-ai vs qumo, Qiskit, TKET; statevector-verified)
 	QUMO_MODEL_DIR=$(CURDIR)/models/ai_transpiler $(PY) bench/neutral/run_neutral.py --circuits bench/neutral/circuits $(AI_BENCH_ARGS) --out bench/results/ai_neutral.jsonl

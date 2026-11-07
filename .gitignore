@@ -53,9 +53,8 @@ bench/results/neutral_campaign1.jsonl
 # models/ai_transpiler/** with their INDEX.json are committed)
 training/ai_transpiler/**/runs/
 training/ai_transpiler/**/checkpoints/
-training/ai_transpiler/**/*.safetensors
 training/ai_transpiler/**/*.pt
 training/ai_transpiler/**/*.ckpt
 training/ai_transpiler/**/logs/
-training/ai_transpiler/**/.venv/
 models/ai_transpiler/**/*.tmp
+models/ai_transpiler/**/*.old

@@ -5,7 +5,7 @@ Every random consumer of the training stack derives its own `Rng` (xoshiro256**,
 below fix the exact rules used by the collector and the evaluators:
 
   * `uniform_f32` / `uniform_k24`: 24-bit uniforms (`k * 2^-24`), thresholds are compared on the integer `k`;
-  * `gumbel_argmax`: the twisterl sampling rule (Gumbel noise in f32, strict `>` scan seeded with element 0);
+  * `gumbel_argmax`: the reference sampling rule (Gumbel noise in f32, strict `>` scan seeded with element 0);
   * `sample_softmax` / `sample_probs`: inverse CDF for the sampled evaluation;
   * `mulf`: the FMA barrier (rule 9 of section 3).
 """
@@ -67,7 +67,7 @@ def uniform_f32(mut r: Rng) -> Float32:
 
 
 def uniform_sym_f32(mut r: Rng, bound: Float32) -> Float32:
-    """torch-style `U(-bound, bound)`: `(2 u - 1) * bound` with a 24-bit u (one draw)."""
+    """Uniform `U(-bound, bound)`: `(2 u - 1) * bound` with a 24-bit u (one draw)."""
     var u = uniform_f32(r)
     return (2.0 * u - 1.0) * bound
 
@@ -93,7 +93,7 @@ def randperm(mut r: Rng, n: Int) -> List[Int]:
 
 
 def gumbel_argmax(logits: FPtr, n: Int, mut r: Rng) -> Int:
-    """Samples an index with probability softmax(logits) by the Gumbel-max trick, exactly as twisterl does:
+    """Samples an index with probability softmax(logits) by the Gumbel-max trick, exactly as the reference collector does:
     value_i = l_i - ln|ln u_i| in f32 with `u_i = uniform_f32` clamped to [2^-24, 1 - 2^-24] (one draw per element,
     in index order, whether or not the element is masked), then a strict `>` scan seeded with element 0, so the
     first maximum wins and a NaN is never chosen (unless it is element 0, which nothing can beat).
@@ -180,7 +180,7 @@ def sample_softmax(logits: FPtr, n: Int, mut r: Rng) -> Int:
 @no_inline
 def mulf(a: Float32, b: Float32) -> Float32:
     """`a * b` behind a call barrier. Mojo contracts `(x - y) + (a * b)` into a fused multiply-add, whereas the
-    Rust env and numpy round the product first; computing each product through `mulf` and keeping the sum in a
+    reference environment rounds the product first; computing each product through `mulf` and keeping the sum in a
     separate statement reproduces the unfused value (MOJO_PORT.md section 3, rule 9)."""
     return a * b
 

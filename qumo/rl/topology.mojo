@@ -12,8 +12,8 @@ A topology spec is a short string:
     edges:0-1,1-2       explicit undirected edge list (n = largest index + 1)
 
 `parse_topology` returns the qubit count and the undirected edges as a flat list `[a0, b0, a1, b1, ...]` with
-`a < b`, sorted lexicographically and without duplicates or self loops (the same normalisation as the Python
-helper this module replaces). Bad specs raise QM-E641.
+`a < b`, sorted lexicographically and without duplicates or self loops (the same normalisation as the earlier helper
+this module replaces). Bad specs raise QM-E641.
 
 The Weisfeiler-Lehman hash is not re-implemented here: use `qumo.compiler.policy.wl_hash(n, edges)`.
 """
@@ -159,7 +159,7 @@ def parse_topology(spec: String) raises -> Topology:
             raw.append(i + 1)
     elif kind == "ring":
         n = _parse_count(spec, arg, "qubit count", 1, MAX_QUBITS)
-        # ring:1 has no edge and ring:2 a single edge, exactly as the Python helper (self loops dropped, pairs unique)
+        # ring:1 has no edge and ring:2 a single edge, exactly as the earlier helper (self loops dropped, pairs unique)
         for i in range(n):
             raw.append(i)
             raw.append((i + 1) % n)
@@ -227,7 +227,7 @@ def topology_slug(spec: String) raises -> String:
     """File-system friendly name: `grid:2x3` -> `grid2x3`, `heavyhex_frag:H7` -> `hhH7`.
 
     `edges:` specs get `edges` plus 8 hex digits of the FNV-1a hash of the normalised edge list (this replaces the
-    SHA-1 prefix of the Python helper and is only used for directory names)."""
+    SHA-1 prefix of the earlier helper and is only used for directory names)."""
     var colon = spec.find(":")
     if colon < 0:
         raise _bad(spec, "expected kind:arg")
@@ -249,7 +249,7 @@ def topology_slug(spec: String) raises -> String:
 
 def is_connected(n: Int, edges: List[Int]) -> Bool:
     """True iff the graph on `n` vertices with flat undirected `edges` is connected. A graph with no vertex is not
-    connected (as in the Python helper); an edge naming a vertex outside [0, n) makes the graph invalid -> False."""
+    connected (as in the earlier helper); an edge naming a vertex outside [0, n) makes the graph invalid -> False."""
     if n <= 0:
         return False
     var adj = List[List[Int]]()

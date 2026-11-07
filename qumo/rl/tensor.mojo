@@ -247,7 +247,7 @@ def add_bias_rows(x: FPtr, rows: Int, cols: Int, bias: FPtr):
 
 
 def relu_inplace(x: FPtr, n: Int):
-    """x = max(x, 0); a NaN stays NaN (torch)."""
+    """x = max(x, 0); a NaN stays NaN (the usual framework convention)."""
     var zero = SIMD[_F32, LANES](0)
     var main = (n // LANES) * LANES
     var i = 0
@@ -262,7 +262,7 @@ def relu_inplace(x: FPtr, n: Int):
 
 
 def relu_backward(dx: FPtr, pre: FPtr, n: Int):
-    """dx *= (pre > 0): the gradient is 0 where the pre-activation is <= 0 (exactly 0 included, torch rule)."""
+    """dx *= (pre > 0): the gradient is 0 where the pre-activation is <= 0 (exactly 0 included)."""
     var zero = SIMD[_F32, LANES](0)
     var main = (n // LANES) * LANES
     var i = 0

@@ -184,7 +184,7 @@ def twists(kind: Int, n: Int, actions: List[Int]) -> Twists:
 
     The coupling graph is the set of 2-qubit actions. Automorphisms are visited in lexicographic order; one whose
     relabelled action is missing from the gateset is skipped. (The identity always has an action permutation, so
-    the "fall back to identity when nothing is kept" rule of qiskit-gym cannot trigger and is not needed.)"""
+    the "fall back to identity when nothing is kept" rule of the reference environment cannot trigger and is not needed.)"""
     var res = Twists()
     if kind != MODEL_KIND_PERM and kind != MODEL_KIND_LINEAR and kind != MODEL_KIND_CLIFFORD:
         return res^

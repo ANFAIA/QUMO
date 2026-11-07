@@ -1,6 +1,6 @@
 """Adam, gradient-norm clipping and the cosine learning-rate schedule (MOJO_PORT.md section 4.3).
 
-`Adam` is the torch single-tensor CPU path over one flat parameter buffer (torch.md 4):
+`Adam` is the standard single-tensor CPU Adam over one flat parameter buffer (reference semantics of the optimizer spec in training/ai_transpiler/spec):
 
     t += 1                                      # one counter per optimizer, never reset
     m  = m + (g - m) * (1 - beta1)              # lerp form, f32
@@ -10,7 +10,7 @@
     p  = p - step_size * m / denom              # scalars computed in f64, cast to f32 per operation
 
 The update is dense (momentum on rows with a zero gradient still moves them). Two exact refinements exist:
-frozen slices (`set_frozen`: torch's `grad is None`, no step and no state) and sparse row regions
+frozen slices (`set_frozen`: a parameter without a gradient takes no step and keeps no state) and sparse row regions
 (`mark_sparse_rows`: rows that never received a non-zero gradient have m = v = 0 and update by exactly 0, so they are
 skipped; the result is bit-identical to the dense update).
 """
@@ -246,11 +246,11 @@ struct Adam(Movable):
 
 
 def clip_grad_norm(mut grads: List[Float32], ranges: List[Int], max_norm: Float64) -> Float64:
-    """torch `clip_grad_norm_`: one global L2 norm over several tensors, then every gradient is multiplied by
+    """Global gradient-norm clipping: one global L2 norm over several tensors, then every gradient is multiplied by
     `coef = min(max_norm / (total + 1e-6), 1)` unconditionally (also when coef is 1.0). Returns the pre-clip norm.
 
     `ranges` lists the tensors as consecutive (offset, length) pairs: `[off0, len0, off1, len1, ...]`; an empty list
-    means the whole buffer is one tensor. As in torch the per-tensor norms are f32 values and the total is the f32
+    means the whole buffer is one tensor. As in the reference semantics the per-tensor norms are f32 values and the total is the f32
     norm of that vector of norms (accumulated here in f64 before the final rounding)."""
     var p = grads.unsafe_ptr().as_unsafe_any_origin()
     var total_sq: Float64 = 0.0
@@ -283,7 +283,7 @@ def clip_grad_norm(mut grads: List[Float32], ranges: List[Int], max_norm: Float6
 
 
 def cosine_epoch_lr(base: Float64, epoch: Int, total_epochs: Int) -> Float64:
-    """`base * (1 + cos(pi * epoch / total_epochs)) / 2`: torch CosineAnnealingLR (eta_min 0, stepped once per epoch)
+    """`base * (1 + cos(pi * epoch / total_epochs)) / 2`: the standard cosine annealing schedule (eta_min 0, stepped once per epoch)
     in closed form; `epoch` is clamped to [0, total_epochs]. Same closed form as `qml_train.cosine_lr(epoch, total,
     base)`, kept here so the RL stack does not import the quantum-ML simulator stack."""
     if total_epochs <= 0:

@@ -1,12 +1,12 @@
 """f32 -> f16 encoding with overflow checks for the model container (MOJO_PORT.md 4.7, 9.1).
 
-`Float16(Float32(x))` rounds to nearest even in Mojo 1.2 and equals numpy's `astype("<f2")` bit for bit (probed on
+`Float16(Float32(x))` rounds to nearest even in Mojo 1.2 and equals the usual array library's f16 cast bit for bit (probed on
 65519.99, 65520, 2^-25, 2^-24, 0.1 and a tie; the exhaustive golden in `tests/test_rl_digest.mojo` gates it).
 Decoding f16 -> f32 is exact and lives in `qumo.compiler.policy.f16_to_f32`.
 
 `encode_f16` writes little-endian bytes, as the container does, and raises QM-E645 when any converted value is not
-finite (an f32 above 65519.99... rounds to infinity, and NaN / inf inputs stay non-finite), like the old Python
-writer's `tensor 'X' overflows f16` check.
+finite (an f32 above 65519.99... rounds to infinity, and NaN / inf inputs stay non-finite), like the old exporter's
+`tensor 'X' overflows f16` check.
 """
 
 from std.collections import List

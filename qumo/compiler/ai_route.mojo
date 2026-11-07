@@ -533,7 +533,7 @@ def load_route_model(dir: String) raises -> RouteModel:
     checksum mismatch); QM-E620 when it is not a router model of this
     architecture (sign embedding 128 -> H, relu, -> 16 logits).
 
-    Tensors (training/ai_transpiler/common/export.py naming):
+    Tensors (naming written by qumo/rl/export_route.mojo):
     `embeddings.weight` [128, H] (stored transposed, row i = embedding of
     observation feature i), `embeddings.bias` [H], `action.0.weight` [16, H],
     `action.0.bias` [16]; optional `value.0.*` (PPO critic, unused here).

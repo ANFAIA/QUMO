@@ -44,6 +44,7 @@ Machine-readable catalog: `qumo describe errors --json`, or the MCP tool
 | `QM-E47x` | gpu | GPU state vector and GPU Pauli frames (qumo.gpu; builds made with -D QUMO_GPU) |
 | `QM-E5xx` | qasm | OpenQASM 2/3 parsing and export (qumo.ir.qasm, qumo.ir.qasm2) |
 | `QM-E6xx` | compiler | Compiler passes, pass pipelines and targets (qumo.compiler) |
+| `QM-E64x` | training | Native training stack of the AI-transpiler models (qumo.rl, training/ai_transpiler) |
 | `QM-E7xx` | stabilizer | Stabilizer / Pauli-frame simulation and QEC (qumo.sim.stabilizer, qumo.sim.frame, qumo.qec) |
 | `QM-E8xx` | algorithms | Algorithms library (qumo.algorithms) |
 | `QM-E9xx` | interface | JSON, MCP tools, CLI and device selection (qumo.ai, qumo.exec.tools, cli); QM-E999 = uncategorized |
@@ -635,6 +636,60 @@ Fix: Report the program; check that the target's coupling graph is what you mean
 
 **A gate with target angle bounds takes an angle known only at run time, which cannot be wrapped into the bounds.**  
 Fix: Use a gate without bounds, or drop the bounds.
+
+## QM-E64x — AI-transpiler training
+
+Raised by the training tools (`train_synth`, `train_all`, `train_route`, `export_synth`, `export_route`, `eval_synth`, `route_tool`, `models_verify`) and by the `qumo.rl` library. They never occur while compiling or running a model. See [AI_TRANSPILER.md](AI_TRANSPILER.md) and training/ai_transpiler/README.md.
+
+### QM-E640
+
+**Bad usage of a training tool or library call: a missing, repeated, unknown or out-of-range option or argument (for example both or neither of --iters and --budget-s).**  
+Fix: Run the tool without arguments for its usage line; see training/ai_transpiler/README.md.
+
+### QM-E641
+
+**Invalid topology or coupling graph for training: a malformed spec, an empty edge list, a self loop, a disconnected graph, or a highest qubit that is not n-1.**  
+Fix: Use a spec like 'line:6', 'ring:5', 'grid:2x3' or 'heavyhex_frag:H7' with a connected coupling graph.
+
+### QM-E642
+
+**Invalid training environment or network: an unsupported gate (only H, S, CX and SWAP train), a state that is too wide, an action outside the gate set, or a network that does not match the environment.**  
+Fix: Check the gate set and sizes; the network must have the environment's observation size and number of actions.
+
+### QM-E643
+
+**Training diverged: the loss or a weight became NaN or infinite.**  
+Fix: The last finite checkpoint was written; lower the learning rate or resume from it with --resume.
+
+### QM-E644
+
+**A written model or checkpoint does not read back identically, or its embedded test vectors disagree with an independent forward pass.**  
+Fix: Re-run the export; the previous model directory and INDEX.json were left untouched.
+
+### QM-E645
+
+**A weight does not fit in f16 (overflow to infinity) or is not finite when a model is exported.**  
+Fix: Export with --dtype f32, or retrain with a lower learning rate.
+
+### QM-E646
+
+**Teacher data is malformed or too small: the file size is not a multiple of 328 bytes, a record is out of range, a cost is NaN, or there are too few rows for the validation split.**  
+Fix: Pass files written by `route_tool gen`.
+
+### QM-E647
+
+**Warm start is incompatible: the source is not a run directory or model container of the same kind, or its architecture, gate set or hidden size differs.**  
+Fix: Use a run directory or model of the same kind and sizes, or leave out --init.
+
+### QM-E648
+
+**The campaign file is malformed or names an unknown model.**  
+Fix: See training/ai_transpiler/synth/campaign.json for the format.
+
+### QM-E649
+
+**A trained model failed the keep rule of the block evaluation (beam-8 policy against greedy synthesis), or no decision was printed.**  
+Fix: Train longer or from a better start; the model was not published.
 
 ## QM-E7xx — Stabilizer simulation and QEC
 
