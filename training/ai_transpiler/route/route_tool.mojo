@@ -23,7 +23,27 @@ Subcommands (run from the repo root with `.venv/bin/mojo run -I . <this file> ..
 
   episode <jobs.json> <model_dir|-> <out.json>
       Replays one episode per job (policy mode, from the job's layout and
-      seed) and writes the action trace + overhead (Python/Mojo parity).
+      seed) and writes the action trace + overhead (the reference traces of
+      tests/test_ai_route.mojo are replayed against it).
+
+  gen-jobs <seed> <n_jobs> <max_n> <scale> <out.json> [--topologies train|eval|name,name,..]
+           [--families rand2q,qv,..] [--min-frac F]
+      Seeded random (topology, circuit family, size) jobs for `gen`. Defaults:
+      the 25 training topologies, all 6 families, min-frac 0.4. Topology names
+      are those of the jobs files (grid4x4, heavy_hex19, diag18, oct16, line8,
+      ring14, tree15, torus16, atom_r2_16, ionring12, ...). The training recipe
+      uses scale 0.5, max_n 30 and seeds 31 (round 0) and 32 (DAgger round).
+
+  eval-sets <out_dir>
+      Writes the held-out evaluation sets eval_synth.json (8 generated jobs per
+      evaluation topology, build seeds >= 910000) and eval_bench.json (the
+      bench/neutral/circuits QASM files with 3..14 qubits, 3 topologies each
+      chosen by crc32 of the file name, router seed 7). <out_dir> is created if missing.
+
+  summarize <eval.jsonl> [jobs.json] [--base sabre_o2|sabre_o3] [--md]
+      Geometric-mean cost / depth / time ratios of every configuration in an
+      `eval` output against the base configuration, per topology family
+      (taken from jobs.json when given, else from the topology name).
 
 jobs.json: {"targets": [{"name", "n", "edges": [[a,b],...]}],
             "circuits": [{"name", "n", "ops": [[kind,a,b],...]} | {"name", "qasm": path}],
@@ -49,75 +69,16 @@ from qumo.compiler.ai_route import (
 )
 from qumo.sim.rng import Rng
 from max.algorithm import parallelize
-
-
-def circuit_from_json(cj: JsonValue) raises -> Circuit:
-    if cj.has("qasm"):
-        return load_qasm(cj.get("qasm").as_string())
-    var n = cj.get("n").as_int()
-    var nm = 0
-    var ops = cj.get("ops")
-    for i in range(len(ops)):
-        if ops.at(i).at(0).as_string() == "measure":
-            nm += 1
-    var c = Circuit(n, nm)
-    var m = 0
-    for i in range(len(ops)):
-        var o = ops.at(i)
-        var k = o.at(0).as_string()
-        var a = o.at(1).as_int()
-        var b = o.at(2).as_int()
-        if k == "cx":
-            c.cx(a, b)
-        elif k == "cz":
-            c.cz(a, b)
-        elif k == "swap":
-            c.swap(a, b)
-        elif k == "u2":
-            c.rzz(0.3, a, b)
-        elif k == "u1":
-            c.h(a)
-        elif k == "measure":
-            c.measure(a, m)
-            m += 1
-        elif k == "barrier":
-            c.barrier()
-        else:
-            raise Error("QM-E602: unknown op kind '" + k + "' in jobs file. Hint: use cx cz swap u2 u1 measure barrier.")
-    return c^
-
-
-def target_from_json(tj: JsonValue) raises -> Target:
-    var n = tj.get("n").as_int()
-    var e = List[Int]()
-    var ej = tj.get("edges")
-    for i in range(len(ej)):
-        e.append(ej.at(i).at(0).as_int())
-        e.append(ej.at(i).at(1).as_int())
-    var t = Target.from_edges(n, e, "any", tj.get_string("name", "custom"))
-    return t^
+from qumo.rl.jobs import (
+    circuit_from_json, target_from_json, put_i16, put_f32, build_jobs, eval_sets, summarize,
+)
+from qumo.rl.targets import RTopo, train_topologies, eval_topologies, topology_by_name
 
 
 def load_model_arg(s: String) raises -> RouteModel:
     if s == "-" or s == "":
         return RouteModel()
     return load_route_model(s)
-
-
-def put_i16(mut b: List[UInt8], v: Int):
-    var x = max(-32768, min(32767, v))
-    var u = UInt16(x & 0xFFFF)
-    b.append(UInt8(u & 0xFF))
-    b.append(UInt8(u >> 8))
-
-
-def put_f32(mut b: List[UInt8], v: Float32):
-    from std.memory import bitcast
-    var u = bitcast[DType.uint32](v)
-    b.append(UInt8(u & 0xFF))
-    b.append(UInt8((u >> 8) & 0xFF))
-    b.append(UInt8((u >> 16) & 0xFF))
-    b.append(UInt8(u >> 24))
 
 
 comptime REC_BYTES = 328
@@ -446,10 +407,96 @@ def cmd_episode(jobs_path: String, model_arg: String, out_path: String) raises:
     print("episodes ->", out_path)
 
 
+def _split_csv(s: String) -> List[String]:
+    var out = List[String]()
+    for part in s.split(","):
+        var p = String(part.strip())
+        if p.byte_length() > 0:
+            out.append(p)
+    return out^
+
+
+def _usage() raises:
+    print("usage: route_tool gen|eval|episode|gen-jobs|eval-sets|summarize ...")
+    print("  gen <jobs.json> <out.bin> <model_dir|-> <beta> <seed> <heuristic|model> <G>")
+    print("  eval <jobs.json> <out.jsonl> <model_dir|-> <level>")
+    print("  episode <jobs.json> <model_dir|-> <out.json>")
+    print("  gen-jobs <seed> <n_jobs> <max_n> <scale> <out.json> [--topologies train|eval|name,..] [--families a,b] [--min-frac F]")
+    print("  eval-sets <out_dir>")
+    print("  summarize <eval.jsonl> [jobs.json] [--base sabre_o2|sabre_o3] [--md]")
+
+
+def cmd_gen_jobs(args: List[String]) raises:
+    """`gen-jobs SEED N MAX_N SCALE OUT [--topologies train|eval|name,..] [--families a,b] [--min-frac F]`."""
+    if len(args) < 5:
+        _usage()
+        raise Error("QM-E640: gen-jobs needs SEED N MAX_N SCALE OUT. Hint: see the usage lines above.")
+    var seed = Int(args[0])
+    var n_jobs = Int(args[1])
+    var max_n = Int(args[2])
+    var scale = Float64(args[3])
+    var out_path = args[4]
+    var topo_arg = String("train")
+    var fam_arg = String()
+    var min_frac = 0.4
+    var i = 5
+    while i < len(args):
+        if i + 1 >= len(args):
+            raise Error("QM-E640: option '" + args[i] + "' needs a value. Hint: --topologies, --families or --min-frac.")
+        if args[i] == "--topologies":
+            topo_arg = args[i + 1]
+        elif args[i] == "--families":
+            fam_arg = args[i + 1]
+        elif args[i] == "--min-frac":
+            min_frac = Float64(args[i + 1])
+        else:
+            raise Error("QM-E640: unknown option '" + args[i] + "' for gen-jobs. Hint: --topologies, --families or --min-frac.")
+        i += 2
+    var topos = List[RTopo]()
+    if topo_arg == "train":
+        topos = train_topologies()
+    elif topo_arg == "eval":
+        topos = eval_topologies()
+    else:
+        for nm in _split_csv(topo_arg):
+            topos.append(topology_by_name(nm))
+    var t0 = perf_counter_ns()
+    var js = build_jobs(seed, n_jobs, topos, _split_csv(fam_arg), max_n, scale, min_frac)
+    with open(out_path, "w") as f:
+        f.write(js.to_json())
+    print("gen-jobs:", js.num_jobs(), "jobs,", len(js.circuits), "circuits,", len(js.targets), "targets ->", out_path, "in s", Float64(perf_counter_ns() - t0) / 1e9)
+
+
+def cmd_summarize(args: List[String]) raises:
+    """`summarize EVAL.jsonl [JOBS.json] [--base X] [--md]`."""
+    if len(args) < 1:
+        _usage()
+        raise Error("QM-E640: summarize needs EVAL.jsonl. Hint: see the usage lines above.")
+    var jobs_path = String()
+    var base = String("sabre_o2")
+    var md = False
+    var i = 1
+    while i < len(args):
+        if args[i] == "--base":
+            if i + 1 >= len(args):
+                raise Error("QM-E640: --base needs a value. Hint: sabre_o2 or sabre_o3.")
+            base = args[i + 1]
+            i += 2
+        elif args[i] == "--md":
+            md = True
+            i += 1
+        elif jobs_path.byte_length() == 0 and not args[i].startswith("--"):
+            jobs_path = args[i]
+            i += 1
+        else:
+            raise Error("QM-E640: unknown option '" + args[i] + "' for summarize. Hint: [JOBS.json] [--base X] [--md].")
+    print(summarize(args[0], jobs_path, base, md), end="")
+
+
 def main() raises:
     var args = argv()
     if len(args) < 2:
-        print("usage: route_tool.mojo gen|eval|episode ...")
+        _usage()
         return
     var cmd = String(args[1])
     if cmd == "gen":
@@ -458,5 +505,21 @@ def main() raises:
         cmd_eval(String(args[2]), String(args[3]), String(args[4]), Int(String(args[5])))
     elif cmd == "episode":
         cmd_episode(String(args[2]), String(args[3]), String(args[4]))
+    elif cmd == "gen-jobs":
+        var rest = List[String]()
+        for i in range(2, len(args)):
+            rest.append(String(args[i]))
+        cmd_gen_jobs(rest)
+    elif cmd == "eval-sets":
+        if len(args) < 3:
+            _usage()
+            raise Error("QM-E640: eval-sets needs OUT_DIR. Hint: see the usage lines above.")
+        eval_sets(String(args[2]))
+    elif cmd == "summarize":
+        var rest2 = List[String]()
+        for i in range(2, len(args)):
+            rest2.append(String(args[i]))
+        cmd_summarize(rest2)
     else:
         print("unknown command", cmd)
+        _usage()
