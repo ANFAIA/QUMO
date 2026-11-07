@@ -1,0 +1,1134 @@
+{
+ "repr": [
+  [
+   "",
+   "''"
+  ],
+  [
+   "a",
+   "'a'"
+  ],
+  [
+   "it's",
+   "\"it's\""
+  ],
+  [
+   "\"q\"",
+   "'\"q\"'"
+  ],
+  [
+   "both ' \"",
+   "'both \\' \"'"
+  ],
+  [
+   "a\tb\nc\\",
+   "'a\\tb\\nc\\\\'"
+  ],
+  [
+   "\r\u0000\u001f",
+   "'\\r\\x00\\x1f'"
+  ],
+  [
+   "\u007f\u0080\u009f",
+   "'\\x7f\\x80\\x9f'"
+  ],
+  [
+   "\u00e9\u00a0\u2028\u007f\u0001",
+   "'\u00e9\\xa0\\u2028\\x7f\\x01'"
+  ],
+  [
+   "\u65e5\u672c",
+   "'\u65e5\u672c'"
+  ],
+  [
+   "emoji \ud83d\ude00",
+   "'emoji \ud83d\ude00'"
+  ],
+  [
+   "soft\u00adhyphen",
+   "'soft\\xadhyphen'"
+  ],
+  [
+   "\u200b\u200f",
+   "'\\u200b\\u200f'"
+  ],
+  [
+   "\u2066x\u2069",
+   "'\\u2066x\\u2069'"
+  ],
+  [
+   "\ufeffbom",
+   "'\\ufeffbom'"
+  ],
+  [
+   "\ue000private",
+   "'\\ue000private'"
+  ],
+  [
+   "\udb80\udc00",
+   "'\\U000f0000'"
+  ],
+  [
+   "\u3000wide space",
+   "'\\u3000wide space'"
+  ],
+  [
+   "\u1680ogham",
+   "'\\u1680ogham'"
+  ],
+  [
+   "tab\there",
+   "'tab\\there'"
+  ],
+  [
+   "back\\slash'quote",
+   "\"back\\\\slash'quote\""
+  ],
+  [
+   "only'single",
+   "\"only'single\""
+  ],
+  [
+   "only\"double",
+   "'only\"double'"
+  ],
+  [
+   "\u001b[0m",
+   "'\\x1b[0m'"
+  ],
+  [
+   "\u00e9\u0301",
+   "'\u00e9\u0301'"
+  ],
+  [
+   "line1\nline2\r\n",
+   "'line1\\nline2\\r\\n'"
+  ],
+  [
+   "\u0085next",
+   "'\\x85next'"
+  ],
+  [
+   "\ufe0f",
+   "'\ufe0f'"
+  ]
+ ],
+ "json_docs": [
+  {
+   "doc": "{}",
+   "dumps_false": "{}",
+   "dumps_true": "{}",
+   "indent0": "{}",
+   "indent2": "{}",
+   "indent1_ascii": "{}",
+   "repr": "{}"
+  },
+  {
+   "doc": "[]",
+   "dumps_false": "[]",
+   "dumps_true": "[]",
+   "indent0": "[]",
+   "indent2": "[]",
+   "indent1_ascii": "[]",
+   "repr": "[]"
+  },
+  {
+   "doc": "\"\"",
+   "dumps_false": "\"\"",
+   "dumps_true": "\"\"",
+   "indent0": "\"\"",
+   "indent2": "\"\"",
+   "indent1_ascii": "\"\"",
+   "repr": "''"
+  },
+  {
+   "doc": "null",
+   "dumps_false": "null",
+   "dumps_true": "null",
+   "indent0": "null",
+   "indent2": "null",
+   "indent1_ascii": "null",
+   "repr": "None"
+  },
+  {
+   "doc": "true",
+   "dumps_false": "true",
+   "dumps_true": "true",
+   "indent0": "true",
+   "indent2": "true",
+   "indent1_ascii": "true",
+   "repr": "True"
+  },
+  {
+   "doc": "false",
+   "dumps_false": "false",
+   "dumps_true": "false",
+   "indent0": "false",
+   "indent2": "false",
+   "indent1_ascii": "false",
+   "repr": "False"
+  },
+  {
+   "doc": "0",
+   "dumps_false": "0",
+   "dumps_true": "0",
+   "indent0": "0",
+   "indent2": "0",
+   "indent1_ascii": "0",
+   "repr": "0"
+  },
+  {
+   "doc": "-0",
+   "dumps_false": "0",
+   "dumps_true": "0",
+   "indent0": "0",
+   "indent2": "0",
+   "indent1_ascii": "0",
+   "repr": "0"
+  },
+  {
+   "doc": "7",
+   "dumps_false": "7",
+   "dumps_true": "7",
+   "indent0": "7",
+   "indent2": "7",
+   "indent1_ascii": "7",
+   "repr": "7"
+  },
+  {
+   "doc": "-12",
+   "dumps_false": "-12",
+   "dumps_true": "-12",
+   "indent0": "-12",
+   "indent2": "-12",
+   "indent1_ascii": "-12",
+   "repr": "-12"
+  },
+  {
+   "doc": "1.0",
+   "dumps_false": "1.0",
+   "dumps_true": "1.0",
+   "indent0": "1.0",
+   "indent2": "1.0",
+   "indent1_ascii": "1.0",
+   "repr": "1.0"
+  },
+  {
+   "doc": "1e2",
+   "dumps_false": "100.0",
+   "dumps_true": "100.0",
+   "indent0": "100.0",
+   "indent2": "100.0",
+   "indent1_ascii": "100.0",
+   "repr": "100.0"
+  },
+  {
+   "doc": "2.5",
+   "dumps_false": "2.5",
+   "dumps_true": "2.5",
+   "indent0": "2.5",
+   "indent2": "2.5",
+   "indent1_ascii": "2.5",
+   "repr": "2.5"
+  },
+  {
+   "doc": "0.1",
+   "dumps_false": "0.1",
+   "dumps_true": "0.1",
+   "indent0": "0.1",
+   "indent2": "0.1",
+   "indent1_ascii": "0.1",
+   "repr": "0.1"
+  },
+  {
+   "doc": "1e-05",
+   "dumps_false": "1e-05",
+   "dumps_true": "1e-05",
+   "indent0": "1e-05",
+   "indent2": "1e-05",
+   "indent1_ascii": "1e-05",
+   "repr": "1e-05"
+  },
+  {
+   "doc": "1e16",
+   "dumps_false": "1e+16",
+   "dumps_true": "1e+16",
+   "indent0": "1e+16",
+   "indent2": "1e+16",
+   "indent1_ascii": "1e+16",
+   "repr": "1e+16"
+  },
+  {
+   "doc": "123456789012345678",
+   "dumps_false": "123456789012345678",
+   "dumps_true": "123456789012345678",
+   "indent0": "123456789012345678",
+   "indent2": "123456789012345678",
+   "indent1_ascii": "123456789012345678",
+   "repr": "123456789012345678"
+  },
+  {
+   "doc": "-9223372036854775808",
+   "dumps_false": "-9223372036854775808",
+   "dumps_true": "-9223372036854775808",
+   "indent0": "-9223372036854775808",
+   "indent2": "-9223372036854775808",
+   "indent1_ascii": "-9223372036854775808",
+   "repr": "-9223372036854775808"
+  },
+  {
+   "doc": "18446744073709551615",
+   "dumps_false": "18446744073709551615",
+   "dumps_true": "18446744073709551615",
+   "indent0": "18446744073709551615",
+   "indent2": "18446744073709551615",
+   "indent1_ascii": "18446744073709551615",
+   "repr": "18446744073709551615"
+  },
+  {
+   "doc": "3.141592653589793",
+   "dumps_false": "3.141592653589793",
+   "dumps_true": "3.141592653589793",
+   "indent0": "3.141592653589793",
+   "indent2": "3.141592653589793",
+   "indent1_ascii": "3.141592653589793",
+   "repr": "3.141592653589793"
+  },
+  {
+   "doc": "1e300",
+   "dumps_false": "1e+300",
+   "dumps_true": "1e+300",
+   "indent0": "1e+300",
+   "indent2": "1e+300",
+   "indent1_ascii": "1e+300",
+   "repr": "1e+300"
+  },
+  {
+   "doc": "-0.0",
+   "dumps_false": "-0.0",
+   "dumps_true": "-0.0",
+   "indent0": "-0.0",
+   "indent2": "-0.0",
+   "indent1_ascii": "-0.0",
+   "repr": "-0.0"
+  },
+  {
+   "doc": "{\"path\": \"/\u00e9\", \"n\": [1, 2.5, null, true], \"s\": \"a\\n \\u007f\\u0001\\\"\"}",
+   "dumps_false": "{\"path\": \"/\u00e9\", \"n\": [1, 2.5, null, true], \"s\": \"a\\n \u007f\\u0001\\\"\"}",
+   "dumps_true": "{\"path\": \"/\\u00e9\", \"n\": [1, 2.5, null, true], \"s\": \"a\\n \\u007f\\u0001\\\"\"}",
+   "indent0": "{\n\"path\": \"/\u00e9\",\n\"n\": [\n1,\n2.5,\nnull,\ntrue\n],\n\"s\": \"a\\n \u007f\\u0001\\\"\"\n}",
+   "indent2": "{\n  \"path\": \"/\u00e9\",\n  \"n\": [\n    1,\n    2.5,\n    null,\n    true\n  ],\n  \"s\": \"a\\n \u007f\\u0001\\\"\"\n}",
+   "indent1_ascii": "{\n \"path\": \"/\\u00e9\",\n \"n\": [\n  1,\n  2.5,\n  null,\n  true\n ],\n \"s\": \"a\\n \\u007f\\u0001\\\"\"\n}",
+   "repr": "{'path': '/\u00e9', 'n': [1, 2.5, None, True], 's': 'a\\n \\x7f\\x01\"'}"
+  },
+  {
+   "doc": "{\"d\": \"\u00e9\u2014\\ud83d\\ude00\"}",
+   "dumps_false": "{\"d\": \"\u00e9\u2014\ud83d\ude00\"}",
+   "dumps_true": "{\"d\": \"\\u00e9\\u2014\\ud83d\\ude00\"}",
+   "indent0": "{\n\"d\": \"\u00e9\u2014\ud83d\ude00\"\n}",
+   "indent2": "{\n  \"d\": \"\u00e9\u2014\ud83d\ude00\"\n}",
+   "indent1_ascii": "{\n \"d\": \"\\u00e9\\u2014\\ud83d\\ude00\"\n}",
+   "repr": "{'d': '\u00e9\u2014\ud83d\ude00'}"
+  },
+  {
+   "doc": "{\"a\": [], \"b\": {}, \"c\": [1, {\"x\": \"\u00e9\"}]}",
+   "dumps_false": "{\"a\": [], \"b\": {}, \"c\": [1, {\"x\": \"\u00e9\"}]}",
+   "dumps_true": "{\"a\": [], \"b\": {}, \"c\": [1, {\"x\": \"\\u00e9\"}]}",
+   "indent0": "{\n\"a\": [],\n\"b\": {},\n\"c\": [\n1,\n{\n\"x\": \"\u00e9\"\n}\n]\n}",
+   "indent2": "{\n  \"a\": [],\n  \"b\": {},\n  \"c\": [\n    1,\n    {\n      \"x\": \"\u00e9\"\n    }\n  ]\n}",
+   "indent1_ascii": "{\n \"a\": [],\n \"b\": {},\n \"c\": [\n  1,\n  {\n   \"x\": \"\\u00e9\"\n  }\n ]\n}",
+   "repr": "{'a': [], 'b': {}, 'c': [1, {'x': '\u00e9'}]}"
+  },
+  {
+   "doc": "{\"nested\": {\"deep\": {\"deeper\": [[], [{}], [1, [2, [3]]]]}}}",
+   "dumps_false": "{\"nested\": {\"deep\": {\"deeper\": [[], [{}], [1, [2, [3]]]]}}}",
+   "dumps_true": "{\"nested\": {\"deep\": {\"deeper\": [[], [{}], [1, [2, [3]]]]}}}",
+   "indent0": "{\n\"nested\": {\n\"deep\": {\n\"deeper\": [\n[],\n[\n{}\n],\n[\n1,\n[\n2,\n[\n3\n]\n]\n]\n]\n}\n}\n}",
+   "indent2": "{\n  \"nested\": {\n    \"deep\": {\n      \"deeper\": [\n        [],\n        [\n          {}\n        ],\n        [\n          1,\n          [\n            2,\n            [\n              3\n            ]\n          ]\n        ]\n      ]\n    }\n  }\n}",
+   "indent1_ascii": "{\n \"nested\": {\n  \"deep\": {\n   \"deeper\": [\n    [],\n    [\n     {}\n    ],\n    [\n     1,\n     [\n      2,\n      [\n       3\n      ]\n     ]\n    ]\n   ]\n  }\n }\n}",
+   "repr": "{'nested': {'deep': {'deeper': [[], [{}], [1, [2, [3]]]]}}}"
+  },
+  {
+   "doc": "[\"\\u2028\", \"\\u2029\", \"\\u0085\", \"\\u00a0\", \"tab\\there\", \"quote\\\"\", \"back\\\\slash\"]",
+   "dumps_false": "[\"\u2028\", \"\u2029\", \"\u0085\", \"\u00a0\", \"tab\\there\", \"quote\\\"\", \"back\\\\slash\"]",
+   "dumps_true": "[\"\\u2028\", \"\\u2029\", \"\\u0085\", \"\\u00a0\", \"tab\\there\", \"quote\\\"\", \"back\\\\slash\"]",
+   "indent0": "[\n\"\u2028\",\n\"\u2029\",\n\"\u0085\",\n\"\u00a0\",\n\"tab\\there\",\n\"quote\\\"\",\n\"back\\\\slash\"\n]",
+   "indent2": "[\n  \"\u2028\",\n  \"\u2029\",\n  \"\u0085\",\n  \"\u00a0\",\n  \"tab\\there\",\n  \"quote\\\"\",\n  \"back\\\\slash\"\n]",
+   "indent1_ascii": "[\n \"\\u2028\",\n \"\\u2029\",\n \"\\u0085\",\n \"\\u00a0\",\n \"tab\\there\",\n \"quote\\\"\",\n \"back\\\\slash\"\n]",
+   "repr": "['\\u2028', '\\u2029', '\\x85', '\\xa0', 'tab\\there', 'quote\"', 'back\\\\slash']"
+  },
+  {
+   "doc": "{\"name\": \"ls\", \"args\": {\"path\": \"/\u00e9\", \"n\": 1.5, \"ok\": true, \"z\": null}, \"id\": \"call_1\", \"type\": \"tool_call\"}",
+   "dumps_false": "{\"name\": \"ls\", \"args\": {\"path\": \"/\u00e9\", \"n\": 1.5, \"ok\": true, \"z\": null}, \"id\": \"call_1\", \"type\": \"tool_call\"}",
+   "dumps_true": "{\"name\": \"ls\", \"args\": {\"path\": \"/\\u00e9\", \"n\": 1.5, \"ok\": true, \"z\": null}, \"id\": \"call_1\", \"type\": \"tool_call\"}",
+   "indent0": "{\n\"name\": \"ls\",\n\"args\": {\n\"path\": \"/\u00e9\",\n\"n\": 1.5,\n\"ok\": true,\n\"z\": null\n},\n\"id\": \"call_1\",\n\"type\": \"tool_call\"\n}",
+   "indent2": "{\n  \"name\": \"ls\",\n  \"args\": {\n    \"path\": \"/\u00e9\",\n    \"n\": 1.5,\n    \"ok\": true,\n    \"z\": null\n  },\n  \"id\": \"call_1\",\n  \"type\": \"tool_call\"\n}",
+   "indent1_ascii": "{\n \"name\": \"ls\",\n \"args\": {\n  \"path\": \"/\\u00e9\",\n  \"n\": 1.5,\n  \"ok\": true,\n  \"z\": null\n },\n \"id\": \"call_1\",\n \"type\": \"tool_call\"\n}",
+   "repr": "{'name': 'ls', 'args': {'path': '/\u00e9', 'n': 1.5, 'ok': True, 'z': None}, 'id': 'call_1', 'type': 'tool_call'}"
+  },
+  {
+   "doc": "{\"ctrl\": \"\\b\\f\\n\\r\\t\\u0000\\u001f\", \"del\": \"\\u007f\", \"slash\": \"a/b\"}",
+   "dumps_false": "{\"ctrl\": \"\\b\\f\\n\\r\\t\\u0000\\u001f\", \"del\": \"\u007f\", \"slash\": \"a/b\"}",
+   "dumps_true": "{\"ctrl\": \"\\b\\f\\n\\r\\t\\u0000\\u001f\", \"del\": \"\\u007f\", \"slash\": \"a/b\"}",
+   "indent0": "{\n\"ctrl\": \"\\b\\f\\n\\r\\t\\u0000\\u001f\",\n\"del\": \"\u007f\",\n\"slash\": \"a/b\"\n}",
+   "indent2": "{\n  \"ctrl\": \"\\b\\f\\n\\r\\t\\u0000\\u001f\",\n  \"del\": \"\u007f\",\n  \"slash\": \"a/b\"\n}",
+   "indent1_ascii": "{\n \"ctrl\": \"\\b\\f\\n\\r\\t\\u0000\\u001f\",\n \"del\": \"\\u007f\",\n \"slash\": \"a/b\"\n}",
+   "repr": "{'ctrl': '\\x08\\x0c\\n\\r\\t\\x00\\x1f', 'del': '\\x7f', 'slash': 'a/b'}"
+  },
+  {
+   "doc": "{\"k\u00e9y\": \"v\", \"\": \"empty key\", \"it's\": \"x\"}",
+   "dumps_false": "{\"k\u00e9y\": \"v\", \"\": \"empty key\", \"it's\": \"x\"}",
+   "dumps_true": "{\"k\\u00e9y\": \"v\", \"\": \"empty key\", \"it's\": \"x\"}",
+   "indent0": "{\n\"k\u00e9y\": \"v\",\n\"\": \"empty key\",\n\"it's\": \"x\"\n}",
+   "indent2": "{\n  \"k\u00e9y\": \"v\",\n  \"\": \"empty key\",\n  \"it's\": \"x\"\n}",
+   "indent1_ascii": "{\n \"k\\u00e9y\": \"v\",\n \"\": \"empty key\",\n \"it's\": \"x\"\n}",
+   "repr": "{'k\u00e9y': 'v', '': 'empty key', \"it's\": 'x'}"
+  },
+  {
+   "doc": "[1, -1, 0.5, -0.5, 1e-7, 123.456, 1e21, 1e22]",
+   "dumps_false": "[1, -1, 0.5, -0.5, 1e-07, 123.456, 1e+21, 1e+22]",
+   "dumps_true": "[1, -1, 0.5, -0.5, 1e-07, 123.456, 1e+21, 1e+22]",
+   "indent0": "[\n1,\n-1,\n0.5,\n-0.5,\n1e-07,\n123.456,\n1e+21,\n1e+22\n]",
+   "indent2": "[\n  1,\n  -1,\n  0.5,\n  -0.5,\n  1e-07,\n  123.456,\n  1e+21,\n  1e+22\n]",
+   "indent1_ascii": "[\n 1,\n -1,\n 0.5,\n -0.5,\n 1e-07,\n 123.456,\n 1e+21,\n 1e+22\n]",
+   "repr": "[1, -1, 0.5, -0.5, 1e-07, 123.456, 1e+21, 1e+22]"
+  }
+ ],
+ "dumps_string": [
+  [
+   "",
+   "\"\"",
+   "\"\""
+  ],
+  [
+   "plain",
+   "\"plain\"",
+   "\"plain\""
+  ],
+  [
+   "\u00e9",
+   "\"\u00e9\"",
+   "\"\\u00e9\""
+  ],
+  [
+   "\u2028",
+   "\"\u2028\"",
+   "\"\\u2028\""
+  ],
+  [
+   "\u007f",
+   "\"\u007f\"",
+   "\"\\u007f\""
+  ],
+  [
+   "\u0000\u001f",
+   "\"\\u0000\\u001f\"",
+   "\"\\u0000\\u001f\""
+  ],
+  [
+   "\"\\",
+   "\"\\\"\\\\\"",
+   "\"\\\"\\\\\""
+  ],
+  [
+   "\ud83d\ude00",
+   "\"\ud83d\ude00\"",
+   "\"\\ud83d\\ude00\""
+  ],
+  [
+   "a\tb",
+   "\"a\\tb\"",
+   "\"a\\tb\""
+  ],
+  [
+   "\u65e5\u672c\u8a9e",
+   "\"\u65e5\u672c\u8a9e\"",
+   "\"\\u65e5\\u672c\\u8a9e\""
+  ]
+ ],
+ "float_repr": [
+  [
+   1e-05,
+   "1e-05",
+   "1e-05"
+  ],
+  [
+   1e+16,
+   "1e+16",
+   "1e+16"
+  ],
+  [
+   1000000000000000.0,
+   "1000000000000000.0",
+   "1000000000000000.0"
+  ],
+  [
+   0.30000000000000004,
+   "0.30000000000000004",
+   "0.30000000000000004"
+  ],
+  [
+   -0.0,
+   "-0.0",
+   "-0.0"
+  ],
+  [
+   1.2345678901234568e+17,
+   "1.2345678901234568e+17",
+   "1.2345678901234568e+17"
+  ],
+  [
+   2.5,
+   "2.5",
+   "2.5"
+  ],
+  [
+   100.0,
+   "100.0",
+   "100.0"
+  ],
+  [
+   0.0,
+   "0.0",
+   "0.0"
+  ],
+  [
+   1.0,
+   "1.0",
+   "1.0"
+  ],
+  [
+   -1.5,
+   "-1.5",
+   "-1.5"
+  ],
+  [
+   1e-07,
+   "1e-07",
+   "1e-07"
+  ],
+  [
+   1e+21,
+   "1e+21",
+   "1e+21"
+  ],
+  [
+   1e+22,
+   "1e+22",
+   "1e+22"
+  ],
+  [
+   123456789.0,
+   "123456789.0",
+   "123456789.0"
+  ],
+  [
+   0.1,
+   "0.1",
+   "0.1"
+  ],
+  [
+   0.3333333333333333,
+   "0.3333333333333333",
+   "0.3333333333333333"
+  ],
+  [
+   9007199254740992.0,
+   "9007199254740992.0",
+   "9007199254740992.0"
+  ],
+  [
+   5e-324,
+   "5e-324",
+   "5e-324"
+  ],
+  [
+   1.7976931348623157e+308,
+   "1.7976931348623157e+308",
+   "1.7976931348623157e+308"
+  ],
+  [
+   9007199254740992.0,
+   "9007199254740992.0",
+   "9007199254740992.0"
+  ],
+  [
+   1e+100,
+   "1e+100",
+   "1e+100"
+  ],
+  [
+   12345.678,
+   "12345.678",
+   "12345.678"
+  ]
+ ],
+ "float_special": [
+  [
+   "nan",
+   "nan",
+   "NaN"
+  ],
+  [
+   "inf",
+   "inf",
+   "Infinity"
+  ],
+  [
+   "-inf",
+   "-inf",
+   "-Infinity"
+  ]
+ ],
+ "splitlines": [
+  [
+   "",
+   []
+  ],
+  [
+   "a",
+   [
+    "a"
+   ]
+  ],
+  [
+   "a\n",
+   [
+    "a"
+   ]
+  ],
+  [
+   "a\nb",
+   [
+    "a",
+    "b"
+   ]
+  ],
+  [
+   "a\r\nb\rc\u000bd\fe\u001cf\u0085g\u2028h\n",
+   [
+    "a",
+    "b",
+    "c",
+    "d",
+    "e",
+    "f",
+    "g",
+    "h"
+   ]
+  ],
+  [
+   "\n\n",
+   [
+    "",
+    ""
+   ]
+  ],
+  [
+   "x\r",
+   [
+    "x"
+   ]
+  ],
+  [
+   "x\r\r\n",
+   [
+    "x",
+    ""
+   ]
+  ],
+  [
+   "a\u2029b",
+   [
+    "a",
+    "b"
+   ]
+  ],
+  [
+   "a\u001db\u001ec",
+   [
+    "a",
+    "b",
+    "c"
+   ]
+  ],
+  [
+   "no newline at all",
+   [
+    "no newline at all"
+   ]
+  ],
+  [
+   "\r\n",
+   [
+    ""
+   ]
+  ]
+ ],
+ "split_ws": [
+  [
+   "",
+   []
+  ],
+  [
+   "   ",
+   []
+  ],
+  [
+   " a b\u3000c\t",
+   [
+    "a",
+    "b",
+    "c"
+   ]
+  ],
+  [
+   "a\u001cb\u001fc",
+   [
+    "a",
+    "b",
+    "c"
+   ]
+  ],
+  [
+   "one",
+   [
+    "one"
+   ]
+  ],
+  [
+   "  lead and trail  ",
+   [
+    "lead",
+    "and",
+    "trail"
+   ]
+  ],
+  [
+   "a\u00a0b\u2009c\u200bd",
+   [
+    "a",
+    "b",
+    "c\u200bd"
+   ]
+  ],
+  [
+   "x\n\ny",
+   [
+    "x",
+    "y"
+   ]
+  ],
+  [
+   "\u1680a\u205fb\u202fc",
+   [
+    "a",
+    "b",
+    "c"
+   ]
+  ]
+ ],
+ "strip": [
+  [
+   "",
+   "",
+   ""
+  ],
+  [
+   "  x  ",
+   "x",
+   "  x"
+  ],
+  [
+   "\t\nx\r\n",
+   "x",
+   "\t\nx"
+  ],
+  [
+   "\u3000x\u00a0",
+   "x",
+   "\u3000x"
+  ],
+  [
+   "x",
+   "x",
+   "x"
+  ],
+  [
+   "  ",
+   "",
+   ""
+  ],
+  [
+   "\u200bx\u200b",
+   "\u200bx\u200b",
+   "\u200bx\u200b"
+  ],
+  [
+   "\u001cx\u001f",
+   "x",
+   "\u001cx"
+  ],
+  [
+   "a b",
+   "a b",
+   "a b"
+  ]
+ ],
+ "isspace": [
+  [
+   9,
+   true
+  ],
+  [
+   10,
+   true
+  ],
+  [
+   11,
+   true
+  ],
+  [
+   12,
+   true
+  ],
+  [
+   13,
+   true
+  ],
+  [
+   28,
+   true
+  ],
+  [
+   29,
+   true
+  ],
+  [
+   30,
+   true
+  ],
+  [
+   31,
+   true
+  ],
+  [
+   32,
+   true
+  ],
+  [
+   133,
+   true
+  ],
+  [
+   160,
+   true
+  ],
+  [
+   5760,
+   true
+  ],
+  [
+   8192,
+   true
+  ],
+  [
+   8202,
+   true
+  ],
+  [
+   8203,
+   false
+  ],
+  [
+   8232,
+   true
+  ],
+  [
+   8233,
+   true
+  ],
+  [
+   8239,
+   true
+  ],
+  [
+   8287,
+   true
+  ],
+  [
+   12288,
+   true
+  ],
+  [
+   65,
+   false
+  ],
+  [
+   0,
+   false
+  ],
+  [
+   8,
+   false
+  ],
+  [
+   65279,
+   false
+  ],
+  [
+   6158,
+   false
+  ]
+ ],
+ "list_repr": [
+  [
+   [],
+   "[]"
+  ],
+  [
+   [
+    "a"
+   ],
+   "['a']"
+  ],
+  [
+   [
+    "it's",
+    "\"q\"",
+    "\u00e9"
+   ],
+   "[\"it's\", '\"q\"', '\u00e9']"
+  ],
+  [
+   [
+    "a\nb",
+    ""
+   ],
+   "['a\\nb', '']"
+  ]
+ ],
+ "cp_slice": [
+  [
+   "h\u00e9llo w\u00f6rld",
+   0,
+   3,
+   "h\u00e9l",
+   11
+  ],
+  [
+   "h\u00e9llo w\u00f6rld",
+   -5,
+   11,
+   "w\u00f6rld",
+   11
+  ],
+  [
+   "h\u00e9llo w\u00f6rld",
+   2,
+   -2,
+   "llo w\u00f6r",
+   11
+  ],
+  [
+   "h\u00e9llo w\u00f6rld",
+   5,
+   2,
+   "",
+   11
+  ],
+  [
+   "h\u00e9llo w\u00f6rld",
+   -100,
+   100,
+   "h\u00e9llo w\u00f6rld",
+   11
+  ],
+  [
+   "\u65e5\u672c\u8a9e\u30c6\u30ad\u30b9\u30c8",
+   1,
+   4,
+   "\u672c\u8a9e\u30c6",
+   7
+  ],
+  [
+   "",
+   0,
+   5,
+   "",
+   0
+  ],
+  [
+   "a\ud83d\ude00b",
+   1,
+   2,
+   "\ud83d\ude00",
+   3
+  ]
+ ],
+ "cp_head_tail": [
+  [
+   "h\u00e9llo",
+   2,
+   "h\u00e9",
+   "lo"
+  ],
+  [
+   "h\u00e9llo",
+   0,
+   "",
+   ""
+  ],
+  [
+   "h\u00e9llo",
+   9,
+   "h\u00e9llo",
+   "h\u00e9llo"
+  ],
+  [
+   "h\u00e9llo",
+   -1,
+   "h\u00e9ll",
+   ""
+  ],
+  [
+   "\u65e5\u672c\u8a9e",
+   1,
+   "\u65e5",
+   "\u8a9e"
+  ]
+ ],
+ "universal_newlines": [
+  [
+   "a\r\nb\rc\nd",
+   "a\nb\nc\nd"
+  ],
+  [
+   "\r\r\n\n",
+   "\n\n\n"
+  ],
+  [
+   "plain",
+   "plain"
+  ],
+  [
+   "x\r",
+   "x\n"
+  ]
+ ],
+ "xml": [
+  [
+   "hi <x> & \"q\"",
+   "hi &lt;x&gt; &amp; \"q\"",
+   "'hi &lt;x&gt; &amp; \"q\"'"
+  ],
+  [
+   "a'b",
+   "a'b",
+   "\"a'b\""
+  ],
+  [
+   "a\"b'c",
+   "a\"b'c",
+   "\"a&quot;b'c\""
+  ],
+  [
+   "tab\tnl\ncr\r",
+   "tab\tnl\ncr\r",
+   "\"tab&#9;nl&#10;cr&#13;\""
+  ],
+  [
+   "plain",
+   "plain",
+   "\"plain\""
+  ],
+  [
+   "&amp;",
+   "&amp;amp;",
+   "\"&amp;amp;\""
+  ]
+ ],
+ "c1": {
+  "repr": [
+   [
+    "it's",
+    "\"it's\""
+   ],
+   [
+    "\"q\"",
+    "'\"q\"'"
+   ],
+   [
+    "both ' \"",
+    "'both \\' \"'"
+   ],
+   [
+    "a\tb\nc\\",
+    "'a\\tb\\nc\\\\'"
+   ],
+   [
+    "\u00e9\u00a0\u2028\u007f\u0001",
+    "'\u00e9\\xa0\\u2028\\x7f\\x01'"
+   ],
+   [
+    "\u65e5\u672c",
+    "'\u65e5\u672c'"
+   ]
+  ],
+  "json_dumps_ensure_ascii_false": "{\"path\": \"/\u00e9\", \"n\": [1, 2.5, null, true], \"s\": \"a\\n \u007f\\u0001\\\"\"}",
+  "json_dumps_ensure_ascii_true": "{\"d\": \"\\u00e9\\u2014\\ud83d\\ude00\"}",
+  "json_dumps_indent1": "{\n \"a\": [],\n \"b\": {},\n \"c\": [\n  1,\n  {\n   \"x\": \"\u00e9\"\n  }\n ]\n}",
+  "float_repr": [
+   [
+    1e-05,
+    "1e-05"
+   ],
+   [
+    1e+16,
+    "1e+16"
+   ],
+   [
+    1000000000000000.0,
+    "1000000000000000.0"
+   ],
+   [
+    0.30000000000000004,
+    "0.30000000000000004"
+   ],
+   [
+    -0.0,
+    "-0.0"
+   ],
+   [
+    1.2345678901234568e+17,
+    "1.2345678901234568e+17"
+   ],
+   [
+    2.5,
+    "2.5"
+   ],
+   [
+    100.0,
+    "100.0"
+   ]
+  ],
+  "splitlines": [
+   [
+    "a",
+    "b",
+    "c",
+    "d",
+    "e",
+    "f",
+    "g",
+    "h"
+   ]
+  ],
+  "split_ws": [
+   "a",
+   "b",
+   "c"
+  ],
+  "repr_tool_calls": "[{'name': 'ls', 'args': {'path': '/\u00e9', 'n': 1.5, 'ok': True, 'z': None}, 'id': 'call_1', 'type': 'tool_call'}]"
+ }
+}

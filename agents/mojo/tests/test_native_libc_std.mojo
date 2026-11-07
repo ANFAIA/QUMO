@@ -1,0 +1,211 @@
+"""Tests that every native/libc.mojo wrapper links next to the standard library.
+
+Mojo 1.2 refuses two different `external_call` signatures for one C symbol in
+one binary, and the standard library calls some libc symbols itself (`write`
+for `print`, `strerror` for errno texts, file, os and time functions). This
+program calls every wrapper once with harmless arguments and uses the std APIs
+other components are expected to use, so a clash fails here at compile time.
+"""
+
+from std.testing import assert_equal, assert_true
+from std.os import getenv, setenv, unsetenv, listdir, mkdir, makedirs, remove, rmdir, stat, lstat, symlink, unlink
+from std.os.path import exists, isdir, isfile, islink, realpath, expanduser, getsize
+from std.pathlib import Path
+from std.time import sleep, perf_counter_ns, monotonic
+from std.sys import argv
+from std.ffi import get_errno
+from std.random import random_ui64
+from std.tempfile import mkdtemp, gettempdir
+
+from qumo_agent.native.libc import *
+
+
+def use_std() raises -> String:
+    _ = setenv("QUMO_LIBC_STD_X", "1")
+    assert_equal(getenv("QUMO_LIBC_STD_X"), "1")
+    _ = unsetenv("QUMO_LIBC_STD_X")
+    var base = getenv("TMPDIR", "/tmp")
+    if not base.endswith("/"):
+        base += "/"
+    var tmpl = CStr(base + "qumo-libc-std-XXXXXX")
+    var dir = c_string_at(c_mkdtemp(tmpl.addr()))
+    tmpl.keep()
+    assert_true(dir.byte_length() > 0)
+    makedirs(dir + "/a/b", exist_ok=True)
+    mkdir(dir + "/c")
+    with open(dir + "/f.txt", "w") as f:
+        f.write("x")
+    with open(dir + "/f.txt", "r") as f:
+        assert_equal(f.read(), "x")
+    assert_equal(len(listdir(dir)), 3)
+    assert_true(exists(dir) and isdir(dir) and isfile(dir + "/f.txt") and not islink(dir))
+    assert_equal(getsize(dir + "/f.txt"), 1)
+    assert_equal(stat(dir + "/f.txt").st_size, 1)
+    _ = lstat(dir)
+    # open (same call shape as std's open()) and readlink.
+    var fpath = CStr(dir + "/f.txt")
+    var fd = c_open(fpath.addr(), O_RDONLY | O_CLOEXEC, 0)
+    fpath.keep()
+    assert_true(fd >= 0)
+    _ = c_close(fd)
+    symlink("f.txt", dir + "/l")
+    var lpath = CStr(dir + "/l")
+    var lbuf = List[UInt8](length=PATH_BUF_SIZE, fill=0)
+    var ln = c_readlink(lpath.addr(), buf_addr(lbuf), PATH_BUF_SIZE)
+    lpath.keep()
+    assert_equal(ln, 5)
+    assert_equal(String(from_utf8_lossy=Span(lbuf)[0:ln]), "f.txt")
+    _ = len(lbuf)
+    unlink(dir + "/l")
+    assert_true(Path(dir).exists())
+    _ = realpath(dir)
+    _ = expanduser("~")
+    remove(dir + "/f.txt")
+    rmdir(dir + "/a/b")
+    rmdir(dir + "/a")
+    rmdir(dir + "/c")
+    rmdir(dir)
+    sleep(0.001)
+    assert_true(perf_counter_ns() > 0 and monotonic() > 0 and len(argv()) >= 1)
+    _ = random_ui64(0, 10)
+    var td = mkdtemp()
+    rmdir(td)
+    _ = gettempdir()
+    return String(get_errno())
+
+
+def use_every_wrapper() raises:
+    var ok = 0
+    # posix_spawn of /usr/bin/true with file actions and attributes.
+    var fa = List[UInt64](length=64, fill=0)
+    var attr = List[UInt64](length=64, fill=0)
+    var fa_a = Int(fa.unsafe_ptr())
+    var attr_a = Int(attr.unsafe_ptr())
+    ok += c_fa_init(fa_a) + c_attr_init(attr_a)
+    var devnull = CStr("/dev/null")
+    ok += c_fa_addopen(fa_a, 0, devnull.addr(), O_RDONLY, 0)
+    ok += c_fa_adddup2(fa_a, 2, 2)
+    var sigs = List[UInt8](length=128, fill=0)
+    ok += c_attr_setsigdefault(attr_a, buf_addr(sigs)) + c_attr_setsigmask(attr_a, buf_addr(sigs))
+    ok += c_attr_setpgroup(attr_a, 0) + c_attr_setflags(attr_a, POSIX_SPAWN_SETSIGMASK)
+    var path = CStr("/usr/bin/true")
+    var argv_c = CStrArray(["true"])
+    var envp = CStrArray(List[String]())
+    var pid_buf = List[UInt8](length=8, fill=0)
+    ok += c_posix_spawn(buf_addr(pid_buf), path.addr(), fa_a, attr_a, argv_c.addr(), envp.addr())
+    var pid = load_i32(buf_addr(pid_buf))
+    _ = c_kill(pid, 0)
+    var st = List[UInt8](length=8, fill=0)
+    assert_equal(c_waitpid(pid, buf_addr(st), 0), pid)
+    ok += c_fa_addclose(fa_a, 2)
+    ok += c_fa_destroy(fa_a) + c_attr_destroy(attr_a)
+    assert_equal(ok, 0)
+    # Calls that fail harmlessly.
+    var missing = CStr("/nonexistent/qumo")
+    var other = CStr("/nonexistent/qumo2")
+    assert_equal(c_execve(missing.addr(), argv_c.addr(), envp.addr()), -1)
+    assert_equal(c_chdir(missing.addr()), -1)
+    assert_equal(c_access(missing.addr(), X_OK), -1)
+    assert_equal(c_chmod(missing.addr(), 0o600), -1)
+    assert_equal(c_rename(missing.addr(), other.addr()), -1)
+    var rl = List[UInt64](length=2, fill=0)
+    assert_equal(c_setrlimit(9999, Int(rl.unsafe_ptr())), -1)
+    assert_equal(c_isatty(-1), 0)
+    assert_equal(c_unshare(-1), -1)
+    assert_equal(c_prctl(-1, 0, 0, 0, 0), -1)
+    assert_equal(c_syscall4(-1, 0, 0, 0), -1)
+    _ = c_ns_get_environ()
+    _ = c_signal(SIGPIPE, SIG_IGN)
+    assert_true(strerror_text(EPIPE).byte_length() > 0)
+    # fds.
+    var fds = List[UInt8](length=8, fill=0)
+    assert_equal(c_pipe(buf_addr(fds)), 0)
+    var r = load_i32(buf_addr(fds))
+    var w = load_i32(buf_addr(fds) + 4)
+    _ = c_fcntl(r, F_SETFD, FD_CLOEXEC)
+    var one = CStr("1")
+    assert_equal(c_write(w, one.addr(), 1), 1)
+    var buf = List[UInt8](length=64, fill=0)
+    assert_equal(c_read(r, buf_addr(buf), 64), 1)
+    assert_equal(c_poll(0, 0, 0), 0)
+    _ = c_close(r)
+    _ = c_close(w)
+    var rp = List[UInt8](length=PATH_BUF_SIZE, fill=0)
+    var root = CStr("/")
+    assert_equal(c_string_at(c_realpath(root.addr(), buf_addr(rp))), "/")
+    # time.
+    var ts = List[Int64](length=2, fill=0)
+    ok += c_clock_gettime(CLOCK_REALTIME, Int(ts.unsafe_ptr()))
+    var tt = List[Int64](length=1, fill=0)
+    tt[0] = Int64(c_time())
+    var tm = List[UInt8](length=SIZEOF_TM, fill=0)
+    _ = c_localtime_r(Int(tt.unsafe_ptr()), buf_addr(tm))
+    _ = c_gmtime_r(Int(tt.unsafe_ptr()), buf_addr(tm))
+    var fmt = CStr("%Y")
+    assert_equal(c_strftime(buf_addr(buf), 64, fmt.addr(), buf_addr(tm)), 4)
+    assert_equal(c_timegm(buf_addr(tm)), Int(tt[0]))
+    # sockets (fd -1 fails with EBADF).
+    var sa = List[UInt8](length=16, fill=0)
+    var len_buf = List[UInt8](length=4, fill=0)
+    assert_equal(c_connect(-1, buf_addr(sa), 16), -1)
+    assert_equal(c_bind(-1, buf_addr(sa), 16), -1)
+    assert_equal(c_listen(-1, 1), -1)
+    assert_equal(c_accept(-1, 0, 0), -1)
+    assert_equal(c_getsockname(-1, buf_addr(sa), buf_addr(len_buf)), -1)
+    assert_equal(c_setsockopt(-1, SOL_SOCKET, SO_ERROR, buf_addr(sa), 4), -1)
+    assert_equal(c_getsockopt(-1, SOL_SOCKET, SO_ERROR, buf_addr(sa), buf_addr(len_buf)), -1)
+    var s = c_socket(AF_INET, SOCK_STREAM, 0)
+    assert_true(s >= 0)
+    _ = c_close(s)
+    var host = CStr("127.0.0.1")
+    var port = CStr("80")
+    assert_equal(c_inet_pton(AF_INET, host.addr(), buf_addr(sa)), 1)
+    var hints = List[UInt8](length=SIZEOF_ADDRINFO, fill=0)
+    var res = List[UInt8](length=8, fill=0)
+    assert_equal(c_getaddrinfo(host.addr(), port.addr(), buf_addr(hints), buf_addr(res)), 0)
+    c_freeaddrinfo(load_i64(buf_addr(res)))
+    assert_true(c_string_at(c_gai_strerror(1)).byte_length() > 0)
+    # regex and fnmatch.
+    var re = List[UInt64](length=64, fill=0)
+    var pat = CStr("a")
+    assert_equal(c_regcomp(Int(re.unsafe_ptr()), pat.addr(), REG_EXTENDED | REG_NOSUB), 0)
+    assert_equal(c_regexec(Int(re.unsafe_ptr()), pat.addr(), 0, 0, 0), 0)
+    assert_true(c_regerror(REG_NOMATCH, Int(re.unsafe_ptr()), buf_addr(buf), 64) > 0)
+    c_regfree(Int(re.unsafe_ptr()))
+    assert_equal(c_fnmatch(pat.addr(), pat.addr(), 0), 0)
+    assert_equal(ok, 0)
+    _ = len(fa)
+    _ = len(attr)
+    _ = len(sigs)
+    _ = len(pid_buf)
+    _ = len(st)
+    _ = len(rl)
+    _ = len(fds)
+    _ = len(buf)
+    _ = len(rp)
+    _ = len(ts)
+    _ = len(tt)
+    _ = len(tm)
+    _ = len(sa)
+    _ = len(len_buf)
+    _ = len(hints)
+    _ = len(res)
+    _ = len(re)
+    devnull.keep()
+    path.keep()
+    argv_c.keep()
+    envp.keep()
+    missing.keep()
+    other.keep()
+    one.keep()
+    root.keep()
+    fmt.keep()
+    host.keep()
+    port.keep()
+    pat.keep()
+
+
+def main() raises:
+    use_every_wrapper()
+    _ = use_std()
+    print("test_native_libc_std OK")

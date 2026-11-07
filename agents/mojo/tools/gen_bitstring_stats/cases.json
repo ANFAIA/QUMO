@@ -1,0 +1,16 @@
+{"schema": "qumo.tool_cases.v1", "tool": "gen_bitstring_stats", "cases": [
+ {"name": "bell", "arguments": {"counts": "{\"00\": 500, \"11\": 500}"},
+  "expect": {"is_error": false, "json_equals": {"shots": 1000, "outcomes": 2, "width": 2, "entropy_bits": 1.0, "parity_even": 1.0, "parity_odd": 0.0, "most_frequent": "00"}}},
+ {"name": "uniform two qubits", "arguments": {"counts": "{\"00\": 250, \"01\": 250, \"10\": 250, \"11\": 250}"},
+  "expect": {"json_equals": {"shots": 1000, "outcomes": 4, "width": 2, "entropy_bits": 2.0, "parity_even": 0.5, "parity_odd": 0.5, "most_frequent": "00"}}},
+ {"name": "registers and a zero count", "arguments": {"counts": "{\"0 1\": 1, \"10\": 3, \"11\": 0}"},
+  "expect": {"text_contains": ["\"shots\":4", "\"outcomes\":2", "\"most_frequent\":\"10\""]}},
+ {"name": "single outcome", "arguments": {"counts": "{\"111\": 7}"},
+  "expect": {"json_equals": {"shots": 7, "outcomes": 1, "width": 3, "entropy_bits": 0.0, "parity_even": 0.0, "parity_odd": 1.0, "most_frequent": "111"}}},
+ {"name": "bad input", "arguments": {"counts": "nope"},
+  "expect": {"is_error": true, "text_contains": ["not valid JSON"]}},
+ {"name": "mixed widths", "arguments": {"counts": "{\"0\": 1, \"11\": 1}"},
+  "expect": {"is_error": true, "text_contains": "different widths"}},
+ {"name": "missing counts", "arguments": {},
+  "expect": {"is_error": true, "text_equals": "counts is required: a JSON object such as {\"00\": 500, \"11\": 500}"}}
+]}

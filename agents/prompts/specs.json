@@ -10,7 +10,8 @@
    ],
    "mcp_tools": [],
    "subagents": [],
-   "writes_code": false
+   "writes_code": false,
+   "generated_tools": []
   },
   "code-review": {
    "description": "Reviews QUMO code for performance and security on an independent model; reports file:line findings with failure scenarios.",
@@ -21,7 +22,8 @@
    ],
    "mcp_tools": [],
    "subagents": [],
-   "writes_code": false
+   "writes_code": false,
+   "generated_tools": []
   },
   "autoresearch": {
    "description": "Improves one QUMO module step by step in a sandbox branch: hypothesis, baseline, change, measurement, review.",
@@ -49,7 +51,8 @@
     "qec-research",
     "compiler-research"
    ],
-   "writes_code": true
+   "writes_code": true,
+   "generated_tools": "all"
   },
   "qumo-operator": {
    "description": "Uses QUMO through MCP: builds algorithms, simulates and compiles circuits, runs QEC experiments, explains error codes.",
@@ -58,7 +61,8 @@
    ],
    "mcp_tools": "all",
    "subagents": [],
-   "writes_code": false
+   "writes_code": false,
+   "generated_tools": "all"
   },
   "algorithm-research": {
    "description": "Explores new quantum algorithms, checks them against QUMO's library and prototypes toy instances.",
@@ -78,7 +82,8 @@
     "qumo_expectation"
    ],
    "subagents": [],
-   "writes_code": false
+   "writes_code": false,
+   "generated_tools": []
   },
   "qec-research": {
    "description": "Explores new error-correcting codes and decoders and compares them with QUMO's QEC baseline.",
@@ -95,7 +100,8 @@
     "qumo_ft_codes"
    ],
    "subagents": [],
-   "writes_code": false
+   "writes_code": false,
+   "generated_tools": []
   },
   "compiler-research": {
    "description": "Explores new circuit optimisation and compilation methods and measures QUMO's current compiler as the baseline.",
@@ -112,7 +118,8 @@
     "qumo_to_pbc"
    ],
    "subagents": [],
-   "writes_code": false
+   "writes_code": false,
+   "generated_tools": []
   },
   "execution": {
    "description": "Runs circuits the best available way: validates, sizes, picks simulator or GPU, compiles and emulates targets.",
@@ -133,7 +140,8 @@
     "qumo_describe"
    ],
    "subagents": [],
-   "writes_code": false
+   "writes_code": false,
+   "generated_tools": []
   },
   "orchestrator": {
    "description": "Splits a problem between classical, AI and quantum stages and delegates to every research and execution agent.",
@@ -155,7 +163,8 @@
     "code-review",
     "autoresearch"
    ],
-   "writes_code": false
+   "writes_code": false,
+   "generated_tools": []
   }
  }
 }

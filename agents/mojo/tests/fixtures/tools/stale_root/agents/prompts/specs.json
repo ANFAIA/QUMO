@@ -1,0 +1,12 @@
+{
+ "schema": "qumo.agent_specs.v1",
+ "agents": {
+  "alpha": {
+   "description": "An export from before generated_tools existed.",
+   "tool_groups": ["report"],
+   "mcp_tools": [],
+   "subagents": [],
+   "writes_code": false
+  }
+ }
+}
