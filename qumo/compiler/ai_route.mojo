@@ -554,7 +554,7 @@ def load_route_model(dir: String) raises -> RouteModel:
     m.w1 = mf.tensor("action.0.weight")
     m.b1 = mf.tensor("action.0.bias")
     if len(m.emb) != OBS_SIZE * H or len(m.b0) != H or len(m.w1) != NUM_ACTIVE_SWAPS * H or len(m.b1) != NUM_ACTIVE_SWAPS:
-        raise Error("QM-E620: router model '" + mf.id + "' tensor shapes do not match hidden=" + String(H) + ". Hint: re-export the model with training/ai_transpiler/route/export_route.py.")
+        raise Error("QM-E620: router model '" + mf.id + "' tensor shapes do not match hidden=" + String(H) + ". Hint: re-export the model with build/export_route (make train-ai-route).")
     m.hidden = H
     m.id = mf.id
     m.dir = dir
@@ -1282,11 +1282,15 @@ struct Episode(Copyable):
     def finished(self, prob: RProblem) -> Bool:
         return self.executed == prob.num_nodes()
 
-    def step(mut self, prob: RProblem, target: Target, model: RouteModel, mode: Int, beta: Float64, limit: Int) -> Bool:
-        """Run one decision (after executing ready gates). False when done."""
+    def pre_decision(mut self, prob: RProblem, target: Target, limit: Int) -> Int:
+        """Execute the ready gates and prepare the decision state: progress bookkeeping (`noprog`, `fallback`), the
+        layers, the active swaps and, when a policy decision is due (`needs_policy`), the observation `obs`.
+        Returns the number of gates executed, or -1 when the circuit is finished (nothing more to decide). The
+        second half of a decision is `act` (a chosen edge) or, when the policy is not asked, `fallback_swap`
+        followed by `act`. `step` is exactly this split run back to back."""
         var ex = self.execute(prob, target)
         if self.finished(prob):
-            return False
+            return -1
         var f = self.fsum(prob, target)
         if ex > 0:
             self.noprog = 0
@@ -1303,25 +1307,37 @@ struct Episode(Copyable):
         self.steps += 1
         self.build_layers(prob)
         self.build_active(prob, target)
+        if not self.fallback and len(self.active) > 0:
+            self.build_obs(prob, target)
+        return ex
+
+    def needs_policy(self) -> Bool:
+        """True after `pre_decision` when the policy must pick one of `active` (not in fallback mode and at least one
+        active swap); False when the next swap is the fallback shortest-path swap."""
+        return not self.fallback and len(self.active) > 0
+
+    def act(mut self, prob: RProblem, target: Target, e: Int):
+        """Apply the chosen coupling edge `e` (an index into the target's edges, e.g. `active[k]`): records it in the
+        trace and swaps."""
+        self.actions.append(e)
+        self.apply_swap(prob, target, e)
+
+    def step(mut self, prob: RProblem, target: Target, model: RouteModel, mode: Int, beta: Float64, limit: Int) -> Bool:
+        """Run one decision (after executing ready gates). False when done."""
+        var ex = self.pre_decision(prob, target, limit)
+        if ex < 0:
+            return False
         var e: Int
-        if self.fallback:
-            e = self.fallback_swap(prob, target)
-            self.n_fallback += 1
-            if e < 0:
-                self.failed = True
-                return False
-        elif len(self.active) == 0:
+        if not self.needs_policy():
             e = self.fallback_swap(prob, target)
             self.n_fallback += 1
             if e < 0:
                 self.failed = True
                 return False
         else:
-            self.build_obs(prob, target)
             var k = self.choose(prob, target, model, mode, beta)
             e = self.active[k]
-        self.actions.append(e)
-        self.apply_swap(prob, target, e)
+        self.act(prob, target, e)
         return True
 
     def run(mut self, prob: RProblem, target: Target, model: RouteModel, mode: Int, beta: Float64, max_steps: Int):
