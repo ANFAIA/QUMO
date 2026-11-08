@@ -7,7 +7,7 @@ from a sign-encoded distance-change observation, with a tiny 128 -> H -> 16
 MLP; episodes are stochastic (seeded shuffles), run in parallel, and wrapped
 in a bidirectional layout search. Re-implemented from a written spec; no IBM
 code or weights are used. QUMO's router models are trained locally
-(`training/ai_transpiler/route`, format `qumo.rlroute.v0`).
+(`rl/`: qrl router training with the qumo_bridge export, format `qumo.rlroute.v0`).
 
 QUMO additions:
   * Determinism: every shuffle uses `Rng(seed).split(...)`; results do not
@@ -533,7 +533,7 @@ def load_route_model(dir: String) raises -> RouteModel:
     checksum mismatch); QM-E620 when it is not a router model of this
     architecture (sign embedding 128 -> H, relu, -> 16 logits).
 
-    Tensors (naming written by qumo/rl/export_route.mojo):
+    Tensors (naming written by rl/qumo_bridge/export_route.mojo):
     `embeddings.weight` [128, H] (stored transposed, row i = embedding of
     observation feature i), `embeddings.bias` [H], `action.0.weight` [16, H],
     `action.0.bias` [16]; optional `value.0.*` (PPO critic, unused here).
@@ -547,7 +547,7 @@ def load_route_model(dir: String) raises -> RouteModel:
     var na = arch.get_int("num_active_swaps", -1)
     var H = arch.get_int("hidden", -1)
     if mf.obs_size != OBS_SIZE or hz != HORIZON or na != NUM_ACTIVE_SWAPS or H <= 0 or H > 4096:
-        raise Error("QM-E620: router model '" + mf.id + "' has obs=" + String(mf.obs_size) + ", horizon=" + String(hz) + ", actions=" + String(na) + ", hidden=" + String(H) + "; this router needs obs=128, horizon=8, actions=16. Hint: retrain / re-export it as qumo.rlroute.v0 (training/ai_transpiler/route).")
+        raise Error("QM-E620: router model '" + mf.id + "' has obs=" + String(mf.obs_size) + ", horizon=" + String(hz) + ", actions=" + String(na) + ", hidden=" + String(H) + "; this router needs obs=128, horizon=8, actions=16. Hint: retrain / re-export it as qumo.rlroute.v0 (make train-ai-route, rl/).")
     var m = RouteModel()
     m.emb = mf.tensor("embeddings.weight")
     m.b0 = mf.tensor("embeddings.bias")

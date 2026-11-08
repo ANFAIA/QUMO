@@ -1,3 +1,5 @@
+# The training package rl/qrl keeps a copy of the reader half of this file (rl/qrl/model.mojo, it never imports QUMO);
+# rl/qumo_bridge/tests/test_bridge_policy.mojo and test_bridge_parity.mojo pin the two together.
 """Learned-policy models for the AI transpiler: container loader, MLP inference,
 model lookup by coupling-graph isomorphism.
 
@@ -9,7 +11,7 @@ or code is used. A policy only *proposes* gate sequences: callers verify every
 proposal exactly before using it.
 
 Container (`qumo.rlsynth.v0` / `qumo.rlroute.v0`, written by
-qumo/rl/container.mojo, via the export_synth and export_route tools): a directory with `manifest.json`
+rl/qrl/container.mojo, via the export_synth and export_route tools): a directory with `manifest.json`
 (format, id, kind, num_qubits, edges, actions, obs, arch, symmetries, tensors,
 weights_bytes, fnv1a64, sha256, test_vectors, rollouts, training, license) and
 `weights.bin` (little-endian f32/f16 tensors, 64-byte aligned). The FNV-1a 64
@@ -113,7 +115,7 @@ def fnv1a64_bytes(data: List[UInt8]) -> UInt64:
 
 def fnv_words(words: List[UInt64]) -> UInt64:
     """FNV-1a over the little-endian 8-byte encoding of each word (matches
-    qumo/rl/topology.mojo `fnv_words` usage in the training stack)."""
+    rl/qrl/topology.mojo `fnv_words` usage in the training stack)."""
     var h = FNV_OFFSET
     for w in words:
         var u = w
@@ -136,7 +138,7 @@ def hex16(v: UInt64) -> String:
 def wl_hash(n: Int, edges: List[Int], iters: Int = 3) -> String:
     """Weisfeiler-Lehman colour-refinement hash of an undirected graph given as
     flat pairs (prefilter only; collisions are resolved by an exact matcher).
-    Same rule as the training stack (qumo/rl/topology.mojo uses this function)."""
+    Same rule as the training stack (rl/qrl/topology.mojo uses this function)."""
     var adj = List[List[Int]]()
     for _ in range(n):
         adj.append(List[Int]())

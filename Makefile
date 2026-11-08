@@ -1,8 +1,8 @@
 # QUMO build & test entry points.
 MOJO ?= .venv/bin/mojo
 PY ?= bench/.venv/bin/python
-# make test skips the slow statistical and end-to-end RL files (make test-rl-slow runs them)
-TESTS := $(filter-out %_slow.mojo tests/test_rl_smoke.mojo tests/test_rl_e2e.mojo,$(wildcard tests/test_*.mojo))
+# the RL tests live in rl/ (make test runs the fast ones once, via make test-rl; make test-rl-slow runs the rest)
+TESTS := $(wildcard tests/test_*.mojo)
 
 .PHONY: all setup setup-py test cli py bench-sv bench-neutral bench-charts benchpress clean examples examples-all examples-gpu test-py
 
@@ -23,11 +23,11 @@ setup-py:  ## bench/.venv: Python 3.12 + latest Qiskit, Aer, TKET, Cirq, Stim, P
 		cirq-core ply stim pymatching numpy scipy matplotlib altair vl-convert-python psutil pytest nbformat "openqasm3[parser]"
 	uv pip install --python bench/.venv/bin/python -U "./plugins/hardware[all]"
 
-test:  ## run every Mojo test file
+test:  ## run every Mojo test file (tests/ and, once, the fast RL tests of rl/ through make test-rl)
 	@fail=0; for t in $(TESTS); do \
 		out=$$($(MOJO) run -I . $$t 2>&1 | grep -v Crashpad | tail -1); \
 		case "$$out" in *OK*) echo "PASS $$t";; *) echo "FAIL $$t: $$out"; fail=1;; esac; \
-	done; exit $$fail
+	done; $(MAKE) --no-print-directory test-rl || fail=1; exit $$fail
 
 cli:  ## native CLI + MCP server (build/qumo)
 	@mkdir -p build
@@ -65,12 +65,13 @@ agents-doctor:  ## check keys, the MCP server and the back-end CLIs the agents n
 
 # ---------------------------------------------------------------- AI transpiler (docs/AI_TRANSPILER.md)
 # Models live in models/ai_transpiler/{synth,route}/ with an INDEX.json registry (sha256 per file); the Mojo
-# loader re-checks an FNV-1a checksum. Training is native Mojo (qumo/rl, training/ai_transpiler): the training
-# targets run no Python, no Rust and no torch (`make check-pure-mojo` enforces it). None of this is part of
-# `make test` except the fast `tests/test_rl_*.mojo` files.
+# loader re-checks an FNV-1a checksum. Training is the independent native Mojo package in rl/ (qrl, plus the
+# qumo_bridge glue; rl/README.md, rl/Makefile): the training targets run no Python, no Rust and no torch
+# (`make check-pure-mojo` enforces it). The targets below delegate to rl/Makefile. `make test` runs the fast RL
+# tests once, through `make test-rl` (rl/tests/test_rl_*.mojo and rl/qumo_bridge/tests/test_bridge_*.mojo).
 AI_BUILD ?= build/ai_train
 AI_CORES ?= 4
-# two lanes share the same pool threads and each runs about 0.69x slower (MOJO_PORT.md section 3, rule 8)
+# two lanes share the same pool threads and each runs about 0.69x slower (rl/docs/MOJO_PORT.md section 3, rule 8)
 AI_LANES ?= 1
 # hard wall-clock cap of the whole synthesis campaign (the shipped budgets total 22,200 s)
 AI_SYNTH_BUDGET_S ?= 28800
@@ -81,69 +82,59 @@ AI_ROUTE_ID ?= route_mlp_h64_v1
 AI_BENCH_ARGS ?= --sdks qumo,qumo-ai,qiskit,tket --levels default,max --max-qubits 14
 AI_TOOLS := route_tool train_route export_route train_synth export_synth eval_synth eval_blocks train_all models_verify train_route_ppo make_fixtures
 
+# MOJO, AI_BUILD and the work dir as rl/Makefile (which runs in rl/) must see them
+RL_ARGS = --no-print-directory -C rl QUMO_ROOT=$(CURDIR) \
+	MOJO=$(if $(findstring /,$(MOJO)),$(abspath $(MOJO)),$(MOJO)) AI_BUILD=$(abspath $(AI_BUILD)) \
+	MODELS=$(CURDIR)/models/ai_transpiler AI_ROUTE_WORK=$(abspath $(AI_ROUTE_WORK)) AI_CORES=$(AI_CORES) \
+	AI_LANES=$(AI_LANES) AI_SYNTH_BUDGET_S=$(AI_SYNTH_BUDGET_S) AI_ROUTE_BC_BUDGET_S=$(AI_ROUTE_BC_BUDGET_S) \
+	AI_ROUTE_ID=$(AI_ROUTE_ID)
+
 .PHONY: models-verify train-ai train-ai-synth train-ai-route train-ai-smoke train-ai-route-ppo ai-tools bench-ai \
-	test-rl test-rl-slow check-pure-mojo bench-rl
+	test-rl test-rl-slow check-pure-mojo check-independence bench-rl
 
-vpath %.mojo training/ai_transpiler/synth training/ai_transpiler/route training/ai_transpiler/common
-AI_SRC := $(shell find qumo -name '*.mojo' 2>/dev/null)
+# one tool per main (core mains in rl/drivers, QUMO glue mains in rl/qumo_bridge/drivers); kept here so that
+# `make $(AI_BUILD)/bin/<tool>` works from the QUMO root (the e2e test builds missing tools that way)
+vpath %.mojo rl/drivers/synth rl/drivers/route rl/drivers/common rl/qumo_bridge/drivers
+AI_SRC := $(shell find qumo rl/qrl rl/qumo_bridge -name '*.mojo' ! -path '*/tests/*' 2>/dev/null)
 
-# one tool per main file; vpath finds the main in synth/, route/ or common/
 $(AI_BUILD)/bin/%: %.mojo $(AI_SRC)
 	@mkdir -p $(dir $@)
-	$(MOJO) build -I . -o $@ $<
+	$(MOJO) build -I . -I rl -o $@ $<
 
 ai-tools: $(addprefix $(AI_BUILD)/bin/,$(AI_TOOLS))  ## build every training tool into $(AI_BUILD)/bin
 
-models-verify: $(AI_BUILD)/bin/models_verify  ## sha256 of every model file under models/ai_transpiler (QUMO_MODEL_DIR) against its INDEX.json
-	@$<
+models-verify:  ## sha256 of every model file under models/ai_transpiler (QUMO_MODEL_DIR) against its INDEX.json
+	@$(MAKE) $(RL_ARGS) models-verify
 
-train-ai: train-ai-synth train-ai-route  ## retrain the AI-transpiler models (hours; no Python, no Rust, no torch; not part of make test)
-	@$(MAKE) --no-print-directory models-verify
+train-ai:  ## retrain the AI-transpiler models (hours; no Python, no Rust, no torch; not part of make test)
+	@$(MAKE) $(RL_ARGS) train-ai
 
-train-ai-synth: $(addprefix $(AI_BUILD)/bin/,train_all train_synth export_synth eval_synth)  ## synthesis models of training/ai_transpiler/synth/campaign.json (cap AI_SYNTH_BUDGET_S)
-	@pids=; for k in $$(seq 1 $(AI_LANES)); do \
-	  $(AI_BUILD)/bin/train_all --campaign training/ai_transpiler/synth/campaign.json --lane $$k/$(AI_LANES) \
-	      --cores $(AI_CORES) --budget-cap-s $(AI_SYNTH_BUDGET_S) --work $(AI_BUILD)/synth & pids="$$pids $$!"; done; \
-	  rc=0; for p in $$pids; do wait $$p || rc=1; done; exit $$rc
+train-ai-synth:  ## synthesis models of rl/drivers/synth/campaign.json (cap AI_SYNTH_BUDGET_S)
+	@$(MAKE) $(RL_ARGS) train-ai-synth
 
-train-ai-route: $(addprefix $(AI_BUILD)/bin/,route_tool train_route export_route)  ## learned routing policy: teacher data + BC + one DAgger round (training/ai_transpiler/route/README.md)
-	@mkdir -p $(AI_ROUTE_WORK)/stage
-	$(AI_BUILD)/bin/route_tool gen-jobs 31 1000 30 0.5 $(AI_ROUTE_WORK)/jobs0.json
-	$(AI_BUILD)/bin/route_tool gen-jobs 32 1000 30 0.5 $(AI_ROUTE_WORK)/jobs1.json
-	ROUTE_TOOL_CAP=96 $(AI_BUILD)/bin/route_tool gen $(AI_ROUTE_WORK)/jobs0.json $(AI_ROUTE_WORK)/d0.bin - 1.0 401 heuristic 16
-	$(AI_BUILD)/bin/train_route --data $(AI_ROUTE_WORK)/d0.bin --out $(AI_ROUTE_WORK)/run0 --hidden 64 --tau 0.5 --epochs 30 --seed 0 --budget-s $(AI_ROUTE_BC_BUDGET_S)
-	$(AI_BUILD)/bin/export_route $(AI_ROUTE_WORK)/run0 --root $(AI_ROUTE_WORK)/stage --id round0 --default
-	ROUTE_TOOL_CAP=96 $(AI_BUILD)/bin/route_tool gen $(AI_ROUTE_WORK)/jobs1.json $(AI_ROUTE_WORK)/d1.bin $(AI_ROUTE_WORK)/stage/round0 0.3 402 heuristic 16
-	$(AI_BUILD)/bin/train_route --data $(AI_ROUTE_WORK)/d0.bin $(AI_ROUTE_WORK)/d1.bin --out $(AI_ROUTE_WORK)/run1 --hidden 64 --tau 0.5 --epochs 30 --seed 0 --budget-s $(AI_ROUTE_BC_BUDGET_S)
-	$(AI_BUILD)/bin/export_route $(AI_ROUTE_WORK)/run1 --root models/ai_transpiler/route --id $(AI_ROUTE_ID) --default
+train-ai-route:  ## learned routing policy: teacher data + BC + one DAgger round (rl/drivers/route/README.md)
+	@$(MAKE) $(RL_ARGS) train-ai-route
 
-train-ai-smoke: $(addprefix $(AI_BUILD)/bin/,train_synth export_synth eval_synth route_tool train_route export_route models_verify)  ## ~5 min end-to-end into $(AI_BUILD)/smoke (synth learns and beats greedy, router BC, export + verify); never writes models/
-	training/ai_transpiler/smoke.sh $(AI_BUILD)
+train-ai-smoke:  ## ~5 min end-to-end into $(AI_BUILD)/smoke (synth learns and beats greedy, router BC, export + verify); never writes models/
+	@$(MAKE) $(RL_ARGS) train-ai-smoke
 
-train-ai-route-ppo: $(addprefix $(AI_BUILD)/bin/,train_route_ppo export_route)  ## optional router PPO fine-tune: make train-ai-route-ppo INIT=<router dir> BUDGET_S=<s>; never part of train-ai
-	@test -n "$(INIT)" -a -n "$(BUDGET_S)" || { echo "usage: make train-ai-route-ppo INIT=<router dir> BUDGET_S=<seconds>"; exit 2; }
-	$(AI_BUILD)/bin/train_route_ppo --init $(INIT) --out $(AI_ROUTE_WORK)/ppo_run --budget-s $(BUDGET_S)
+train-ai-route-ppo:  ## optional router PPO fine-tune: make train-ai-route-ppo INIT=<router dir> BUDGET_S=<s>; never part of train-ai
+	@$(MAKE) $(RL_ARGS) train-ai-route-ppo INIT=$(if $(INIT),$(abspath $(INIT))) BUDGET_S=$(BUDGET_S)
 
-test-rl:  ## fast RL tests only (tests/test_rl_*.mojo except *_slow, smoke, e2e); prints the wall time per file, each must stay under 30 s
-	@fail=0; for t in $(filter-out %_slow.mojo tests/test_rl_smoke.mojo tests/test_rl_e2e.mojo,$(wildcard tests/test_rl_*.mojo)); do \
-	  s=$$(date +%s); out=$$($(MOJO) run -I . $$t 2>&1 | grep -v Crashpad | tail -1); e=$$(( $$(date +%s) - s )); \
-	  case "$$out" in *OK*) echo "PASS $$t ($${e}s)";; *) echo "FAIL $$t: $$out"; fail=1;; esac; \
-	done; exit $$fail
+test-rl:  ## fast RL tests: rl/ independence check, core tests (-I rl only) and bridge tests; wall time per file, each under 30 s
+	@$(MAKE) $(RL_ARGS) test test-bridge
 
-test-rl-slow:  ## statistical and end-to-end RL tests (*_slow, smoke, e2e) and test_rl_tensor with -D ASSERT=all
-	@fail=0; for t in $(wildcard tests/test_rl_*_slow.mojo) tests/test_rl_smoke.mojo tests/test_rl_e2e.mojo; do \
-	  s=$$(date +%s); out=$$($(MOJO) run -I . $$t 2>&1 | grep -v Crashpad | tail -1); e=$$(( $$(date +%s) - s )); \
-	  case "$$out" in *OK*) echo "PASS $$t ($${e}s)";; *) echo "FAIL $$t: $$out"; fail=1;; esac; \
-	done; \
-	out=$$($(MOJO) run -D ASSERT=all -I . tests/test_rl_tensor.mojo 2>&1 | grep -v Crashpad | tail -1); \
-	case "$$out" in *OK*) echo "PASS tests/test_rl_tensor.mojo (-D ASSERT=all)";; *) echo "FAIL tests/test_rl_tensor.mojo: $$out"; fail=1;; esac; exit $$fail
+test-rl-slow:  ## statistical and end-to-end RL tests (core *_slow, smoke; bridge e2e) and test_rl_tensor with -D ASSERT=all
+	@$(MAKE) $(RL_ARGS) test-slow test-bridge-slow
+
+check-independence:  ## fails if anything under rl/qrl, rl/drivers or rl/tests imports qumo.* (rl/check_independence.sh)
+	@$(MAKE) $(RL_ARGS) check-independence
 
 check-pure-mojo:  ## fails if the training path invokes or names python/pip/uv/torch/numpy/qiskit/twisterl/rustworkx/safetensors/cargo/rustc (CHECK_PURE_SMOKE=1 also runs train-ai-smoke in a clean environment)
-	training/ai_transpiler/check_pure_mojo.sh
+	rl/check_pure_mojo.sh
 
-bench-rl:  ## performance gates G1-G10 of MOJO_PORT.md section 15, one JSON line each (bench/bench_rl.mojo; run on an otherwise idle machine)
-	@mkdir -p build
-	$(MOJO) build -I . -o build/bench_rl bench/bench_rl.mojo && ./build/bench_rl
+bench-rl:  ## performance gates G1-G10 of rl/docs/MOJO_PORT.md section 15, one JSON line each (rl/bench/bench_rl.mojo; run on an otherwise idle machine)
+	@$(MAKE) $(RL_ARGS) bench-rl
 
 bench-ai: py  ## hardware-neutral benchmark of the AI transpiler (qumo-ai vs qumo, Qiskit, TKET; statevector-verified)
 	QUMO_MODEL_DIR=$(CURDIR)/models/ai_transpiler $(PY) bench/neutral/run_neutral.py --circuits bench/neutral/circuits $(AI_BENCH_ARGS) --out bench/results/ai_neutral.jsonl

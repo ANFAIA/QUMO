@@ -44,7 +44,7 @@ Machine-readable catalog: `qumo describe errors --json`, or the MCP tool
 | `QM-E47x` | gpu | GPU state vector and GPU Pauli frames (qumo.gpu; builds made with -D QUMO_GPU) |
 | `QM-E5xx` | qasm | OpenQASM 2/3 parsing and export (qumo.ir.qasm, qumo.ir.qasm2) |
 | `QM-E6xx` | compiler | Compiler passes, pass pipelines and targets (qumo.compiler) |
-| `QM-E64x` | training | Native training stack of the AI-transpiler models (qumo.rl, training/ai_transpiler) |
+| `QM-E64x` | training | Native training stack of the AI-transpiler models (rl/: qrl and qumo_bridge) |
 | `QM-E7xx` | stabilizer | Stabilizer / Pauli-frame simulation and QEC (qumo.sim.stabilizer, qumo.sim.frame, qumo.qec) |
 | `QM-E8xx` | algorithms | Algorithms library (qumo.algorithms) |
 | `QM-E9xx` | interface | JSON, MCP tools, CLI and device selection (qumo.ai, qumo.exec.tools, cli); QM-E999 = uncategorized |
@@ -639,12 +639,12 @@ Fix: Use a gate without bounds, or drop the bounds.
 
 ## QM-E64x — AI-transpiler training
 
-Raised by the training tools (`train_synth`, `train_all`, `train_route`, `export_synth`, `export_route`, `eval_synth`, `route_tool`, `models_verify`) and by the `qumo.rl` library. They never occur while compiling or running a model. See [AI_TRANSPILER.md](AI_TRANSPILER.md) and training/ai_transpiler/README.md.
+Raised by the training tools (`train_synth`, `train_all`, `train_route`, `export_synth`, `export_route`, `eval_synth`, `route_tool`, `models_verify`) and by the `qrl` library (rl/). They never occur while compiling or running a model. See [AI_TRANSPILER.md](AI_TRANSPILER.md) and rl/docs/TRAINING.md.
 
 ### QM-E640
 
 **Bad usage of a training tool or library call: a missing, repeated, unknown or out-of-range option or argument (for example both or neither of --iters and --budget-s).**  
-Fix: Run the tool without arguments for its usage line; see training/ai_transpiler/README.md.
+Fix: Run the tool without arguments for its usage line; see rl/docs/TRAINING.md.
 
 ### QM-E641
 
@@ -684,7 +684,7 @@ Fix: Use a run directory or model of the same kind and sizes, or leave out --ini
 ### QM-E648
 
 **The campaign file is malformed or names an unknown model.**  
-Fix: See training/ai_transpiler/synth/campaign.json for the format.
+Fix: See rl/drivers/synth/campaign.json for the format.
 
 ### QM-E649
 

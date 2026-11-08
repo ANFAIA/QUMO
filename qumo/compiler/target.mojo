@@ -297,7 +297,8 @@ struct Target(Copyable, Writable):
 
     @staticmethod
     def heavy_hex_edges(d: Int) raises -> List[Int]:
-        """Edges of rustworkx `heavy_hex_graph(d)` (d odd): (5d^2 - 2d - 1)/2 nodes."""
+        """Edges of rustworkx `heavy_hex_graph(d)` (d odd): (5d^2 - 2d - 1)/2 nodes.
+        (Copied as qrl.targets.heavy_hex_lattice_edges for the training package; test_bridge_jobs pins the two.)"""
         if d < 1 or d % 2 == 0:
             raise Error("QM-E612: heavy_hex distance must be odd and >= 1, got " + String(d) + ". Hint: use d = 3, 5, 7, ... ((5d^2-2d-1)/2 qubits).")
         var e = List[Int]()

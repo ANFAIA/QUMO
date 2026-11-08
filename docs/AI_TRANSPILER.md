@@ -8,7 +8,7 @@ learned-policy layout and routing, and a hybrid heuristic + AI pass manager.
 Everything runs in Mojo inside the QUMO compiler. There is no IBM dependency
 at runtime, no IBM model weight and no cloud service: the models are trained
 locally on QUMO's own topologies (grid, heavy-hex, line, ion, neutral atom) by
-QUMO's native Mojo training stack (`qumo/rl`, `make train-ai`; no Python, Rust
+QUMO's native Mojo training stack (the independent package `rl/`, `make train-ai`; no Python, Rust
 or torch), a re-implementation of the algorithms of
 [qiskit-gym](https://github.com/AI4quantum/qiskit-gym) 0.4.1 and twisterl 0.5.1
 (both Apache-2.0), and every learned proposal is verified exactly before it is
@@ -150,7 +150,7 @@ pass note) or, with `strict=1`, raises QM-E619. All searches use seeded
 lowest action index), so results are deterministic and independent of the
 thread count; upstream twisterl samples with an unseeded `thread_rng`. QUMO's
 native trainer is seeded as well: a run is independent of `--cores` and
-bit-identical across reruns (training/ai_transpiler/README.md).
+bit-identical across reruns (rl/docs/TRAINING.md).
 
 Test coverage: tests/test_block_synth.mojo, tests/test_collect.mojo,
 tests/test_policy.mojo, tests/test_ai_route.mojo and
@@ -158,7 +158,7 @@ tests/test_ai_transpiler.mojo (statevector-verified `transpile_ai` levels 1-3
 on grid, heavy-hex, line, ion and neutral-atom targets; ai3 never worse than
 O3; determinism; O0-O3 snapshot unchanged). The two replay tests honour
 `QUMO_TEST_MODEL_ROOT`, so a model trained by the native stack can be replayed
-from a staging root. The training stack has its own tests, `tests/test_rl_*.mojo`
+from a staging root. The training stack has its own tests, `rl/tests/test_rl_*.mojo` and `rl/qumo_bridge/tests/test_bridge_*.mojo`
 (`make test-rl`, and `make test-rl-slow` for the statistical and end-to-end
 ones): golden comparisons against the reference packages' numbers (environments,
 rewards, forward, loss, gradients, Adam, GAE, rollout statistics), container
@@ -202,11 +202,11 @@ Shipped models (3.3 MB in total, trained locally by QUMO):
 ## Training budgets and retraining
 
 `make train-ai` (not part of `make test`) runs the native Mojo training stack
-(`qumo/rl`, `training/ai_transpiler`): PPO for the synthesis models
-(`training/ai_transpiler/synth/campaign.json`, CPU, portable SIMD kernels) and
+(the independent package `rl/`: core `qrl`, QUMO glue `qumo_bridge`; rl/README.md): PPO for the synthesis models
+(`rl/drivers/synth/campaign.json`, CPU, portable SIMD kernels) and
 behaviour cloning + one DAgger round on a rollout teacher for the router. It
 needs only the Mojo toolchain: no Python, torch, qiskit-gym or twisterl. See
-`training/ai_transpiler/README.md`; `make train-ai-smoke` is a 5-minute
+`rl/docs/TRAINING.md`; `make train-ai-smoke` is a 5-minute
 end-to-end check into a staging directory.
 
 Budget ledger of the shipped campaign, trained by the earlier qiskit-gym / twisterl
@@ -460,12 +460,12 @@ Attribution, Torino families, level 3 (2q ratio, W/T/L):
 * No IBM-trained weights (Hugging Face `qiskit/ai-transpiler_*`) and no code
   from `qiskit-ibm-ai-local-transpiler` (which declares no license) are used or
   redistributed. QUMO's models are trained locally and ship under Apache-2.0.
-* Training is native Mojo (`qumo/rl`): qiskit-gym, twisterl, torch, numpy and
+* Training is native Mojo (`rl/`, package `qrl`): qiskit-gym, twisterl, torch, numpy and
   safetensors are not needed to retrain (`make train-ai`), to run or to test
   QUMO. The training code is a clean-room re-implementation from written
   specifications; no source of those packages is copied (NOTICE). Reference
   numbers obtained from them offline are kept as data under
-  `tests/fixtures/rl`.
+  `rl/tests/fixtures`.
 * The head-to-head baseline (qiskit-ibm-transpiler 0.18.0, Apache-2.0, and
   IBM's Hugging Face models, whose model cards declare apache-2.0) is
   installed only in a scratch venv and cache (`bench/ai_vs_ibm/setup_venv.sh`);

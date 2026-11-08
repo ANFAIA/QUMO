@@ -118,20 +118,31 @@ seeding and JSON conventions.
   and keeps one layout: a region exits with the layout it entered with, and
   `verify_program` checks the skeleton, every edge and the blocks it can.
 
-## 3b. AI-transpiler training (`qumo/rl`)
+## 3b. AI-transpiler training (`rl/`: `qrl` and `qumo_bridge`)
 
-Training-only library, never imported by `qumo/compiler` (the runtime inference stack stays
-untouched by it). It is pure Mojo, with no Python, Rust, torch or numpy: portable SIMD f32
-kernels (`tensor`, `optim`, `rlrng`), the synthesis network and its PPO loss (`nn`, `loss`),
-native ports of the four synthesis environments (`topology`, `symmetry`, `gateset`,
-`synth_env`), the PPO collector, evaluator and trainer (`ppo`), the model-container writer
-with atomic directory swaps, INDEX writer and verifier (`container`, `digest`, `f16`), run
-directories, checkpoints and exporters (`checkpoint`, `export_synth`, `export_route`), the
-router's behaviour-cloning and PPO trainers (`teacher_data`, `router_net`, `router_loss`, `bc`,
-`route_ppo`), circuit-family and topology generators (`targets`, `jobs`), block evaluation
-(`eval_blocks`) and the synthesis driver and campaign (`synth_train`, `campaign`). The drivers
-are thin mains in `training/ai_transpiler` (`make train-ai`). Results are independent of the
-core count (fixed seed tree and reduction order). Design: `training/ai_transpiler/MOJO_PORT.md`.
+An independent package next to QUMO, never imported by `qumo/` (the runtime inference stack only
+reads the model files it writes). It is pure Mojo, with no Python, Rust, torch or numpy, and has
+two parts (rl/README.md):
+
+* `rl/qrl`, the core, imports nothing from `qumo.*` (`make check-independence`) and builds with
+  `-I rl` alone: portable SIMD f32 kernels (`tensor`, `optim`, `rlrng`), the synthesis network
+  and its PPO loss (`nn`, `loss`), native ports of the four synthesis environments (`topology`,
+  `symmetry`, `gateset`, `synth_env`, over the packed-state dynamics `env_core`), the PPO
+  collector, evaluator and trainer (`ppo`), the model-container formats `qumo.rlsynth.v0` /
+  `qumo.rlroute.v0` with their writer, reader, INDEX writer and verifier (`container`, `model`,
+  `digest`, `f16`), run directories, checkpoints and the synthesis exporter (`checkpoint`,
+  `export_synth`), the router's behaviour cloning (`teacher_data`, `router_net`, `router_loss`,
+  `bc`), circuit-family and topology generators (`targets`, `jobs`), the synthesis driver and
+  campaign (`synth_train`, `campaign`), and its own JSON, RNG and opcodes (`json`, `rng`,
+  `gates`, copies of QUMO's).
+* `rl/qumo_bridge`, the only part that imports QUMO: job circuits as QUMO circuits
+  (`circuits`), the router export and PPO fine-tune that play episodes in QUMO's routing
+  environment (`export_route`, `route_ppo`), block evaluation against QUMO's synthesizers
+  (`eval_blocks`), and the tools built on them (`route_tool`, `eval_synth`, ...). Its tests pin
+  every copied piece of qrl against QUMO's original and load qrl-exported models in QUMO.
+
+The tool mains are thin (`rl/drivers`, `rl/qumo_bridge/drivers`; `make train-ai`). Results are
+independent of the core count (fixed seed tree and reduction order). Design: `rl/docs/MOJO_PORT.md`.
 
 ## 4. Execution (`qumo/exec`)
 

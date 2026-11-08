@@ -261,8 +261,8 @@ def error_ranges() -> List[ErrorRange]:
        "See [GPU.md](GPU.md). Only GPU entry points raise these codes. The MCP tool `qumo_run_device` and `qumo.exec.dispatch.sample_on(..., \"gpu\")` never fail because the GPU is missing: they run on the CPU and report warning QM-W020. They do fail with QM-E472 when precision 'fp64' is requested on an Apple GPU, which has no fp64.")
     _r(r, "QM-E5xx", "qasm", "OpenQASM", "OpenQASM 2/3 parsing and export (qumo.ir.qasm, qumo.ir.qasm2)", 500, 599)
     _r(r, "QM-E6xx", "compiler", "Compiler", "Compiler passes, pass pipelines and targets (qumo.compiler)", 600, 699)
-    _r(r, "QM-E64x", "training", "AI-transpiler training", "Native training stack of the AI-transpiler models (qumo.rl, training/ai_transpiler)", 640, 649,
-       "Raised by the training tools (`train_synth`, `train_all`, `train_route`, `export_synth`, `export_route`, `eval_synth`, `route_tool`, `models_verify`) and by the `qumo.rl` library. They never occur while compiling or running a model. See [AI_TRANSPILER.md](AI_TRANSPILER.md) and training/ai_transpiler/README.md.")
+    _r(r, "QM-E64x", "training", "AI-transpiler training", "Native training stack of the AI-transpiler models (rl/: qrl and qumo_bridge)", 640, 649,
+       "Raised by the training tools (`train_synth`, `train_all`, `train_route`, `export_synth`, `export_route`, `eval_synth`, `route_tool`, `models_verify`) and by the `qrl` library (rl/). They never occur while compiling or running a model. See [AI_TRANSPILER.md](AI_TRANSPILER.md) and rl/docs/TRAINING.md.")
     _r(r, "QM-E7xx", "stabilizer", "Stabilizer simulation and QEC", "Stabilizer / Pauli-frame simulation and QEC (qumo.sim.stabilizer, qumo.sim.frame, qumo.qec)", 700, 799,
        "See [QEC.md](QEC.md).")
     _r(r, "QM-E8xx", "algorithms", "Algorithms", "Algorithms library (qumo.algorithms)", 800, 899)
@@ -413,8 +413,8 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E631", "compiler", "A compiled Program failed verification: a different control structure, two layouts meeting on a control-flow edge, or a block that does not equal its source.", "Report the program; run a lower optimization level meanwhile.")
     _e(c, "QM-E632", "compiler", "No SWAP network was found to bring a region of a Program back to its entry layout.", "Report the program; check that the target's coupling graph is what you meant.")
     _e(c, "QM-E633", "compiler", "A gate with target angle bounds takes an angle known only at run time, which cannot be wrapped into the bounds.", "Use a gate without bounds, or drop the bounds.")
-    # native AI-transpiler training (qumo.rl, training/ai_transpiler)
-    _e(c, "QM-E640", "training", "Bad usage of a training tool or library call: a missing, repeated, unknown or out-of-range option or argument (for example both or neither of --iters and --budget-s).", "Run the tool without arguments for its usage line; see training/ai_transpiler/README.md.")
+    # native AI-transpiler training (rl/: qrl and qumo_bridge)
+    _e(c, "QM-E640", "training", "Bad usage of a training tool or library call: a missing, repeated, unknown or out-of-range option or argument (for example both or neither of --iters and --budget-s).", "Run the tool without arguments for its usage line; see rl/docs/TRAINING.md.")
     _e(c, "QM-E641", "training", "Invalid topology or coupling graph for training: a malformed spec, an empty edge list, a self loop, a disconnected graph, or a highest qubit that is not n-1.", "Use a spec like 'line:6', 'ring:5', 'grid:2x3' or 'heavyhex_frag:H7' with a connected coupling graph.")
     _e(c, "QM-E642", "training", "Invalid training environment or network: an unsupported gate (only H, S, CX and SWAP train), a state that is too wide, an action outside the gate set, or a network that does not match the environment.", "Check the gate set and sizes; the network must have the environment's observation size and number of actions.")
     _e(c, "QM-E643", "training", "Training diverged: the loss or a weight became NaN or infinite.", "The last finite checkpoint was written; lower the learning rate or resume from it with --resume.")
@@ -422,7 +422,7 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E645", "training", "A weight does not fit in f16 (overflow to infinity) or is not finite when a model is exported.", "Export with --dtype f32, or retrain with a lower learning rate.")
     _e(c, "QM-E646", "training", "Teacher data is malformed or too small: the file size is not a multiple of 328 bytes, a record is out of range, a cost is NaN, or there are too few rows for the validation split.", "Pass files written by `route_tool gen`.")
     _e(c, "QM-E647", "training", "Warm start is incompatible: the source is not a run directory or model container of the same kind, or its architecture, gate set or hidden size differs.", "Use a run directory or model of the same kind and sizes, or leave out --init.")
-    _e(c, "QM-E648", "training", "The campaign file is malformed or names an unknown model.", "See training/ai_transpiler/synth/campaign.json for the format.")
+    _e(c, "QM-E648", "training", "The campaign file is malformed or names an unknown model.", "See rl/drivers/synth/campaign.json for the format.")
     _e(c, "QM-E649", "training", "A trained model failed the keep rule of the block evaluation (beam-8 policy against greedy synthesis), or no decision was printed.", "Train longer or from a better start; the model was not published.")
     _e(c, "QM-E701", "stabilizer", "Non-Clifford operation in a stabilizer-only path.", "Use the state-vector simulator, or keep rotations at multiples of pi/2.")
     _e(c, "QM-E702", "stabilizer", "Unbound parameters in a stabilizer/Stim export path.", "Bind parameters first.")
