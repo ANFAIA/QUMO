@@ -1,3 +1,5 @@
+# rl/qrl/json.mojo is a copy for the training package (which never imports QUMO); rl/qumo_bridge/tests/
+# test_bridge_parity.mojo checks that both format JSON identically.
 """Tiny, fast, dependency-free JSON for QUMO's AI-facing surfaces.
 
 Two halves:
