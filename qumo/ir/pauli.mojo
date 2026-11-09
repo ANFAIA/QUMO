@@ -108,6 +108,17 @@ struct PauliSum(Copyable, Writable, Sized):
                 raise Error("QM-E301: invalid Pauli character in '" + label + "'. Hint: use only I, X, Y, Z.")
         self.add(coeff, x, z)
 
+    @staticmethod
+    def from_list(terms: List[Tuple[Float64, String]]) raises -> PauliSum:
+        """Build a sum from (coefficient, label) pairs, like Qiskit's SparsePauliOp.from_list.
+
+        PauliSum.from_list([(1.0, "ZZ"), (-1.0, "ZX")]) equals two add_label calls.
+        """
+        var r = PauliSum()
+        for ref t in terms:
+            r.add_label(t[0], t[1])
+        return r^
+
     def num_qubits(self) -> Int:
         var m = -1
         for t in self.terms:

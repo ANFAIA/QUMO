@@ -45,16 +45,8 @@ comptime PRECISION = 0.01
 
 
 def chsh_observables() raises -> List[PauliSum]:
-    var s1 = PauliSum()
-    s1.add_label(1.0, "ZZ")
-    s1.add_label(-1.0, "ZX")
-    s1.add_label(1.0, "XZ")
-    s1.add_label(1.0, "XX")
-    var s2 = PauliSum()
-    s2.add_label(1.0, "ZZ")
-    s2.add_label(1.0, "ZX")
-    s2.add_label(-1.0, "XZ")
-    s2.add_label(1.0, "XX")
+    var s1 = PauliSum.from_list([(1.0, "ZZ"), (-1.0, "ZX"), (1.0, "XZ"), (1.0, "XX")])
+    var s2 = PauliSum.from_list([(1.0, "ZZ"), (1.0, "ZX"), (-1.0, "XZ"), (1.0, "XX")])
     var out = List[PauliSum]()
     out.append(s1^)
     out.append(s2^)
