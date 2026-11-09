@@ -29,7 +29,7 @@ PY = sys.executable
 
 
 def qiskit_baseline(root, mid, ninst):
-    """Qiskit 2.5.2 transpile(optimization_level=3) of uniformly random blocks
+    """Qiskit (training pin, 2.6.2) transpile(optimization_level=3) of uniformly random blocks
     (LinearFunction / PermutationGate / random Clifford) onto the model graph
     with a fixed trivial layout; the routing permutation left in the final
     layout is charged with its optimal SWAP count (BFS, 3 CX per SWAP) so the

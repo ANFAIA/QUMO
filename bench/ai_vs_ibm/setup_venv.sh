@@ -12,6 +12,9 @@ uv venv --python 3.12 venv
 # 0.18.x pulls qiskit-gym, twisterl and torch for its local synthesis; its local
 # routing is a Rust extension inside the wheel. The legacy package
 # qiskit-ibm-ai-local-transpiler (no declared license) is NOT needed by 0.18.x.
+# qiskit-ibm-runtime stays at 0.45.1, below the plugin floor (0.50.1): qiskit-ibm-transpiler
+# 0.18.0 -> qiskit-serverless ~=0.30.0 -> qiskit-ibm-runtime <0.46.0, so 0.50.1 does not resolve.
+# The fake backends' coupling maps are identical in 0.45.1 and 0.50.1 (checked 2026-11-09).
 VIRTUAL_ENV=$DIR/venv uv pip install --python venv/bin/python \
   "qiskit==2.5.2" "qiskit-ibm-transpiler==0.18.0" "qiskit-ibm-runtime==0.45.1" "qiskit-aer==0.18.0" numpy
 # IBM's models (Hugging Face qiskit/ai-transpiler_*, model cards: apache-2.0) are
