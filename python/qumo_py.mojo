@@ -18,6 +18,13 @@ from std.time import perf_counter_ns
 from qumo.ir.circuit import Circuit
 from qumo.ir.mc import append_mcx
 from qumo.sim.ptsbe import sample_ptsbe, plan_trajectories
+from qumo.ir.noise_inject import inject_noise
+from qumo.exec.ibm_api import ibm_backends, ibm_target, ibm_isa_payload, ibm_submit, ibm_status, ibm_result
+from qumo.exec.speqtrum_api import (
+    SpeQtrumAuth, checked_base, payload_document, unsafe_construct, decode_result,
+    speqtrum_devices, speqtrum_execute, speqtrum_status, speqtrum_result,
+)
+from qumo.exec.ionq_api import ionq_request, ionq_counts, ionq_submit, ionq_status, ionq_result, ionq_backends
 from qumo.sim.runner import SampleResult
 from qumo.sim.branching import sample_branching
 from qumo.sim.density import density_evolve
@@ -523,6 +530,202 @@ def _counts_dict(r: SampleResult) raises -> PythonObject:
 def py_sample_ptsbe(circ: PythonObject, shots: PythonObject, seed: PythonObject) raises -> PythonObject:
     """Static noisy circuit, one simulation per distinct Pauli error pattern -> counts."""
     return _counts_dict(sample_ptsbe(PyCircuit._get(circ)[].c, Int(py=shots), UInt64(Int(py=seed))))
+
+
+def py_inject_noise(text: PythonObject, p1: PythonObject, p2: PythonObject, pm: PythonObject) raises -> PythonObject:
+    """OpenQASM 2 text + gate/measure rates -> (text with #pragma qumo channels, inserted 1q, 2q, readout)."""
+    var r = inject_noise(String(py=text), Float64(py=p1), Float64(py=p2), Float64(py=pm))
+    return Python.tuple(String(r.text), r.depolarize1, r.depolarize2, r.x_error)
+
+
+def py_ionq_request(text: PythonObject, shots: PythonObject, noise: PythonObject, seed: PythonObject,
+                    name: PythonObject) raises -> PythonObject:
+    """OpenQASM 2 -> (IonQ ionq.circuit.v1 JSON, clbit->qubit map, num_clbits, dense qubits)."""
+    var r = ionq_request(String(py=text), Int(py=shots), String(py=noise), Int(py=seed), String(py=name))
+    var qmap = Python.list()
+    for v in r.clbit_qubit:
+        qmap.append(v)
+    return Python.tuple(String(r.body), qmap, r.num_clbits, r.dense_qubits)
+
+
+def py_ionq_counts(keys: PythonObject, probs: PythonObject, clbit_qubit: PythonObject, shots: PythonObject,
+                   seed: PythonObject) raises -> PythonObject:
+    """IonQ histogram (lists of outcome ints and probabilities) -> counts dict over the clbits."""
+    var p = List[Float64]()
+    for v in probs:
+        p.append(Float64(py=v))
+    return _py_counts(ionq_counts(_int_list(keys), p, _int_list(clbit_qubit), Int(py=shots), UInt64(Int(py=seed))))
+
+
+def _int_list(obj: PythonObject) raises -> List[Int]:
+    var out = List[Int]()
+    for v in obj:
+        out.append(Int(py=v))
+    return out^
+
+
+def _py_int_list(vals: List[Int]) raises -> PythonObject:
+    var out = Python.list()
+    for v in vals:
+        out.append(v)
+    return out
+
+
+def _py_counts(counts: Dict[String, Int]) raises -> PythonObject:
+    var d = Python.dict()
+    for kv in counts.items():
+        d[kv.key] = kv.value
+    return d
+
+
+def py_ionq_submit(text: PythonObject, shots: PythonObject, noise: PythonObject, seed: PythonObject,
+                   name: PythonObject) raises -> PythonObject:
+    """Native IonQ submission (POST /jobs; key read from IONQ_API_KEY in Mojo) -> (job id, clbit->qubit map, num_clbits, dense qubits)."""
+    var r = ionq_submit(String(py=text), Int(py=shots), String(py=noise), Int(py=seed), String(py=name))
+    return Python.tuple(String(r.job_id), _py_int_list(r.request.clbit_qubit), r.request.num_clbits,
+                        r.request.dense_qubits)
+
+
+def py_ionq_status(job_id: PythonObject) raises -> PythonObject:
+    """Native GET /jobs/<id> -> QUMO state name."""
+    return PythonObject(ionq_status(String(py=job_id)))
+
+
+def py_ionq_result(job_id: PythonObject, clbit_qubit: PythonObject, shots: PythonObject,
+                   seed: PythonObject) raises -> PythonObject:
+    """Native GET of the probability histogram, sampled into counts."""
+    return _py_counts(ionq_result(String(py=job_id), _int_list(clbit_qubit), Int(py=shots), UInt64(Int(py=seed))))
+
+
+def py_ionq_backends() raises -> PythonObject:
+    """Native GET /backends -> list of (name, status, qubits)."""
+    var out = Python.list()
+    for r in ionq_backends():
+        out.append(Python.tuple(String(r.name), String(r.status), r.qubits))
+    return out
+
+
+def _spq_auth(base: PythonObject, user: PythonObject, key: PythonObject, aud: PythonObject) raises -> SpeQtrumAuth:
+    return SpeQtrumAuth(checked_base(String(py=base)), String(py=user), String(py=key), String(py=aud))
+
+
+def py_spq_payload_document(backend: PythonObject, shots: PythonObject, qasm: PythonObject, nq: PythonObject,
+                            nc: PythonObject, initial: PythonObject, final: PythonObject, mclbits: PythonObject,
+                            mqubits: PythonObject, auto: PythonObject) raises -> PythonObject:
+    """qumo.payload.v1 document (byte-identical to the Python fallback)."""
+    return PythonObject(payload_document(String(py=backend), Int(py=shots), String(py=qasm), Int(py=nq), Int(py=nc),
+                                         _int_list(initial), _int_list(final), _int_list(mclbits), _int_list(mqubits),
+                                         Bool(py=auto)))
+
+
+def py_spq_unsafe_construct(text: PythonObject) raises -> PythonObject:
+    return PythonObject(unsafe_construct(String(py=text)))
+
+
+def py_spq_decode_result(encoded: PythonObject, job_id: PythonObject) raises -> PythonObject:
+    return _py_counts(decode_result(String(py=encoded), String(py=job_id)))
+
+
+def py_spq_devices(base: PythonObject, user: PythonObject, key: PythonObject, aud: PythonObject) raises -> PythonObject:
+    var out = Python.list()
+    var auth = _spq_auth(base, user, key, aud)
+    for d in speqtrum_devices(auth):
+        out.append(Python.tuple(String(d.code), d.nqubits, String(d.status), String(d.notes)))
+    return out
+
+
+def py_spq_execute(base: PythonObject, user: PythonObject, key: PythonObject, aud: PythonObject, device: PythonObject,
+                   document: PythonObject, shots: PythonObject) raises -> PythonObject:
+    var auth = _spq_auth(base, user, key, aud)
+    return PythonObject(speqtrum_execute(auth, String(py=device), String(py=document), Int(py=shots)))
+
+
+def py_spq_status(base: PythonObject, user: PythonObject, key: PythonObject, aud: PythonObject,
+                  job_id: PythonObject) raises -> PythonObject:
+    var auth = _spq_auth(base, user, key, aud)
+    return PythonObject(speqtrum_status(auth, String(py=job_id)))
+
+
+def py_spq_result(base: PythonObject, user: PythonObject, key: PythonObject, aud: PythonObject,
+                  job_id: PythonObject) raises -> PythonObject:
+    var auth = _spq_auth(base, user, key, aud)
+    return _py_counts(speqtrum_result(auth, String(py=job_id)))
+
+
+def _str_list(obj: PythonObject) raises -> List[String]:
+    var out = List[String]()
+    for v in obj:
+        out.append(String(py=v))
+    return out^
+
+
+def _py_float_list(vals: List[Float64]) raises -> PythonObject:
+    var out = Python.list()
+    for v in vals:
+        out.append(v)
+    return out
+
+
+def py_ibm_backends(account: PythonObject, instance: PythonObject) raises -> PythonObject:
+    var out = Python.list()
+    for r in ibm_backends(String(py=account), String(py=instance)):
+        out.append(Python.tuple(String(r.name), r.qubits, String(r.status), r.pending))
+    return out
+
+
+def py_ibm_target(account: PythonObject, instance: PythonObject, backend: PythonObject,
+                  fractional: PythonObject) raises -> PythonObject:
+    var t = ibm_target(String(py=account), String(py=instance), String(py=backend), Bool(py=fractional))
+    var d = Python.dict()
+    d["name"] = String(t.name)
+    d["num_qubits"] = t.num_qubits
+    var basis = Python.list()
+    for g in t.basis:
+        basis.append(String(g))
+    d["basis"] = basis
+    d["edges"] = _py_int_list(t.edges)
+    d["edge_errors"] = _py_float_list(t.edge_errors)
+    d["symmetric"] = t.symmetric
+    d["err_1q"] = t.err_1q
+    d["err_2q"] = t.err_2q
+    d["err_ro"] = t.err_ro
+    d["dur_1q"] = t.dur_1q
+    d["dur_2q"] = t.dur_2q
+    d["dur_ro"] = t.dur_ro
+    d["readout"] = _py_float_list(t.readout)
+    d["max_shots"] = t.max_shots
+    d["simulator"] = t.simulator
+    d["processor"] = String(t.processor)
+    d["dt"] = t.dt
+    d["rep_delay"] = t.rep_delay
+    d["fractional"] = t.fractional
+    d["native_2q"] = String(t.native_2q)
+    d["faulty_qubits"] = _py_int_list(t.faulty_qubits)
+    d["faulty_edges"] = t.faulty_edges
+    return d
+
+
+def py_ibm_isa_payload(qasm: PythonObject, num_qubits: PythonObject, basis: PythonObject, edges: PythonObject,
+                       symmetric: PythonObject, d1: PythonObject, d2: PythonObject, dr: PythonObject) raises -> PythonObject:
+    var p = ibm_isa_payload(String(py=qasm), Int(py=num_qubits), _str_list(basis), _int_list(edges), Bool(py=symmetric),
+                            Float64(py=d1), Float64(py=d2), Float64(py=dr))
+    return Python.tuple(String(p.qasm3), p.duration_s, p.two_qubit_gates, p.active_qubits)
+
+
+def py_ibm_submit(account: PythonObject, instance: PythonObject, backend: PythonObject, qasm3: PythonObject,
+                  shots: PythonObject, cap: PythonObject) raises -> PythonObject:
+    return PythonObject(ibm_submit(String(py=account), String(py=instance), String(py=backend), String(py=qasm3),
+                                   Int(py=shots), Int(py=cap)))
+
+
+def py_ibm_status(account: PythonObject, instance: PythonObject, job_id: PythonObject) raises -> PythonObject:
+    var st = ibm_status(String(py=account), String(py=instance), String(py=job_id))
+    return Python.tuple(String(st.state), String(st.reason))
+
+
+def py_ibm_result(account: PythonObject, instance: PythonObject, job_id: PythonObject,
+                  num_clbits: PythonObject) raises -> PythonObject:
+    return _py_counts(ibm_result(String(py=account), String(py=instance), String(py=job_id), Int(py=num_clbits)))
 
 
 def py_plan_trajectories(circ: PythonObject, shots: PythonObject, seed: PythonObject) raises -> PythonObject:
@@ -1276,6 +1479,26 @@ def PyInit_qumo_py() abi("C") -> PythonObject:
         m.def_function[py_draw]("draw")
         m.def_function[py_sample_ptsbe]("sample_ptsbe")
         m.def_function[py_plan_trajectories]("plan_trajectories")
+        m.def_function[py_inject_noise]("inject_noise")
+        m.def_function[py_ionq_request]("ionq_request")
+        m.def_function[py_ionq_counts]("ionq_counts")
+        m.def_function[py_ionq_submit]("ionq_submit")
+        m.def_function[py_ionq_status]("ionq_status")
+        m.def_function[py_ionq_result]("ionq_result")
+        m.def_function[py_ionq_backends]("ionq_backends")
+        m.def_function[py_spq_payload_document]("speqtrum_payload_document")
+        m.def_function[py_spq_unsafe_construct]("speqtrum_unsafe_construct")
+        m.def_function[py_spq_decode_result]("speqtrum_decode_result")
+        m.def_function[py_spq_devices]("speqtrum_devices")
+        m.def_function[py_spq_execute]("speqtrum_execute")
+        m.def_function[py_spq_status]("speqtrum_status")
+        m.def_function[py_spq_result]("speqtrum_result")
+        m.def_function[py_ibm_backends]("ibm_backends")
+        m.def_function[py_ibm_target]("ibm_target")
+        m.def_function[py_ibm_isa_payload]("ibm_isa_payload")
+        m.def_function[py_ibm_submit]("ibm_submit")
+        m.def_function[py_ibm_status]("ibm_status")
+        m.def_function[py_ibm_result]("ibm_result")
         m.def_function[py_sample_branching]("sample_branching")
         m.def_function[py_density_probabilities]("density_probabilities")
         m.def_function[py_density_expectation]("density_expectation")

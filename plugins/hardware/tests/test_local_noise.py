@@ -119,7 +119,7 @@ def test_error_pattern_sampling_matches_qumo_trajectories(qumo):
         "measure q[1] -> c[1];", "ry(0.7) q[2];\ncx q[1],q[2];\nmeasure q[1] -> c[1];\nmeasure q[2] -> c[2];")
     p = runner.plan(src, "local", "qumo-sim:line:3/sc_cz+noise:custom(0.02,0.08,0.03)", shots=8000)
     fast, info = sample_noisy(qumo, p.payload, 8000, 21)
-    assert info["distinct_error_patterns"] > 10 and info["readout_flips_on_clbits"] == 3
+    assert info["distinct_error_patterns"] > 10 and info["method"].startswith("statevector:ptsbe")
     slow = {str(k): int(v) for k, v in dict(qumo.sample(qumo.load_qasm(p.payload), 8000, 22)).items()}
     keys = set(fast) | set(slow)
     tvd = 0.5 * sum(abs(fast.get(k, 0) - slow.get(k, 0)) / 8000 for k in keys)

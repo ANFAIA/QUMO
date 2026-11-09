@@ -94,7 +94,7 @@ def test_submit_h2_mocked_end_to_end(nexus):
     types = {cmd.op.type for cmd in up["circuit"].get_commands()}
     assert types <= {OpType.Rz, OpType.PhasedX, OpType.ZZPhase, OpType.Measure, OpType.Barrier}
     rec = jobs.load("nexus-job-123")
-    assert rec.meta["provider_options"] == {"project": "qumo-hardware"}
+    assert rec.meta["provider_options"] == {"project": "qumo-hardware", "client": "python"}
     assert "token" not in str(rec.to_dict()).lower()
     st = runner.job_status("nexus-job-123")
     assert st["status"] == "DONE"

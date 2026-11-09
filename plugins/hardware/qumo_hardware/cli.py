@@ -69,6 +69,7 @@ def _provider_options(args) -> dict:
         "server_dry_run": True if getattr(args, "ibm_dry_run", False) else None,
         "project": getattr(args, "project", None),
         "seed": getattr(args, "seed", None),
+        "client": getattr(args, "client", None),
     }
 
 
@@ -91,6 +92,8 @@ def _add_common(p: argparse.ArgumentParser, circuit: bool = True, backend: bool 
     p.add_argument("--account", help="IBM saved-account name")
     p.add_argument("--targets", help="SpeQtrum: JSON file mapping device codes to target specs (the service publishes no topology)")
     p.add_argument("--project", help="Quantinuum Nexus project (default: qumo-hardware)")
+    p.add_argument("--client", choices=["native", "python"], default=None,
+                   help="provider client: native Mojo (default) or the vendor Python SDK (fallback); env QUMO_HW_CLIENT")
     p.add_argument("--show-qasm", action="store_true", help="include the compiled OpenQASM 2 payload")
     p.add_argument("--params", help="bind symbolic parameters: JSON list (declaration order) or {name: value}")
 
@@ -123,6 +126,7 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("--channel")
     b.add_argument("--instance")
     b.add_argument("--account")
+    b.add_argument("--client", choices=["native", "python"], default=None)
 
     t = sub.add_parser("target", help="show the neutral TargetSpec of a backend")
     _add_common(t, circuit=False)
@@ -256,12 +260,12 @@ def cmd_run(args, estimate_only: bool = False) -> int:
 
 
 def cmd_backends(args) -> int:
-    names = [args.provider] if args.provider else ["local", "ibm", "quantinuum", "speqtrum"]
+    names = [args.provider] if args.provider else ["local", "ibm", "quantinuum", "ionq", "speqtrum"]
     rows, warnings = [], []
     for n in names:
         try:
             rows += runner.list_backends(n, online=args.online, channel=args.channel, instance=args.instance,
-                                         account_name=args.account)
+                                         account_name=args.account, client=args.client)
         except HardwareError as exc:
             if args.provider:
                 raise

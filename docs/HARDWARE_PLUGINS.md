@@ -1,11 +1,11 @@
 # Hardware plugins: running QUMO circuits on quantum hardware
 
 `plugins/hardware` (Python package `qumo_hardware`, distribution `qumo-hardware`)
-runs circuits compiled by QUMO on real quantum computers. The first two
-providers are **IBM Quantum** (Qiskit Runtime / IBM Quantum Compute API) and
-**Quantinuum** (Quantinuum Nexus: System Model H2 and Helios). A `local`
-provider runs the same payloads offline, so you can test everything without an
-account.
+runs circuits compiled by QUMO on real quantum computers. The remote providers
+are **IBM Quantum** (Qiskit Runtime / IBM Quantum Compute API),
+**Quantinuum** (Quantinuum Nexus: System Model H2 and Helios) and **IonQ**
+(IonQ cloud simulator; QPUs are not enabled yet). A `local` provider runs the
+same payloads offline, so you can test everything without an account.
 
 ```bash
 make py                                                    # build/qumo_py.so: the QUMO compiler used by the plugins
@@ -144,6 +144,30 @@ lines and returned in `notes`.
 `CIRCUIT` may be `-` (stdin). IBM options: `--channel`, `--instance`, `--account`;
 Quantinuum: `--project` (Nexus project, default `qumo-hardware`).
 
+## 3b. Clients: native Mojo by default, vendor Python SDK as fallback
+
+Each provider has up to two client implementations:
+
+| Provider | `native` (default) | `python` (fallback) |
+|---|---|---|
+| `ionq` | `qumo/exec/ionq_api.mojo` | `ionq_sdk.py` (qiskit-ionq) |
+| `speqtrum` | `qumo/exec/speqtrum_api.mojo` | `speqtrum.py` (urllib) |
+| `ibm` | `qumo/exec/ibm_api.mojo` (real backends) | `ibm.py` (qiskit-ibm-runtime) |
+| `local` | QUMO's Mojo simulator | none |
+| `quantinuum` | not ported yet: uses its Python client | `quantinuum.py` (qnexus, pytket) |
+
+Native clients run the whole provider protocol inside the `qumo_py` extension
+(`make py`): request bodies, QUMO's HTTP/1.1 + TLS stack (`qumo/net`, OpenSSL 3
+loaded at run time), JSON parsing (`qumo/ai/json.mojo`), and results. Credentials
+are read in Mojo, and access tokens never leave the native call.
+
+Pick the client with `--client native|python`, `QUMO_HW_CLIENT=native|python`, or
+per provider with `QUMO_HW_CLIENT_<PROVIDER>` (for example `QUMO_HW_CLIENT_IBM=python`).
+The order of precedence is the argument, then the per-provider variable, then the
+global one. A job records the client that submitted it (`provider_options.client`),
+and `status` and `result` use the same client again. Asking for `python` where a
+provider has no Python client (`local`) is refused.
+
 ## 4. IBM Quantum
 
 **Access.** Create an IBM Cloud account at <https://quantum.cloud.ibm.com>, an
@@ -162,6 +186,29 @@ export QISKIT_IBM_INSTANCE=<instance CRN or name>
 python -c "from qiskit_ibm_runtime import QiskitRuntimeService as S; S.save_account(token='...', instance='...', set_as_default=True)"
 ```
 
+**Native client (default, `qumo/exec/ibm_api.mojo`).** It reads the same
+credentials itself: `QISKIT_IBM_TOKEN` + `QISKIT_IBM_INSTANCE`, else the account
+saved in `~/.qiskit/qiskit-ibm.json` (`--account NAME`, or the default one). The
+instance must be a CRN, and `--instance` overrides it. The client then works as follows:
+* It exchanges the API key for an IAM token (`iam.cloud.ibm.com`) inside each call.
+* It builds the target from `/backends/<name>/configuration` and `/properties`.
+  For `ibm_marrakesh` this gave the same qubits, basis, couplings, error and
+  duration medians and readout errors as qiskit-ibm-runtime (2026-11-09).
+* It checks the compiled circuit against the target and sends it as OpenQASM 3 on
+  physical qubits `$n` in one Sampler PUB (`POST /jobs`, `program_id: sampler`),
+  with twirling and dynamical decoupling off and `cost` = the
+  `max_execution_time` cap.
+* It reads the `samples` of `/jobs/<id>/results` into counts.
+
+Every request carries a QUMO `User-Agent`, because IBM's edge refuses requests
+without one (Cloudflare error 1010). Some cases are handled by the Python
+fallback, automatically or with a refusal and a hint:
+* `fake_*` backends need Aer and are delegated automatically.
+* Gates outside `stdgates.inc` (`ecr` on Eagle, fractional `rzz`), native-direction
+  finishing, dynamic circuits, `--ibm-dry-run`, sampler options and
+  `--provider-transpile` are refused with a hint to `--client python`.
+
+**Python fallback (`--client python`).**
 `QiskitRuntimeService()` resolves the account (env vars first, then the saved
 default; channel `ibm_quantum_platform` unless `QISKIT_IBM_CHANNEL`/`--channel`
 says `ibm_cloud`). Missing or rejected credentials raise **QM-E952** with this
@@ -292,6 +339,86 @@ is available from Nexus (`qnx.circuits.cost` / `qnx.hugr.cost`, which run on
 the syntax checker). Set `QUMO_QUANTINUUM_USD_PER_HQC` to get a USD figure
 (HQC prices depend on your contract).
 
+## 5b. IonQ (`-p ionq`)
+
+**Native client.** The IonQ path has no vendor SDK and no Python HTTP or JSON.
+`qumo/exec/ionq_api.mojo` builds the request, calls the IonQ API v0.4 over QUMO's
+own HTTP/1.1 + TLS stack (`qumo/net`, OpenSSL 3 loaded at run time with `dlopen`;
+`QUMO_LIBSSL` / `QUMO_LIBCRYPTO` select the library), parses the JSON with
+`qumo/ai/json.mojo` and samples the counts with QUMO's seeded RNG.
+`plugins/hardware/qumo_hardware/ionq.py` only adapts it to the plugin API through
+the `qumo_py` extension (`make py`). qiskit-ionq is not needed. The previous
+qiskit-ionq client stays as the fallback (`--client python`, `ionq_sdk.py`;
+`pip install 'qiskit-ionq>=1.1.1'`); its counts are drawn by the SDK with numpy.
+
+**Access.** An IonQ Cloud account and API key (create one at
+<https://cloud.ionq.com/settings/keys>). The Mojo client reads only the
+`IONQ_API_KEY` environment variable, at call time, and puts it only in the
+`Authorization: apiKey ...` header of requests to the IonQ API. Redirects are
+not followed, so the header never reaches another host. The key is never
+returned to Python, printed, logged, or stored in a job record. `IONQ_API_URL`
+overrides the API base (default `https://api.ionq.co/v0.4`); it must be https,
+plain http is accepted only for a loopback host (the offline tests).
+
+```bash
+export IONQ_API_KEY=...          # in the shell that runs QUMO; never commit it
+```
+
+**Backends.** The IonQ simulator (API name `simulator`, 29 qubits) takes a noise
+model. QUMO names the Aria-1 simulator `ionq_simulator:aria-1`.
+
+| Backend | Kind | Notes |
+|---|---|---|
+| `ionq_simulator:aria-1` | simulator, remote | Aria-1 noise model; Aria's native two-qubit gate is MS |
+| `ionq_simulator:aria-2`, `ionq_simulator:forte-1`, `ionq_simulator:forte-enterprise-1` | simulator, remote | other noise models offered by the API |
+| `ionq_qpu.<device>` | QPU | refused by the plugin (`backends --provider ionq --online` lists them) |
+
+`ionq_simulator:ideal` is refused: it returns exact probabilities, not shot-sampled
+results.
+
+Live API state on 2026-11-09 (`GET /backends`, read-only, fetched by the native
+client): `simulator` available; `qpu.aria-1` and `qpu.aria-2` **retired**;
+`qpu.forte-1` available (36 qubits). The listing is public: the key is not sent.
+
+**Payload.** QUMO compiles to IONQ_BASIS (h, x, y, z, s, sdg, t, tdg, sx, rx, ry,
+rz, cx, cy, cz, swap, rxx, ryy, rzz) and the Mojo client writes the
+`ionq.circuit.v1` body with gateset `qis`: the same circuit list qiskit-ionq 1.1.1
+writes (aliases sdg -> si, tdg -> ti, sx -> v, rxx/ryy/rzz -> xx/yy/zz; CX is an `x`
+gate with one control; rotations in radians). IonQ compiles the QIS gates to its
+native set (gpi, gpi2, ms for Aria). Measurements become the clbit -> qubit map.
+Gates outside the QIS set, resets, classical conditions and mid-circuit
+measurements are refused with QM-E955 before anything is sent.
+
+**Results.** IonQ returns a probability histogram (`GET /jobs/<id>/results/probabilities`;
+outcome integer, bit q = qubit q). The client maps it through the measurement map
+(leftmost character = highest clbit, as everywhere in QUMO) and draws `shots`
+samples with QUMO's RNG seeded by `--seed` (0 when not given). The same seed gives
+the same counts; they are not the same draws as qiskit-ionq's numpy sampler.
+The same seed also goes to IonQ as `noise.seed`, as qiskit-ionq does. Status and
+result reads are retried 3 times on 429/502/503/504 and transport errors;
+submissions are never retried (the job may already exist), and a failed job
+reports IonQ's `failure` code and message.
+
+**Cost.** The unit is `unknown` with amount 0. IonQ publishes no simulator
+price: `GET /jobs/estimate` refuses simulator backends ("Cost estimation is only
+available for QPU backends"), and the public pricing pages were not retrievable
+on 2026-11-09. No number is invented. The simulator is treated as billable, so
+submission needs `--yes`.
+
+**Shots.** The plugin caps a job at 10,000 shots (the QPU cap); the limit for
+noisy simulators is not published. Confirm it before a large run.
+
+```bash
+python -m qumo_hardware run examples/foundations/bell.qasm -p ionq -b ionq_simulator:aria-1 --dry-run  # plan, no submit
+python -m qumo_hardware run examples/foundations/bell.qasm -p ionq -b ionq_simulator:aria-1 --yes      # submits (cost unknown)
+python -m qumo_hardware backends --provider ionq --online                                             # read-only listing
+```
+
+**Test.** `plugins/hardware/tests/test_ionq.py` runs offline against a fake IonQ API
+on 127.0.0.1 (`tests/ionq_fake_server.py`), so the native HTTP client, headers,
+status mapping, JSON parsing and sampling all run for real. When qiskit-ionq is
+installed, the circuit JSON is also compared with that SDK's output (reference only).
+
 ## 6. Local emulators (`-p local`)
 
 | Backend | What runs |
@@ -327,20 +454,20 @@ After QUMO compiles the circuit for the target topology and basis, the plugin
 inserts `#pragma qumo depolarize1(p1)` after every 1-qubit gate,
 `depolarize2(p2)` after every 2-qubit gate (`depolarize1(p2)` per qubit for
 wider gates) and `x_error(pm)` before every measurement
-(`inject_noise`, plugins/hardware/qumo_hardware/local.py).
+(`inject_noise`: native in qumo/ir/noise_inject.mojo, called from plugins/hardware/qumo_hardware/local.py).
 
-Sampling (`sample_noisy`) is exact in distribution and seeded: each shot draws
-its Pauli error pattern; shots without gate errors share one static
-simulation and every distinct error pattern is simulated once with explicit
-Pauli gates; readout flips are applied classically. Circuits that are dynamic
-after compilation (mid-circuit measurement followed by more gates on the same
-qubit, conditions, resets) fall back to QUMO's per-shot trajectories, which
-are slower (a routed 16-qubit QAOA p=2 on `grid:4x4` with 2000 shots takes
-about 2 minutes on an M5 CPU). `QUMO_HW_NOISE_WORKERS=N` opts into process
-parallelism for the pattern route.
+Sampling (`sample_noisy`) calls QUMO's Mojo pre-trajectory sampler
+(`sample_ptsbe`, qumo/sim/ptsbe.mojo): each shot draws its Pauli error pattern
+(gate channels and readout flips) up front, and every distinct pattern is
+simulated once. Exact in distribution and seeded. Circuits that are dynamic
+after compilation (conditions, resets, gates after a measurement) fall outside
+PTSBE (QM-E409) and use QUMO's per-shot trajectories, which are slower. Zero-rate
+noise draws no sites and runs as the noise-free backend. The Python-side
+planner and its process pool (`QUMO_HW_NOISE_WORKERS`) were removed: the Mojo
+sampler is faster and single-process. The pragma transform is Mojo too.
 
 The result carries `noisy: true`, `noise_model` and `noise_sampling` (method,
-error-free shots, distinct patterns); the cost estimate stays "free, local".
+error-free shots, distinct patterns, noise sites); the cost estimate stays "free, local".
 This is a depolarizing approximation, not a device calibration: use
 `ibm:fake_<backend>` (calibration snapshot + Aer) or `quantinuum:H2-1LE` for
 vendor-specific noise. Tests: plugins/hardware/tests/test_local_noise.py
@@ -369,8 +496,9 @@ free).
   untrusted directory cannot load a planted extension. A non-editable
   `pip install` of the plugin therefore needs `QUMO_PY_PATH`.
 * Credentials only through the providers' standard mechanisms (IBM env vars or
-  saved account; qnexus login store). No token is read, written or printed by
-  the plugins, and none is stored in the repository or in job records
+  saved account; qnexus login store; IonQ `IONQ_API_KEY`, passed explicitly to
+  the SDK). No token is read, written or printed by the plugins, and none is
+  stored in the repository or in job records
   (`$QUMO_HARDWARE_HOME/jobs`, default `~/.qumo/hardware/jobs`, holds job ids,
   backend names, layouts and counts).
 * Errors are coded (QM-E95x) with hints; no stack traces (set
@@ -386,8 +514,8 @@ New range **QM-E950–QM-E959** (inside QUMO's `QM-E9xx` interface range;
 | Code | Meaning | Typical fix |
 |---|---|---|
 | QM-E950 | `build/qumo_py.so` cannot be imported | `make py`, or `QUMO_PY_PATH=<dir>` |
-| QM-E951 | provider SDK missing | `pip install 'qumo-hardware[ibm]'` / `[quantinuum]` / `[helios]` / `[local-quantinuum]` |
-| QM-E952 | credentials missing, expired or rejected | IBM: `QISKIT_IBM_TOKEN` + `QISKIT_IBM_INSTANCE` or `save_account`; Quantinuum: `qnx.login()` |
+| QM-E951 | provider SDK missing | `pip install 'qumo-hardware[ibm]'` / `[quantinuum]` / `[ionq]` / `[helios]` / `[local-quantinuum]` |
+| QM-E952 | credentials missing, expired or rejected | IBM: `QISKIT_IBM_TOKEN` + `QISKIT_IBM_INSTANCE` or `save_account`; Quantinuum: `qnx.login()`; IonQ: `export IONQ_API_KEY` |
 | QM-E953 | unknown provider/backend, or not available to the account | `backends --provider P [--online]` |
 | QM-E954 | cannot compile (parse error, too many qubits, unbound parameters, missing file) | fix the circuit / pick a larger device |
 | QM-E955 | payload rejected by the provider's own validation, or it cannot be lowered to the provider's program format (e.g. conditions on Helios) | follow the hint; for a bridge failure report the payload (`--show-qasm`) |
@@ -439,7 +567,7 @@ mocked qnexus and IBM submissions/status/results; provider-level confirmation;
 (including failed jobs and Ctrl-C), refusal without `--yes`, credential errors
 without tracebacks, no `fake_nighthawk` warning.
 
-## 9. Adding a provider (Braket, IonQ, IQM, ...)
+## 9. Adding a provider (Braket, IQM, ...)
 
 1. Write a class with the `Provider` methods (copy `quantinuum.py` for an
    all-to-all device or `ibm.py` for a coupling map). `target()` returns a
@@ -463,10 +591,11 @@ Notes for the next ones:
   so QUMO's layout is kept; `result.measurement_counts` are keyed by
   `measured_qubits` order → `physical_counts_to_clbits`. Cost: per task + per
   shot (device pricing table).
-* **IonQ** (direct API or Braket): all-to-all, native `gpi, gpi2, ms/zz`;
-  extend QUMO's basis translation or rebase `rx/ry/rz/rxx` 1:1 (`rx = gpi2`
-  sequences are not 1:1, so translate at the gate level and report it).
-  Results are probabilities/histograms over qubit indices.
+* **IonQ QPUs** (`ionq_qpu.*`): the simulator is built in (section 5b). QPU
+  submission is not enabled yet. Before enabling it, price the job: the
+  `GET /jobs/estimate` endpoint answers for QPU backends only. The native
+  gates are `gpi, gpi2, ms/zz`, which the IonQ service compiles to from the
+  QIS gates, so no client-side rebase is needed.
 * **IQM** (`iqm-client`): coupling map from `DynamicQuantumArchitecture`,
   native `prx` + `cz`; QUMO's `rz, rx, ry, cz` maps with `rz` absorbed into
   `prx` phases.
@@ -522,6 +651,13 @@ Notes for the next ones:
 
 ## Sources
 
+* qiskit-ionq 1.1.1 source, used as the reference for the native wire format (`ionq_provider.py` backends `ionq_simulator` / `ionq_qpu`,
+  `ionq_backend.py` simulator `max_shots=1` and `noise_model` run option,
+  `helpers.py` `resolve_credentials` and `native_2q_gate`, `ionq_job.py`
+  `map_output`) and README: <https://github.com/qiskit-community/qiskit-ionq>
+* IonQ API v0.4, read-only on 2026-11-09: `GET /backends` (simulator noise models,
+  QPU status), `GET /backends/simulator`, `GET /jobs/estimate` (QPU only). IonQ
+  pricing pages were not retrievable on that date, so the simulator price is unknown.
 * qiskit-ibm-runtime release notes (0.47–0.50: Executor, client-side Sampler,
   SamplerV2 deprecation, `dry_run`, `instance="auto"`, fractional-gate fixes):
   <https://quantum.cloud.ibm.com/docs/en/api/qiskit-ibm-runtime/release-notes>

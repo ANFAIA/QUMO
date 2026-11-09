@@ -41,7 +41,6 @@ from __future__ import annotations
 
 import argparse
 import math
-import os
 import sys
 import time
 from pathlib import Path
@@ -245,7 +244,6 @@ def run(argv=None, runner=None, edges_override=None) -> dict:
     from _checks import CheckLog
 
     t_start = time.perf_counter()
-    os.environ.setdefault("QUMO_HW_NOISE_WORKERS", str(max(1, min(8, (os.cpu_count() or 2) - 1))))
     q = H.load_qumo()
     H.require_bindings(q, ["value_and_gradient", "expectation_device", "schedule"])
     sc_qpu = a.sc_qpu or default_sc(a.nodes)

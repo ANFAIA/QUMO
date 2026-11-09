@@ -134,7 +134,9 @@ def run(source: Any, provider: Any, backend: str, shots: int = 1000, level: int 
         )
     job = provider.submit(p.compiled, shots, backend, seed=seed, payload=p.submit_payload, report=p.report,
                           max_cost=max_cost, confirm=True)  # the gate above is the confirmation
-    job.meta["provider_options"] = getattr(provider, "public_options", dict)()
+    job.meta["provider_options"] = dict(getattr(provider, "public_options", dict)())
+    if getattr(provider, "client", None):
+        job.meta["provider_options"]["client"] = provider.client  # read the job back with the same client
     job.meta["cost"] = p.cost.to_dict()
     job_store.save(job)
     out.update({"dry_run": False, "submitted": True, "job_id": job.job_id, "status": job.status})
@@ -168,7 +170,11 @@ def _mock_flags(job: JobHandle) -> dict:
 def _provider_for(job: JobHandle, provider: Any = None):
     if provider is not None:
         return provider
-    return get_provider(job.provider, **(job.meta.get("provider_options") or {}))
+    options = dict(job.meta.get("provider_options") or {})
+    if "client" not in options and not job.local:
+        # submitted before clients were recorded, i.e. through the vendor Python SDK
+        options["client"] = "python"
+    return get_provider(job.provider, **options)
 
 
 def job_status(job_id: str, provider: Any = None) -> dict:
