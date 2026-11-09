@@ -32,6 +32,13 @@ CASES = {
 }
 
 
+@pytest.fixture(autouse=True)
+def python_quantinuum_client(monkeypatch):
+    """Quantinuum cases here mock qnexus / inspect pytket payloads: the Python client
+    (native Quantinuum is covered by test_quantinuum_native.py)."""
+    monkeypatch.setenv("QUMO_HW_CLIENT_QUANTINUUM", "python")
+
+
 def _case(name):
     device, nq, extra = CASES[name]
     ones = {0, 1, 4, nq - 2}  # asymmetric pattern: a reversed key cannot match

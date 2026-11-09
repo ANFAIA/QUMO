@@ -158,9 +158,9 @@ def native_gate_counts(circ) -> dict[str, int]:
     n1 = n2 = nm = 0
     for cmd in circ.get_commands():
         op = cmd.op
+        if op.type == OpType.Conditional:
+            op = op.op  # count the conditioned gate itself (the wrapper is not a gate)
         t = op.type
-        if t == OpType.Conditional:
-            t = op.op.type
         if t in (OpType.Measure, OpType.Reset):
             nm += 1
         elif t in (OpType.ZZPhase, OpType.ZZMax, OpType.TK2):

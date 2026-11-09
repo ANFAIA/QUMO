@@ -40,7 +40,7 @@ CATALOG: dict[str, tuple[str, str]] = {
     E_CREDENTIALS: (
         "Provider credentials are missing, expired or rejected.",
         "IBM: export QISKIT_IBM_TOKEN (and QISKIT_IBM_INSTANCE) or QiskitRuntimeService.save_account(); "
-        "Quantinuum: run qnexus.login() once.",
+        "Quantinuum: run qnexus.login() once; IonQ: export IONQ_API_KEY.",
     ),
     E_UNKNOWN_BACKEND: (
         "Unknown provider or backend name, or the backend is not available to this account.",

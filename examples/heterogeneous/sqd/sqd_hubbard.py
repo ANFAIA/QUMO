@@ -226,7 +226,6 @@ def run(argv=None, runner=None) -> dict:
     from _checks import CheckLog
 
     t_start = time.perf_counter()
-    os.environ.setdefault("QUMO_HW_NOISE_WORKERS", str(max(1, min(8, (os.cpu_count() or 2) - 1))))
     q = H.load_qumo()
     H.require_bindings(q, ["subspace_ground_state", "schedule", "sample_device"])
     H.check_targets([a.qpu], a.allow_remote)

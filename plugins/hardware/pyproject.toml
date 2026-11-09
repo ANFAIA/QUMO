@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "qumo-hardware"
 version = "0.1.0"
-description = "Run QUMO-compiled circuits on quantum hardware (IBM Quantum, Quantinuum) through a vendor-neutral provider interface"
+description = "Run QUMO-compiled circuits on quantum hardware (IBM Quantum, Quantinuum, IonQ) through a vendor-neutral provider interface"
 readme = "README.md"
 requires-python = ">=3.12"
 # The QUMO compiler itself is the CPython extension build/qumo_py.so (`make py`
@@ -23,6 +23,12 @@ quantinuum = [
     "pytket>=2.13",
     "pytket-quantinuum>=0.59",
 ]
+# IonQ cloud (IONQ_API_KEY): the default client is native Mojo (no Python packages);
+# this extra installs the qiskit-ionq fallback client (--client python).
+ionq = [
+    "qiskit>=2.3",
+    "qiskit-ionq>=1.1.1",
+]
 # Helios programs are HUGR; built from the pytket payload with guppylang.
 helios = ["guppylang>=1.2"]
 # Offline H2 emulator (H2-1LE); pulls pre-release quantum-pecos: pip install --pre.
@@ -30,7 +36,7 @@ helios = ["guppylang>=1.2"]
 # selene-sim<0.3 and guppylang 1.2 needs >=0.3.1. Use separate environments.
 local-quantinuum = ["pytket-quantinuum[pecos]>=0.59"]
 test = ["pytest>=8", "numpy>=1.26"]
-all = ["qumo-hardware[ibm,quantinuum,test]"]
+all = ["qumo-hardware[ibm,quantinuum,ionq,test]"]
 
 [project.scripts]
 qumo-hardware = "qumo_hardware.cli:main"

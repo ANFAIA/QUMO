@@ -216,7 +216,7 @@ def test_parameter_binding_list_and_dict():
 
 
 def test_simulation_only_instructions_refused():
-    noisy = (EXAMPLES_DIR / "noisy_bell.qasm").read_text()
+    noisy = (EXAMPLES_DIR / "noise_and_mitigation" / "noisy_bell.qasm").read_text()
     with pytest.raises(HardwareError) as ei:
         compile_for_target(noisy, parse_sim_backend("qumo-sim"))
     assert ei.value.code == E_COMPILE and "depolarize" in ei.value.message
@@ -239,7 +239,7 @@ measure q[1] -> c[1];
 
 
 def test_single_bit_condition_is_a_coded_limitation():
-    tele = (EXAMPLES_DIR / "teleport.qasm").read_text()
+    tele = (EXAMPLES_DIR / "foundations" / "teleport.qasm").read_text()
     with pytest.raises(HardwareError) as ei:
         compile_for_target(tele, parse_sim_backend("qumo-sim"))
     assert ei.value.code == E_COMPILE and "single-bit conditions" in ei.value.hint

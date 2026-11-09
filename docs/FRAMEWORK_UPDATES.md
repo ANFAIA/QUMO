@@ -7,7 +7,7 @@ Cross-checks live in `bench/crosscheck/tier1.py`; per-feature numbers are in the
 module docs linked below.
 
 Versions: Qiskit 2.6.1, qiskit-ibm-runtime 0.51, Aer 0.18.2, pytket 2.18.5, tket-py
-0.15.13, guppylang 1.2.0, guppyft 0.5.1, CUDA-Q 0.16.0, cudaq-qec 0.8.1, PennyLane
+0.15.13, guppylang 1.2.0, guppyft 0.5.1, CUDA-Q 0.16.0.post1, cudaq-qec 0.8.1, PennyLane
 0.45.1, Catalyst 0.15, Cirq 1.7.0, Stim 1.16, PyMatching 2.4, QDK 1.33.1, Braket
 1.127.7, Qibo 0.3.6. Toolchain: Mojo 1.2.0, MAX 26.7.0.
 

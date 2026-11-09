@@ -15,6 +15,13 @@ from qumo_hardware.quantinuum import QuantinuumProvider, hqc_cost, native_gate_c
 pytestmark = needs_pytket
 
 
+@pytest.fixture(autouse=True)
+def python_client(monkeypatch):
+    """These tests mock qnexus, so they exercise the Python client (the native one is tested in
+    test_quantinuum_native.py)."""
+    monkeypatch.setenv("QUMO_HW_CLIENT_QUANTINUUM", "python")
+
+
 def _compiled(src, device="H2-1"):
     p = QuantinuumProvider()
     c = compile_for_target(src, p.target(device), level=2, seed=1)
@@ -94,7 +101,7 @@ def test_submit_h2_mocked_end_to_end(nexus):
     types = {cmd.op.type for cmd in up["circuit"].get_commands()}
     assert types <= {OpType.Rz, OpType.PhasedX, OpType.ZZPhase, OpType.Measure, OpType.Barrier}
     rec = jobs.load("nexus-job-123")
-    assert rec.meta["provider_options"] == {"project": "qumo-hardware"}
+    assert rec.meta["provider_options"] == {"project": "qumo-hardware", "client": "python"}
     assert "token" not in str(rec.to_dict()).lower()
     st = runner.job_status("nexus-job-123")
     assert st["status"] == "DONE"
@@ -191,3 +198,14 @@ def test_status_and_download_errors_are_coded(nexus):
         runner.job_status(out["job_id"])
     assert ei.value.code == E_JOB and "abcdefghijklmnopqrstuvwxyz0123456789" not in str(ei.value)
     assert "<redacted>" in str(ei.value)
+
+
+@needs_pytket
+def test_conditional_one_qubit_gates_count_toward_hqc():
+    """Regression: a Conditional wrapper is not a gate, so its PhasedX was skipped by the HQC count."""
+    from qumo_hardware.qasm_bridge import to_pytket
+    from qumo_hardware.quantinuum import native_gate_counts, to_native
+
+    src = ('OPENQASM 2.0;\ninclude "qelib1.inc";\nqreg q[2];\ncreg c[2];\nmeasure q[0] -> c[0];\n'
+           'if(c==1) rx(0.5) q[1];\nmeasure q[1] -> c[1];\n')
+    assert native_gate_counts(to_native(to_pytket(src)))["n1q"] == 1
