@@ -2,13 +2,14 @@
 
 Fixture-free mechanics with an inline random-weight model; parity against the
 committed router model's embedded test vectors (obs -> logits and full routed
-episodes) when models/ai_transpiler/route holds one; statevector equivalence
+episodes) when models/ai_transpiler/route holds one (or QUMO_TEST_MODEL_ROOT/route); statevector equivalence
 of routed circuits through the layouts on grid / heavy-hex / line / ring;
 fallback termination on adversarial policies; portfolio never worse than
 SABRE; determinism; layout modes; QM-E617 / QM-E620 diagnostics.
 """
 
 from std.testing import assert_equal, assert_true, assert_false
+from std.os import getenv
 from std.os.path import exists
 from qumo.ir.circuit import Circuit
 from qumo.ir.gates import Op, op_arity, op_is_unitary
@@ -336,9 +337,17 @@ def test_no_model_and_errors() raises:
     print("  no-model / off / QM-E617 / QM-E620 / all-to-all OK")
 
 
+def test_model_root() -> String:
+    """Model root the replay tests run against: $QUMO_TEST_MODEL_ROOT (for example a
+    staging root written by `make train-ai-smoke`), else the committed models/ai_transpiler."""
+    var r = getenv("QUMO_TEST_MODEL_ROOT")
+    return r if r.byte_length() > 0 else String("models/ai_transpiler")
+
+
 def test_committed_model() raises:
     """Parity with the committed router model's embedded test vectors."""
-    var d = find_route_model("auto", model_search_dirs(""))
+    var root = test_model_root()
+    var d = find_route_model("auto", model_search_dirs(root))
     if d.byte_length() == 0:
         print("  no committed router model found: parity test skipped (policy=auto runs SABRE)")
         return
@@ -413,6 +422,7 @@ def test_committed_model() raises:
     var c = rand_circ(8, 60, 4242)
     var ao = AIRouteOptions()
     ao.level = 1
+    ao.model_dir = root
     var out = Circuit(1)
     var il = List[Int]()
     var fl = List[Int]()

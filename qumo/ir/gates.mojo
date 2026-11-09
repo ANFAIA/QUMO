@@ -1,3 +1,5 @@
+# rl/qrl/gates.mojo copies the opcodes of the synthesis gates for the training package (which never imports QUMO);
+# the numbers must not change (rl/qumo_bridge/tests/test_bridge_parity.mojo).
 """QUMO gate set: opcodes, static metadata and unitary matrices.
 
 Every opcode carries machine-readable metadata (arity, #params, Clifford,

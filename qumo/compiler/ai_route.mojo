@@ -7,7 +7,7 @@ from a sign-encoded distance-change observation, with a tiny 128 -> H -> 16
 MLP; episodes are stochastic (seeded shuffles), run in parallel, and wrapped
 in a bidirectional layout search. Re-implemented from a written spec; no IBM
 code or weights are used. QUMO's router models are trained locally
-(`training/ai_transpiler/route`, format `qumo.rlroute.v0`).
+(`rl/`: qrl router training with the qumo_bridge export, format `qumo.rlroute.v0`).
 
 QUMO additions:
   * Determinism: every shuffle uses `Rng(seed).split(...)`; results do not
@@ -533,7 +533,7 @@ def load_route_model(dir: String) raises -> RouteModel:
     checksum mismatch); QM-E620 when it is not a router model of this
     architecture (sign embedding 128 -> H, relu, -> 16 logits).
 
-    Tensors (training/ai_transpiler/common/export.py naming):
+    Tensors (naming written by rl/qumo_bridge/export_route.mojo):
     `embeddings.weight` [128, H] (stored transposed, row i = embedding of
     observation feature i), `embeddings.bias` [H], `action.0.weight` [16, H],
     `action.0.bias` [16]; optional `value.0.*` (PPO critic, unused here).
@@ -547,14 +547,14 @@ def load_route_model(dir: String) raises -> RouteModel:
     var na = arch.get_int("num_active_swaps", -1)
     var H = arch.get_int("hidden", -1)
     if mf.obs_size != OBS_SIZE or hz != HORIZON or na != NUM_ACTIVE_SWAPS or H <= 0 or H > 4096:
-        raise Error("QM-E620: router model '" + mf.id + "' has obs=" + String(mf.obs_size) + ", horizon=" + String(hz) + ", actions=" + String(na) + ", hidden=" + String(H) + "; this router needs obs=128, horizon=8, actions=16. Hint: retrain / re-export it as qumo.rlroute.v0 (training/ai_transpiler/route).")
+        raise Error("QM-E620: router model '" + mf.id + "' has obs=" + String(mf.obs_size) + ", horizon=" + String(hz) + ", actions=" + String(na) + ", hidden=" + String(H) + "; this router needs obs=128, horizon=8, actions=16. Hint: retrain / re-export it as qumo.rlroute.v0 (make train-ai-route, rl/).")
     var m = RouteModel()
     m.emb = mf.tensor("embeddings.weight")
     m.b0 = mf.tensor("embeddings.bias")
     m.w1 = mf.tensor("action.0.weight")
     m.b1 = mf.tensor("action.0.bias")
     if len(m.emb) != OBS_SIZE * H or len(m.b0) != H or len(m.w1) != NUM_ACTIVE_SWAPS * H or len(m.b1) != NUM_ACTIVE_SWAPS:
-        raise Error("QM-E620: router model '" + mf.id + "' tensor shapes do not match hidden=" + String(H) + ". Hint: re-export the model with training/ai_transpiler/route/export_route.py.")
+        raise Error("QM-E620: router model '" + mf.id + "' tensor shapes do not match hidden=" + String(H) + ". Hint: re-export the model with build/export_route (make train-ai-route).")
     m.hidden = H
     m.id = mf.id
     m.dir = dir
@@ -1282,11 +1282,15 @@ struct Episode(Copyable):
     def finished(self, prob: RProblem) -> Bool:
         return self.executed == prob.num_nodes()
 
-    def step(mut self, prob: RProblem, target: Target, model: RouteModel, mode: Int, beta: Float64, limit: Int) -> Bool:
-        """Run one decision (after executing ready gates). False when done."""
+    def pre_decision(mut self, prob: RProblem, target: Target, limit: Int) -> Int:
+        """Execute the ready gates and prepare the decision state: progress bookkeeping (`noprog`, `fallback`), the
+        layers, the active swaps and, when a policy decision is due (`needs_policy`), the observation `obs`.
+        Returns the number of gates executed, or -1 when the circuit is finished (nothing more to decide). The
+        second half of a decision is `act` (a chosen edge) or, when the policy is not asked, `fallback_swap`
+        followed by `act`. `step` is exactly this split run back to back."""
         var ex = self.execute(prob, target)
         if self.finished(prob):
-            return False
+            return -1
         var f = self.fsum(prob, target)
         if ex > 0:
             self.noprog = 0
@@ -1303,25 +1307,37 @@ struct Episode(Copyable):
         self.steps += 1
         self.build_layers(prob)
         self.build_active(prob, target)
+        if not self.fallback and len(self.active) > 0:
+            self.build_obs(prob, target)
+        return ex
+
+    def needs_policy(self) -> Bool:
+        """True after `pre_decision` when the policy must pick one of `active` (not in fallback mode and at least one
+        active swap); False when the next swap is the fallback shortest-path swap."""
+        return not self.fallback and len(self.active) > 0
+
+    def act(mut self, prob: RProblem, target: Target, e: Int):
+        """Apply the chosen coupling edge `e` (an index into the target's edges, e.g. `active[k]`): records it in the
+        trace and swaps."""
+        self.actions.append(e)
+        self.apply_swap(prob, target, e)
+
+    def step(mut self, prob: RProblem, target: Target, model: RouteModel, mode: Int, beta: Float64, limit: Int) -> Bool:
+        """Run one decision (after executing ready gates). False when done."""
+        var ex = self.pre_decision(prob, target, limit)
+        if ex < 0:
+            return False
         var e: Int
-        if self.fallback:
-            e = self.fallback_swap(prob, target)
-            self.n_fallback += 1
-            if e < 0:
-                self.failed = True
-                return False
-        elif len(self.active) == 0:
+        if not self.needs_policy():
             e = self.fallback_swap(prob, target)
             self.n_fallback += 1
             if e < 0:
                 self.failed = True
                 return False
         else:
-            self.build_obs(prob, target)
             var k = self.choose(prob, target, model, mode, beta)
             e = self.active[k]
-        self.actions.append(e)
-        self.apply_swap(prob, target, e)
+        self.act(prob, target, e)
         return True
 
     def run(mut self, prob: RProblem, target: Target, model: RouteModel, mode: Int, beta: Float64, max_steps: Int):

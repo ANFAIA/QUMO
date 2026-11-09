@@ -1,3 +1,5 @@
+# rl/qrl/rng.mojo is a copy for the training package (which never imports QUMO); the streams must stay bit-identical
+# (rl/qumo_bridge/tests/test_bridge_parity.mojo).
 """Deterministic, splittable PRNG (xoshiro256** seeded by SplitMix64).
 
 Reproducibility is an AI-native requirement: the same (circuit, seed) must give
