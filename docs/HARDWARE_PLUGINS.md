@@ -154,7 +154,7 @@ Each provider has up to two client implementations:
 | `speqtrum` | `qumo/exec/speqtrum_api.mojo` | `speqtrum.py` (urllib) |
 | `ibm` | `qumo/exec/ibm_api.mojo` (real backends) | `ibm.py` (qiskit-ibm-runtime) |
 | `local` | QUMO's Mojo simulator | none |
-| `quantinuum` | not ported yet: uses its Python client | `quantinuum.py` (qnexus, pytket) |
+| `quantinuum` | `qumo/exec/quantinuum_api.mojo` (H2 devices in Nexus) | `quantinuum.py` (qnexus, pytket, guppylang) |
 
 Native clients run the whole provider protocol inside the `qumo_py` extension
 (`make py`): request bodies, QUMO's HTTP/1.1 + TLS stack (`qumo/net`, OpenSSL 3
@@ -269,6 +269,32 @@ QuantumCircuit.estimate_duration(target)`. The USD figure uses the
 Pay-As-You-Go list price USD 1.60/s; override with `QUMO_IBM_USD_PER_SECOND`.
 
 ## 5. Quantinuum
+
+**Native client (default, `qumo/exec/quantinuum_api.mojo`), H2 devices.** Nexus has no
+published REST reference, so the client speaks the protocol qnexus 0.51 uses. Its request
+bodies were taken from qnexus itself, and the offline tests compare against qnexus and pytket.
+* **Login.** It stays with Quantinuum's own tool: run `qnx login` once (`pip install qnexus`,
+  browser and MFA). The native client reads the tokens that tool stores in `~/.qnx/auth`. It
+  sends them only as cookies to the Nexus host and refreshes an expired access token in
+  memory. It never writes, returns or prints them.
+* **Circuit.** The compiled circuit becomes a native pytket circuit 1:1: `Rz(t)`,
+  `PhasedX(t, 0)`, `PhasedX(t, 1/2)` and `ZZPhase(t)` in half-turns, plus `Measure`, `Reset`,
+  `Barrier`, and `if(c==k)` as pytket `Conditional`. More than 63 classical bits are split
+  into `c_0, c_1, ...` exactly like the Python client. A condition over a split register is
+  refused. On 200 random circuits it gives the same per-wire gates, angles and HQC counts as
+  pytket's rebase.
+* **Job.** The client finds or creates the project and uploads the circuit. It then starts
+  the execute job with `QuantinuumConfig`: the same fields qnexus sends, which differ for
+  hardware and for emulators or syntax checkers. The HQC cap goes in `max_cost`. Finally it
+  reads the status and decodes the pytket `BackendResult` (packed shots or counts) into
+  QUMO's bit order.
+* **Python client instead.** Helios devices (HUGR programs) and the local emulators
+  (`H2-1LE`, `selene`) use it automatically, and so do jobs submitted by it.
+  `--provider-transpile` (TKET comparison) also needs pytket.
+* **Live status.** Live validation is pending: no Nexus account was logged in on the
+  development machine, and Quantinuum submissions cost HQC.
+
+**Python fallback (`--client python`).**
 
 **Access.** A Quantinuum Nexus account (<https://nexus.quantinuum.com>) with an
 organisation that has H-series/Helios quota (HQCs). Log in once; qnexus stores

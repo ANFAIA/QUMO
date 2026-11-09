@@ -19,6 +19,7 @@ from qumo.ir.circuit import Circuit
 from qumo.ir.mc import append_mcx
 from qumo.sim.ptsbe import sample_ptsbe, plan_trajectories
 from qumo.ir.noise_inject import inject_noise
+from qumo.exec.quantinuum_api import qtm_native_circuit, qtm_hqc, qtm_submit, qtm_status, qtm_result, qtm_devices
 from qumo.exec.ibm_api import ibm_backends, ibm_target, ibm_isa_payload, ibm_submit, ibm_status, ibm_result
 from qumo.exec.speqtrum_api import (
     SpeQtrumAuth, checked_base, payload_document, unsafe_construct, decode_result,
@@ -726,6 +727,38 @@ def py_ibm_status(account: PythonObject, instance: PythonObject, job_id: PythonO
 def py_ibm_result(account: PythonObject, instance: PythonObject, job_id: PythonObject,
                   num_clbits: PythonObject) raises -> PythonObject:
     return _py_counts(ibm_result(String(py=account), String(py=instance), String(py=job_id), Int(py=num_clbits)))
+
+
+def py_qtm_native_circuit(qasm: PythonObject) raises -> PythonObject:
+    """Compiled OpenQASM 2 -> (pytket circuit JSON, n_qubits, n_clbits, n1q, n2q, n_measure_reset)."""
+    var c = qtm_native_circuit(String(py=qasm))
+    var regs = Python.list()
+    for r in c.registers:
+        regs.append(String(r))
+    return Python.tuple(String(c.json), c.n_qubits, c.n_clbits, c.n1q, c.n2q, c.n_measure_reset, regs)
+
+
+def py_qtm_submit(device: PythonObject, project: PythonObject, name: PythonObject, qasm: PythonObject,
+                  shots: PythonObject, max_cost: PythonObject) raises -> PythonObject:
+    var r = qtm_submit(String(py=device), String(py=project), String(py=name), String(py=qasm), Int(py=shots),
+                       Float64(py=max_cost))
+    return Python.tuple(String(r.job_id), String(r.project_id), String(r.circuit_id))
+
+
+def py_qtm_status(job_id: PythonObject) raises -> PythonObject:
+    var st = qtm_status(String(py=job_id))
+    return Python.tuple(String(st.state), String(st.detail))
+
+
+def py_qtm_result(job_id: PythonObject, num_clbits: PythonObject) raises -> PythonObject:
+    return _py_counts(qtm_result(String(py=job_id), Int(py=num_clbits)))
+
+
+def py_qtm_devices() raises -> PythonObject:
+    var out = Python.list()
+    for d in qtm_devices():
+        out.append(Python.tuple(String(d.name), d.qubits))
+    return out
 
 
 def py_plan_trajectories(circ: PythonObject, shots: PythonObject, seed: PythonObject) raises -> PythonObject:
@@ -1499,6 +1532,11 @@ def PyInit_qumo_py() abi("C") -> PythonObject:
         m.def_function[py_ibm_submit]("ibm_submit")
         m.def_function[py_ibm_status]("ibm_status")
         m.def_function[py_ibm_result]("ibm_result")
+        m.def_function[py_qtm_native_circuit]("quantinuum_native_circuit")
+        m.def_function[py_qtm_submit]("quantinuum_submit")
+        m.def_function[py_qtm_status]("quantinuum_status")
+        m.def_function[py_qtm_result]("quantinuum_result")
+        m.def_function[py_qtm_devices]("quantinuum_devices")
         m.def_function[py_sample_branching]("sample_branching")
         m.def_function[py_density_probabilities]("density_probabilities")
         m.def_function[py_density_expectation]("density_expectation")

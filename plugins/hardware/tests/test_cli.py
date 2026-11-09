@@ -13,6 +13,13 @@ from conftest import BELL, ROOT, ghz, needs_ibm, needs_pytket, needs_qnexus, x_o
 from qumo_hardware.cli import EXIT_CONFIRM, EXIT_ERR, EXIT_INTERRUPTED, EXIT_OK, EXIT_USAGE, main
 
 
+@pytest.fixture(autouse=True)
+def python_quantinuum_client(monkeypatch):
+    """Quantinuum cases here mock qnexus / inspect pytket payloads: the Python client
+    (native Quantinuum is covered by test_quantinuum_native.py)."""
+    monkeypatch.setenv("QUMO_HW_CLIENT_QUANTINUUM", "python")
+
+
 @pytest.fixture
 def qasm(tmp_path):
     def write(text, name="c.qasm"):

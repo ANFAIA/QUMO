@@ -47,6 +47,12 @@ def _ionq():
     return IonQProvider
 
 
+def _quantinuum_native():
+    from .quantinuum_native import QuantinuumNativeProvider
+
+    return QuantinuumNativeProvider
+
+
 def _ibm_native():
     from .ibm_native import IBMNativeProvider
 
@@ -69,7 +75,7 @@ def _ionq_python():
 # Mojo (the qumo_py extension); "python" uses the vendor's Python SDK. Native is the
 # default wherever it exists; Python stays available as an explicit fallback.
 NATIVE: dict[str, Callable[[], type]] = {"ionq": _ionq, "local": _local, "speqtrum": _speqtrum_native,
-                                         "ibm": _ibm_native}
+                                         "ibm": _ibm_native, "quantinuum": _quantinuum_native}
 PYTHON: dict[str, Callable[[], type]] = {"ionq": _ionq_python, "ibm": _ibm, "quantinuum": _quantinuum,
                                          "speqtrum": _speqtrum}
 BUILTIN: dict[str, Callable[[], type]] = {"ibm": _ibm, "quantinuum": _quantinuum, "ionq": _ionq,
