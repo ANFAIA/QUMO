@@ -16,6 +16,7 @@ Conventions an agent must know:
 
 ## Agent interfaces
 
+- [Documentation map](docs/README.md): every doc grouped by goal; [Getting started](docs/GETTING_STARTED.md): install, CLI, MCP, Python, GPU, hardware
 - [AI-native interface design](docs/AI_NATIVE.md): OpenQASM subset, diagnostics, MCP tools, CLI, determinism, and how to register new tools and commands
 - [Control flow and classical variables](docs/CONTROL_FLOW.md): `Program`, the classical semantics table, compiling, verification, `qumo.program.v1` JSON, flat inputs that changed, limits
 - [Error and warning codes](docs/ERRORS.md): every QM-Exxx and QM-Wxxx code with its meaning and fix (generated from `error_catalog()`; includes the Python hardware-plugin range QM-E95x and benchmark-harness range QM-E96x)
