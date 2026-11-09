@@ -1,0 +1,23 @@
+{
+ "format": "qumo.campaign.v0",
+ "comment": "Synthesis-model campaign (MOJO_PORT.md 10.3). One entry per shipped model; budgets are the shipped budget_s values, so a native retrain gets the same wall time as the original (AI_LANES=1: 22,200 s of training plus evaluation, inside the 28,800 s cap). A stage may give iters instead of budget_s to make a model independent of the clock. Run: make train-ai-synth (train_all --campaign ...).",
+ "defaults": {"cores": 4, "seed": 1, "emb": 512, "common": "256", "episodes": 1024, "diff_max": 256, "instances": 100},
+ "entries": [
+  {"id": "perm_grid3x3", "kind": "perm", "topology": "grid:3x3", "stages": [{"budget_s": 600}]},
+  {"id": "perm_grid3x4", "kind": "perm", "topology": "grid:3x4", "stages": [{"budget_s": 900}]},
+  {"id": "perm_king3x4", "kind": "perm", "topology": "king:3x4", "stages": [{"budget_s": 1200}]},
+  {"id": "perm_hhring10s2", "kind": "perm", "topology": "heavyhex_frag:ring10s2", "stages": [{"budget_s": 2700}]},
+  {"id": "lf_grid2x3", "kind": "lf", "topology": "grid:2x3", "stages": [{"budget_s": 2700}]},
+  {"id": "lf_ring6", "kind": "lf", "topology": "ring:6", "stages": [{"budget_s": 2400}]},
+  {"id": "lf_line6", "kind": "lf", "topology": "line:6", "stages": [{"budget_s": 2700}]},
+  {"id": "lf_hhH7", "kind": "lf", "topology": "heavyhex_frag:H7", "stages": [{"budget_s": 2700}]},
+  {"id": "pauli_line4", "kind": "pauli", "topology": "line:4",
+   "comment": "three stages as in the shipped manifest (6,300 s in total); each later stage warm-starts from the previous stage's best checkpoint and continues its global iteration count",
+   "stages": [{"budget_s": 2100}, {"budget_s": 2100}, {"budget_s": 2100}]},
+  {"id": "clifford_models", "enabled": false, "comment": "the clifford_* models were dropped from the shipped set and their specs were not recorded; add one entry per model (kind clifford, topology, stages) to retrain them"},
+  {"id": "lf_line7", "enabled": false, "kind": "lf", "topology": "line:7", "comment": "dropped from the shipped set (no recorded budget); give it stages to retrain it"},
+  {"id": "pauli_complete5", "enabled": false, "kind": "pauli", "topology": "complete:5", "comment": "dropped from the shipped set (no recorded budget); give it stages to retrain it"},
+  {"id": "pauli_line6", "enabled": false, "kind": "pauli", "topology": "line:6", "comment": "dropped from the shipped set (no recorded budget); give it stages to retrain it"},
+  {"id": "perm_line8", "enabled": false, "kind": "perm", "topology": "line:8", "comment": "dropped from the shipped set (no recorded budget); give it stages to retrain it"}
+ ]
+}

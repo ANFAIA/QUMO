@@ -1,3 +1,5 @@
+# rl/qrl/env_core.mojo is a copy of PolicyEnv / greedy_trace for the training package (which never imports QUMO);
+# rl/qumo_bridge/tests/test_bridge_parity.mojo replays random walks through both.
 """Policy-guided, topology-aware block synthesis (permutation, linear function,
 Clifford, Pauli network).
 
