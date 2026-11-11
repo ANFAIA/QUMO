@@ -338,6 +338,41 @@ back-to-back, repeat >= 3 times, report medians and the load average.
 
 ## 6. Noise beyond per-shot trajectories
 
+### Noise channels and the pragma syntax
+
+Noise is part of the circuit: a channel is an instruction placed where the error
+happens. Each one has a `Circuit` method and an OpenQASM form, a `#pragma qumo`
+line that other OpenQASM tools skip. `to_qasm` writes the same lines back.
+
+| Channel | Mojo (`Circuit` method) | OpenQASM 3 |
+|---|---|---|
+| X, Y or Z error with probability p | `c.x_error(p, q)`, `c.y_error(p, q)`, `c.z_error(p, q)` | `#pragma qumo x_error(0.01) q[0]` |
+| 1-qubit depolarizing (X, Y, Z with p/3 each) | `c.depolarize1(p, q)` | `#pragma qumo depolarize1(0.02) q[0]` |
+| 2-qubit depolarizing (15 Paulis with p/15 each) | `c.depolarize2(p, a, b)` | `#pragma qumo depolarize2(0.05) q[0], q[1]` |
+| 1-qubit Pauli channel | `c.pauli_channel_1(px, py, pz, q)` | `#pragma qumo pauli_channel_1(0.01, 0.02, 0.03) q[1]` |
+| 2-qubit Pauli channel, 15 probabilities IX, IY, IZ, XI, ... ZZ | `c.pauli_channel_2(probs, a, b)` | `#pragma qumo pauli_channel_2(p1, ..., p15) q[0], q[1]` |
+| Correlated Pauli error (Stim's `E`), and its `ELSE` | `c.correlated_error(p, qubits, letters)` | `#pragma qumo correlated_error(0.01) x q[0], z q[1]`, `#pragma qumo else_correlated_error(0.02) z q[0]` |
+| Any 1- or 2-qubit channel by Kraus matrices | `c.apply_channel(KrausChannel, q0, q1=-1)` | `#pragma qumo kraus1 "name" (re, im, ...) q[0];`, `#pragma qumo kraus2 "name" (re, im, ...) q[0], q[1];` |
+| Noise under a classical condition | `c.c_if(clbit, value)` after the channel | `#pragma qumo if (c[0] == 1) x_error(0.1) q[1];` |
+
+Rules of the pragma lines: the trailing `;` is optional, `pragma qumo ...` without
+the `#` is accepted, and arguments may be constant expressions (`sqrt(0.7)`, `pi/4`). Kraus values are (real, imaginary) pairs, row-major, one matrix after the
+other: 8 numbers per matrix for `kraus1`, 32 for `kraus2`; the channel must preserve
+the trace (QM-E414). A malformed pragma is QM-E560. Related, non-noise pragmas
+(`detector`, `observable`, `tick`, `param`) are in [AI_NATIVE.md](AI_NATIVE.md#qumo-pragmas)
+and [QEC.md](QEC.md). Worked examples: step 5 of [TUTORIAL.md](TUTORIAL.md),
+[`examples/noise_and_mitigation/noisy_bell.qasm`](../examples/noise_and_mitigation/noisy_bell.qasm),
+and a custom Kraus channel in [EXTENDING.md](EXTENDING.md#2-a-custom-noise-channel).
+
+Which sampler runs a noisy circuit: `sample()` always uses state-vector trajectories
+(one error pattern per shot) and accepts every channel above. `sample_auto`
+(`qumo.exec.dispatch`) and the CLI switch to Pauli frames or the tableau when the
+circuit is Clifford with Pauli noise; those refuse Kraus channels (QM-E414). To
+derive channels from a device's error rates instead of writing them by hand, use
+`NoiseModel` + `apply_noise_model` (`qumo.qec.characterization`) or `emulate` below.
+
+### Simulators for noise
+
 `sample()` draws one Pauli error pattern per shot and evolves one state per shot.
 Three opt-in simulators cover what that cannot do cheaply:
 
@@ -390,6 +425,33 @@ vector on random Clifford + rotation circuits to 1e-9. 200 shots of 400 qubits w
 `qumo.exec.emulate.emulate(circuit, target, shots, seed)` is the device-level entry
 point: it checks conformance, builds `NoiseModel.from_target`, drops unused physical
 qubits and runs the cheapest exact sampler; `method` in the result says which.
+
+From the command line, `build/qumo emulate <file> --target SPEC [--shots N] [--seed S]`
+does the same and compiles the circuit first when it does not fit the target (it
+says so; `--no-compile` makes that an error, QM-E615). The output gives the counts,
+the method, and the estimated fidelity of the circuit on the device; with `--json`
+the fields are `counts`, `method`, `shots`, `seed`, `num_qubits`, `compiled`,
+`estimated_fidelity` and `target` (the MCP tool `qumo_emulate` returns the same).
+
+### Reading results
+
+`print(sv)` of a `StateVector` lists the nonzero amplitudes by bitstring (the
+highest qubit is the leftmost character), up to 16 of them:
+
+```
+StateVector(2 qubits)
+  |00>: 0.7071067811865476 + 0.0j
+  |11>: 0.7071067811865476 + 0.0j
+```
+
+`print(r)` of a `SampleResult` prints the counts (`{"00": 484, "11": 516}`) and
+`r.to_json()` gives `{"counts": {...}, "shots": 1000, "num_clbits": 2, "method":
+"statevector:static"}`. `VQEResult.to_json()` (`qumo.algorithms.variational`) does
+the same for an optimisation: energy, parameters and their names, history, counters.
+
+Sampling a circuit without measurements is QM-E402 in every sampler and through
+`sample_auto` / `sample_on`, whichever simulator the dispatch picks. The CLI and
+the MCP tools measure all qubits instead and add the note QM-W004.
 
 ## 7. Limitations
 

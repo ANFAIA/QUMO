@@ -86,6 +86,46 @@ struct VQEResult(Copyable, Writable):
                 ", circuit_evals=", self.circuit_evals, ", time_s=", self.wall_time_s,
                 ", converged=", self.converged, ")")
 
+    def to_json(self) -> String:
+        """One JSON object with the fields of the `qumo_vqe` tool (energy, params,
+        iterations, circuit_evaluations, converged, optimizer, gradient,
+        wall_time_s) plus param_names, function_evaluations,
+        gradient_evaluations, message and the energy history."""
+        var s = String("{\"energy\": ") + _json_num(self.energy) + ", \"params\": " + _json_nums(self.params)
+        s += ", \"param_names\": ["
+        for i in range(len(self.param_names)):
+            if i > 0:
+                s += ", "
+            s += _json_str(self.param_names[i])
+        s += "], \"iterations\": " + String(self.nit) + ", \"function_evaluations\": " + String(self.nfev)
+        s += ", \"gradient_evaluations\": " + String(self.ngrad) + ", \"circuit_evaluations\": " + String(self.circuit_evals)
+        s += ", \"converged\": " + ("true" if self.converged else "false")
+        s += ", \"optimizer\": " + _json_str(self.optimizer) + ", \"gradient\": " + _json_str(self.grad_method)
+        s += ", \"message\": " + _json_str(self.message) + ", \"wall_time_s\": " + _json_num(self.wall_time_s)
+        s += ", \"history\": " + _json_nums(self.history) + "}"
+        return s^
+
+
+def _json_num(v: Float64) -> String:
+    """A JSON number; NaN and infinities, which JSON cannot hold, become null."""
+    if v != v or v - v != 0.0:
+        return "null"
+    return String(v)
+
+
+def _json_nums(xs: List[Float64]) -> String:
+    var s = String("[")
+    for i in range(len(xs)):
+        if i > 0:
+            s += ", "
+        s += _json_num(xs[i])
+    return s + "]"
+
+
+def _json_str(text: String) -> String:
+    """`text` as a JSON string (backslash, quote, newline and tab escaped)."""
+    return "\"" + text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\t", "\\t") + "\""
+
 
 def default_initial_point(num_params: Int, seed: UInt64 = 7, scale: Float64 = 0.1) -> List[Float64]:
     """Small seeded random angles in [-scale, scale] (breaks symmetric saddles, deterministic)."""

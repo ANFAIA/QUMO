@@ -69,4 +69,37 @@ def main() raises:
         assert_equal(rg.method, "statevector:static")
         assert_true(note.find("not compiled") >= 0, note)
         _ = unsetenv(GPU_PRECISION_ENV)
+    # no measurements: QM-E402 from every route, not the empty outcome {"": shots} of the
+    # tableau / Pauli-frame samplers (wide Clifford -> tableau; noisy Clifford -> frames)
+    var wide = Circuit(50)
+    wide.h(0)
+    for q in range(49):
+        wide.cx(q, q + 1)
+    var noisy_nm = Circuit(2)
+    noisy_nm.h(0)
+    noisy_nm.cx(0, 1)
+    noisy_nm.depolarize2(0.05, 0, 1)
+    var small_nm = Circuit(2)
+    small_nm.h(0)
+    assert_equal(choose_method(wide, 100), "stabilizer")
+    assert_equal(choose_method(noisy_nm, 20000), "frame")
+    for dev in ["auto", "cpu", "gpu"]:
+        for which in range(3):
+            raised = False
+            try:
+                if which == 0:
+                    _ = sample_on(wide, 100, 5, List[Float64](), String(dev), note)
+                elif which == 1:
+                    _ = sample_on(noisy_nm, 20000, 5, List[Float64](), String(dev), note)
+                else:
+                    _ = sample_on(small_nm, 100, 5, List[Float64](), String(dev), note)
+            except e:
+                raised = String(e).startswith("QM-E402")
+            assert_true(raised, "QM-E402 expected without measurements (device " + String(dev) + ", circuit " + String(which) + ")")
+    raised = False
+    try:
+        _ = sample_auto(wide, 100, 5)
+    except e:
+        raised = String(e).startswith("QM-E402")
+    assert_true(raised, "QM-E402 expected from sample_auto without measurements")
     print("test_dispatch OK")

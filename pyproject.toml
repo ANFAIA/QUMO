@@ -1,0 +1,33 @@
+# Python package `qumo`: the friendly layer over the compiled extension qumo_py.
+#
+#   make py                  # build/qumo_py.so (Mojo toolchain from `make setup`)
+#   pip install -e .         # or: uv pip install -e .
+#   python -c "import qumo; print(qumo.sample(qumo.ghz(3, measure=True)))"
+#
+# The package is pure Python (python/qumo). It does not contain the extension:
+# qumo_py.so is built on this machine and links the Modular runtime of the
+# checkout's .venv, so it is loaded from <checkout>/build at import time (or
+# from $QUMO_PY_PATH). That is why the install is editable: a copied package
+# would lose the path to the checkout. See docs/PYTHON.md.
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qumo"
+version = "0.1.0"
+description = "QUMO quantum software stack: circuits, simulators, compiler and research drivers (Python layer over the Mojo core)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+dependencies = ["numpy>=1.26"]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[project.urls]
+Repository = "https://github.com/ANFAIA/QUMO"
+
+[tool.setuptools]
+package-dir = { "" = "python" }
+packages = ["qumo"]

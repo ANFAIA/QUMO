@@ -4,9 +4,17 @@ PY ?= bench/.venv/bin/python
 # the RL tests live in rl/ (make test runs the fast ones once, via make test-rl; make test-rl-slow runs the rest)
 TESTS := $(wildcard tests/test_*.mojo)
 
-.PHONY: all setup setup-py test cli py bench-sv bench-neutral bench-charts benchpress clean examples examples-all examples-gpu test-py
+.PHONY: all help setup setup-py test cli py bench-sv bench-neutral bench-charts clean examples examples-all examples-gpu test-py test-python install-py
 
 all: cli py
+
+# The targets a new user needs, in the order to run them; `make help` marks them with *.
+ESSENTIAL := setup cli py test examples
+
+help:  ## list the documented targets (* = the ones a new user needs)
+	@echo "QUMO make targets (* = start here: make setup, then make cli; docs/GETTING_STARTED.md)"; echo
+	@awk -v ess="$(ESSENTIAL)" 'BEGIN { n = split(ess, e, " "); for (i = 1; i <= n; i++) mark[e[i]] = 1; FS = ":.*## " } \
+		/^[a-zA-Z0-9_-]+:.*## / { printf "  %s %-20s %s\n", (($$1 in mark) ? "*" : " "), $$1, $$2 }' $(MAKEFILE_LIST)
 
 # Mojo changes dialect between releases and QUMO pins the one it is written in
 # (docs/MOJO_GUIDE.md); bump these together with the guide.
@@ -216,7 +224,15 @@ examples-all:  ## every example tier
 examples-gpu: cli-gpu py-gpu  ## fast tier with GPU builds
 	$(PY) examples/run_examples.py --tier fast --gpu
 
-test-py:  ## Python tests: examples runner, heterogeneous example, hardware plugins
+install-py: py  ## install the Python package `qumo` (editable) into the environment of $(PY); docs/PYTHON.md
+	uv pip install --python $(PY) -e .
+
+test-python: py  ## tests of the Python package `qumo` (python/tests; needs numpy and pytest in $(PY))
+	PYTHONPATH=python $(PY) -m pytest -q python/tests
+
+# two pytest runs: python/tests and plugins/hardware/tests both have a conftest.py and a test_compile.py
+test-py:  ## every Python test: the `qumo` package, examples runner, heterogeneous example, hardware plugins
+	PYTHONPATH=python $(PY) -m pytest -q python/tests
 	PYTHONPATH=build:plugins/hardware $(PY) -m pytest -q examples/heterogeneous examples/test_run_examples.py plugins/hardware/tests
 
 clean:

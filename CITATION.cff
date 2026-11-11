@@ -1,0 +1,26 @@
+# How to cite QUMO. GitHub reads this file and shows "Cite this repository".
+# QUMO has no tagged release yet: also state the commit hash you used.
+cff-version: 1.2.0
+message: "If you use QUMO in your research, please cite it using this metadata and state the commit hash you used."
+type: software
+title: "QUMO"
+abstract: >-
+  QUMO is a hardware-neutral, AI-native quantum software stack written in Mojo:
+  circuit IR with OpenQASM 2/3, a vendor-neutral compiler, state-vector,
+  stabilizer, Pauli-frame and density-matrix simulators, GPU kernels, quantum
+  error correction, fault-tolerant programming, an algorithms library, a
+  command line tool and an MCP server for LLM agents. Research prototype.
+authors:
+  - given-names: "Ismael"
+    family-names: "Faro Sertage"
+version: "0.1.0"
+license: Apache-2.0
+repository-code: "https://github.com/ANFAIA/QUMO"
+url: "https://github.com/ANFAIA/QUMO"
+keywords:
+  - quantum computing
+  - quantum circuit simulation
+  - quantum compilation
+  - quantum error correction
+  - OpenQASM
+  - Mojo
