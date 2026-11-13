@@ -38,8 +38,10 @@ setup-py-locked:  ## bench/.venv from bench/requirements.lock: the exact version
 
 test:  ## run every Mojo test file (tests/ and, once, the fast RL tests of rl/ through make test-rl)
 	@fail=0; for t in $(TESTS); do \
-		out=$$($(MOJO) run -I . $$t 2>&1 | grep -v Crashpad | tail -1); \
-		case "$$out" in *OK*) echo "PASS $$t";; *) echo "FAIL $$t: $$out"; fail=1;; esac; \
+		log=$$(mktemp); $(MOJO) run -I . $$t > $$log 2>&1; \
+		out=$$(grep -v Crashpad $$log | tail -1); \
+		case "$$out" in *OK*) echo "PASS $$t";; *) echo "FAIL $$t: $$out"; grep -v Crashpad $$log | tail -25; fail=1;; esac; \
+		rm -f $$log; \
 	done; $(MAKE) --no-print-directory test-rl || fail=1; exit $$fail
 
 cli:  ## native CLI + MCP server (build/qumo)
