@@ -68,7 +68,8 @@ from std.bit import pop_count
 from qumo.ir.circuit import Circuit, Instruction, QUARTER_TURN_LIMIT
 from qumo.ir.gates import Op, op_arity, matrix_2q
 from qumo.compiler.target import Target
-from qumo.compiler.common import GateSet, is_plain_gate, is_bound, inst_matrix_1q
+from qumo.compiler.common import is_plain_gate, is_bound, inst_matrix_1q
+from qumo.ir.gateset import GateSet
 from qumo.compiler.kak import cx_cost
 from qumo.compiler.optimize import cancel_inverses
 from qumo.compiler.basis import translate_to_basis

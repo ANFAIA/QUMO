@@ -7,12 +7,14 @@ Mojo. Defaults equal the command line's (`qumo run`): shots=1024, seed=1234.
 
 from __future__ import annotations
 
+from numbers import Complex, Real
+
 from ._native import native as _q
 from .circuit import Circuit, _call, _native_of, param_values
 from .errors import QumoError, QumoTypeError, from_native
 
 __all__ = [
-    "Counts", "sample", "run", "statevector", "probabilities", "expectation",
+    "Counts", "Emulation", "sample", "run", "statevector", "probabilities", "expectation", "emulate",
     "value_and_gradient", "batch_value_and_gradient",
 ]
 
@@ -226,17 +228,41 @@ def probabilities(circuit, params=None):
 
 
 def _observable(observable):
-    """A str passes through; (label, coeff) pairs become a list the extension reads."""
+    """A str passes through; (label, coeff) pairs become a list the extension reads.
+
+    Complex coefficients, as Qiskit's ``SparsePauliOp.to_list()`` gives them, are
+    accepted when their imaginary part is zero; a non-zero one is an error (a
+    Pauli sum with complex coefficients is not a Hermitian observable).
+    """
     if isinstance(observable, str):
         return observable
     if isinstance(observable, dict):
-        return list(observable.items())
+        return [_real_term(term) for term in observable.items()]
     try:
-        return list(observable)
+        terms = list(observable)
     except TypeError:
         raise QumoTypeError(
             f"an observable is a Pauli-sum str or a list of (label, coeff) pairs, got {type(observable).__name__}",
             "QM-E911", "e.g. 'Z0 Z1 + 0.5 * X0' or [('ZZ', 1.0), ('XI', 0.5)].") from None
+    return [_real_term(term) for term in terms]
+
+
+def _real_term(term):
+    """``(label, coeff)`` with a complex coeff made real; anything else passes through unchanged."""
+    try:
+        label, coeff = term
+    except (TypeError, ValueError):
+        return term
+    if isinstance(label, str) and isinstance(coeff, Complex) and not isinstance(coeff, Real):
+        value = complex(coeff)
+        if value.imag != 0:
+            raise QumoError(
+                f"the observable has the complex coefficient {value} on '{label}': a Pauli sum must have real "
+                "coefficients (its imaginary part must be zero)", "QM-E913",
+                "check the operator is Hermitian (for a SparsePauliOp: simplify() and drop the imaginary parts), "
+                "or pass the real part.")
+        return (label, value.real)
+    return term
 
 
 def expectation(circuit, observable, params=None, *, noise: str = "auto", device: str = "cpu") -> float:
@@ -285,6 +311,109 @@ def expectation(circuit, observable, params=None, *, noise: str = "auto", device
     if params is None and nat.num_parameters() == 0:
         return float(_call(_q.expectation, nat, obs))
     return float(_call(_q.expectation, nat, obs, params=param_values(circuit, params)))
+
+
+class Emulation:
+    """What `emulate` returns: counts sampled under a device model's noise.
+
+    Attributes:
+        counts: the outcomes, a `Counts` (``{bitstring: count}``) with shots and seed.
+        method: the sampler that ran, e.g. ``'frame'`` or ``'stabilizer'``.
+        compiled: True when the circuit was transpiled for the target first.
+        estimated_fidelity: the product of (1 - error) over the gates and
+            measurements of the circuit that ran, from the target's model.
+        target: the target's name.
+        num_qubits: qubits of the circuit that ran (after compilation).
+    """
+
+    __slots__ = ("counts", "method", "compiled", "estimated_fidelity", "target", "num_qubits")
+
+    def __init__(self, counts, method, compiled, estimated_fidelity, target, num_qubits):
+        self.counts = counts
+        self.method = method
+        self.compiled = compiled
+        self.estimated_fidelity = estimated_fidelity
+        self.target = target
+        self.num_qubits = num_qubits
+
+    def __repr__(self):
+        return (f"Emulation({self.target!r}, shots={self.counts.shots}, compiled={self.compiled}, "
+                f"method={self.method!r}, estimated_fidelity={self.estimated_fidelity:.4f})")
+
+
+def _count_arg(name: str, value) -> int:
+    if isinstance(value, bool):
+        raise QumoTypeError(f"emulate(): {name} is an int, got bool", "QM-E911", f"e.g. {name}=1000.")
+    try:
+        return value.__index__()
+    except AttributeError:
+        raise QumoTypeError(f"emulate(): {name} is an int, got {type(value).__name__}", "QM-E911",
+                            f"e.g. {name}=1000.") from None
+
+
+def emulate(circuit, target: str, shots: int = 1024, seed: int = 1234, *, compile: bool | None = None,
+            level: int = 2) -> Emulation:
+    """Sample `circuit` under the noise model of a device `target`, with no device.
+
+    This is `qumo emulate`: the circuit runs as written when it fits the target
+    (its gates in the target's basis, its two-qubit gates on coupling-map edges).
+    Otherwise it is compiled for the target first, and `Emulation.compiled` says
+    so. The noise is the target's model: per-qubit T1/T2, gate and readout errors,
+    per-edge two-qubit errors.
+
+    Args:
+        circuit: a `qumo.Circuit` with at least one measurement and no unbound parameters.
+        target: a target spec as `qumo.transpile` reads it, e.g. ``'grid:2x2/sc_cz'``,
+            ``'line:5/u,cx'``, ``'heavy_hex:3/rz,sx,x,ecr'``, ``'trapped_ion:5'``, ``'neutral_atom:3x3'``.
+        shots: number of repetitions (default 1024, as the CLI).
+        seed: random seed (default 1234, as the CLI); same seed, same counts.
+        compile: ``None`` (default) compiles only when the circuit does not fit;
+            ``True`` always compiles first; ``False`` never does.
+        level: optimisation level of the compilation, 0..3 (default 2, as the CLI).
+
+    Returns:
+        `Emulation`.
+
+    Raises:
+        QumoError: QM-E615 when the circuit does not fit the target and
+            ``compile=False``; QM-E101 when it has unbound parameters.
+    """
+    if not isinstance(target, str):
+        raise QumoTypeError(f"emulate(): target is a spec string, got {type(target).__name__}", "QM-E911",
+                            "e.g. target='grid:2x2/sc_cz'.")
+    shots = _count_arg("shots", shots)
+    seed = _count_arg("seed", seed)
+    level = _count_arg("level", level)
+    if shots < 1:
+        raise QumoError(f"emulate(): shots must be at least 1, got {shots}", "QM-E913", "e.g. shots=1000.")
+    if compile not in (None, True, False):
+        raise QumoError(f"emulate(): compile is None, True or False, got {compile!r}", "QM-E913",
+                        "the default None compiles only when the circuit does not fit the target.")
+    nat = _native_of(circuit)
+    if nat.num_parameters():
+        raise QumoError("emulate() needs a circuit without unbound parameters", "QM-E101",
+                        "bind them first: circuit.bind({...}).")
+
+    def run(compiled: bool):
+        return _call(_q.emulate, nat, target, shots, seed, compiled, level)
+
+    if compile is None:
+        try:
+            counts, method, num_qubits, fidelity, name = run(False)
+            compiled = False
+        except QumoError as exc:
+            if exc.code != "QM-E615":
+                raise
+            counts, method, num_qubits, fidelity, name = run(True)
+            compiled = True
+    else:
+        compiled = bool(compile)
+        counts, method, num_qubits, fidelity, name = run(compiled)
+    out = Counts(counts)
+    out.shots = shots
+    out.seed = seed
+    out.method = str(method)
+    return Emulation(out, str(method), compiled, float(fidelity), str(name), int(num_qubits))
 
 
 def value_and_gradient(circuit, observable, params, *, device: str = "cpu"):

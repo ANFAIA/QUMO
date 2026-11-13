@@ -26,16 +26,10 @@ from qumo.ir.gates import (
 )
 from qumo.ir.param import Param
 from qumo.ir.circuit import Circuit, Instruction
+from qumo.ir.gateset import ANG_TOL, EXACT_TOL, GateSet, HALF_PI, QUARTER_PI
 
 comptime TWO_PI = 6.283185307179586476925
 comptime FOUR_PI = 12.56637061435917295385
-comptime HALF_PI = 1.5707963267948966192313
-comptime QUARTER_PI = 0.7853981633974483096157
-comptime ANG_TOL = 1e-10
-# What a pass may round off per gate in a block of a Program, in place of ANG_TOL and of
-# 1e-9 on a matrix. verify_program sees a distance of 1e-7, and small errors add up over
-# the gates of a block, so this leaves room for the longest block its budget takes.
-comptime EXACT_TOL = 1e-14
 
 # per-wire action axis
 comptime AX_OTHER = 0
@@ -44,83 +38,6 @@ comptime AX_X = 2
 comptime AX_Y = 3
 comptime AX_ANY = 4
 
-
-# ----------------------------------------------------------------------------
-# Gate sets
-# ----------------------------------------------------------------------------
-struct GateSet(Copyable, Writable):
-    """Set of allowed unitary opcodes. `any` = every gate is allowed."""
-
-    var any: Bool
-    var allowed: List[Bool]
-    var exact: Bool  # round off EXACT_TOL at most: see `angle_tol`
-
-    def __init__(out self):
-        self.any = True
-        self.allowed = List[Bool](length=Op.NUM_OPS, fill=True)
-        self.exact = False
-
-    def __init__(out self, kinds: List[Int]):
-        self.exact = False
-        if len(kinds) == 0:
-            self.any = True
-            self.allowed = List[Bool](length=Op.NUM_OPS, fill=True)
-            return
-        self.any = False
-        self.allowed = List[Bool](length=Op.NUM_OPS, fill=False)
-        for k in kinds:
-            if k >= 0 and k < Op.NUM_OPS:
-                self.allowed[k] = True
-
-    def angle_tol(self) -> Float64:
-        """An angle this close to zero, or to a named gate's, counts as equal."""
-        return EXACT_TOL if self.exact else ANG_TOL
-
-    def matrix_tol(self) -> Float64:
-        """An entry of a resynthesised 1-qubit matrix may be this far off."""
-        return EXACT_TOL if self.exact else 1e-9
-
-    @staticmethod
-    def all_but_3q() -> GateSet:
-        var g = GateSet()
-        g.any = False
-        g.allowed[Op.CCX] = False
-        g.allowed[Op.CCZ] = False
-        g.allowed[Op.CSWAP] = False
-        return g^
-
-    def has(self, k: Int) -> Bool:
-        if k < 0 or k >= Op.NUM_OPS:
-            return False
-        if not op_is_unitary(k):
-            return True
-        return self.allowed[k]
-
-    def has_z_rot(self) -> Bool:
-        return self.has(Op.RZ) or self.has(Op.P)
-
-    def kinds(self) -> List[Int]:
-        var out = List[Int]()
-        if self.any:
-            return out^
-        for k in range(Op.CCZ + 1):
-            if self.allowed[k]:
-                out.append(k)
-        return out^
-
-    def write_to(self, mut w: Some[Writer]):
-        if self.any:
-            w.write("{any}")
-            return
-        w.write("{")
-        var first = True
-        for k in range(Op.CCZ + 1):
-            if self.allowed[k]:
-                if not first:
-                    w.write(",")
-                first = False
-                w.write(op_name(k))
-        w.write("}")
 
 
 def basis_str(kinds: List[Int]) -> String:

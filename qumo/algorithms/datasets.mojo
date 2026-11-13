@@ -21,7 +21,7 @@ from std.math import pi, sqrt, cos, sin, floor, ceil
 from std.os.path import exists
 
 from qumo.sim.rng import Rng
-from qumo.ai.json import parse_json, JsonValue
+from qumo.core.json import parse_json, JsonValue
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +260,7 @@ def _parse_or_e834(text: String, path: String) raises -> JsonValue:
 
 
 def load_json_matrix(path: String, key: String) raises -> List[List[Float64]]:
-    """Numeric matrix stored under `key` of a JSON object (via qumo.ai.json.parse_json).
+    """Numeric matrix stored under `key` of a JSON object (via qumo.core.json.parse_json).
 
     `key` may be a '/'-separated path into nested objects ("probes/X"); an
     empty key reads the document root. A flat numeric array is returned as a

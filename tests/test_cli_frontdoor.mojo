@@ -13,7 +13,7 @@ from std.time import perf_counter_ns
 
 from cli.app import run_cli, command_table, command_help, CliOut
 from qumo.ai.cli_help import did_you_mean, edit_distance, tool_example, tool_help_text, tool_takes, with_file_as_qasm
-from qumo.ai.json import parse_json, JsonValue
+from qumo.core.json import parse_json, JsonValue
 from qumo.ai.registry import full_registry
 
 comptime BELL = "examples/foundations/bell.qasm"

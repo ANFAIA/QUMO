@@ -14,7 +14,7 @@ a double-quoted string is data.
 
 from std.math import isinf, isnan
 
-from qumo.ai.json import JsonValue, JsonWriter, json_number, parse_json
+from qumo.core.json import JsonValue, JsonWriter, json_number, parse_json
 from qumo.ir.pauli import PauliSum
 
 

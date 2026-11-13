@@ -32,7 +32,7 @@ QM-E722 (unknown code name or bad code parameters).
 
 from std.bit import pop_count, count_leading_zeros
 from qumo.ft.pauli import SymPauli, StabilizerGroup, group_from
-from qumo.ai.json import JsonWriter
+from qumo.core.json import JsonWriter
 from qumo.qec.codes import surface_code_memory, repetition_code_memory, NoiseParams, CodeCircuit
 from qumo.ir.gates import Op
 

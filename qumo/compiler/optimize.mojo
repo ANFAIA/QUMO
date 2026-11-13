@@ -36,12 +36,8 @@ from qumo.ir.gates import (
 )
 from qumo.ir.param import Param
 from qumo.ir.circuit import Circuit, Instruction
-from qumo.compiler.common import (
-    GateSet, WireList, TWO_PI, FOUR_PI, HALF_PI, ANG_TOL, EXACT_TOL, AX_Z, AX_ANY, AX_OTHER,
-    is_plain_gate, is_bound, is_all_wire_op, commutes, same_qubit_set, compact,
-    wrap_angle, near_mod, m2_identity_phase, inst_matrix_1q, rot_axis, rot_is_r,
-    rot_angle, combine_rotations, emit_rotation, wire_axis,
-)
+from qumo.compiler.common import WireList, TWO_PI, FOUR_PI, AX_Z, AX_ANY, AX_OTHER, is_plain_gate, is_bound, is_all_wire_op, commutes, same_qubit_set, compact, wrap_angle, near_mod, m2_identity_phase, inst_matrix_1q, rot_axis, rot_is_r, rot_angle, combine_rotations, emit_rotation, wire_axis
+from qumo.ir.gateset import GateSet, HALF_PI, ANG_TOL, EXACT_TOL
 from qumo.compiler.synth import synth_1q
 from max.algorithm import parallelize
 

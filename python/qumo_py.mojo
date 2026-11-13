@@ -48,7 +48,7 @@ from qumo.qec.sparse_blossom import SparseBlossomDecoder
 from qumo.qec.correlated import CorrelatedMatchingDecoder
 from qumo.qec.stim_text import from_stim, parse_dem, sample_dem
 from qumo.qec.lint import missing_detectors, count_determined_measurements
-from qumo.ai.json import JsonWriter
+from qumo.core.json import JsonWriter
 from std.collections import Dict
 from qumo.ir.gates import Op, op_name, op_arity, op_is_unitary, op_from_name
 from qumo.ir.pauli import parse_pauli_sum, PauliSum
@@ -59,7 +59,7 @@ from qumo.ir.qasm2 import to_qasm2
 from qumo.sim.program_runner import DEFAULT_MAX_ITERATIONS, sample_program
 from qumo.compiler.program_compile import compile_program
 from qumo.ai.describe import program_from_json, program_to_json
-from qumo.ai.json import parse_json
+from qumo.core.json import parse_json
 from qumo.ai.diagnostics import diagnostic_from_error, lint_program
 from qumo.exec.dispatch import sample_on
 from qumo.gpu.device import query_gpu
@@ -80,6 +80,8 @@ from std.runtime import parallelism_level
 from max.algorithm import parallelize
 from qumo.sim.statevector import StateVector
 from qumo.compiler.target import Target, parse_target
+from qumo.ir.kraus import KrausChannel
+from qumo.exec.emulate import emulate
 from qumo.algorithms.variational import vqe, qaoa_maxcut
 from qumo.algorithms.hamiltonians import (
     Graph, maxcut, transverse_field_ising, heisenberg_xxz, fermi_hubbard, h2_sto3g, ground_energy,
@@ -235,6 +237,41 @@ struct PyCircuit(Movable, Writable):
         var out = Self._get(py_self)[].c.copy()
         out.compose(Self._get(other)[].c)
         return PythonObject(alloc=PyCircuit(out^))
+
+    @staticmethod
+    def add_kraus(py_self: PythonObject, name: PythonObject, arity: PythonObject, data: PythonObject,
+                  q0: PythonObject, q1: PythonObject) raises -> PythonObject:
+        """Append a Kraus channel in place: the qumo builder flushes its pending gates first, so order holds.
+
+        data: flat (re, im) pairs, row-major, one matrix after the other (dim 2^arity); q1 = -1 for arity 1.
+        Errors: QM-E001 qubit out of range, QM-E414 wrong matrix shape or not trace preserving.
+        """
+        var k = _int_arg(arity, "add_kraus", "arity")
+        var a = _int_arg(q0, "add_kraus", "qubit")
+        var b = _int_arg(q1, "add_kraus", "qubit")
+        var channel_name = String(py=name)
+        if k != 1 and k != 2:
+            raise Error("QM-E414: Kraus channel '" + channel_name + "' acts on " + String(k) + " qubit(s). Hint: kraus1 or kraus2.")
+        ref c = Self._get(py_self)[].c
+        if a < 0 or a >= c.num_qubits or (k == 2 and (b < 0 or b >= c.num_qubits or b == a)):
+            raise Error("QM-E001: Kraus channel '" + channel_name + "' uses a qubit outside 0.." + String(c.num_qubits - 1) + ". Hint: pass distinct qubits in range.")
+        var vals = _floats(data)
+        var dim = 1 << k
+        var step = 2 * dim * dim
+        if len(vals) == 0 or len(vals) % step != 0:
+            raise Error("QM-E414: Kraus channel '" + channel_name + "' needs (re, im) pairs for whole " + String(dim) + "x" + String(dim) + " matrices. Hint: matrices are row-major, one after the other.")
+        var ch = KrausChannel(channel_name, k)
+        var at = 0
+        while at < len(vals):
+            var re = List[Float64]()
+            var im = List[Float64]()
+            for j in range(dim * dim):
+                re.append(vals[at + 2 * j])
+                im.append(vals[at + 2 * j + 1])
+            ch.add(re^, im^)
+            at += step
+        c.apply_channel(ch, a, b if k == 2 else -1)
+        return len(c.ops)
 
     @staticmethod
     def bind(py_self: PythonObject, values: PythonObject) raises -> PythonObject:
@@ -1822,6 +1859,23 @@ def py_transpile_report(circ: PythonObject, num_qubits: PythonObject, edges: Pyt
                                     _int_arg(seed, "transpile_report", "seed")))
 
 
+def py_emulate(circ: PythonObject, spec: PythonObject, shots: PythonObject, seed: PythonObject,
+               compile: PythonObject, level: PythonObject) raises -> PythonObject:
+    """Emulate a circuit under a target's noise (what `qumo emulate` runs, without calibration data).
+
+    emulate(circuit, spec, shots, seed, compile, level) -> (counts, method, num_qubits, estimated_fidelity, target).
+    compile=True transpiles to the target first; compile=False requires a circuit that already fits it
+    (QM-E615 otherwise). The Python `qumo.emulate` retries with compile=True, as the CLI does.
+    """
+    var t = parse_target(String(py=spec))
+    var c = PyCircuit._get(circ)[].c.copy()
+    var sd = _int_arg(seed, "emulate", "seed")
+    if Bool(py=compile):
+        c = transpile(c, t, _int_arg(level, "emulate", "level"), sd).circuit.copy()
+    var r = emulate(c, t, _int_arg(shots, "emulate", "shots"), UInt64(sd))
+    return Python.tuple(_counts_dict(r), String(r.method), c.num_qubits, t.estimate_fidelity(c), String(t.name))
+
+
 def _grad_method(name: String) raises -> Int:
     var k = name.lower()
     if k == "adjoint":
@@ -2082,6 +2136,7 @@ def PyInit_qumo_py() abi("C") -> PythonObject:
             .def_method[PyCircuit.is_clifford]("is_clifford", docstring="is_clifford() -> bool\n\nTrue when every gate is Clifford (rotations by multiples of pi/2 count).")
             .def_method[PyCircuit.is_dynamic]("is_dynamic", docstring="is_dynamic() -> bool\n\nTrue with classical conditions, resets or gates after a measurement.")
             .def_method[PyCircuit.inverse]("inverse", docstring="inverse() -> Circuit\n\nThe inverse of a unitary circuit.")
+            .def_method[PyCircuit.add_kraus]("add_kraus", docstring="add_kraus(name, arity, data, q0, q1) -> int\n\nAppend a Kraus channel (arity 1 or 2; q1 = -1 for arity 1) with `data` = flat (re, im) pairs, row-major, one matrix after the other. Used by the qumo builder (kraus1 / kraus2); returns the instruction count.")
             .def_method[PyCircuit.extend_packed]("extend_packed", docstring="extend_packed(ops_addr, num_ops, params_addr, num_params, new_parameters) -> int\n\nAppend many instructions in one call, read from two C buffers (the `qumo` package builds them; array('q') and array('d') give the addresses through buffer_info()). Returns the new instruction count.\n\nops: 5 int64 per instruction: kind, q0, q1, q2, aux. kind comes from op_table(); unused qubits are -1; aux is the classical bit of a measure. kind -1 conditions the previous instruction on classical bit q0 having value q1.\nparams: 3 float64 per gate angle, in order: offset, parameter index (-1 = a constant, the value is `offset`), coeff; the angle is coeff * parameter + offset.\nnew_parameters: names to declare before appending.\nErrors: QM-E001 qubit out of range, QM-E913 malformed buffers.")
         )
         _ = (
@@ -2185,6 +2240,7 @@ def PyInit_qumo_py() abi("C") -> PythonObject:
         m.def_function[py_op_table]("op_table", docstring="op_table() -> dict\n\n{gate name: (kind, arity, num_params)} for every instruction; `kind` is what Circuit.extend_packed takes.")
         m.def_function[py_statevector]("statevector", docstring="statevector(circuit, params=[]) -> numpy.ndarray\n\nFinal state as a complex128 array of 2^n amplitudes; amplitude i has qubit q in bit q of i. Measurements, resets and noise are skipped. The simulator's state is written once into the array (no Python lists). Needs NumPy. Limit 32 qubits (QM-E404).")
         m.def_function[py_probabilities]("probabilities", docstring="probabilities(circuit, params=[]) -> numpy.ndarray\n\nfloat64 array of 2^n outcome probabilities. A circuit with noise goes through the density matrix (limit 15 qubits).")
+        m.def_function[py_emulate]("emulate", docstring="emulate(circuit, spec, shots, seed, compile, level) -> (counts, method, num_qubits, estimated_fidelity, target)\n\nSample `circuit` under the noise of the target `spec` (e.g. 'grid:2x2/sc_cz'), as `qumo emulate` does. compile=True transpiles first. Errors: QM-E615 when the circuit does not fit the target and compile is False.")
         m.def_function[py_parse_target]("parse_target", docstring="parse_target(spec) -> dict\n\nA one-line target, as the CLI takes it: '<topology>:<size>[/<basis>]', e.g. 'grid:2x2/sc_cz', 'line:20', 'heavy_hex:5/rz,sx,x,ecr', 'trapped_ion:11'. Returns name, modality, num_qubits, all_to_all, edges, basis. Errors: QM-E611.")
         m.def_function[py_transpile_target]("transpile_target", docstring="transpile_target(circuit, spec, level, seed) -> (circuit, initial_layout, final_layout, report_json)\n\nCompile for a one-line target spec (see parse_target). level 0..3.")
         m.def_function[py_transpile_report]("transpile_report", docstring="transpile_report(circuit, num_qubits, edges, basis, level, seed) -> (circuit, initial_layout, final_layout, report_json)\n\ntranspile() plus the per-pass report as JSON. num_qubits: physical qubits; edges: [(a, b), ...] couplings ([] = all-to-all); basis: list of gate names, or one str: a basis-set name ('sc_cz', 'sc_cx', 'sc_ecr', 'sc_iswap', 'ion_ms', 'ion_zz', 'atom_cz', 'clifford_t', 'generic', 'any') or a comma list ('rz,sx,x,cz').")

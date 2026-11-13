@@ -24,7 +24,7 @@ wire protocol, same security rules, no Python on the request path:
 
 from std.collections import Dict
 
-from qumo.ai.json import JsonValue, parse_json
+from qumo.core.json import JsonValue, parse_json
 from qumo.net.http import HttpClient, HttpOptions, HttpRequest, HttpResponse, REDIRECT_NONE
 from qumo.net.libc import c_time
 from qumo.net.url import Url, parse_url

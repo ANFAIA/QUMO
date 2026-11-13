@@ -43,7 +43,7 @@ from qumo.ft.logical import LogicalProgram, LOp
 from qumo.ft.implement import EncodedProgram
 from qumo.ft.arch import Architecture
 from qumo.ft.encode import encode
-from qumo.ai.json import JsonWriter
+from qumo.core.json import JsonWriter
 
 
 struct LogicalCounts(Copyable, Writable):

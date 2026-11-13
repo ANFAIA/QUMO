@@ -293,4 +293,4 @@ def main() raises:
     test_15_sized_casts_in_a_flat_gate_argument()
     test_17_bool_and_bit_next_to_a_narrow_type()
     test_18_float_declarations_and_range_bounds()
-    print("test_program_review2 OK")
+    print("test_program_regressions_constants OK")

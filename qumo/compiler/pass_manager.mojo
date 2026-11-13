@@ -23,7 +23,8 @@ self-correct. `CompileResult.to_json()` is the machine-readable summary.
 from std.time import perf_counter_ns
 from qumo.ir.gates import Op, op_name, op_arity, op_is_unitary
 from qumo.ir.circuit import Circuit, Instruction
-from qumo.compiler.common import GateSet, fmt_num, basis_str, reduce_large_angles, wrap_angle, TWO_PI
+from qumo.compiler.common import fmt_num, basis_str, reduce_large_angles, wrap_angle, TWO_PI
+from qumo.ir.gateset import GateSet
 from qumo.compiler.target import Target, parse_basis, parse_angle_bound
 from qumo.compiler.optimize import (
     remove_identities, cancel_inverses, merge_rotations, commute_rotations,

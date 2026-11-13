@@ -453,6 +453,77 @@ class Circuit:
         self._ops.extend((_OPS["pauli_channel_1"][0], q, -1, -1, -1))
         return self
 
+    def kraus1(self, name: str, matrices, q: int):
+        """General noise channel on qubit `q` given by its Kraus operators (non-Pauli noise).
+
+        `matrices` is a list of 2x2 complex matrices K_k with sum_k K_k^dagger K_k = I
+        (the channel is rho -> sum_k K_k rho K_k^dagger). `name` labels the channel in
+        drawings and in the OpenQASM text, where it is written as
+        ``#pragma qumo kraus1 "name" (re, im, ...) q[q];``. Density-matrix and
+        trajectory simulation take it; the stabilizer and Pauli-frame samplers do not.
+        Returns the circuit.
+
+        Example:
+            >>> import qumo
+            >>> damp = [[[1, 0], [0, (1 - 0.3) ** 0.5]], [[0, 0.3 ** 0.5], [0, 0]]]
+            >>> float(round(qumo.probabilities(qumo.Circuit(1).x(0).kraus1("damp", damp, 0))[1], 6))
+            0.7
+        """
+        return self._kraus("kraus1", name, matrices, 1, (q,))
+
+    def kraus2(self, name: str, matrices, q0: int, q1: int):
+        """General two-qubit noise channel on `q0`, `q1` given by its Kraus operators.
+
+        `matrices` is a list of 4x4 complex matrices, row-major, with
+        sum_k K_k^dagger K_k = I. See `kraus1`. Returns the circuit.
+        """
+        return self._kraus("kraus2", name, matrices, 2, (q0, q1))
+
+    def _kraus(self, gate: str, name, matrices, arity: int, qubits):
+        if not isinstance(name, str):
+            raise QumoTypeError(f"{gate}(): the channel name is a str, got {type(name).__name__}", "QM-E911",
+                                f"e.g. c.{gate}('damp', [K0, K1], 0).")
+        if not name or '"' in name:
+            raise QumoError(f"{gate}(): the channel name must be non-empty and contain no double quote", "QM-E913",
+                            "e.g. 'amplitude_damping'.")
+        qs = tuple(self._index(gate, q) for q in qubits)
+        for q in qs:
+            if not 0 <= q < self._n:
+                self._bad_qubit(gate, q)
+        if arity == 2 and qs[0] == qs[1]:
+            self._bad_qubits(gate, qs)
+        dim = 1 << arity
+        try:
+            ops = list(matrices)
+        except TypeError:
+            raise QumoTypeError(f"{gate}(): matrices is a list of Kraus operators, got {type(matrices).__name__}",
+                                "QM-E911", f"e.g. [[[1, 0], [0, 0.8]], [[0, 0.6], [0, 0]]] for {gate}.") from None
+        if not ops:
+            raise QumoError(f"{gate}(): the channel has no Kraus operators", "QM-E414",
+                            f"pass at least one {dim}x{dim} matrix.")
+        data = array("d")
+        for m in ops:
+            try:
+                rows = [list(row) for row in m]
+            except TypeError:
+                raise QumoTypeError(f"{gate}(): each Kraus operator is a {dim}x{dim} matrix", "QM-E911",
+                                    f"e.g. [[1, 0], [0, 0]] for kraus1.") from None
+            if len(rows) != dim or any(len(row) != dim for row in rows):
+                raise QumoError(f"{gate}(): a Kraus operator has the wrong shape for {arity} qubit(s); expected "
+                                f"{dim}x{dim}", "QM-E414", f"matrices are {dim}x{dim} for {gate}.")
+            for row in rows:
+                for x in row:
+                    try:
+                        z = complex(x)
+                    except (TypeError, ValueError):
+                        raise QumoTypeError(f"{gate}(): matrix entries are numbers, got {x!r}", "QM-E911",
+                                            "e.g. 1, 0.5j or 0.5+0.5j.") from None
+                    data.append(z.real)
+                    data.append(z.imag)
+        nat = self._flush()
+        _call(nat.add_kraus, name, arity, data, qs[0], qs[1] if arity == 2 else -1)
+        return self
+
     def barrier(self):
         """A barrier over all qubits: the compiler does not optimise across it."""
         self._ops.extend((_OPS["barrier"][0], -1, -1, -1, -1))

@@ -25,8 +25,8 @@ from qumo.ir.circuit import Circuit, Instruction, check_shots
 from qumo.sim.rng import Rng
 from qumo.sim.stabilizer import TableauSimulator, bound_instruction
 from qumo.sim.runner import SampleResult
-from qumo.compiler.common import GateSet
-from qumo.compiler.basis import expand_rule
+from qumo.ir.gateset import GateSet
+from qumo.ir.gateset import expand_rule
 from max.algorithm import parallelize
 
 comptime MAX_BRANCHES = 1 << 20

@@ -15,7 +15,7 @@ from qumo.ir.circuit import Circuit
 from qumo.ir.gates import Op, op_arity, op_is_unitary
 from qumo.sim.runner import evolve
 from qumo.sim.rng import Rng
-from qumo.ai.json import parse_json
+from qumo.core.json import parse_json
 from qumo.compiler.target import Target
 from qumo.compiler.routing import RouteOptions, route_circuit
 from qumo.compiler.ai_route import (

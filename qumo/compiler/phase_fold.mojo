@@ -27,10 +27,8 @@ from std.math import pi
 from qumo.ir.gates import Op, op_arity, op_is_unitary
 from qumo.ir.param import Param
 from qumo.ir.circuit import Circuit, Instruction
-from qumo.compiler.common import (
-    GateSet, AX_Z, FOUR_PI, TWO_PI, ANG_TOL, is_plain_gate, is_all_wire_op,
-    rot_axis, rot_is_r, rot_angle, emit_rotation, wrap_angle,
-)
+from qumo.compiler.common import AX_Z, FOUR_PI, TWO_PI, is_plain_gate, is_all_wire_op, rot_axis, rot_is_r, rot_angle, emit_rotation, wrap_angle
+from qumo.ir.gateset import GateSet, ANG_TOL
 
 
 def _zobrist(v: Int) -> UInt64:

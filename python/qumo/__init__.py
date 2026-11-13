@@ -20,7 +20,8 @@ from ._native import native
 from .errors import QumoError, QumoNativeMissing, QumoTypeError
 from .circuit import Circuit, Parameter, from_stim, load, load_qasm
 from .sim import (
-    Counts, batch_value_and_gradient, expectation, probabilities, run, sample, statevector, value_and_gradient,
+    Counts, Emulation, batch_value_and_gradient, emulate, expectation, probabilities, run, sample, statevector,
+    value_and_gradient,
 )
 from .compiler import BASIS_SETS, TOPOLOGIES, TranspileResult, target_info, transpile
 from .algorithms import (
@@ -53,7 +54,7 @@ def gpu_info() -> dict:
 
 __all__ = [
     "Circuit", "Parameter", "load", "load_qasm", "from_stim", "bind",
-    "sample", "run", "statevector", "probabilities", "expectation", "Counts",
+    "sample", "run", "statevector", "probabilities", "expectation", "Counts", "emulate", "Emulation",
     "value_and_gradient", "batch_value_and_gradient",
     "transpile", "TranspileResult", "target_info", "BASIS_SETS", "TOPOLOGIES",
     "vqe", "qaoa_maxcut", "ground_energy", "OPTIMIZERS",

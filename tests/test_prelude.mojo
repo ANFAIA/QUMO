@@ -5,7 +5,7 @@ result types have `to_json()`."""
 from std.testing import assert_equal, assert_true, assert_false, assert_almost_equal
 
 from qumo.prelude import *
-from qumo.ai.json import parse_json
+from qumo.core.json import parse_json
 from qumo.algorithms.variational import vqe, VQEResult
 from qumo.algorithms.library import hardware_efficient_ansatz
 from qumo.sim.runner import evolve as deep_evolve, sample as deep_sample

@@ -4,7 +4,7 @@ PY ?= bench/.venv/bin/python
 # the RL tests live in rl/ (make test runs the fast ones once, via make test-rl; make test-rl-slow runs the rest)
 TESTS := $(wildcard tests/test_*.mojo)
 
-.PHONY: all help setup setup-py test cli py bench-sv bench-neutral bench-charts clean examples examples-all examples-gpu test-py test-python install-py
+.PHONY: all help setup setup-py setup-py-locked test cli py bench-sv bench-neutral bench-charts clean examples examples-all examples-gpu test-py test-python install-py
 
 all: cli py
 
@@ -25,11 +25,16 @@ setup:  ## create .venv, or update an existing one, to the pinned Mojo toolchain
 	[ -x .venv/bin/python ] || uv venv .venv --python 3.12
 	uv pip install --python .venv/bin/python "mojo==$(MOJO_VERSION)" "max-mojo-libs==$(MAX_VERSION)" "max-core==$(MAX_VERSION)"
 
-setup-py:  ## bench/.venv: Python 3.12 + latest Qiskit, Aer, TKET, Cirq, Stim, PyMatching (examples, benchmarks, plugin tests)
+setup-py:  ## bench/.venv: Python 3.12 + latest Qiskit, Aer, TKET, Cirq, Stim, PyMatching (examples, benchmarks, plugin tests); setup-py-locked pins them
 	[ -x bench/.venv/bin/python ] || uv venv bench/.venv --python 3.12
 	uv pip install --python bench/.venv/bin/python -U qiskit qiskit-aer qiskit-ibm-runtime pytket pytket-qiskit \
 		cirq-core ply stim pymatching numpy scipy matplotlib altair vl-convert-python psutil pytest nbformat "openqasm3[parser]"
 	uv pip install --python bench/.venv/bin/python -U "./plugins/hardware[all]"
+
+setup-py-locked:  ## bench/.venv from bench/requirements.lock: the exact versions of the last measured run (reproducible; setup-py takes the latest)
+	[ -x bench/.venv/bin/python ] || uv venv bench/.venv --python 3.12
+	uv pip install --python bench/.venv/bin/python -r bench/requirements.lock
+	uv pip install --python bench/.venv/bin/python "./plugins/hardware[all]"
 
 test:  ## run every Mojo test file (tests/ and, once, the fast RL tests of rl/ through make test-rl)
 	@fail=0; for t in $(TESTS); do \

@@ -19,11 +19,8 @@ from std.math import pi, cos, sin, atan2, sqrt
 from qumo.ir.gates import Op, M2, matrix_1q, zyz_decompose, op_num_params
 from qumo.ir.param import Param
 from qumo.ir.circuit import Instruction
-from qumo.compiler.common import (
-    GateSet, AX_X, AX_Y, AX_Z, HALF_PI, TWO_PI, FOUR_PI, ANG_TOL,
-    m2_phase_to, m2_identity_phase, seq_matrix_1q, wrap_angle, emit_rotation,
-    rot_axis, rot_is_r,
-)
+from qumo.compiler.common import AX_X, AX_Y, AX_Z, TWO_PI, FOUR_PI, m2_phase_to, m2_identity_phase, seq_matrix_1q, wrap_angle, emit_rotation, rot_axis, rot_is_r
+from qumo.ir.gateset import GateSet, HALF_PI, ANG_TOL
 
 
 def can_synthesize_1q(gs: GateSet) -> Bool:

@@ -62,7 +62,7 @@ from qumo.ft.gadgets import (
     transversal_1q, transversal_2q, steane_physical_kind, iceberg_prep_zero, iceberg_pauli,
     iceberg_rotation, iceberg_exp_kind, iceberg_syndrome_cycle, steane_reichardt_cycle, steane_syndrome_supports,
 )
-from qumo.ai.json import JsonWriter
+from qumo.core.json import JsonWriter
 
 
 # ---------------------------------------------------------------------------

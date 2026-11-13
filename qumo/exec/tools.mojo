@@ -13,7 +13,7 @@ from qumo.ir.circuit import Circuit
 from qumo.ir.pauli import parse_pauli_sum
 from qumo.ir.program import Program
 from qumo.ir.qasm import to_qasm
-from qumo.ai.json import JsonWriter, JsonValue
+from qumo.core.json import JsonWriter, JsonValue
 from qumo.ai.tools import (
     ToolRegistry, ToolResult, ToolContext, tool_ok, arg_circuit, arg_int, arg_max_iterations, arg_program,
     arg_program_params, arg_required, arg_params, write_program_outputs, write_warnings,
