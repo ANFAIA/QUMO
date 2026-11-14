@@ -63,10 +63,11 @@ class IBMNativeProvider(IBMProvider):
 
     # ------------------------------------------------------------ Provider API
     def list_backends(self, online: bool = False) -> list[BackendInfo]:
-        try:
-            out = super().list_backends(online=False)  # offline fake snapshots, when the SDK is installed
-        except HardwareError:
-            out = []
+        # The default path imports no third-party package: the offline snapshots (fake_*) belong to the
+        # optional qiskit-ibm-runtime extra, so they are named here, not loaded. `--client python` lists them.
+        out = [BackendInfo("fake_<backend>", self.name, "local-emulator", None, "local", 0, False,
+                           "IBM calibration snapshot + Aer noise (optional: pip install 'qumo-hardware[ibm]'; "
+                           "list them with --client python)")]
         if online:
             for name, qubits, status, pending in self._call("ibm_backends"):
                 out.append(BackendInfo(str(name), self.name, "hardware", int(qubits) if int(qubits) >= 0 else None,

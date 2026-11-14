@@ -28,6 +28,7 @@ from qumo.ir.circuit import Circuit
 from qumo.ir.mc import append_mcx
 from qumo.sim.ptsbe import sample_ptsbe, plan_trajectories
 from qumo.ir.noise_inject import inject_noise
+from qumo.exec.qbraid_api import qbraid_devices, qbraid_device, qbraid_cost_estimate, qbraid_submit, qbraid_job, qbraid_result_counts, qbraid_cancel, QbraidDevice
 from qumo.exec.quantinuum_api import qtm_native_circuit, qtm_hqc, qtm_submit, qtm_status, qtm_result, qtm_devices
 from qumo.exec.ibm_api import ibm_backends, ibm_target, ibm_isa_payload, ibm_submit, ibm_status, ibm_result
 from qumo.exec.speqtrum_api import (
@@ -967,6 +968,62 @@ def py_qtm_devices() raises -> PythonObject:
     for d in qtm_devices():
         out.append(Python.tuple(String(d.name), d.qubits))
     return out
+
+
+def _qbraid_device_dict(d: QbraidDevice) raises -> PythonObject:
+    var out = Python.dict()
+    out["qrn"] = String(d.qrn)
+    out["name"] = String(d.name)
+    out["vendor"] = String(d.vendor)
+    out["device_type"] = String(d.device_type)
+    out["status"] = String(d.status)
+    out["qubits"] = d.qubits
+    out["paradigm"] = String(d.paradigm)
+    var ins = Python.list()
+    for x in d.run_input_types:
+        ins.append(String(x))
+    out["run_input_types"] = ins
+    out["per_task"] = d.per_task
+    out["per_shot"] = d.per_shot
+    out["per_minute"] = d.per_minute
+    out["pricing_model"] = String(d.pricing_model)
+    out["queue_depth"] = d.queue_depth
+    return out
+
+
+def py_qbraid_devices() raises -> PythonObject:
+    var out = Python.list()
+    for d in qbraid_devices():
+        out.append(_qbraid_device_dict(d))
+    return out
+
+
+def py_qbraid_device(qrn: PythonObject) raises -> PythonObject:
+    return _qbraid_device_dict(qbraid_device(String(py=qrn)))
+
+
+def py_qbraid_cost_estimate(qrn: PythonObject, shots: PythonObject) raises -> PythonObject:
+    var q = qbraid_cost_estimate(String(py=qrn), Int(py=shots))
+    return Python.tuple(q.available, q.credits, String(q.reason))
+
+
+def py_qbraid_submit(qrn: PythonObject, fmt: PythonObject, program: PythonObject, shots: PythonObject,
+                     name: PythonObject) raises -> PythonObject:
+    return PythonObject(qbraid_submit(String(py=qrn), String(py=fmt), String(py=program), Int(py=shots), String(py=name)))
+
+
+def py_qbraid_job(job_qrn: PythonObject) raises -> PythonObject:
+    var j = qbraid_job(String(py=job_qrn))
+    return Python.tuple(String(j.status), String(j.raw_status), String(j.message), j.cost)
+
+
+def py_qbraid_result_counts(job_qrn: PythonObject) raises -> PythonObject:
+    return _py_counts(qbraid_result_counts(String(py=job_qrn)))
+
+
+def py_qbraid_cancel(job_qrn: PythonObject) raises -> PythonObject:
+    qbraid_cancel(String(py=job_qrn))
+    return PythonObject(None)
 
 
 def py_plan_trajectories(circ: PythonObject, shots: PythonObject, seed: PythonObject) raises -> PythonObject:
@@ -2222,6 +2279,13 @@ def PyInit_qumo_py() abi("C") -> PythonObject:
         m.def_function[py_expectation]("expectation", docstring="expectation(circuit, observable, params=[]) -> float\n\n<psi|H|psi> from the state vector. Noise channels and measurements are skipped: use density_expectation for a noisy circuit. observable: a Pauli-sum str ('0.5 * Z0 Z1 - X0' or 'ZZI + 0.5*XIX') or a list of (label, coeff) pairs; a dense label reads left to right from the highest qubit. params: values of the symbolic parameters.")
         m.def_function[py_sample_device]("sample_device", docstring="sample_device(circuit, shots, seed, device, precision='auto', params=[], counts=None) -> (counts, method, note)\n\nSample on a device. device: 'auto' (state vector, stabilizer or Pauli frames, GPU when built with -D QUMO_GPU and worth it) | 'cpu' | 'gpu' (falls back to the CPU and says why in `note`). precision: 'auto' | 'fp32' | 'fp64' for GPU state vectors. params: values of the symbolic parameters. counts: a dict (or dict subclass) to fill and return.\nErrors: QM-E940 unknown device, QM-E941 unknown precision, QM-E472 fp64 on an Apple GPU, QM-E911 when shots or seed is not an int.")
         m.def_function[py_gpu_info]("gpu_info", docstring="gpu_info() -> dict\n\ncompiled, available, name, api, vendor, precision, precisions, precision_note, ...")
+        m.def_function[py_qbraid_devices]("qbraid_devices", docstring="qbraid_devices() -> list\n\nDevices of the qBraid account as dicts (qrn, vendor, status, qubits, run_input_types, prices).")
+        m.def_function[py_qbraid_device]("qbraid_device", docstring="qbraid_device(qrn) -> dict\n\nOne qBraid device record (QRN vendor:provider:type:name).")
+        m.def_function[py_qbraid_cost_estimate]("qbraid_cost_estimate", docstring="qbraid_cost_estimate(qrn, shots) -> (available, credits, reason)\n\nqBraid's own quote in credits (1 credit = 0.01 USD).")
+        m.def_function[py_qbraid_submit]("qbraid_submit", docstring="qbraid_submit(qrn, format, program, shots, name) -> job_qrn\n\nSubmit one program to a qBraid device; the API key is read from QBRAID_API_KEY.")
+        m.def_function[py_qbraid_job]("qbraid_job", docstring="qbraid_job(job_qrn) -> (state, raw_status, message, cost)\n\nqBraid job state: QUEUED, RUNNING, DONE, ERROR, CANCELLED or UNKNOWN.")
+        m.def_function[py_qbraid_result_counts]("qbraid_result_counts", docstring="qbraid_result_counts(job_qrn) -> dict\n\nmeasurementCounts of a completed gate-model job.")
+        m.def_function[py_qbraid_cancel]("qbraid_cancel", docstring="qbraid_cancel(job_qrn) -> None\n\nCancel a qBraid job.")
         _ = (
             m.add_type[PyQecMemory]("QecMemory")
             .def_method[PyQecMemory.info]("info", docstring="info() -> dict\n\ncode, basis, distance, rounds, num_qubits, num_detectors, num_observables, dem_errors, p.")
