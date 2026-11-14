@@ -1,0 +1,8 @@
+{"schema": "qumo.agent_specs.v1", "agents": {"mojo-toolsmith": {
+  "description": "Builds, compiles and tests small native Mojo tools that other QUMO agents can call over MCP, in a sandbox branch, for human review.",
+  "tool_groups": ["read", "report", "sandbox", "toolsmith"],
+  "mcp_tools": ["qumo_describe"],
+  "subagents": [],
+  "writes_code": true,
+  "generated_tools": "all",
+  "model": ""}}}

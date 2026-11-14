@@ -1,0 +1,312 @@
+{
+ "schema": "qumo.modules.v1",
+ "modules": {
+  "ir": {
+   "summary": "Circuit IR: gates, circuits, Pauli sums, Kraus channels, OpenQASM 2/3 parsing and export.",
+   "paths": [
+    "qumo/ir"
+   ],
+   "docs": [
+    "docs/ARCHITECTURE.md",
+    "docs/CONTROL_FLOW.md"
+   ],
+   "tests": [
+    "tests/test_qasm*.mojo",
+    "tests/test_program*.mojo"
+   ],
+   "sdks": [
+    "qiskit",
+    "openqasm3",
+    "cirq-core",
+    "pytket",
+    "pyqir"
+   ],
+   "arxiv_categories": [
+    "quant-ph"
+   ],
+   "arxiv_queries": [
+    "quantum intermediate representation",
+    "OpenQASM",
+    "quantum circuit compiler IR"
+   ],
+   "mcp_tools": [
+    "qumo_validate_qasm",
+    "qumo_convert",
+    "qumo_circuit_info",
+    "qumo_draw",
+    "qumo_describe"
+   ]
+  },
+  "sim": {
+   "summary": "CPU simulators: state vector, stabilizer tableau, branching, density matrix, noise and trajectories.",
+   "paths": [
+    "qumo/sim"
+   ],
+   "docs": [
+    "docs/SIMULATION.md"
+   ],
+   "tests": [
+    "tests/test_sim*.mojo",
+    "tests/test_stabilizer*.mojo"
+   ],
+   "sdks": [
+    "qiskit-aer",
+    "stim",
+    "cirq-core",
+    "qsim",
+    "pennylane-lightning",
+    "cuda-quantum"
+   ],
+   "arxiv_categories": [
+    "quant-ph"
+   ],
+   "arxiv_queries": [
+    "state vector simulation",
+    "stabilizer simulation",
+    "quantum circuit simulation algorithm"
+   ],
+   "mcp_tools": [
+    "qumo_run_qasm",
+    "qumo_statevector",
+    "qumo_expectation",
+    "qumo_density",
+    "qumo_emulate"
+   ]
+  },
+  "gpu": {
+   "summary": "Vendor-neutral GPU back ends on MAX (NVIDIA, AMD, Apple): state vector and Pauli frames.",
+   "paths": [
+    "qumo/gpu"
+   ],
+   "docs": [
+    "docs/GPU.md",
+    "docs/BENCHMARKING_ON_CLOUD_GPUS.md"
+   ],
+   "tests": [
+    "tests/test_gpu*.mojo"
+   ],
+   "sdks": [
+    "qiskit-aer-gpu",
+    "cuda-quantum",
+    "pennylane-lightning-gpu",
+    "pennylane-lightning-kokkos"
+   ],
+   "arxiv_categories": [
+    "quant-ph",
+    "cs.DC"
+   ],
+   "arxiv_queries": [
+    "GPU quantum circuit simulation",
+    "distributed state vector simulation"
+   ],
+   "mcp_tools": [
+    "qumo_gpu_info",
+    "qumo_run_device"
+   ]
+  },
+  "compiler": {
+   "summary": "Transpiler: targets, pass manager, layout, routing, synthesis, exact optimisation passes, AI passes.",
+   "paths": [
+    "qumo/compiler"
+   ],
+   "docs": [
+    "docs/COMPILER.md",
+    "docs/AI_TRANSPILER.md",
+    "docs/NEUTRAL_BENCHMARK_REPORT.md"
+   ],
+   "tests": [
+    "tests/test_compiler*.mojo",
+    "tests/test_ai_*.mojo",
+    "tests/test_program_compile*.mojo"
+   ],
+   "sdks": [
+    "qiskit",
+    "pytket",
+    "cirq-core",
+    "bqskit",
+    "qiskit-ibm-transpiler"
+   ],
+   "arxiv_categories": [
+    "quant-ph",
+    "cs.ET"
+   ],
+   "arxiv_queries": [
+    "qubit routing",
+    "quantum circuit optimization",
+    "unitary synthesis",
+    "qubit mapping"
+   ],
+   "mcp_tools": [
+    "qumo_transpile",
+    "qumo_estimate_resources",
+    "qumo_to_pbc"
+   ]
+  },
+  "algorithms": {
+   "summary": "Algorithm library: QFT, Grover, QPE, VQE, QAOA, Hamiltonians, QUBO, schedules, QML helpers.",
+   "paths": [
+    "qumo/algorithms"
+   ],
+   "docs": [
+    "docs/ALGORITHMS.md",
+    "docs/QML.md"
+   ],
+   "tests": [
+    "tests/test_algorithm*.mojo"
+   ],
+   "sdks": [
+    "qiskit-algorithms",
+    "pennylane",
+    "classiq",
+    "qibo",
+    "qilisdk",
+    "openfermion"
+   ],
+   "arxiv_categories": [
+    "quant-ph"
+   ],
+   "arxiv_queries": [
+    "quantum algorithm",
+    "variational quantum algorithm",
+    "quantum advantage algorithm"
+   ],
+   "mcp_tools": [
+    "qumo_build_circuit",
+    "qumo_vqe",
+    "qumo_qaoa_maxcut",
+    "qumo_expectation"
+   ]
+  },
+  "qec": {
+   "summary": "Error correction toolkit: codes, memory experiments, detector error models, decoders, characterisation.",
+   "paths": [
+    "qumo/qec"
+   ],
+   "docs": [
+    "docs/QEC.md"
+   ],
+   "tests": [
+    "tests/test_qec*.mojo"
+   ],
+   "sdks": [
+    "stim",
+    "pymatching",
+    "sinter",
+    "ldpc",
+    "qiskit-qec",
+    "cudaq-qec"
+   ],
+   "arxiv_categories": [
+    "quant-ph"
+   ],
+   "arxiv_queries": [
+    "quantum error correcting code",
+    "qLDPC code",
+    "surface code decoder",
+    "magic state distillation"
+   ],
+   "mcp_tools": [
+    "qumo_qec_memory",
+    "qumo_qec_dem",
+    "qumo_stim_import"
+   ]
+  },
+  "ft": {
+   "summary": "Fault-tolerant programming layer: logical programs on stabilizer codes, gadgets, verification.",
+   "paths": [
+    "qumo/ft"
+   ],
+   "docs": [
+    "docs/FT.md"
+   ],
+   "tests": [
+    "tests/test_ft*.mojo"
+   ],
+   "sdks": [
+    "guppylang",
+    "stim",
+    "tket2"
+   ],
+   "arxiv_categories": [
+    "quant-ph"
+   ],
+   "arxiv_queries": [
+    "fault-tolerant quantum computation",
+    "logical gate",
+    "lattice surgery"
+   ],
+   "mcp_tools": [
+    "qumo_ft_codes",
+    "qumo_ft_encode",
+    "qumo_ft_verify"
+   ]
+  },
+  "exec": {
+   "summary": "Execution layer: job planning, batching, devices, runners and hardware plugins.",
+   "paths": [
+    "qumo/exec",
+    "plugins/hardware"
+   ],
+   "docs": [
+    "docs/HARDWARE_PLUGINS.md"
+   ],
+   "tests": [
+    "tests/test_exec*.mojo",
+    "plugins/hardware/tests"
+   ],
+   "sdks": [
+    "qiskit-ibm-runtime",
+    "pytket-quantinuum",
+    "amazon-braket-sdk",
+    "qilisdk",
+    "cudaq"
+   ],
+   "arxiv_categories": [
+    "quant-ph",
+    "cs.DC"
+   ],
+   "arxiv_queries": [
+    "quantum circuit execution",
+    "error mitigation",
+    "quantum cloud scheduling"
+   ],
+   "mcp_tools": [
+    "qumo_estimate_resources",
+    "qumo_emulate",
+    "qumo_run_device"
+   ]
+  },
+  "ai": {
+   "summary": "AI-native interface: JSON, MCP server, tool registry, diagnostics and error catalogue.",
+   "paths": [
+    "qumo/ai",
+    "cli"
+   ],
+   "docs": [
+    "docs/AI_NATIVE.md",
+    "docs/ERRORS.md",
+    "llms.txt"
+   ],
+   "tests": [
+    "tests/test_mcp.mojo"
+   ],
+   "sdks": [
+    "mcp",
+    "qiskit-mcp-server"
+   ],
+   "arxiv_categories": [
+    "quant-ph",
+    "cs.AI",
+    "cs.SE"
+   ],
+   "arxiv_queries": [
+    "LLM agents quantum computing",
+    "language model quantum code generation"
+   ],
+   "mcp_tools": [
+    "qumo_describe",
+    "qumo_validate_qasm"
+   ]
+  }
+ }
+}

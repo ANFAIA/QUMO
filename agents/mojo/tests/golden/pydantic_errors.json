@@ -1,0 +1,1451 @@
+{
+ "cases": [
+  {
+   "tool": "read_file",
+   "parameters": {
+    "properties": {
+     "path": {
+      "type": "string"
+     },
+     "start_line": {
+      "default": 1,
+      "type": "integer"
+     },
+     "max_lines": {
+      "default": 400,
+      "type": "integer"
+     }
+    },
+    "required": [
+     "path"
+    ],
+    "type": "object"
+   },
+   "args": {},
+   "errors": [
+    "path: Field required"
+   ],
+   "coerced": null
+  },
+  {
+   "tool": "read_file",
+   "parameters": {
+    "properties": {
+     "path": {
+      "type": "string"
+     },
+     "start_line": {
+      "default": 1,
+      "type": "integer"
+     },
+     "max_lines": {
+      "default": 400,
+      "type": "integer"
+     }
+    },
+    "required": [
+     "path"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "path": 5
+   },
+   "errors": [
+    "path: Input should be a valid string"
+   ],
+   "coerced": null
+  },
+  {
+   "tool": "read_file",
+   "parameters": {
+    "properties": {
+     "path": {
+      "type": "string"
+     },
+     "start_line": {
+      "default": 1,
+      "type": "integer"
+     },
+     "max_lines": {
+      "default": 400,
+      "type": "integer"
+     }
+    },
+    "required": [
+     "path"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "path": null
+   },
+   "errors": [
+    "path: Input should be a valid string"
+   ],
+   "coerced": null
+  },
+  {
+   "tool": "read_file",
+   "parameters": {
+    "properties": {
+     "path": {
+      "type": "string"
+     },
+     "start_line": {
+      "default": 1,
+      "type": "integer"
+     },
+     "max_lines": {
+      "default": 400,
+      "type": "integer"
+     }
+    },
+    "required": [
+     "path"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "path": "x",
+    "start_line": "abc"
+   },
+   "errors": [
+    "start_line: Input should be a valid integer, unable to parse string as an integer"
+   ],
+   "coerced": null
+  },
+  {
+   "tool": "read_file",
+   "parameters": {
+    "properties": {
+     "path": {
+      "type": "string"
+     },
+     "start_line": {
+      "default": 1,
+      "type": "integer"
+     },
+     "max_lines": {
+      "default": 400,
+      "type": "integer"
+     }
+    },
+    "required": [
+     "path"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "path": "x",
+    "start_line": 1.5
+   },
+   "errors": [
+    "start_line: Input should be a valid integer, got a number with a fractional part"
+   ],
+   "coerced": null
+  },
+  {
+   "tool": "read_file",
+   "parameters": {
+    "properties": {
+     "path": {
+      "type": "string"
+     },
+     "start_line": {
+      "default": 1,
+      "type": "integer"
+     },
+     "max_lines": {
+      "default": 400,
+      "type": "integer"
+     }
+    },
+    "required": [
+     "path"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "path": "x",
+    "start_line": "7"
+   },
+   "errors": [],
+   "coerced": {
+    "path": "x",
+    "start_line": 7,
+    "max_lines": 400
+   }
+  },
+  {
+   "tool": "read_file",
+   "parameters": {
+    "properties": {
+     "path": {
+      "type": "string"
+     },
+     "start_line": {
+      "default": 1,
+      "type": "integer"
+     },
+     "max_lines": {
+      "default": 400,
+      "type": "integer"
+     }
+    },
+    "required": [
+     "path"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "path": "x",
+    "start_line": 2.0
+   },
+   "errors": [],
+   "coerced": {
+    "path": "x",
+    "start_line": 2,
+    "max_lines": 400
+   }
+  },
+  {
+   "tool": "read_file",
+   "parameters": {
+    "properties": {
+     "path": {
+      "type": "string"
+     },
+     "start_line": {
+      "default": 1,
+      "type": "integer"
+     },
+     "max_lines": {
+      "default": 400,
+      "type": "integer"
+     }
+    },
+    "required": [
+     "path"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "path": "x",
+    "extra": 1
+   },
+   "errors": [],
+   "coerced": {
+    "path": "x",
+    "start_line": 1,
+    "max_lines": 400
+   }
+  },
+  {
+   "tool": "read_file",
+   "parameters": {
+    "properties": {
+     "path": {
+      "type": "string"
+     },
+     "start_line": {
+      "default": 1,
+      "type": "integer"
+     },
+     "max_lines": {
+      "default": 400,
+      "type": "integer"
+     }
+    },
+    "required": [
+     "path"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "path": "x",
+    "start_line": true
+   },
+   "errors": [],
+   "coerced": {
+    "path": "x",
+    "start_line": 1,
+    "max_lines": 400
+   }
+  },
+  {
+   "tool": "read_file",
+   "parameters": {
+    "properties": {
+     "path": {
+      "type": "string"
+     },
+     "start_line": {
+      "default": 1,
+      "type": "integer"
+     },
+     "max_lines": {
+      "default": 400,
+      "type": "integer"
+     }
+    },
+    "required": [
+     "path"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "path": "x",
+    "start_line": " 12 "
+   },
+   "errors": [],
+   "coerced": {
+    "path": "x",
+    "start_line": 12,
+    "max_lines": 400
+   }
+  },
+  {
+   "tool": "read_file",
+   "parameters": {
+    "properties": {
+     "path": {
+      "type": "string"
+     },
+     "start_line": {
+      "default": 1,
+      "type": "integer"
+     },
+     "max_lines": {
+      "default": 400,
+      "type": "integer"
+     }
+    },
+    "required": [
+     "path"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "path": "x",
+    "max_lines": "1e3"
+   },
+   "errors": [
+    "max_lines: Input should be a valid integer, unable to parse string as an integer"
+   ],
+   "coerced": null
+  },
+  {
+   "tool": "read_file",
+   "parameters": {
+    "properties": {
+     "path": {
+      "type": "string"
+     },
+     "start_line": {
+      "default": 1,
+      "type": "integer"
+     },
+     "max_lines": {
+      "default": 400,
+      "type": "integer"
+     }
+    },
+    "required": [
+     "path"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "path": "x",
+    "max_lines": [
+     1
+    ]
+   },
+   "errors": [
+    "max_lines: Input should be a valid integer"
+   ],
+   "coerced": null
+  },
+  {
+   "tool": "read_file",
+   "parameters": {
+    "properties": {
+     "path": {
+      "type": "string"
+     },
+     "start_line": {
+      "default": 1,
+      "type": "integer"
+     },
+     "max_lines": {
+      "default": 400,
+      "type": "integer"
+     }
+    },
+    "required": [
+     "path"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "path": [
+     "a"
+    ],
+    "start_line": "q"
+   },
+   "errors": [
+    "path: Input should be a valid string",
+    "start_line: Input should be a valid integer, unable to parse string as an integer"
+   ],
+   "coerced": null
+  },
+  {
+   "tool": "run_check",
+   "parameters": {
+    "properties": {
+     "argv": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "timeout_s": {
+      "default": 600,
+      "type": "integer"
+     }
+    },
+    "required": [
+     "argv"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "argv": "git"
+   },
+   "errors": [
+    "argv: Input should be a valid list"
+   ],
+   "coerced": null
+  },
+  {
+   "tool": "run_check",
+   "parameters": {
+    "properties": {
+     "argv": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "timeout_s": {
+      "default": 600,
+      "type": "integer"
+     }
+    },
+    "required": [
+     "argv"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "argv": [
+     1
+    ]
+   },
+   "errors": [
+    "argv.0: Input should be a valid string"
+   ],
+   "coerced": null
+  },
+  {
+   "tool": "run_check",
+   "parameters": {
+    "properties": {
+     "argv": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "timeout_s": {
+      "default": 600,
+      "type": "integer"
+     }
+    },
+    "required": [
+     "argv"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "argv": [
+     "git",
+     null,
+     3
+    ]
+   },
+   "errors": [
+    "argv.1: Input should be a valid string",
+    "argv.2: Input should be a valid string"
+   ],
+   "coerced": null
+  },
+  {
+   "tool": "run_check",
+   "parameters": {
+    "properties": {
+     "argv": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "timeout_s": {
+      "default": 600,
+      "type": "integer"
+     }
+    },
+    "required": [
+     "argv"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "argv": [
+     "git",
+     "status"
+    ],
+    "timeout_s": "30"
+   },
+   "errors": [],
+   "coerced": {
+    "argv": [
+     "git",
+     "status"
+    ],
+    "timeout_s": 30
+   }
+  },
+  {
+   "tool": "run_check",
+   "parameters": {
+    "properties": {
+     "argv": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "timeout_s": {
+      "default": 600,
+      "type": "integer"
+     }
+    },
+    "required": [
+     "argv"
+    ],
+    "type": "object"
+   },
+   "args": {},
+   "errors": [
+    "argv: Field required"
+   ],
+   "coerced": null
+  },
+  {
+   "tool": "da_grep",
+   "parameters": {
+    "properties": {
+     "pattern": {
+      "description": "Text pattern to search for (literal string, not regex).",
+      "type": "string"
+     },
+     "path": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Directory to search in. Defaults to current working directory."
+     },
+     "glob": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Glob pattern (NOT regex) limiting which files are searched (e.g. '*.py', '*.ts'). A pattern without '/' matches the file name at any depth; a pattern containing '/' matches the search-root-relative path (e.g. 'src/**/*.py'). This is an in-tool file filter, not a call to the separate glob tool. Brace expansion (e.g. '*.{ts,tsx}') is not supported on all backends; run a separate search per extension for reliable results."
+     },
+     "output_mode": {
+      "default": "files_with_matches",
+      "description": "Shape of the returned text. 'files_with_matches' (default): newline-separated matching file paths. 'content': matching lines grouped by file under a '<path>:' header, each line indented and formatted '<line_number>: <line text>' (only the matched line, no surrounding context). 'count': one '<path>: <match_count>' line per file.",
+      "enum": [
+       "files_with_matches",
+       "content",
+       "count"
+      ],
+      "type": "string"
+     },
+     "max_count": {
+      "anyOf": [
+       {
+        "exclusiveMinimum": 0,
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Optional cap on the total number of matches returned across all files. Leave unset to use the configured default. When the cap is hit, results are truncated and a note says so; narrow the pattern or path to see the rest."
+     }
+    },
+    "required": [
+     "pattern"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "pattern": "x",
+    "max_count": 0
+   },
+   "errors": [
+    "max_count: Input should be greater than 0"
+   ],
+   "coerced": null
+  },
+  {
+   "tool": "da_grep",
+   "parameters": {
+    "properties": {
+     "pattern": {
+      "description": "Text pattern to search for (literal string, not regex).",
+      "type": "string"
+     },
+     "path": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Directory to search in. Defaults to current working directory."
+     },
+     "glob": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Glob pattern (NOT regex) limiting which files are searched (e.g. '*.py', '*.ts'). A pattern without '/' matches the file name at any depth; a pattern containing '/' matches the search-root-relative path (e.g. 'src/**/*.py'). This is an in-tool file filter, not a call to the separate glob tool. Brace expansion (e.g. '*.{ts,tsx}') is not supported on all backends; run a separate search per extension for reliable results."
+     },
+     "output_mode": {
+      "default": "files_with_matches",
+      "description": "Shape of the returned text. 'files_with_matches' (default): newline-separated matching file paths. 'content': matching lines grouped by file under a '<path>:' header, each line indented and formatted '<line_number>: <line text>' (only the matched line, no surrounding context). 'count': one '<path>: <match_count>' line per file.",
+      "enum": [
+       "files_with_matches",
+       "content",
+       "count"
+      ],
+      "type": "string"
+     },
+     "max_count": {
+      "anyOf": [
+       {
+        "exclusiveMinimum": 0,
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Optional cap on the total number of matches returned across all files. Leave unset to use the configured default. When the cap is hit, results are truncated and a note says so; narrow the pattern or path to see the rest."
+     }
+    },
+    "required": [
+     "pattern"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "pattern": "x",
+    "output_mode": "lines"
+   },
+   "errors": [
+    "output_mode: Input should be 'files_with_matches', 'content' or 'count'"
+   ],
+   "coerced": null
+  },
+  {
+   "tool": "da_grep",
+   "parameters": {
+    "properties": {
+     "pattern": {
+      "description": "Text pattern to search for (literal string, not regex).",
+      "type": "string"
+     },
+     "path": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Directory to search in. Defaults to current working directory."
+     },
+     "glob": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Glob pattern (NOT regex) limiting which files are searched (e.g. '*.py', '*.ts'). A pattern without '/' matches the file name at any depth; a pattern containing '/' matches the search-root-relative path (e.g. 'src/**/*.py'). This is an in-tool file filter, not a call to the separate glob tool. Brace expansion (e.g. '*.{ts,tsx}') is not supported on all backends; run a separate search per extension for reliable results."
+     },
+     "output_mode": {
+      "default": "files_with_matches",
+      "description": "Shape of the returned text. 'files_with_matches' (default): newline-separated matching file paths. 'content': matching lines grouped by file under a '<path>:' header, each line indented and formatted '<line_number>: <line text>' (only the matched line, no surrounding context). 'count': one '<path>: <match_count>' line per file.",
+      "enum": [
+       "files_with_matches",
+       "content",
+       "count"
+      ],
+      "type": "string"
+     },
+     "max_count": {
+      "anyOf": [
+       {
+        "exclusiveMinimum": 0,
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Optional cap on the total number of matches returned across all files. Leave unset to use the configured default. When the cap is hit, results are truncated and a note says so; narrow the pattern or path to see the rest."
+     }
+    },
+    "required": [
+     "pattern"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "pattern": "x",
+    "max_count": "3"
+   },
+   "errors": [],
+   "coerced": {
+    "pattern": "x",
+    "path": null,
+    "glob": null,
+    "output_mode": "files_with_matches",
+    "max_count": 3
+   }
+  },
+  {
+   "tool": "da_grep",
+   "parameters": {
+    "properties": {
+     "pattern": {
+      "description": "Text pattern to search for (literal string, not regex).",
+      "type": "string"
+     },
+     "path": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Directory to search in. Defaults to current working directory."
+     },
+     "glob": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Glob pattern (NOT regex) limiting which files are searched (e.g. '*.py', '*.ts'). A pattern without '/' matches the file name at any depth; a pattern containing '/' matches the search-root-relative path (e.g. 'src/**/*.py'). This is an in-tool file filter, not a call to the separate glob tool. Brace expansion (e.g. '*.{ts,tsx}') is not supported on all backends; run a separate search per extension for reliable results."
+     },
+     "output_mode": {
+      "default": "files_with_matches",
+      "description": "Shape of the returned text. 'files_with_matches' (default): newline-separated matching file paths. 'content': matching lines grouped by file under a '<path>:' header, each line indented and formatted '<line_number>: <line text>' (only the matched line, no surrounding context). 'count': one '<path>: <match_count>' line per file.",
+      "enum": [
+       "files_with_matches",
+       "content",
+       "count"
+      ],
+      "type": "string"
+     },
+     "max_count": {
+      "anyOf": [
+       {
+        "exclusiveMinimum": 0,
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Optional cap on the total number of matches returned across all files. Leave unset to use the configured default. When the cap is hit, results are truncated and a note says so; narrow the pattern or path to see the rest."
+     }
+    },
+    "required": [
+     "pattern"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "pattern": "x",
+    "max_count": null
+   },
+   "errors": [],
+   "coerced": {
+    "pattern": "x",
+    "path": null,
+    "glob": null,
+    "output_mode": "files_with_matches",
+    "max_count": null
+   }
+  },
+  {
+   "tool": "da_grep",
+   "parameters": {
+    "properties": {
+     "pattern": {
+      "description": "Text pattern to search for (literal string, not regex).",
+      "type": "string"
+     },
+     "path": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Directory to search in. Defaults to current working directory."
+     },
+     "glob": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Glob pattern (NOT regex) limiting which files are searched (e.g. '*.py', '*.ts'). A pattern without '/' matches the file name at any depth; a pattern containing '/' matches the search-root-relative path (e.g. 'src/**/*.py'). This is an in-tool file filter, not a call to the separate glob tool. Brace expansion (e.g. '*.{ts,tsx}') is not supported on all backends; run a separate search per extension for reliable results."
+     },
+     "output_mode": {
+      "default": "files_with_matches",
+      "description": "Shape of the returned text. 'files_with_matches' (default): newline-separated matching file paths. 'content': matching lines grouped by file under a '<path>:' header, each line indented and formatted '<line_number>: <line text>' (only the matched line, no surrounding context). 'count': one '<path>: <match_count>' line per file.",
+      "enum": [
+       "files_with_matches",
+       "content",
+       "count"
+      ],
+      "type": "string"
+     },
+     "max_count": {
+      "anyOf": [
+       {
+        "exclusiveMinimum": 0,
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Optional cap on the total number of matches returned across all files. Leave unset to use the configured default. When the cap is hit, results are truncated and a note says so; narrow the pattern or path to see the rest."
+     }
+    },
+    "required": [
+     "pattern"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "pattern": "x",
+    "path": 3
+   },
+   "errors": [
+    "path: Input should be a valid string"
+   ],
+   "coerced": null
+  },
+  {
+   "tool": "da_grep",
+   "parameters": {
+    "properties": {
+     "pattern": {
+      "description": "Text pattern to search for (literal string, not regex).",
+      "type": "string"
+     },
+     "path": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Directory to search in. Defaults to current working directory."
+     },
+     "glob": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Glob pattern (NOT regex) limiting which files are searched (e.g. '*.py', '*.ts'). A pattern without '/' matches the file name at any depth; a pattern containing '/' matches the search-root-relative path (e.g. 'src/**/*.py'). This is an in-tool file filter, not a call to the separate glob tool. Brace expansion (e.g. '*.{ts,tsx}') is not supported on all backends; run a separate search per extension for reliable results."
+     },
+     "output_mode": {
+      "default": "files_with_matches",
+      "description": "Shape of the returned text. 'files_with_matches' (default): newline-separated matching file paths. 'content': matching lines grouped by file under a '<path>:' header, each line indented and formatted '<line_number>: <line text>' (only the matched line, no surrounding context). 'count': one '<path>: <match_count>' line per file.",
+      "enum": [
+       "files_with_matches",
+       "content",
+       "count"
+      ],
+      "type": "string"
+     },
+     "max_count": {
+      "anyOf": [
+       {
+        "exclusiveMinimum": 0,
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Optional cap on the total number of matches returned across all files. Leave unset to use the configured default. When the cap is hit, results are truncated and a note says so; narrow the pattern or path to see the rest."
+     }
+    },
+    "required": [
+     "pattern"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "pattern": "x",
+    "max_count": -1,
+    "output_mode": 5
+   },
+   "errors": [
+    "output_mode: Input should be 'files_with_matches', 'content' or 'count'",
+    "max_count: Input should be greater than 0"
+   ],
+   "coerced": null
+  },
+  {
+   "tool": "da_edit_file",
+   "parameters": {
+    "properties": {
+     "file_path": {
+      "description": "Absolute path to the file to edit. Must be absolute, not relative.",
+      "type": "string"
+     },
+     "old_string": {
+      "description": "The exact text to find and replace. Must be unique in the file unless replace_all is True.",
+      "type": "string"
+     },
+     "new_string": {
+      "description": "The text to replace old_string with. Must be different from old_string.",
+      "type": "string"
+     },
+     "replace_all": {
+      "default": false,
+      "description": "If True, replace all occurrences of old_string. If False (default), old_string must be unique.",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "file_path",
+     "old_string",
+     "new_string"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "file_path": "/a",
+    "old_string": "a",
+    "new_string": "b",
+    "replace_all": "maybe"
+   },
+   "errors": [
+    "replace_all: Input should be a valid boolean, unable to interpret input"
+   ],
+   "coerced": null
+  },
+  {
+   "tool": "da_edit_file",
+   "parameters": {
+    "properties": {
+     "file_path": {
+      "description": "Absolute path to the file to edit. Must be absolute, not relative.",
+      "type": "string"
+     },
+     "old_string": {
+      "description": "The exact text to find and replace. Must be unique in the file unless replace_all is True.",
+      "type": "string"
+     },
+     "new_string": {
+      "description": "The text to replace old_string with. Must be different from old_string.",
+      "type": "string"
+     },
+     "replace_all": {
+      "default": false,
+      "description": "If True, replace all occurrences of old_string. If False (default), old_string must be unique.",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "file_path",
+     "old_string",
+     "new_string"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "file_path": "/a",
+    "old_string": "a",
+    "new_string": "b",
+    "replace_all": "yes"
+   },
+   "errors": [],
+   "coerced": {
+    "file_path": "/a",
+    "old_string": "a",
+    "new_string": "b",
+    "replace_all": true
+   }
+  },
+  {
+   "tool": "da_edit_file",
+   "parameters": {
+    "properties": {
+     "file_path": {
+      "description": "Absolute path to the file to edit. Must be absolute, not relative.",
+      "type": "string"
+     },
+     "old_string": {
+      "description": "The exact text to find and replace. Must be unique in the file unless replace_all is True.",
+      "type": "string"
+     },
+     "new_string": {
+      "description": "The text to replace old_string with. Must be different from old_string.",
+      "type": "string"
+     },
+     "replace_all": {
+      "default": false,
+      "description": "If True, replace all occurrences of old_string. If False (default), old_string must be unique.",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "file_path",
+     "old_string",
+     "new_string"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "file_path": "/a",
+    "old_string": "a",
+    "new_string": "b",
+    "replace_all": 1
+   },
+   "errors": [],
+   "coerced": {
+    "file_path": "/a",
+    "old_string": "a",
+    "new_string": "b",
+    "replace_all": true
+   }
+  },
+  {
+   "tool": "da_edit_file",
+   "parameters": {
+    "properties": {
+     "file_path": {
+      "description": "Absolute path to the file to edit. Must be absolute, not relative.",
+      "type": "string"
+     },
+     "old_string": {
+      "description": "The exact text to find and replace. Must be unique in the file unless replace_all is True.",
+      "type": "string"
+     },
+     "new_string": {
+      "description": "The text to replace old_string with. Must be different from old_string.",
+      "type": "string"
+     },
+     "replace_all": {
+      "default": false,
+      "description": "If True, replace all occurrences of old_string. If False (default), old_string must be unique.",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "file_path",
+     "old_string",
+     "new_string"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "file_path": "/a",
+    "old_string": "a",
+    "new_string": "b",
+    "replace_all": 2
+   },
+   "errors": [
+    "replace_all: Input should be a valid boolean, unable to interpret input"
+   ],
+   "coerced": null
+  },
+  {
+   "tool": "da_edit_file",
+   "parameters": {
+    "properties": {
+     "file_path": {
+      "description": "Absolute path to the file to edit. Must be absolute, not relative.",
+      "type": "string"
+     },
+     "old_string": {
+      "description": "The exact text to find and replace. Must be unique in the file unless replace_all is True.",
+      "type": "string"
+     },
+     "new_string": {
+      "description": "The text to replace old_string with. Must be different from old_string.",
+      "type": "string"
+     },
+     "replace_all": {
+      "default": false,
+      "description": "If True, replace all occurrences of old_string. If False (default), old_string must be unique.",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "file_path",
+     "old_string",
+     "new_string"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "file_path": "/a",
+    "old_string": "a",
+    "new_string": "b",
+    "replace_all": "OFF"
+   },
+   "errors": [],
+   "coerced": {
+    "file_path": "/a",
+    "old_string": "a",
+    "new_string": "b",
+    "replace_all": false
+   }
+  },
+  {
+   "tool": "da_edit_file",
+   "parameters": {
+    "properties": {
+     "file_path": {
+      "description": "Absolute path to the file to edit. Must be absolute, not relative.",
+      "type": "string"
+     },
+     "old_string": {
+      "description": "The exact text to find and replace. Must be unique in the file unless replace_all is True.",
+      "type": "string"
+     },
+     "new_string": {
+      "description": "The text to replace old_string with. Must be different from old_string.",
+      "type": "string"
+     },
+     "replace_all": {
+      "default": false,
+      "description": "If True, replace all occurrences of old_string. If False (default), old_string must be unique.",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "file_path",
+     "old_string",
+     "new_string"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "file_path": "/a"
+   },
+   "errors": [
+    "old_string: Field required",
+    "new_string: Field required"
+   ],
+   "coerced": null
+  },
+  {
+   "tool": "da_glob",
+   "parameters": {
+    "properties": {
+     "pattern": {
+      "description": "Glob pattern to match files (e.g., '*.py', '**/*.py', '/subdir/**/*.md'). A pattern without '/' matches the file name at any depth; a pattern containing '/' matches the search-root-relative path; a leading '/' anchors to the search root ('/*.py' matches only top-level files). Leading-dot names are excluded unless the pattern segment starts with '.', so prefer the bare form '*.py' over '**/*.py' -- '**' will not descend into dot-directories like '.github'.",
+      "type": "string"
+     },
+     "path": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Base directory to search from. Defaults to the backend's default root."
+     }
+    },
+    "required": [
+     "pattern"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "pattern": "*",
+    "path": null
+   },
+   "errors": [],
+   "coerced": {
+    "pattern": "*",
+    "path": null
+   }
+  },
+  {
+   "tool": "da_ls",
+   "parameters": {
+    "properties": {
+     "path": {
+      "description": "Absolute path to the directory to list. Must be absolute, not relative.",
+      "type": "string"
+     }
+    },
+    "required": [
+     "path"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "path": 1.5
+   },
+   "errors": [
+    "path: Input should be a valid string"
+   ],
+   "coerced": null
+  },
+  {
+   "tool": "write_report",
+   "parameters": {
+    "properties": {
+     "name": {
+      "type": "string"
+     },
+     "markdown": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "name",
+     "markdown"
+    ],
+    "type": "object"
+   },
+   "args": {},
+   "errors": [
+    "name: Field required",
+    "markdown: Field required"
+   ],
+   "coerced": null
+  },
+  {
+   "tool": "echo",
+   "parameters": {
+    "properties": {
+     "text": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "text"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "bad": 1
+   },
+   "errors": [
+    "text: Field required"
+   ],
+   "coerced": null
+  },
+  {
+   "tool": "echo",
+   "parameters": {
+    "properties": {
+     "text": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "text"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "text": 1
+   },
+   "errors": [
+    "text: Input should be a valid string"
+   ],
+   "coerced": null
+  },
+  {
+   "tool": "big",
+   "parameters": {
+    "properties": {
+     "n": {
+      "type": "integer"
+     }
+    },
+    "required": [
+     "n"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "n": "12"
+   },
+   "errors": [],
+   "coerced": {
+    "n": 12
+   }
+  },
+  {
+   "tool": "big",
+   "parameters": {
+    "properties": {
+     "n": {
+      "type": "integer"
+     }
+    },
+    "required": [
+     "n"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "n": 1e+20
+   },
+   "errors": [
+    "n: Unable to parse input string as an integer, exceeded maximum size"
+   ],
+   "coerced": null
+  },
+  {
+   "tool": "parts",
+   "parameters": {
+    "properties": {
+     "items": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     }
+    },
+    "required": [
+     "items"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "items": [
+     "a",
+     2
+    ]
+   },
+   "errors": [
+    "items.1: Input should be a valid string"
+   ],
+   "coerced": null
+  },
+  {
+   "tool": "parts",
+   "parameters": {
+    "properties": {
+     "items": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     }
+    },
+    "required": [
+     "items"
+    ],
+    "type": "object"
+   },
+   "args": {
+    "items": "ab"
+   },
+   "errors": [
+    "items: Input should be a valid list"
+   ],
+   "coerced": null
+  }
+ ]
+}

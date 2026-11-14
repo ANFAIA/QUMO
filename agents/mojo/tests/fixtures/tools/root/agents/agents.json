@@ -1,0 +1,7 @@
+{
+  "schema": "qumo.agents.v1",
+  "openrouter": {"base_url": "http://127.0.0.1:9/api/v1", "api_key_env": "TEST_ROUTER_KEY",
+                 "headers": {"X-Title": "QUMO agents", "X-Other": "2"}, "timeout": 7, "max_retries": 1},
+  "default_model": "vendor/default",
+  "models": {"alpha": "vendor/alpha-model"}
+}

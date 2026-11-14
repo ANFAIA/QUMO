@@ -1,0 +1,9 @@
+// Replay script for test_core_replay: root lines are bare responses, children are wrapped.
+{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":"","tool_calls":[{"id":"call_a","type":"function","function":{"name":"task","arguments":"{\"description\": \"d\", \"subagent_type\": \"general-purpose\"}"}}]}}],"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}}
+
+{"at": "call_a", "response": {"choices":[{"finish_reason":"tool_calls","message":{"content":"","tool_calls":[{"id":"call_b","type":"function","function":{"name":"task","arguments":"{}"}}]}}]}}
+{"at": "call_a/call_b", "error": "QA-E102: context overflow: HTTP 400: prompt is too long"}
+{"at": "call_a/call_b", "response": {"choices":[{"message":{"content":"grandchild done"}}]}}
+{"at": "call_a", "response": {"choices":[{"message":{"content":"child done"}}]}}
+   // indented comment
+{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"root done"}}]}

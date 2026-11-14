@@ -1,0 +1,8 @@
+{"schema": "qumo.agent_specs.v1", "agents": {"smith": {
+  "description": "Mojo-only agent.",
+  "tool_groups": ["read", "report", "sandbox", "toolsmith"],
+  "mcp_tools": ["qumo_describe"],
+  "subagents": [],
+  "writes_code": true,
+  "generated_tools": "all",
+  "model": "vendor/smith-hint"}}}
