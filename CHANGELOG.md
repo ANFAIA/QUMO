@@ -38,6 +38,8 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 ### Security
 
 - OpenQASM source is capped in what it can expand to (gate calls, unrolled loops, broadcasts, `pow`): a few bytes of source could previously ask for any amount of memory, including through the MCP server. ([#1](https://github.com/ANFAIA/QUMO/pull/1), 2026-11-03)
+- MCP server: one message is at most 1 MiB (a longer line is dropped and answered with a parse error), and a call is refused with QM-E913 above `shots` = 1,000,000 or `max_qubits` = 30. The CLI and the Mojo and Python APIs keep the tools' own ranges. (security pass, 2026-11-13; not yet merged, as the next entry)
+- Agent layer: the research tools fetch only public `https` addresses on the default port, the API tools only `export.arxiv.org`, `pypi.org` and `api.github.com`, every redirect is checked again and loses the `Authorization` header. `run_check` passes no variable whose name looks like a credential, takes no absolute path, and limits `git diff` / `git status` to `--stat`, `--name-only`, `--name-status`, `--cached`, `--staged`. The `autoresearch` agent no longer has the web tools; it asks `research-watch`. Commands still run without an operating-system sandbox.
 
 ## Before pull requests (2026-10-12 to 2026-11-01)
 

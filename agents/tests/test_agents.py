@@ -102,7 +102,7 @@ method</title><published>2026-10-01T00:00:00Z</published>
 
 
 def test_arxiv_parser(monkeypatch):
-    monkeypatch.setattr(research, "_get", lambda url, headers=None: ATOM)
+    monkeypatch.setattr(research, "_get", lambda url, headers=None, hosts=None: ATOM)
     out = research.search_arxiv_raw("qubit routing", ("quant-ph",), 5)
     assert out == [{"id": "2610.00001v1", "title": "A routing method", "published": "2026-10-01",
                     "authors": ["A. B."], "summary": "We route.", "url": "http://arxiv.org/abs/2610.00001v1"}]
@@ -124,7 +124,7 @@ def test_qumo_mcp_tools_load_with_guides():
 def test_network_failures_become_tool_errors(monkeypatch):
     import http.client
 
-    def boom(url, headers=None):
+    def boom(url, headers=None, hosts=None):
         raise http.client.RemoteDisconnected("Remote end closed connection without response")
 
     monkeypatch.setattr(research, "_get", boom)

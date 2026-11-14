@@ -28,7 +28,6 @@
   "autoresearch": {
    "description": "Improves one QUMO module step by step in a sandbox branch: hypothesis, baseline, change, measurement, review.",
    "tool_groups": [
-    "research",
     "read",
     "check",
     "report",

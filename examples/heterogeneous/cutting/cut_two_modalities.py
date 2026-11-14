@@ -47,7 +47,7 @@ reconstruction (20 000 shots per fragment circuit) within
 seeds 7-10, value 0.5-1.3); nothing submitted remotely.
 
 Run:  bench/.venv/bin/python examples/heterogeneous/cutting/cut_two_modalities.py
-example-meta: {"framework": "qumo", "tier": "fast", "timeout": 180, "requires": ["qumo_py"], "args": ["--seed", "7"]}
+example-meta: {"framework": "qumo", "tier": "fast", "timeout": 180, "requires": ["qumo_py", "numpy"], "args": ["--seed", "7"]}
 """
 
 from __future__ import annotations

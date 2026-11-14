@@ -190,6 +190,14 @@ def test_run_tool() raises:
     assert_equal(r8.get("structuredContent").get("error").get("code").as_string(), "QM-E911")
     var r9 = tool(s, 28, "qumo_run_qasm", "{\"shots\":5}")
     assert_equal(r9.get("structuredContent").get("error").get("code").as_string(), "QM-E910")
+    # server ceilings: below the tools' own ranges, refused before the tool runs
+    var r9a = tool(s, 30, "qumo_run_qasm", "{\"qasm\":" + json_quote(BELL) + ",\"shots\":1000001}")
+    assert_equal(r9a.get("structuredContent").get("error").get("code").as_string(), "QM-E913")
+    assert_true(r9a.get("content").at(0).get("text").as_string().find("MCP server limit") >= 0)
+    var r9b = tool(s, 31, "qumo_statevector", "{\"qasm\":" + json_quote(BELL) + ",\"max_qubits\":31}")
+    assert_equal(r9b.get("structuredContent").get("error").get("code").as_string(), "QM-E913")
+    var r9c = tool(s, 32, "qumo_run_qasm", "{\"qasm\":" + json_quote(BELL) + ",\"shots\":1000000,\"max_qubits\":30}")
+    assert_true(not r9c.get("structuredContent").get("error").is_defined(), r9c.to_json())
     # feed-forward teleportation of a Clifford state is dispatched to the tableau simulator
     var tele = "OPENQASM 3.0; include \"stdgates.inc\"; qubit[3] q; bit[3] c; x q[0]; h q[1]; cx q[1], q[2]; cx q[0], q[1]; h q[0]; c[0] = measure q[0]; c[1] = measure q[1]; if (c[1]) x q[2]; if (c[0]) z q[2]; c[2] = measure q[2];"
     var r10 = tool(s, 29, "qumo_run_qasm", "{\"qasm\":" + json_quote(tele) + ",\"shots\":200}")

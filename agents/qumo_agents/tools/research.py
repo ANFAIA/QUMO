@@ -3,15 +3,22 @@
 Standard library HTTP only. Every response is capped in size and returned as data;
 the system prompts tell the agents that fetched text is never an instruction.
 A GitHub token, when present in GITHUB_TOKEN, raises the API rate limit; it is
-sent only to api.github.com and never returned.
+sent only to api.github.com and is dropped on every redirect.
+
+Outbound requests are checked before they leave (see _check_url): https only, default
+port, no credentials in the URL, the API tools limited to API_HOSTS, and no address
+that is not globally routable (loopback, private, link-local, metadata). Redirects are
+followed only when each new target passes the same checks, at most MAX_REDIRECTS times.
 """
 
 from __future__ import annotations
 
 import http.client
+import ipaddress
 import json
 import os
 import re
+import socket
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -24,18 +31,70 @@ from qumo_agents import modules
 
 USER_AGENT = "qumo-agents/0.1 (+https://github.com/ANFAIA/QUMO)"
 MAX_BYTES = 400_000
+MAX_REDIRECTS = 3
 TIMEOUT = 30
 ATOM = "{http://www.w3.org/2005/Atom}"
+# Hosts the API tools may call. fetch_page reads any public https host.
+API_HOSTS = frozenset({"export.arxiv.org", "pypi.org", "api.github.com"})
 # Network and parse failures become an error result for the model, never an exception
 # that stops the whole agent run (OSError covers URLError, timeouts and resets).
 NET_ERRORS = (OSError, http.client.HTTPException, ET.ParseError, ValueError, KeyError)
 
 
-def _get(url: str, headers: dict[str, str] | None = None) -> bytes:
-    if not url.startswith("https://") and not url.startswith("http://export.arxiv.org/"):
+def _public_host(host: str) -> None:
+    """Refuse a host unless every address it resolves to is globally routable."""
+    try:
+        infos = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+    except socket.gaierror as e:
+        raise ValueError(f"cannot resolve {host}") from e
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0].split("%")[0])
+        if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+            ip = ip.ipv4_mapped
+        if not ip.is_global:
+            raise ValueError(f"{host} is not a public address")
+
+
+def _check_url(url: str, hosts: frozenset[str] | None = None) -> None:
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme != "https":
         raise ValueError("only https URLs are fetched")
+    if parts.username is not None or parts.password is not None:
+        raise ValueError("URLs with credentials are refused")
+    if parts.port not in (None, 443):
+        raise ValueError("only the default https port is fetched")
+    host = parts.hostname or ""
+    if not host:
+        raise ValueError("URL has no host")
+    if hosts is not None and host not in hosts:
+        raise ValueError(f"{host} is not on the allow-list for this tool")
+    _public_host(host)
+
+
+class _CheckedRedirects(urllib.request.HTTPRedirectHandler):
+    """Re-run the URL checks on every redirect and drop the Authorization header."""
+
+    def __init__(self, hosts: frozenset[str] | None) -> None:
+        self.hosts = hosts
+        self.count = 0
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D401
+        self.count += 1
+        if self.count > MAX_REDIRECTS:
+            raise ValueError("too many redirects")
+        target = urllib.parse.urljoin(req.full_url, newurl)
+        _check_url(target, self.hosts)
+        new = super().redirect_request(req, fp, code, msg, headers, target)
+        if new is not None:
+            new.headers.pop("Authorization", None)
+        return new
+
+
+def _get(url: str, headers: dict[str, str] | None = None, hosts: frozenset[str] | None = None) -> bytes:
+    _check_url(url, hosts)
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, **(headers or {})})
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+    opener = urllib.request.build_opener(_CheckedRedirects(hosts))
+    with opener.open(req, timeout=TIMEOUT) as resp:
         return resp.read(MAX_BYTES)
 
 
@@ -47,10 +106,10 @@ def search_arxiv_raw(query: str, categories: tuple[str, ...] = ("quant-ph",), ma
     terms = " AND ".join(f'all:"{w}"' if " " in w else f"all:{w}" for w in [query])
     cats = " OR ".join(f"cat:{c}" for c in categories)
     q = f"({terms}) AND ({cats})" if cats else terms
-    url = ("http://export.arxiv.org/api/query?" + urllib.parse.urlencode({
+    url = ("https://export.arxiv.org/api/query?" + urllib.parse.urlencode({
         "search_query": q, "sortBy": "submittedDate", "sortOrder": "descending",
         "max_results": max(1, min(max_results, 50))}))
-    root = ET.fromstring(_get(url))
+    root = ET.fromstring(_get(url, hosts=API_HOSTS))
     out = []
     for e in root.findall(f"{ATOM}entry"):
         out.append({
@@ -77,7 +136,7 @@ def search_arxiv(query: str, module: str = "", max_results: int = 10) -> str:
 
 
 def pypi_info_raw(package: str) -> dict:
-    data = json.loads(_get(f"https://pypi.org/pypi/{urllib.parse.quote(package)}/json"))
+    data = json.loads(_get(f"https://pypi.org/pypi/{urllib.parse.quote(package)}/json", hosts=API_HOSTS))
     info = data["info"]
     releases = sorted(
         ((v, files[0]["upload_time"][:10]) for v, files in data.get("releases", {}).items() if files),
@@ -111,7 +170,8 @@ def github_release_notes(repo: str, count: int = 3) -> str:
     if token:
         headers["Authorization"] = f"Bearer {token}"
     try:
-        rel = json.loads(_get(f"https://api.github.com/repos/{repo}/releases?per_page={max(1, min(count, 10))}", headers))
+        rel = json.loads(_get(f"https://api.github.com/repos/{repo}/releases?per_page={max(1, min(count, 10))}",
+                              headers, hosts=API_HOSTS))
     except NET_ERRORS as e:
         return _json({"error": f"GitHub lookup failed for {repo}: {type(e).__name__}"})
     return _json([{"tag": r.get("tag_name"), "date": (r.get("published_at") or "")[:10],

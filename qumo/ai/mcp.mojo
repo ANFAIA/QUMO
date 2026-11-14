@@ -26,12 +26,30 @@ from std.ffi import c_int
 from std.io.file_descriptor import RawFileDescriptor
 
 from qumo.core.json import JsonWriter, JsonValue, JsonKind, parse_json
-from qumo.ai.tools import ToolRegistry, ToolResult
+from qumo.ai.tools import ToolRegistry, ToolResult, tool_error
 from qumo.ai.registry import full_registry
 from qumo.ai.diagnostics import diagnostic_from_error
 from qumo.ai.describe import QUMO_VERSION
 
 comptime MCP_PROTOCOL_VERSION = "2025-06-18"
+# Per-call ceilings of the server, below the tools' own ranges (which the CLI keeps):
+# a client must not be able to make the server reserve 2^40 amplitudes or sample for hours.
+comptime MCP_MAX_SHOTS = 1000000
+comptime MCP_MAX_QUBITS = 30  # dense simulation: 16 * 2^30 bytes = 16 GiB
+
+
+def _over_server_limit(args: JsonValue) -> String:
+    """Error text when a call asks for more than the server allows, else ""."""
+    try:
+        var shots = args.get_int("shots", 0)
+        if shots > MCP_MAX_SHOTS:
+            return "QM-E913: argument 'shots' = " + String(shots) + " is above the MCP server limit of " + String(MCP_MAX_SHOTS) + ". Hint: split the run into several calls with different seeds, or use the CLI."
+        var max_q = args.get_int("max_qubits", 0)
+        if max_q > MCP_MAX_QUBITS:
+            return "QM-E913: argument 'max_qubits' = " + String(max_q) + " is above the MCP server limit of " + String(MCP_MAX_QUBITS) + ". Hint: larger dense simulations run from the CLI or the Mojo API."
+    except:
+        pass  # a wrong type is reported by the tool itself
+    return String()
 
 comptime _INSTRUCTIONS = "QUMO quantum toolkit. Circuits are OpenQASM 3.0 (2.0 accepted) strings: 'OPENQASM 3.0; include \"stdgates.inc\"; qubit[2] q; bit[2] c; h q[0]; cx q[0], q[1]; c = measure q;'. Use qumo_validate_qasm to check code (errors carry a stable QM-Exxx code, line/col and a Hint), qumo_run_qasm for counts (seeded, deterministic), qumo_statevector / qumo_expectation for exact results, qumo_circuit_info for analysis and qumo_describe for gates/errors/capabilities. Bitstrings are Qiskit-style (leftmost = highest bit). Symbolic angles: 'input float theta;' + params."
 
@@ -201,6 +219,9 @@ struct McpServer(Movable):
                 args = parse_json("{}")
             elif not args.is_object():
                 return rpc_error(id, -32602, "Invalid params: arguments must be an object")
+            var over = _over_server_limit(args)
+            if over.byte_length() > 0:
+                return rpc_result(id, tool_result_json(tool_error(over)))
             var r = self.registry.call(name, args)
             return rpc_result(id, tool_result_json(r))
         return rpc_error(id, -32601, "Method not found: " + method)
@@ -240,15 +261,22 @@ def handle_request(line: String) -> String:
 # ---------------------------------------------------------------------------
 # stdio transport
 # ---------------------------------------------------------------------------
+comptime MAX_LINE_BYTES = 1 << 20  # one JSON-RPC message; longer lines are dropped
+
+
 struct LineReader(Movable):
-    """Buffered newline splitter over a raw file descriptor (handles lines of
-    any length and a final line without trailing newline)."""
+    """Buffered newline splitter over a raw file descriptor. Lines up to MAX_LINE_BYTES
+    are returned whole, a final line without trailing newline included. A longer line
+    is discarded up to its newline and returned as "{" so the server answers it with a
+    parse error; the buffer never grows past MAX_LINE_BYTES."""
 
     var fd: RawFileDescriptor
     var buf: List[UInt8]
     var start: Int
     var end: Int
     var eof: Bool
+    var skipping: Bool  # inside an oversized line, dropping bytes until its newline
+    var capped: Bool  # read_line limits the buffer; read_all reads everything
 
     def __init__(out self, fd: Int = 0):
         self.fd = RawFileDescriptor(c_int(fd))
@@ -256,6 +284,8 @@ struct LineReader(Movable):
         self.start = 0
         self.end = 0
         self.eof = False
+        self.skipping = False
+        self.capped = False
 
     def _fill(mut self) raises -> Bool:
         if self.eof:
@@ -267,6 +297,12 @@ struct LineReader(Movable):
             self.start = 0
             self.end = n
         if self.end == len(self.buf):
+            if self.capped and len(self.buf) >= MAX_LINE_BYTES:
+                # A full window with no newline: drop it and skip to the next newline.
+                self.start = 0
+                self.end = 0
+                self.skipping = True
+                return True
             self.buf.resize(len(self.buf) * 2, 0)
         var got = self.fd.read_bytes(Span(self.buf)[self.end:])
         if got <= 0:
@@ -277,8 +313,26 @@ struct LineReader(Movable):
 
     def read_line(mut self, mut line: String) raises -> Bool:
         """Next line without the newline; False at end of input."""
+        self.capped = True
         var scan = self.start
         while True:
+            if self.skipping:
+                var j = self.start
+                while j < self.end and Int(self.buf[j]) != 0x0A:
+                    j += 1
+                if j < self.end:
+                    self.start = j + 1
+                    self.skipping = False
+                    # Not valid JSON, so the server answers with a parse error instead of
+                    # staying silent (a blank line gets no reply).
+                    line = String("{")
+                    return True
+                self.start = 0
+                self.end = 0
+                scan = 0
+                if not self._fill():
+                    return False
+                continue
             var i = scan
             while i < self.end:
                 if Int(self.buf[i]) == 0x0A:
@@ -291,14 +345,19 @@ struct LineReader(Movable):
                 i += 1
             scan = self.end - self.start
             if not self._fill():
+                if self.skipping:
+                    continue
                 if self.end > self.start:
                     line = String(unsafe_from_utf8=Span(self.buf)[self.start:self.end])
                     self.start = self.end
                     return True
                 return False
+            if self.skipping:
+                continue
             scan = self.start + scan
 
     def read_all(mut self) raises -> String:
+        self.capped = False
         while self._fill():
             pass
         var s = String(unsafe_from_utf8=Span(self.buf)[self.start:self.end])
