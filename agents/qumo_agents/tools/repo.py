@@ -116,6 +116,12 @@ ALLOWED = [
     ("git status of the sandbox", ["git", "status", "--short"]),
 ]
 ARG_OK = re.compile(r"^[\w./:=,@+-]+$")
+# Checks run code the agent may have written, so they do not inherit credentials.
+SECRET_ENV = re.compile(r"TOKEN|SECRET|KEY|PASSWORD|CREDENTIAL|AUTH|COOKIE|SESSION", re.I)
+
+
+def _check_env() -> dict[str, str]:
+    return {k: v for k, v in os.environ.items() if not SECRET_ENV.search(k)}
 
 
 @tool
@@ -129,7 +135,8 @@ def run_check(argv: list[str], timeout_s: int = 600) -> str:
     if any(not ARG_OK.match(a) or ".." in a for a in argv):
         return "refused: arguments may only hold path-like characters"
     try:
-        r = subprocess.run(argv, cwd=_root(), capture_output=True, text=True, timeout=max(10, min(timeout_s, 1800)))
+        r = subprocess.run(argv, cwd=_root(), env=_check_env(), capture_output=True, text=True,
+                           timeout=max(10, min(timeout_s, 1800)))
     except subprocess.TimeoutExpired:
         return f"timeout after {timeout_s}s"
     except OSError as e:

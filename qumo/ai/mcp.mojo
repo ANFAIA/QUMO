@@ -240,15 +240,21 @@ def handle_request(line: String) -> String:
 # ---------------------------------------------------------------------------
 # stdio transport
 # ---------------------------------------------------------------------------
+comptime MAX_LINE_BYTES = 1 << 20  # one JSON-RPC message; longer lines are dropped
+
+
 struct LineReader(Movable):
-    """Buffered newline splitter over a raw file descriptor (handles lines of
-    any length and a final line without trailing newline)."""
+    """Buffered newline splitter over a raw file descriptor. Lines up to MAX_LINE_BYTES
+    are returned whole, a final line without trailing newline included. A longer line
+    is discarded up to its newline and returned as "{" so the server answers it with a
+    parse error; the buffer never grows past MAX_LINE_BYTES."""
 
     var fd: RawFileDescriptor
     var buf: List[UInt8]
     var start: Int
     var end: Int
     var eof: Bool
+    var skipping: Bool  # inside an oversized line, dropping bytes until its newline
 
     def __init__(out self, fd: Int = 0):
         self.fd = RawFileDescriptor(c_int(fd))
@@ -256,6 +262,7 @@ struct LineReader(Movable):
         self.start = 0
         self.end = 0
         self.eof = False
+        self.skipping = False
 
     def _fill(mut self) raises -> Bool:
         if self.eof:
@@ -267,6 +274,12 @@ struct LineReader(Movable):
             self.start = 0
             self.end = n
         if self.end == len(self.buf):
+            if len(self.buf) >= MAX_LINE_BYTES:
+                # A full window with no newline: drop it and skip to the next newline.
+                self.start = 0
+                self.end = 0
+                self.skipping = True
+                return True
             self.buf.resize(len(self.buf) * 2, 0)
         var got = self.fd.read_bytes(Span(self.buf)[self.end:])
         if got <= 0:
@@ -279,6 +292,23 @@ struct LineReader(Movable):
         """Next line without the newline; False at end of input."""
         var scan = self.start
         while True:
+            if self.skipping:
+                var j = self.start
+                while j < self.end and Int(self.buf[j]) != 0x0A:
+                    j += 1
+                if j < self.end:
+                    self.start = j + 1
+                    self.skipping = False
+                    # Not valid JSON, so the server answers with a parse error instead of
+                    # staying silent (a blank line gets no reply).
+                    line = String("{")
+                    return True
+                self.start = 0
+                self.end = 0
+                scan = 0
+                if not self._fill():
+                    return False
+                continue
             var i = scan
             while i < self.end:
                 if Int(self.buf[i]) == 0x0A:
@@ -291,11 +321,15 @@ struct LineReader(Movable):
                 i += 1
             scan = self.end - self.start
             if not self._fill():
+                if self.skipping:
+                    continue
                 if self.end > self.start:
                     line = String(unsafe_from_utf8=Span(self.buf)[self.start:self.end])
                     self.start = self.end
                     return True
                 return False
+            if self.skipping:
+                continue
             scan = self.start + scan
 
     def read_all(mut self) raises -> String:

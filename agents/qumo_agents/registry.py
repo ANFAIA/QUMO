@@ -48,7 +48,7 @@ AGENTS: dict[str, AgentSpec] = {a.name: a for a in [
     AgentSpec(
         "autoresearch",
         "Improves one QUMO module step by step in a sandbox branch: hypothesis, baseline, change, measurement, review.",
-        prompts.AUTORESEARCH, ("research", "read", "check", "report", "sandbox"), QUMO_SIM,
+        prompts.AUTORESEARCH, ("read", "check", "report", "sandbox"), QUMO_SIM,
         subagents=("research-watch", "code-review", "algorithm-research", "qec-research", "compiler-research"),
         writes_code=True),
     AgentSpec(
@@ -82,6 +82,16 @@ AGENTS: dict[str, AgentSpec] = {a.name: a for a in [
         subagents=("qumo-operator", "execution", "algorithm-research", "qec-research", "compiler-research",
                    "research-watch", "code-review", "autoresearch")),
 ]}
+
+
+def _check_no_web_and_exec() -> None:
+    # An agent that can fetch web pages must not also run code: fetched text could steer it.
+    for spec in AGENTS.values():
+        if "research" in spec.tool_groups and "check" in spec.tool_groups:
+            raise RuntimeError(f"{spec.name}: research and check tools may not be combined")
+
+
+_check_no_web_and_exec()
 
 
 def get(name: str) -> AgentSpec:
