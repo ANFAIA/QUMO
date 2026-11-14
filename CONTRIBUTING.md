@@ -33,7 +33,8 @@ QUMO pins one Mojo version (see `MOJO_VERSION` in the `Makefile`) because the la
 ## Running the tests
 
 ```bash
-make test                                       # every tests/test_*.mojo, plus the fast RL tests; prints PASS/FAIL per file
+make test                                       # every tests/test_*.mojo except the GPU files, plus the fast RL tests; prints PASS/FAIL per file
+make test-shard SHARDS=4 SHARD=1              # one quarter of the same files, the way the pull-request CI runs them
 .venv/bin/mojo run -I . tests/test_sim.mojo     # one suite
 make examples                                   # fast-tier examples, verified by their CHECK lines
 make test-python                                # tests of the Python package qumo, python/tests (builds build/qumo_py.so; needs NumPy and pytest)
@@ -120,7 +121,7 @@ How to run the existing harnesses: "Reproduce the benchmarks" in [docs/GETTING_S
 ## Pull requests
 
 - One topic per pull request, with a description of what changed and how you checked it (which tests, which examples, which measurements).
-- `make test` and `make examples` pass. The CI workflow in `.github/workflows/ci.yml` runs the same commands; it is new and has not completed a run yet, so run them locally.
+- `make test` and `make examples` pass. The pull-request checks in `.github/workflows/ci.yml` run the Mojo tests in four shards plus the RL tests; the nightly job runs the whole suite, the GPU files on the CPU (`make test-gpu-fallback`), the slow RL tests and the examples. Run `make test` locally before you open a pull request.
 - Add a line to [CHANGELOG.md](CHANGELOG.md) under "Unreleased".
 - By contributing you agree that your contribution is licensed under the [Apache License 2.0](LICENSE).
 

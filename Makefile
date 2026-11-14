@@ -2,9 +2,14 @@
 MOJO ?= .venv/bin/mojo
 PY ?= bench/.venv/bin/python
 # the RL tests live in rl/ (make test runs the fast ones once, via make test-rl; make test-rl-slow runs the rest)
-TESTS := $(wildcard tests/test_*.mojo)
+# GPU test files need a device; `make test` leaves them out and `make test-gpu-fallback` runs them on the CPU
+TESTS := $(filter-out tests/test_gpu%,$(wildcard tests/test_*.mojo))
+# CI splits the Mojo tests into SHARDS jobs; shard SHARD (1-based) runs every SHARDS-th file of FILES
+SHARDS ?= 1
+SHARD ?= 1
+FILES ?= $(TESTS)
 
-.PHONY: all help setup setup-py setup-py-locked test cli py bench-sv bench-neutral bench-charts clean examples examples-all examples-gpu test-py test-python install-py
+.PHONY: all help setup setup-py setup-py-locked test test-shard test-gpu-fallback cli py bench-sv bench-neutral bench-charts clean examples examples-all examples-gpu test-py test-python install-py
 
 all: cli py
 
@@ -43,6 +48,19 @@ test:  ## run every Mojo test file (tests/ and, once, the fast RL tests of rl/ t
 		case "$$out" in *OK*) echo "PASS $$t";; *) echo "FAIL $$t: $$out"; grep -v Crashpad $$log | tail -25; fail=1;; esac; \
 		rm -f $$log; \
 	done; $(MAKE) --no-print-directory test-rl || fail=1; exit $$fail
+
+test-shard:  ## the Mojo test files of shard SHARD of SHARDS (round robin over FILES); the CI test jobs use this
+	@fail=0; i=0; for t in $(FILES); do \
+		if [ $$((i % $(SHARDS))) -eq $$(($(SHARD) - 1)) ]; then \
+			log=$$(mktemp); $(MOJO) run -I . $$t > $$log 2>&1; \
+			out=$$(grep -v Crashpad $$log | tail -1); \
+			case "$$out" in *OK*) echo "PASS $$t";; *) echo "FAIL $$t: $$out"; grep -v Crashpad $$log | tail -25; fail=1;; esac; \
+			rm -f $$log; \
+		fi; i=$$((i + 1)); \
+	done; exit $$fail
+
+test-gpu-fallback:  ## the GPU test files on the CPU (no device needed); the nightly CI job runs them
+	@$(MAKE) --no-print-directory test-shard FILES="$(GPU_TESTS)"
 
 cli:  ## native CLI + MCP server (build/qumo)
 	@mkdir -p build
