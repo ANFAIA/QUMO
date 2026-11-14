@@ -31,7 +31,7 @@ on SIGTERM.
 from std.sys import argv
 from std.os.path import exists
 
-from qumo.ai.json import JsonValue, JsonWriter, parse_json
+from qumo.core.json import JsonValue, JsonWriter, parse_json
 from qumo_agent.native.libc import CStr, c_rename
 from qumo_agent.native.clock import sleep_ms
 from qumo_agent.net.socket import TcpListener, NetStream

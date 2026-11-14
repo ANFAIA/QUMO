@@ -15,7 +15,7 @@ The JSON-RPC envelope is `qumo_agent.mcp.server`; the texts are those of the pre
 from std.memory import ArcPointer
 from std.sys import stderr
 
-from qumo.ai.json import JsonValue, JsonWriter
+from qumo.core.json import JsonValue, JsonWriter
 
 from qumo_agent.app.env import AppShared, AppOptions, make_shared, run_agent_once, shutdown_shared
 from qumo_agent.mcp.server import McpToolHandler, handler_rpc_error

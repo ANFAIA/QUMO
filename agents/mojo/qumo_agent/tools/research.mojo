@@ -23,7 +23,7 @@ Error texts pass through `redact_all`, so a GitHub token never reaches the model
 
 from std.os import getenv
 
-from qumo.ai.json import JsonValue, JsonWriter, parse_json
+from qumo.core.json import JsonValue, JsonWriter, parse_json
 
 from qumo_agent.net.http import (
     HttpClient, HttpRequest, HttpResponse, HttpOptions, REDIRECT_URLLIB,
@@ -35,7 +35,7 @@ from qumo_agent.tools.html import strip_html
 from qumo_agent.util.pyfmt import cp_head, py_json_dumps
 from qumo_agent.util.redact import redact_all, secret_env_names
 
-comptime ARXIV_API = "http://export.arxiv.org/api/query"
+comptime ARXIV_API = "https://export.arxiv.org/api/query"
 comptime ARXIV_PLAIN_PREFIX = "http://export.arxiv.org/"
 comptime PYPI_BASE = "https://pypi.org/pypi/"
 comptime GITHUB_API = "https://api.github.com/repos/"

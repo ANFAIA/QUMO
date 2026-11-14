@@ -19,7 +19,7 @@
 from std.collections import Dict
 from std.memory import ArcPointer
 
-from qumo.ai.json import JsonValue, parse_json
+from qumo.core.json import JsonValue, parse_json
 
 from qumo_agent.core.messages import ChatRequest, ChatResponse
 from qumo_agent.core.replay import ReplayModel

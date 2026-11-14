@@ -6,7 +6,7 @@ HTML page the text fetch_page returns. gen_research_golden.py writes it from age
 
 from std.testing import assert_equal, assert_true
 
-from qumo.ai.json import parse_json
+from qumo.core.json import parse_json
 from qumo_agent.tools.atom import parse_arxiv_atom, arxiv_entries_json, ArxivEntry
 from qumo_agent.tools.html import strip_html
 

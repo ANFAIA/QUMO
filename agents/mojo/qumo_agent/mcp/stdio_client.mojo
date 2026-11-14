@@ -24,7 +24,7 @@ group, wait 2 s, SIGKILL to the group.
 
 from std.time import perf_counter_ns
 
-from qumo.ai.json import JsonValue, parse_json
+from qumo.core.json import JsonValue, parse_json
 from qumo.ai.mcp import rpc_error
 
 from qumo_agent.core.errors import E_MCP, qa_error

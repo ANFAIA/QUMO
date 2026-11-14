@@ -7,7 +7,7 @@ message, the history file section and the context-overflow tail clip. The orches
 (model calls and retries) lives in loop.mojo.
 """
 
-from qumo.ai.json import JsonValue, json_quote
+from qumo.core.json import JsonValue, json_quote
 
 from qumo_agent.core.messages import (
     Message, ToolCall, ROLE_SYSTEM, ROLE_USER, ROLE_ASSISTANT, ROLE_TOOL, user_message,

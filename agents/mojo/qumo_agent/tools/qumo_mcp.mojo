@@ -16,7 +16,7 @@ from std.memory import ArcPointer
 from std.os import getenv
 from std.os.path import exists
 
-from qumo.ai.json import parse_json
+from qumo.core.json import parse_json
 
 from qumo_agent.core.errors import E_CONFIG, E_MCP, qa_error
 from qumo_agent.core.toolspec import ToolSpec, ToolOutcome, TOOL_MCP

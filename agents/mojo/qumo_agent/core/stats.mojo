@@ -1,6 +1,6 @@
 """Run statistics, summed over subagents (inline and child processes)."""
 
-from qumo.ai.json import JsonValue, JsonWriter
+from qumo.core.json import JsonValue, JsonWriter
 
 
 @fieldwise_init

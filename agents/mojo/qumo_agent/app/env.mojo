@@ -15,7 +15,7 @@ from std.memory import ArcPointer
 from std.os import getenv
 from std.sys import stderr
 
-from qumo.ai.json import JsonValue
+from qumo.core.json import JsonValue
 
 from qumo_agent.core.endpoint import ModelEndpoint
 from qumo_agent.core.errors import E_CONFIG, qa_error

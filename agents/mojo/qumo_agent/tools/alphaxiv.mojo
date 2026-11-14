@@ -19,7 +19,7 @@ description_suffix.
 from std.memory import ArcPointer
 from std.os import getenv
 
-from qumo.ai.json import parse_json
+from qumo.core.json import parse_json
 
 from qumo_agent.core.errors import E_CONFIG, qa_error
 from qumo_agent.core.toolspec import ToolSpec, ToolOutcome, TOOL_ALPHAXIV

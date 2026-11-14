@@ -12,7 +12,7 @@
 from std.os import getenv
 from std.testing import assert_equal, assert_true, assert_false
 
-from qumo.ai.json import parse_json, json_quote
+from qumo.core.json import parse_json, json_quote
 from qumo_agent.core.toolspec import ToolOutcome, TOOL_MCP
 from qumo_agent.mcp.protocol import MCP_CLIENT_NAME, MCP_CLIENT_VERSION
 from qumo_agent.mcp.results import call_result_to_outcome

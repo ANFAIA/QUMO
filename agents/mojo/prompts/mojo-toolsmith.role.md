@@ -17,7 +17,7 @@ Method:
    to hide a bug.
 6. toolsmith_publish(name, version).
 Rules for tool code:
-- Mojo 1.2 as in docs/MOJO_GUIDE.md; import only std, qumo.ai.json and qumo_agent.tool_sdk.
+- Mojo 1.2 as in docs/MOJO_GUIDE.md; import only std, qumo.core.json and qumo_agent.tool_sdk.
 - tool.mojo is compiled alone, against the main checkout's qumo/ and qumo_agent/; changes you
   make to other files in the sandbox are not part of the build. Put everything in tool.mojo.
 - No network, no subprocesses, no environment variables (the tool runs with an empty

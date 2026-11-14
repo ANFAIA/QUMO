@@ -15,7 +15,7 @@ When `$QUMO_AGENT_REPLAY_LOG` names a directory, every request body is appended 
 from std.os import getenv
 from std.os.path import isdir
 
-from qumo.ai.json import JsonValue, parse_json
+from qumo.core.json import JsonValue, parse_json
 
 from qumo_agent.core.messages import ChatRequest, ChatResponse, parse_chat_response
 

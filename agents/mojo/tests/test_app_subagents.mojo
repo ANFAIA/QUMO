@@ -15,7 +15,7 @@
 from std.os import setenv, unsetenv
 from std.testing import assert_equal, assert_true, assert_false
 
-from qumo.ai.json import JsonValue, parse_json
+from qumo.core.json import JsonValue, parse_json
 
 from qumo_agent.app.options import AppOptions, default_options
 from qumo_agent.app.subproc import run_subagent_children

@@ -8,7 +8,7 @@ dispatches `__confine` (like main.mojo will), gen_where and gen_probe."""
 from std.os import getenv
 from std.testing import assert_equal, assert_true, assert_false
 
-from qumo.ai.json import parse_json
+from qumo.core.json import parse_json
 
 from qumo_agent.core.toolspec import TOOL_GENERATED
 from qumo_agent.native.clock import monotonic_ms

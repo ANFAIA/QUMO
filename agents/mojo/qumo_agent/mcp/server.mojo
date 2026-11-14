@@ -16,7 +16,7 @@ with the behaviour of QUMO's own server (`qumo/ai/mcp.mojo`) and the earlier
 - stdout carries only protocol lines (logs belong on stderr).
 """
 
-from qumo.ai.json import JsonValue, JsonWriter, parse_json
+from qumo.core.json import JsonValue, JsonWriter, parse_json
 from qumo.ai.mcp import rpc_result, rpc_error, LineReader
 
 from qumo_agent.mcp.protocol import MCP_CLIENT_PROTOCOL, mcp_supported_version

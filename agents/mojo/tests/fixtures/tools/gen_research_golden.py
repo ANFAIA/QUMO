@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parents[3]
+REPO = HERE.parents[4]  # the repository root (tools, fixtures, tests, mojo, agents)
 sys.path.insert(0, str(REPO / "agents"))
 
 from qumo_agents.tools import research  # noqa: E402
@@ -105,7 +105,7 @@ HTML_CASES = {
 
 
 def atom_result(xml: str) -> str:
-    research._get = lambda url, headers=None: xml.encode()
+    research._get = lambda url, headers=None, hosts=None: xml.encode()
     try:
         return research._json(research.search_arxiv_raw("q", ("quant-ph",), 10))
     except research.NET_ERRORS as e:
@@ -113,7 +113,7 @@ def atom_result(xml: str) -> str:
 
 
 def html_result(html: str) -> str:
-    research._get = lambda url, headers=None: html.encode()
+    research._get = lambda url, headers=None, hosts=None: html.encode()
     return research.fetch_page.invoke({"url": "https://example.org/"})
 
 

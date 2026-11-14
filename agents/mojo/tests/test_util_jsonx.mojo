@@ -2,7 +2,7 @@
 
 from std.testing import assert_equal, assert_true, assert_false
 
-from qumo.ai.json import JsonValue, parse_json
+from qumo.core.json import JsonValue, parse_json
 from qumo_agent.util.jsonx import *
 from qumo_agent.util.pyfmt import py_json_dumps
 

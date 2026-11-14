@@ -3,7 +3,7 @@ negotiation, tools/list and tools/call through a fake handler."""
 
 from std.testing import assert_equal, assert_true, assert_false
 
-from qumo.ai.json import JsonValue, JsonWriter, parse_json
+from qumo.core.json import JsonValue, JsonWriter, parse_json
 from qumo_agent.mcp.server import McpToolHandler, handle_line, handler_rpc_error
 
 

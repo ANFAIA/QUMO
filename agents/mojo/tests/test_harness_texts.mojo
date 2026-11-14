@@ -2,7 +2,7 @@
 
 from std.testing import assert_equal, assert_true
 
-from qumo.ai.json import JsonValue, parse_json
+from qumo.core.json import JsonValue, parse_json
 
 from qumo_agent.harness.texts import (
     text_table, count_parameters, MEDIA_EXTENSIONS, MEDIA_TYPES, MEDIA_MIMES,

@@ -5,7 +5,7 @@ Dev-time only, standard library only:
     agents/.venv/bin/python -I agents/mojo/tests/golden/gen_pyfmt.py
 
 The output is ASCII JSON (ensure_ascii=True), so the Mojo test can read it with
-qumo.ai.json.parse_json whatever characters the vectors hold. The "c1" section
+qumo.core.json.parse_json whatever characters the vectors hold. The "c1" section
 reproduces the Python-format vectors of agents/mojo/DESIGN.md Appendix C.1.
 """
 

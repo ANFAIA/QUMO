@@ -6,7 +6,7 @@ test_app_toolsmith_e2e."""
 
 from std.testing import assert_equal, assert_true, assert_false
 
-from qumo.ai.json import parse_json
+from qumo.core.json import parse_json
 
 from qumo_agent.app.testing import app_env, run_app
 from qumo_agent.native.fs import exists, make_dirs, make_temp_dir, read_text_lossy, remove_tree, write_text

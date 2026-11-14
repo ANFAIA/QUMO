@@ -6,7 +6,7 @@ clock and ids, and `--model` applying to the top agent only (inline subagents)."
 from std.memory import ArcPointer
 from std.testing import assert_equal, assert_true, assert_false
 
-from qumo.ai.json import JsonValue, parse_json
+from qumo.core.json import JsonValue, parse_json
 
 from qumo_agent.app.env import (
     AppEnv, AppOptions, AppShared, make_shared, make_shared_offline, run_agent_once, shutdown_shared,
@@ -146,14 +146,18 @@ def test_dispatch_and_files() raises:
 
 def test_local_tools_dispatch() raises:
     """Every local tool name reaches its implementation with the validated arguments."""
-    var shared = make_shared(options(REPLAY_BELL), "autoresearch")
-    var env = AppEnv(shared, "autoresearch")
-    # module_watchlist: offline, JSON with the module's data.
-    var r = env.call_tool(invocation(env, "module_watchlist", "{\"module\": \"ir\"}"))
+    # module_watchlist: offline, JSON with the module's data. It is a research tool, so it
+    # belongs to research-watch; autoresearch has no web tools since the security pass.
+    var shared_rw = make_shared(options(REPLAY_BELL), "research-watch")
+    var env_rw = AppEnv(shared_rw, "research-watch")
+    var r = env_rw.call_tool(invocation(env_rw, "module_watchlist", "{\"module\": \"ir\"}"))
     assert_false(r.is_error)
     assert_equal(parse_json(r.text).get_string("module", ""), "ir")
-    r = env.call_tool(invocation(env, "module_watchlist", "{\"module\": \"nope\"}"))
+    r = env_rw.call_tool(invocation(env_rw, "module_watchlist", "{\"module\": \"nope\"}"))
     assert_true(parse_json(r.text).get_string("error", "").startswith("unknown module 'nope'"), r.text)
+    shutdown_shared(shared_rw)
+    var shared = make_shared(options(REPLAY_BELL), "autoresearch")
+    var env = AppEnv(shared, "autoresearch")
     # run_check: the argv list is passed whole; refusals come back as text.
     r = env.call_tool(invocation(env, "run_check", "{\"argv\": [\"git\", \"status\", \"--short\"], \"timeout_s\": 60}"))
     assert_true(r.text.startswith("exit "), r.text)

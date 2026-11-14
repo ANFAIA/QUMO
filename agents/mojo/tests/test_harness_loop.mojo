@@ -6,7 +6,7 @@ test_harness_wire.mojo."""
 from std.os import makedirs
 from std.testing import assert_equal, assert_true, assert_false
 
-from qumo.ai.json import JsonValue, JsonWriter, parse_json
+from qumo.core.json import JsonValue, JsonWriter, parse_json
 
 from qumo_agent.core.messages import Message, ROLE_ASSISTANT, ROLE_TOOL, ROLE_USER
 from qumo_agent.harness.env import FileRoutes, AgentDef

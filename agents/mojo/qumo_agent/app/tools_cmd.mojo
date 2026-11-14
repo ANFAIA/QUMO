@@ -10,7 +10,7 @@ shown and re-runs the stored cases (`review_rebuild`) before it marks the entry 
 from std.os import getenv
 from std.sys import stderr
 
-from qumo.ai.json import parse_json
+from qumo.core.json import parse_json
 from qumo.ai.mcp import LineReader
 
 from qumo_agent.native.clock import utc_iso_now

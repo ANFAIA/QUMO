@@ -5,7 +5,7 @@ replay paths, nesting and failures."""
 from std.os import makedirs
 from std.testing import assert_equal, assert_true, assert_false
 
-from qumo.ai.json import JsonValue, JsonWriter, parse_json
+from qumo.core.json import JsonValue, JsonWriter, parse_json
 
 from qumo_agent.core.messages import Message, ROLE_TOOL
 from qumo_agent.core.stats import zero_stats

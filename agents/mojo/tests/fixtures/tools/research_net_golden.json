@@ -464,7 +464,7 @@
     "quant-ph"
    ],
    "max_results": 10,
-   "url": "http://export.arxiv.org/api/query?search_query=%28all%3Arouting%29+AND+%28cat%3Aquant-ph%29&sortBy=submittedDate&sortOrder=descending&max_results=10"
+   "url": "https://export.arxiv.org/api/query?search_query=%28all%3Arouting%29+AND+%28cat%3Aquant-ph%29&sortBy=submittedDate&sortOrder=descending&max_results=10"
   },
   {
    "query": "qubit routing",
@@ -473,7 +473,7 @@
     "cs.DC"
    ],
    "max_results": 100,
-   "url": "http://export.arxiv.org/api/query?search_query=%28all%3A%22qubit+routing%22%29+AND+%28cat%3Aquant-ph+OR+cat%3Acs.DC%29&sortBy=submittedDate&sortOrder=descending&max_results=50"
+   "url": "https://export.arxiv.org/api/query?search_query=%28all%3A%22qubit+routing%22%29+AND+%28cat%3Aquant-ph+OR+cat%3Acs.DC%29&sortBy=submittedDate&sortOrder=descending&max_results=50"
   },
   {
    "query": "a&b=c é\"x\" +/?",
@@ -481,13 +481,13 @@
     "quant-ph"
    ],
    "max_results": 0,
-   "url": "http://export.arxiv.org/api/query?search_query=%28all%3A%22a%26b%3Dc+%C3%A9%22x%22+%2B%2F%3F%22%29+AND+%28cat%3Aquant-ph%29&sortBy=submittedDate&sortOrder=descending&max_results=1"
+   "url": "https://export.arxiv.org/api/query?search_query=%28all%3A%22a%26b%3Dc+%C3%A9%22x%22+%2B%2F%3F%22%29+AND+%28cat%3Aquant-ph%29&sortBy=submittedDate&sortOrder=descending&max_results=1"
   },
   {
    "query": "x",
    "categories": [],
    "max_results": 5,
-   "url": "http://export.arxiv.org/api/query?search_query=all%3Ax&sortBy=submittedDate&sortOrder=descending&max_results=5"
+   "url": "https://export.arxiv.org/api/query?search_query=all%3Ax&sortBy=submittedDate&sortOrder=descending&max_results=5"
   },
   {
    "query": "two  spaces",
@@ -495,7 +495,7 @@
     "quant-ph"
    ],
    "max_results": -3,
-   "url": "http://export.arxiv.org/api/query?search_query=%28all%3A%22two++spaces%22%29+AND+%28cat%3Aquant-ph%29&sortBy=submittedDate&sortOrder=descending&max_results=1"
+   "url": "https://export.arxiv.org/api/query?search_query=%28all%3A%22two++spaces%22%29+AND+%28cat%3Aquant-ph%29&sortBy=submittedDate&sortOrder=descending&max_results=1"
   },
   {
    "query": "y",
@@ -505,7 +505,7 @@
     "cs.AR"
    ],
    "max_results": 50,
-   "url": "http://export.arxiv.org/api/query?search_query=%28all%3Ay%29+AND+%28cat%3Aquant-ph+OR+cat%3Acs.ET+OR+cat%3Acs.AR%29&sortBy=submittedDate&sortOrder=descending&max_results=50"
+   "url": "https://export.arxiv.org/api/query?search_query=%28all%3Ay%29+AND+%28cat%3Aquant-ph+OR+cat%3Acs.ET+OR+cat%3Acs.AR%29&sortBy=submittedDate&sortOrder=descending&max_results=50"
   }
  ],
  "watchlist": [

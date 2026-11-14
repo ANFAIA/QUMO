@@ -12,7 +12,7 @@ langchain-openai (critic B2, B4, B5): reasoning fields are dropped, list content
 joined, an `error` body, missing, null or empty `choices` raise QA-E103.
 """
 
-from qumo.ai.json import JsonValue, JsonKind, JsonWriter, parse_json
+from qumo.core.json import JsonValue, JsonKind, JsonWriter, parse_json
 
 from qumo_agent.core.toolspec import ToolSpec, ToolOutcome
 from qumo_agent.util.jsonx import parse_tool_arguments

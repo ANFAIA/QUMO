@@ -4,7 +4,7 @@ through run_cases. Offline; builds two small binaries with .venv/bin/mojo."""
 
 from std.testing import assert_equal, assert_true, assert_false
 
-from qumo.ai.json import JsonValue, parse_json
+from qumo.core.json import JsonValue, parse_json
 
 from qumo_agent.native.fs import (
     exists, file_mode, is_file, join_path, make_dirs, read_text_lossy, realpath_strict, remove_tree,

@@ -20,7 +20,7 @@ Objects keep Python dict semantics: key order is insertion order, a repeated key
 its first position and its last value.
 """
 
-from qumo.ai.json import JsonValue, JsonKind, JsonWriter, parse_json
+from qumo.core.json import JsonValue, JsonKind, JsonWriter, parse_json
 
 from qumo_agent.core.errors import E_MCP, qa_error
 

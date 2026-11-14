@@ -12,7 +12,7 @@ from std.os.path import exists
 from std.tempfile import mkdtemp
 from std.time import perf_counter_ns
 
-from qumo.ai.json import parse_json
+from qumo.core.json import parse_json
 from qumo_agent.native.libc import c_kill
 from qumo_agent.native.spawn import STDIO_INHERIT, STDIO_PIPE, STDIO_NULL, mcp_server_env
 from qumo_agent.native.sandbox import Confinement

@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parents[3]
+REPO = HERE.parents[4]  # the repository root (tools, fixtures, tests, mojo, agents)
 sys.path.insert(0, str(REPO / "agents"))
 
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel  # noqa: E402

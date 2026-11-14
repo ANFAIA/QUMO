@@ -4,7 +4,7 @@ transform (critic B7)."""
 
 from std.testing import assert_equal, assert_true, assert_false
 
-from qumo.ai.json import parse_json
+from qumo.core.json import parse_json
 from qumo_agent.mcp.protocol import (
     MCP_CLIENT_PROTOCOL, mcp_supported_version, rpc_request_json, rpc_notification_json,
     initialize_params_json, tools_list_params_json, call_params_json,

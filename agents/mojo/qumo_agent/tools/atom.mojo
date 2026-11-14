@@ -19,7 +19,7 @@ duplicate attribute, reference to invalid character number, and not well-formed 
 Other malformed input may be reported with a different message than expat would give.
 """
 
-from qumo.ai.json import JsonWriter, parse_json
+from qumo.core.json import JsonWriter, parse_json
 
 from qumo_agent.util.pyfmt import cp_head, py_json_dumps, py_split_ws
 

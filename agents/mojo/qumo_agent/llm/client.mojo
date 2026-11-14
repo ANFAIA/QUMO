@@ -17,7 +17,7 @@ from std.memory import ArcPointer
 from std.os import getenv
 from std.math import isfinite
 
-from qumo.ai.json import JsonValue, parse_json
+from qumo.core.json import JsonValue, parse_json
 from qumo_agent.core.errors import E_MODEL_HTTP, E_CONTEXT_OVERFLOW, E_NETWORK, E_CONFIG, error_code
 from qumo_agent.core.endpoint import ModelEndpoint
 from qumo_agent.core.messages import ChatRequest, ChatResponse, parse_chat_response, is_context_overflow

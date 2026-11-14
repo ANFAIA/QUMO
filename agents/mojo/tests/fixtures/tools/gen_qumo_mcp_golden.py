@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parents[3]
+REPO = HERE.parents[4]  # the repository root (tools, fixtures, tests, mojo, agents)
 sys.path.insert(0, str(REPO / "agents"))
 
 from langchain_core.utils.function_calling import convert_to_openai_tool  # noqa: E402

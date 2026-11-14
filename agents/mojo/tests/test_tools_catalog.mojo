@@ -7,7 +7,7 @@ slots come first; the harness adds them, so the test prepends them."""
 
 from std.testing import assert_equal, assert_true, assert_false
 
-from qumo.ai.json import parse_json
+from qumo.core.json import parse_json
 from qumo_agent.core.toolspec import ToolSpec, TOOL_MCP, TOOL_ALPHAXIV, TOOL_GENERATED, TOOL_TOOLSMITH, TOOL_LOCAL
 from qumo_agent.tools.catalog import file_routes_for, local_tool_names, user_tool_specs
 from qumo_agent.tools.config import Registry, LocalToolsCatalog
@@ -74,7 +74,8 @@ def test_alphaxiv_and_generated() raises:
     var rw = names_of(user_tool_specs(reg.get("research-watch"), cat, mcp, ax, List[ToolSpec](), List[ToolSpec]()))
     assert_equal(joined(rw), "ls,read_file,write_file,edit_file,delete,glob,grep,task,search_arxiv,sdk_releases,github_release_notes,module_watchlist,fetch_page,list_files,search_code,write_report,discover_papers,get_paper_content")
     var auto = names_of(user_tool_specs(reg.get("autoresearch"), cat, mcp, ax, List[ToolSpec](), gen))
-    assert_equal(joined(auto), "ls,read_file,write_file,edit_file,delete,glob,grep,task,search_arxiv,sdk_releases,github_release_notes,module_watchlist,fetch_page,list_files,search_code,run_check,write_report,open_sandbox,qumo_run_qasm,qumo_describe,discover_papers,get_paper_content,gen_alpha,gen_mid,gen_zeta")
+    # autoresearch has no research group since the security pass: no web tools, no alphaXiv.
+    assert_equal(joined(auto), "ls,read_file,write_file,edit_file,delete,glob,grep,task,list_files,search_code,run_check,write_report,open_sandbox,qumo_run_qasm,qumo_describe,gen_alpha,gen_mid,gen_zeta")
     # no research group: no alphaXiv even when loaded
     var op = names_of(user_tool_specs(reg.get("qumo-operator"), cat, mcp, ax, List[ToolSpec](), gen))
     assert_equal(joined(op), "ls,read_file,write_file,edit_file,delete,glob,grep,task,write_report,qumo_run_qasm,qumo_describe,gen_alpha,gen_mid,gen_zeta")

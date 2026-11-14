@@ -5,7 +5,7 @@ stops (DESIGN.md 6.3 to 6.8). Offline; builds a few small binaries."""
 from std.os import getenv
 from std.testing import assert_equal, assert_true, assert_false
 
-from qumo.ai.json import JsonWriter, parse_json
+from qumo.core.json import JsonWriter, parse_json
 
 from qumo_agent.native.fs import (
     exists, file_mode, is_file, join_path, make_dirs, make_temp_dir, read_text_lossy, realpath_strict,
@@ -106,7 +106,7 @@ def test_reference_flow(ts: Toolsmith, root: String, sandbox: String) raises:
 
     # Hermetic: broken copies of the SDK in the sandbox are not part of the build.
     make_dirs(join_path(sandbox, "qumo/ai"))
-    write_text(join_path(sandbox, "qumo/ai/json.mojo"), "this is not mojo\n")
+    write_text(join_path(sandbox, "qumo/core/json.mojo"), "this is not mojo\n")
     make_dirs(join_path(sandbox, "agents/mojo/qumo_agent"))
     write_text(join_path(sandbox, "agents/mojo/qumo_agent/tool_sdk.mojo"), "this is not mojo either\n")
 

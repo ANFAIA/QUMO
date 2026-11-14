@@ -17,7 +17,7 @@ def _tool_template_text() -> String:
     t += "temporary directory, and a human reviews it before any agent can call it.\n"
     t += "\"\"\"\n"
     t += "\n"
-    t += "from qumo.ai.json import JsonValue\n"
+    t += "from qumo.core.json import JsonValue\n"
     t += "from qumo_agent.tool_sdk import ToolInfo, ToolOutput, ok, fail, ok_json, arg_string, serve_tool\n"
     t += "\n"
     t += "comptime NAME = \"@@NAME@@\"\n"

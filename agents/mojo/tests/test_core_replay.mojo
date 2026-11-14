@@ -6,7 +6,7 @@ from std.os import setenv, unsetenv, listdir, remove, rmdir
 from std.os.path import exists
 from std.tempfile import mkdtemp
 
-from qumo.ai.json import parse_json
+from qumo.core.json import parse_json
 from qumo_agent.core.messages import ChatRequest, Message, ToolSpec, user_message
 from qumo_agent.core.replay import ReplayModel
 from qumo_agent.core.stats import RunStats, zero_stats

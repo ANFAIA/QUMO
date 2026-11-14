@@ -8,7 +8,7 @@ extra_tokens_per_message 3.0 and count_name True, as SummarizationMiddleware cal
 
 from std.math import ceil
 
-from qumo.ai.json import JsonValue, parse_json
+from qumo.core.json import JsonValue, parse_json
 
 from qumo_agent.core.messages import Message, ToolCall, ROLE_ASSISTANT, ROLE_TOOL, system_message
 from qumo_agent.core.toolspec import ToolSpec
