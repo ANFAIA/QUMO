@@ -87,7 +87,7 @@ Full install, update, GPU and hardware steps: [docs/GETTING_STARTED.md](docs/GET
 | `qumo.ai`, `cli/` | JSON everywhere, stable `QM-Exxx` error codes with hints, MCP server, CLI |
 | `qumo.net`, `qumo.bench`, `qumo.testing` | Support code: native HTTP/TLS client used by the hardware clients, benchmark circuit generators, `CheckLog` for machine-checked examples |
 | `plugins/hardware` | Run compiled circuits on IBM Quantum and Quantinuum (dry-run by default) |
-| `agents/` | AI agents that keep QUMO current. Today a Python package (deepagents); a native Mojo harness is proposed in pull request #7 and not merged |
+| `agents/` | AI agents that keep QUMO current: a Python package (`agents/qumo_agents`, on deepagents) and a native Mojo harness (`agents/mojo/`, from pull request #7) |
 
 ### What you need and what you can ignore
 
@@ -127,7 +127,7 @@ The full map is [docs/README.md](docs/README.md). Common entry points:
 
 ## Status
 
-Research prototype (v0.1.0). APIs are small and documented but may change, and Mojo itself moves quickly. In progress: measuring the GPU engine on NVIDIA/AMD, parity with Qiskit on the densest 100+ qubit circuits, and real-hardware submission (the plugins are tested offline only).
+Research prototype (version string 0.1.0, no tagged release yet). APIs are small and documented but may change, and Mojo itself moves quickly. In progress: measuring the GPU engine on NVIDIA/AMD, parity with Qiskit on the densest 100+ qubit circuits, and real-hardware submission (the plugins are tested offline only).
 
 ## Citing and contributing
 
