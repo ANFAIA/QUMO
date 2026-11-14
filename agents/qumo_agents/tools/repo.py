@@ -116,6 +116,7 @@ ALLOWED = [
     ("git status of the sandbox", ["git", "status", "--short"]),
 ]
 ARG_OK = re.compile(r"^[\w./:=,@+-]+$")
+GIT_FLAGS = frozenset({"--stat", "--name-only", "--name-status", "--cached", "--staged", "--"})
 # Checks run code the agent may have written, so they do not inherit credentials.
 SECRET_ENV = re.compile(r"TOKEN|SECRET|KEY|PASSWORD|CREDENTIAL|AUTH|COOKIE|SESSION", re.I)
 
@@ -134,6 +135,14 @@ def run_check(argv: list[str], timeout_s: int = 600) -> str:
         return "refused: not on the allow-list. Allowed: " + "; ".join(" ".join(p) for _, p in ALLOWED)
     if any(not ARG_OK.match(a) or ".." in a for a in argv):
         return "refused: arguments may only hold path-like characters"
+    # Paths stay inside the working tree: no absolute path, bare or as an option value.
+    if any(a.startswith("/") or "=/" in a for a in argv):
+        return "refused: absolute paths are not allowed"
+    if argv[0] == "git":
+        # `git diff` reads any two files with --no-index and writes one with --output.
+        extra = argv[2:] if argv[1] == "diff" else argv[3:]
+        if any(a.startswith("-") and a not in GIT_FLAGS for a in extra):
+            return "refused: git options allowed here: " + " ".join(sorted(GIT_FLAGS))
     try:
         r = subprocess.run(argv, cwd=_root(), env=_check_env(), capture_output=True, text=True,
                            timeout=max(10, min(timeout_s, 1800)))

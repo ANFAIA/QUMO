@@ -75,6 +75,25 @@ def test_checks_get_no_secrets(monkeypatch):
     assert env["PATH"] == "/usr/bin"
 
 
+@pytest.mark.parametrize("argv", [
+    ["git", "diff", "--no-index", "/etc/hosts", "/dev/null"],      # read any file
+    ["git", "diff", "/etc/hosts", "/dev/null"],                    # implicit --no-index
+    ["git", "diff", "--output=/tmp/x", "HEAD"],                    # write any file
+    ["git", "diff", "--output=x", "HEAD"],                         # write inside the tree
+    ["git", "diff", "--ext-diff"],
+    ["git", "status", "--short", "--output=/tmp/x"],
+    [".venv/bin/mojo", "run", "-I", ".", "/tmp/x.mojo"],           # code outside the tree
+    ["build/qumo", "run", "/etc/hosts"],
+])
+def test_run_check_stays_in_the_tree(argv):
+    assert repo.run_check.invoke({"argv": argv}).startswith("refused")
+
+
+def test_run_check_plain_git_still_works():
+    assert repo.run_check.invoke({"argv": ["git", "diff", "--stat"]}).startswith("exit 0")
+    assert repo.run_check.invoke({"argv": ["git", "diff", "--name-only", "HEAD", "--", "agents"]}).startswith("exit 0")
+
+
 def test_autoresearch_cannot_fetch_and_run():
     assert "research" not in registry.get("autoresearch").tool_groups
     for spec in registry.AGENTS.values():

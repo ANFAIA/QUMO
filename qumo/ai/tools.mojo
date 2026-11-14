@@ -389,9 +389,9 @@ def _check_program_size(p: Program, max_qubits: Int) raises:
 
 
 def _run_program(p: Program, args: JsonValue, var warnings: List[String], t0: Int, t1: Int) raises -> ToolResult:
-    var shots = arg_int(args, "shots", 1024, 1, 1000000)
+    var shots = arg_int(args, "shots", 1024, 1, 10000000)
     var seed = arg_int(args, "seed", 1234, 0, 9223372036854775807)
-    _check_program_size(p, arg_int(args, "max_qubits", 28, 1, 30))
+    _check_program_size(p, arg_int(args, "max_qubits", 28, 1, 40))
     var r = sample_program(p, shots, UInt64(seed), arg_program_params(args, p), arg_max_iterations(args))
     var t2 = perf_counter_ns()
     var w = JsonWriter()
@@ -430,9 +430,9 @@ def _run_qasm(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
     if not flat:
         return _run_program(p, args, warnings^, t0, t1)
     var c = flat.take()
-    var shots = arg_int(args, "shots", 1024, 1, 1000000)
+    var shots = arg_int(args, "shots", 1024, 1, 10000000)
     var seed = arg_int(args, "seed", 1234, 0, 9223372036854775807)
-    var max_q = arg_int(args, "max_qubits", 28, 1, 30)
+    var max_q = arg_int(args, "max_qubits", 28, 1, 40)
     if choose_method(c) != "stabilizer":  # Clifford circuits scale polynomially
         _check_qubits(c, max_q)
     var params = arg_params(args, c)
@@ -472,7 +472,7 @@ def _run_qasm(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
 def _statevector(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
     var warnings = List[String]()
     var c = arg_circuit(args, warnings)
-    var max_q = arg_int(args, "max_qubits", 24, 1, 30)
+    var max_q = arg_int(args, "max_qubits", 24, 1, 40)
     _check_qubits(c, max_q)
     var max_amp = arg_int(args, "max_amplitudes", 64, 1, 1 << 20)
     var threshold = args.get_float("threshold", 1e-12)
@@ -518,7 +518,7 @@ def _statevector(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
 def _expectation(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
     var warnings = List[String]()
     var c = arg_circuit(args, warnings)
-    var max_q = arg_int(args, "max_qubits", 28, 1, 30)
+    var max_q = arg_int(args, "max_qubits", 28, 1, 40)
     _check_qubits(c, max_q)
     var params = arg_params(args, c)
     var ob = arg_required(args, "observable", "Pauli sum string or array of strings")
@@ -925,7 +925,7 @@ def register_core_tools(mut reg: ToolRegistry):
     reg.add(
         "qumo_run_qasm", "Run circuit (sample)",
         "Simulate an OpenQASM 2/3 circuit or program and return measurement counts (Qiskit-style bitstrings, leftmost = highest bit). Deterministic for a given seed. Circuits without measurements are measured on all qubits. Supports mid-circuit measurement, reset, feed-forward and '#pragma qumo' noise (per-shot trajectories), and while, break, continue and classical variables, shot by shot: those results add 'iterations' (back-edges per shot) and 'outputs' (declared output variables).",
-        "{\"type\":\"object\",\"properties\":{" + _QASM_PROP + "," + _CIRCUIT_PROP + "," + _PROGRAM_PROP + ",\"shots\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":1000000,\"default\":1024},\"seed\":{\"type\":\"integer\",\"minimum\":0,\"default\":1234}," + _PARAMS_PROP + ",\"max_qubits\":{\"type\":\"integer\",\"default\":28,\"description\":\"Safety limit for dense simulation (16*2^n bytes)\"},\"max_iterations\":{\"type\":\"integer\",\"minimum\":1,\"default\":65536,\"description\":\"Loop back-edges allowed per shot; past it the run stops with QM-E480\"}},\"additionalProperties\":false}",
+        "{\"type\":\"object\",\"properties\":{" + _QASM_PROP + "," + _CIRCUIT_PROP + "," + _PROGRAM_PROP + ",\"shots\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":10000000,\"default\":1024},\"seed\":{\"type\":\"integer\",\"minimum\":0,\"default\":1234}," + _PARAMS_PROP + ",\"max_qubits\":{\"type\":\"integer\",\"default\":28,\"description\":\"Safety limit for dense simulation (16*2^n bytes)\"},\"max_iterations\":{\"type\":\"integer\",\"minimum\":1,\"default\":65536,\"description\":\"Loop back-edges allowed per shot; past it the run stops with QM-E480\"}},\"additionalProperties\":false}",
         _run_qasm,
     )
     reg.add(
