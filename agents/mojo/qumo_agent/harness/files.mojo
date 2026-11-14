@@ -15,7 +15,7 @@ tool per name, routed by path, accepting both argument vocabularies (deepagents'
 | relative, V0 agents | virtual, normalized by validate_vfs_path |
 """
 
-from qumo.ai.json import JsonValue, JsonWriter
+from qumo.core.json import JsonValue, JsonWriter
 
 from qumo_agent.core.toolspec import ToolSpec, ToolOutcome, TOOL_HARNESS, error_outcome
 from qumo_agent.harness.env import (

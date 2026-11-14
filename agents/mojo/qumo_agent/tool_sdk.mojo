@@ -5,7 +5,7 @@ A generated tool is one program with one tool. It describes itself with a
 `serve_tool(info, handle)` from `main`:
 
 ```mojo
-from qumo.ai.json import JsonValue
+from qumo.core.json import JsonValue
 from qumo_agent.tool_sdk import ToolInfo, ToolOutput, ok, fail, arg_string, serve_tool
 
 def handle(args: JsonValue) raises -> ToolOutput:
@@ -34,7 +34,7 @@ def main() raises:
   with `\\n... [output truncated]`.
 
 The SDK never reads the environment and never writes files; it exits at the end of
-standard input. It imports only `qumo.ai.json` and `qumo.ai.mcp`, so the binary
+standard input. It imports only `qumo.core.json` and `qumo.ai.mcp`, so the binary
 depends on nothing else of the harness (`sdk_sha256` in the manifest hashes this
 file together with those two).
 """
@@ -43,7 +43,7 @@ from std.ffi import c_int
 from std.io.file_descriptor import RawFileDescriptor
 from std.memory import ArcPointer
 
-from qumo.ai.json import JsonValue, JsonWriter, JsonArena, parse_json
+from qumo.core.json import JsonValue, JsonWriter, JsonArena, parse_json
 from qumo.ai.mcp import rpc_result, rpc_error
 
 comptime SDK_FALLBACK_PROTOCOL = "2025-06-18"

@@ -23,7 +23,7 @@ Names are `gen_` followed by 2 to 40 characters from `a-z`, `0-9` and `_`.
 A tool is built on `qumo_agent/tool_sdk.mojo`:
 
 ```mojo
-from qumo.ai.json import JsonValue
+from qumo.core.json import JsonValue
 from qumo_agent.tool_sdk import ToolInfo, ToolOutput, ok, fail, ok_json, arg_string, serve_tool
 
 def handle(args: JsonValue) raises -> ToolOutput:
@@ -38,7 +38,7 @@ def main() raises:
 
 - `ok(text)` is a result, `fail(text)` an error result for bad input, and
   `ok_json(object_json)` a result whose text and `structuredContent` are the same JSON
-  object (build it with `JsonWriter` from `qumo.ai.json`).
+  object (build it with `JsonWriter` from `qumo.core.json`).
 - `arg_string`, `arg_int`, `arg_float` and `arg_bool` return the default for a
   missing or null argument and raise for a value of the wrong type. An exception
   raised by `handle` becomes the result `error: <message>`, so check arguments and
@@ -46,7 +46,7 @@ def main() raises:
 - `SCHEMA` is the JSON Schema of the arguments: an object with `properties`,
   `required` and `"additionalProperties": false`.
 - Results are cut at 1,000,000 bytes; keep them well under 100 KB.
-- Only `std`, `qumo.ai.json` and `qumo_agent.tool_sdk` are available. Put everything
+- Only `std`, `qumo.core.json` and `qumo_agent.tool_sdk` are available. Put everything
   in `tool.mojo`: it is compiled alone, against the main checkout's `qumo/` and
   `qumo_agent/`, so other files you change in the sandbox are not part of the build.
 - The dialect is Mojo 1.2 (`docs/MOJO_GUIDE.md`). One trap found while writing the

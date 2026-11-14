@@ -8,7 +8,7 @@ Tool-argument validation as LangGraph's ToolNode reports pydantic v2 (lax mode) 
 ignored (and dropped from the coerced arguments), except for `task`.
 """
 
-from qumo.ai.json import JsonValue, JsonKind, JsonWriter, parse_json
+from qumo.core.json import JsonValue, JsonKind, JsonWriter, parse_json
 
 from qumo_agent.util.pyfmt import py_str_repr, py_repr_json
 from qumo_agent.harness._fmt import fmt, fmt1

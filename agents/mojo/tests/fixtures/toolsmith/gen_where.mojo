@@ -8,7 +8,7 @@ tests can check the schema transform and `count_json`.
 
 from std.sys import argv
 
-from qumo.ai.json import JsonValue
+from qumo.core.json import JsonValue
 from qumo_agent.tool_sdk import ToolInfo, ToolOutput, ok, fail, arg_string, arg_int, serve_tool
 
 comptime NAME = "gen_where"

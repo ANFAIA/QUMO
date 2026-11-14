@@ -12,7 +12,7 @@ transactions of one turn in call order with the reducer "right side wins, None d
 
 from std.collections import Dict, Optional
 
-from qumo.ai.json import JsonValue, JsonWriter, parse_json
+from qumo.core.json import JsonValue, JsonWriter, parse_json
 
 from qumo_agent.native.fs import normpath
 from qumo_agent.harness._fmt import fmt1, fmt2

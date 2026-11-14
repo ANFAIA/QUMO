@@ -17,7 +17,7 @@ Commands: list, run, serve, call, tools, doctor, reports, help, and the internal
 from std.os import getenv, stat
 from std.sys import stderr
 
-from qumo.ai.json import JsonWriter, parse_json
+from qumo.core.json import JsonWriter, parse_json
 from qumo.ai.mcp import LineReader
 
 from qumo_agent.app.doctor import run_doctor

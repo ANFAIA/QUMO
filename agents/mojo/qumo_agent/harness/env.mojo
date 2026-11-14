@@ -9,7 +9,7 @@ fake (`harness/testing.mojo`).
 `qumo-agent subagent` child protocol (Appendix B.7): one JSON line each way.
 """
 
-from qumo.ai.json import JsonValue, JsonWriter, parse_json
+from qumo.core.json import JsonValue, JsonWriter, parse_json
 
 from qumo_agent.core.messages import ChatRequest, ChatResponse
 from qumo_agent.core.stats import RunStats, zero_stats

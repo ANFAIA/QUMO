@@ -4,7 +4,7 @@
 from std.os import getenv, setenv, unsetenv
 from std.testing import assert_equal, assert_true, assert_false
 
-from qumo.ai.json import parse_json
+from qumo.core.json import parse_json
 
 from qumo_agent.native.fs import (
     exists, join_path, make_dirs, make_temp_dir, read_text_lossy, realpath_strict, remove_tree,

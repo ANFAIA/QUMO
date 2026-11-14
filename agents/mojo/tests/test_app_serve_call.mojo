@@ -4,7 +4,7 @@
 
 from std.testing import assert_equal, assert_true, assert_false
 
-from qumo.ai.json import parse_json
+from qumo.core.json import parse_json
 
 from qumo_agent.app.testing import (
     app_binary, app_env, run_app, replay_line, write_replay, REPLAY_BELL, BELL_ANSWER,

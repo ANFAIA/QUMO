@@ -6,7 +6,7 @@ binary is built on demand from agents/mojo/tests/fixtures/app/main_app.mojo."""
 
 from std.testing import assert_equal, assert_true, assert_false
 
-from qumo.ai.json import JsonValue, parse_json
+from qumo.core.json import JsonValue, parse_json
 
 from qumo_agent.app.testing import (
     app_binary, app_env, run_app, REPLAY_BELL, BELL_ANSWER,

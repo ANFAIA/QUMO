@@ -1,6 +1,6 @@
-"""Lenient JSON and small JSON edits on top of qumo.ai.json.
+"""Lenient JSON and small JSON edits on top of qumo.core.json.
 
-`qumo/ai/json.mojo` belongs to QUMO core and is not changed; Python's
+`qumo/core/json.mojo` belongs to QUMO core and is not changed; Python's
 `json.loads(text, strict=False)` (which models' tool-call arguments go through)
 also accepts raw control characters inside strings, so leniency is a pre-pass
 that escapes them (DESIGN.md 2.2.2).
@@ -11,7 +11,7 @@ field of one tool call.
 
 from std.memory import ArcPointer
 
-from qumo.ai.json import JsonValue, JsonKind, JsonWriter, JsonArena, JsonNode, parse_json
+from qumo.core.json import JsonValue, JsonKind, JsonWriter, JsonArena, JsonNode, parse_json
 
 comptime _HEX = "0123456789abcdef"
 

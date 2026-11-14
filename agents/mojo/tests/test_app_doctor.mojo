@@ -7,7 +7,7 @@ from std.os import stat
 from std.os.path import exists
 from std.testing import assert_equal, assert_true, assert_false
 
-from qumo.ai.json import JsonValue, parse_json
+from qumo.core.json import JsonValue, parse_json
 
 from qumo_agent.app.testing import app_env, run_app, REPLAY_BELL
 from qumo_agent.native.clock import monotonic_ms, sleep_ms

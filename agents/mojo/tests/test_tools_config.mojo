@@ -9,7 +9,7 @@ printed by agents/.venv Python (qumo_agents.modules.get, export.tools_json)."""
 from std.os import getenv, setenv, unsetenv
 from std.testing import assert_equal, assert_true, assert_false
 
-from qumo.ai.json import parse_json
+from qumo.core.json import parse_json
 from qumo_agent.tools.config import Registry, Modules, LocalToolsCatalog, find_root
 from qumo_agent.tools.qumo_mcp import ToolGuide
 from qumo_agent.util.pyfmt import py_json_dumps

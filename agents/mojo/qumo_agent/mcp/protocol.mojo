@@ -6,7 +6,7 @@ The client side follows the Python SDK (mcp 1.30.0) as QUMO's agents use it:
 four supported versions, and `tools/list` is paged with `nextCursor`.
 """
 
-from qumo.ai.json import JsonValue, JsonWriter, json_quote
+from qumo.core.json import JsonValue, JsonWriter, json_quote
 
 from qumo_agent.core.errors import E_MCP, qa_error
 

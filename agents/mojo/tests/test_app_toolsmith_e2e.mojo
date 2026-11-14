@@ -18,7 +18,7 @@ test says so and passes nothing else (the toolsmith refuses to run unconfined co
 
 from std.testing import assert_equal, assert_true, assert_false
 
-from qumo.ai.json import JsonValue, parse_json
+from qumo.core.json import JsonValue, parse_json
 
 from qumo_agent.app.testing import (
     app_binary, app_env, run_app, replay_line, tool_call_json, write_replay,

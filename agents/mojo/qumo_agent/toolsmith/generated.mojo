@@ -29,7 +29,7 @@ oversized messages, transport errors and refusals become `error: ...` outcomes.
 
 from std.os import getenv
 
-from qumo.ai.json import JsonWriter, parse_json
+from qumo.core.json import JsonWriter, parse_json
 
 from qumo_agent.core.errors import E_TOOL_REFUSED
 from qumo_agent.core.toolspec import ToolSpec, ToolOutcome, TOOL_GENERATED, error_outcome

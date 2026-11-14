@@ -17,7 +17,7 @@ confine_trampoline.mojo); it is built on demand into build/test-fixtures/."""
 from std.os import getenv, setenv, unsetenv, stat
 from std.testing import assert_equal, assert_true, assert_false
 
-from qumo.ai.json import JsonValue, parse_json
+from qumo.core.json import JsonValue, parse_json
 from qumo_agent.native.clock import local_date, monotonic_ms
 from qumo_agent.native.fs import (
     exists,

@@ -8,7 +8,7 @@ for bad input, and return a small deterministic JSON object.
 
 from std.math import log
 
-from qumo.ai.json import JsonValue, JsonWriter, parse_json
+from qumo.core.json import JsonValue, JsonWriter, parse_json
 from qumo_agent.tool_sdk import ToolInfo, ToolOutput, fail, ok_json, arg_string, serve_tool
 
 comptime NAME = "gen_bitstring_stats"

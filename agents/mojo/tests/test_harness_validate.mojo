@@ -3,7 +3,7 @@
 
 from std.testing import assert_equal, assert_true
 
-from qumo.ai.json import parse_json
+from qumo.core.json import parse_json
 
 from qumo_agent.harness.validate import validate_args, task_extra_key_errors, invocation_error_text
 

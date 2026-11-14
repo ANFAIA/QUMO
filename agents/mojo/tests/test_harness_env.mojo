@@ -2,7 +2,7 @@
 
 from std.testing import assert_equal, assert_true, assert_false
 
-from qumo.ai.json import parse_json
+from qumo.core.json import parse_json
 
 from qumo_agent.core.stats import zero_stats
 from qumo_agent.harness.env import (

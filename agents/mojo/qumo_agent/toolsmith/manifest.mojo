@@ -14,7 +14,7 @@ the stored files. A failing entry is reported with
 from std.os import getenv
 from std.sys import CompilationTarget
 
-from qumo.ai.json import JsonValue, JsonWriter, parse_json
+from qumo.core.json import JsonValue, JsonWriter, parse_json
 
 from qumo_agent.core.errors import E_TOOL_REFUSED
 from qumo_agent.native.fs import exists, join_path, make_dirs, read_text_lossy, realpath_strict, write_text_atomic
@@ -277,7 +277,7 @@ def build_record_from_json(text: String) raises -> BuildRecord:
 # SDK identity, store location, platform
 # ---------------------------------------------------------------------------
 def sdk_files() -> List[String]:
-    return ["agents/mojo/qumo_agent/tool_sdk.mojo", "qumo/ai/json.mojo", "qumo/ai/mcp.mojo"]
+    return ["agents/mojo/qumo_agent/tool_sdk.mojo", "qumo/core/json.mojo", "qumo/ai/mcp.mojo"]
 
 
 def sdk_sha256(repo_root: String) raises -> String:

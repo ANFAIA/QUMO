@@ -11,7 +11,7 @@ the same shape for `isError` (`status="error"` is not sent). `structuredContent`
 an artifact the model never sees, so it is dropped here.
 """
 
-from qumo.ai.json import JsonValue
+from qumo.core.json import JsonValue
 
 from qumo_agent.core.toolspec import ToolOutcome, parts_outcome
 from qumo_agent.mcp.protocol import McpCallResult, block_text

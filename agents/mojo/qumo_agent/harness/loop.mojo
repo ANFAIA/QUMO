@@ -18,7 +18,7 @@ from std.math import ceil
 from std.random import random_float64
 from std.time import perf_counter_ns, sleep
 
-from qumo.ai.json import JsonValue, parse_json
+from qumo.core.json import JsonValue, parse_json
 
 from qumo_agent.core.errors import error_code, error_http_status
 from qumo_agent.core.messages import (

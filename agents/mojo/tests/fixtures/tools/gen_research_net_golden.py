@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parents[3]
+REPO = HERE.parents[4]  # the repository root (tools, fixtures, tests, mojo, agents)
 sys.path.insert(0, str(REPO / "agents"))
 
 from qumo_agents import modules  # noqa: E402
@@ -92,7 +92,7 @@ ARXIV_URL_CASES = [
 
 def run(fn):
     seen = []
-    research._get = lambda url, headers=None: (seen.append([url, headers]), fn())[1]
+    research._get = lambda url, headers=None, hosts=None: (seen.append([url, headers]), fn())[1]
     return seen
 
 

@@ -61,7 +61,7 @@ def test_research_watch() raises:
 
 def test_code_review() raises:
     _ = _run("code-review", ["run", "code-review", "-q",
-                             "Review qumo/ai/json.mojo for performance and security. Use run_check and write a report."])
+                             "Review qumo/core/json.mojo for performance and security. Use run_check and write a report."])
 
 
 def main() raises:

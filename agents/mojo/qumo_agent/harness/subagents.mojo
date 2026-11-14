@@ -5,7 +5,7 @@ The `task` tool and subagent isolation (DESIGN.md 2.7.10, 1.4 "Subagent isolatio
 [sub §3], [fs §8]).
 """
 
-from qumo.ai.json import JsonWriter
+from qumo.core.json import JsonWriter
 
 from qumo_agent.core.messages import Message, ROLE_ASSISTANT
 from qumo_agent.core.toolspec import ToolSpec, TOOL_HARNESS

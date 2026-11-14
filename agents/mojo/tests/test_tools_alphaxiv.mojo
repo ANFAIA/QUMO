@@ -17,7 +17,7 @@ from std.os.path import exists
 from std.memory import ArcPointer
 from std.testing import assert_equal, assert_true, assert_false
 
-from qumo.ai.json import JsonValue, JsonWriter, parse_json, json_quote
+from qumo.core.json import JsonValue, JsonWriter, parse_json, json_quote
 from qumo_agent.core.toolspec import TOOL_ALPHAXIV
 from qumo_agent.native.libc import CStr, c_rename
 from qumo_agent.native.spawn import (
@@ -51,7 +51,7 @@ def _mtime(path: String) raises -> Int:
 
 def _newest_source() raises -> Int:
     var newest = _mtime(_FIXTURE_SRC)
-    newest = max(newest, _mtime("qumo/ai/json.mojo"))
+    newest = max(newest, _mtime("qumo/core/json.mojo"))
     var dirs: List[String] = ["agents/mojo/qumo_agent/net", "agents/mojo/qumo_agent/native"]
     for d in dirs:
         for name in list_dir(d):

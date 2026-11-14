@@ -168,7 +168,7 @@
   },
   {
    "name": "qumo_validate_qasm",
-   "description": "Use when you wrote or received OpenQASM and want parse errors and lint before running anything.\nInstead or first: always run it first on hand-written or user-supplied QASM.\nWatch out: it does not simulate; errors carry QM-E5xx codes with line and column.\n\nParse and lint OpenQASM 2/3 without simulating, including programs with while and classical variables. Returns valid=true/false, structured errors (stable QM-Exxx code, message, line, col, snippet, hint) and lint warnings (QM-Wxxx), plus a summary when valid.",
+   "description": "Use when you wrote or received OpenQASM and want parse errors and lint before running anything.\nInstead or first: always run it first on hand-written or user-supplied QASM.\nWatch out: it does not simulate; errors carry QM-E5xx codes with line and column.\n\nParse and lint OpenQASM 2/3 without simulating, including programs with while and classical variables. Returns valid=true/false, structured errors (stable QM-Exxx code, message, line, col, snippet, hint) and lint warnings (QM-Wxxx), plus a summary when valid. Every independent parse error is listed, not only the first: a failing gate call, measurement or assignment is skipped and parsing goes on; 'errors_complete' is false when collection had to stop (an error in a declaration or a block header, which later lines depend on), so more errors may follow the last one.",
    "parameters": {
     "type": "object",
     "properties": {
@@ -597,7 +597,7 @@
   },
   {
    "name": "qumo_emulate",
-   "description": "Use when you want counts under a target device's noise model (T1/T2, gate and readout errors).\nInstead or first: compile first with qumo_transpile or set compile=true.\n\nSample a circuit under the noise of a target (per-qubit T1/T2, 1q and readout errors, per-edge 2q errors, gate durations) without any real device. The circuit must already fit the target (set compile=true to transpile first; QM-E615 otherwise). Takes 'target' or 'edges'+'basis' as qumo_transpile, plus 'calibration' {error_1q, readout, t1_us, t2_us, edge_errors: [[a, b, e], ...]}. Returns counts, the method that ran and the estimated fidelity.",
+   "description": "Use when you want counts under a target device's noise model (T1/T2, gate and readout errors).\nInstead or first: compile first with qumo_transpile or set compile=true.\n\nSample a circuit under the noise of a target (per-qubit T1/T2, 1q and readout errors, per-edge 2q errors, gate durations) without any real device. The circuit must already fit the target (set compile=true to transpile first; QM-E615 otherwise). Takes 'target' or 'edges'+'basis' as qumo_transpile, plus 'calibration' {error_1q, readout, t1_us, t2_us, edge_errors: [[a, b, e], ...]}. Returns counts, the method that ran, shots, seed, whether it compiled first ('compiled') and the estimated fidelity.",
    "parameters": {
     "type": "object",
     "properties": {

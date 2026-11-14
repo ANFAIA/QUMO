@@ -13,7 +13,7 @@ from std.os import getenv
 from std.sys import CompilationTarget
 from std.time import sleep
 
-from qumo.ai.json import JsonValue
+from qumo.core.json import JsonValue
 from qumo_agent.tool_sdk import ToolInfo, ToolOutput, ok, fail, arg_string, arg_int, serve_tool
 
 comptime NAME = "gen_probe"

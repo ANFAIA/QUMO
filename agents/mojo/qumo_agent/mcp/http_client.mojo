@@ -38,7 +38,7 @@ request (each request has its own connection).
 
 from std.os import getenv
 
-from qumo.ai.json import JsonValue, parse_json
+from qumo.core.json import JsonValue, parse_json
 
 from qumo_agent.core.errors import E_MCP, E_CONFIG, E_NETWORK, qa_error, error_code
 from qumo_agent.net.url import Url, parse_url

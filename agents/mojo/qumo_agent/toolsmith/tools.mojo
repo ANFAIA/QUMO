@@ -23,7 +23,7 @@ The tools return text for the model and never raise: refusals start with
 
 from std.os import getenv
 
-from qumo.ai.json import JsonValue, JsonWriter, parse_json
+from qumo.core.json import JsonValue, JsonWriter, parse_json
 
 from qumo_agent.core.errors import E_TOOL_REFUSED
 from qumo_agent.core.toolspec import ToolSpec, TOOL_TOOLSMITH

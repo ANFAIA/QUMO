@@ -15,7 +15,7 @@ Known, intended differences that the comparison normalizes:
 
 from std.testing import assert_equal, assert_true
 
-from qumo.ai.json import JsonValue, JsonWriter, parse_json
+from qumo.core.json import JsonValue, JsonWriter, parse_json
 
 from qumo_agent.harness.env import FileRoutes, AgentDef
 from qumo_agent.harness.loop import Agent

@@ -10,7 +10,7 @@ from the repository root.
 from std.os import stat
 from std.os.path import exists
 
-from qumo.ai.json import JsonWriter
+from qumo.core.json import JsonWriter
 
 from qumo_agent.native.fs import make_dirs, walk, write_text
 from qumo_agent.native.libc import CStr, c_rename

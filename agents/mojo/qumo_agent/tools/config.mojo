@@ -16,7 +16,7 @@ agents/mojo/prompts/<name>.role.md.
 from std.os import getenv, listdir
 from std.os.path import exists, dirname, isdir
 
-from qumo.ai.json import JsonValue, JsonWriter, parse_json
+from qumo.core.json import JsonValue, JsonWriter, parse_json
 
 from qumo_agent.core.endpoint import ModelEndpoint
 from qumo_agent.core.errors import E_CONFIG, qa_error

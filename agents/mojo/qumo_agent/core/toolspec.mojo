@@ -1,6 +1,6 @@
 """Tool descriptions as the model sees them, and tool results as the harness gets them."""
 
-from qumo.ai.json import JsonWriter
+from qumo.core.json import JsonWriter
 
 comptime TOOL_HARNESS = 0     # ls, read_file, write_file, edit_file, delete, glob, grep, task, execute
 comptime TOOL_LOCAL = 1       # QUMO Python-defined tools (validated like pydantic)

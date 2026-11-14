@@ -36,7 +36,7 @@ written); `sandbox_kind` probes it for real before anything relies on it.
 from std.os import getenv, listdir
 from std.os.path import isdir as _isdir
 
-from qumo.ai.json import JsonWriter, JsonKind, parse_json
+from qumo.core.json import JsonWriter, JsonKind, parse_json
 from qumo_agent.native.libc import (
     CStr,
     CStrArray,

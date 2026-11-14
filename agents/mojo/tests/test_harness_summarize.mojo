@@ -6,7 +6,7 @@ summary request's retry rules."""
 from std.os import makedirs
 from std.testing import assert_equal, assert_true, assert_false
 
-from qumo.ai.json import JsonValue, JsonWriter, parse_json
+from qumo.core.json import JsonValue, JsonWriter, parse_json
 
 from qumo_agent.core.messages import Message, ToolCall, ROLE_ASSISTANT, ROLE_TOOL, ROLE_USER, ROLE_SYSTEM, user_message
 from qumo_agent.core.toolspec import ToolSpec

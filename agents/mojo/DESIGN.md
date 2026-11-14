@@ -137,7 +137,7 @@ written for this port). Implementers copy from the appendices, not from the repo
  │ native/ libc FFI (the only external_call site), spawn, clock, fs, regex,       │
  │         fnmatch, random, OS confinement (sandbox-exec / Landlock)              │
  └───────────────────────────────────────────────────────────────────────────────┘
-   uses qumo/ai/json.mojo (JsonValue, JsonWriter, parse_json) and qumo/ai/mcp.mojo (rpc helpers)
+   uses qumo/core/json.mojo (JsonValue, JsonWriter, parse_json) and qumo/ai/mcp.mojo (rpc helpers)
 ```
 
 Child processes started by the harness, each with an explicit environment (D2b):
@@ -327,7 +327,7 @@ Request body of every model call [defaults §6, critic B3/B4/E]:
 
 Signatures are normative: names, argument conventions, return types and `raises` must match so
 components compile against each other without coordination. Private helpers are free.
-`JsonValue`, `JsonWriter`, `parse_json`, `json_quote` come from `qumo.ai.json`.
+`JsonValue`, `JsonWriter`, `parse_json`, `json_quote` come from `qumo.core.json`.
 Unless stated otherwise, functions that can fail raise `Error` whose text starts with a
 `QA-E` code (2.3.1).
 
@@ -724,7 +724,7 @@ def json_with(obj: JsonValue, key: String, value_json: String) raises -> JsonVal
 def json_without(obj: JsonValue, key: String) raises -> JsonValue
 ```
 
-`qumo/ai/json.mojo` is not changed (it belongs to QUMO core); leniency is a pre-pass.
+`qumo/core/json.mojo` is not changed (it belongs to QUMO core); leniency is a pre-pass.
 
 #### 2.2.3 `util/sha256.mojo`
 
@@ -2180,7 +2180,7 @@ used by `load_alphaxiv_tools_async` (no behaviour change).
 Signatures here; behaviour in section 6.
 
 ```mojo
-# qumo_agent/tool_sdk.mojo (imports only qumo.ai.json and qumo.ai.mcp)
+# qumo_agent/tool_sdk.mojo (imports only qumo.core.json and qumo.ai.mcp)
 @fieldwise_init
 struct ToolInfo(Copyable):
     var name: String
@@ -2255,7 +2255,7 @@ struct BuildRecord(Copyable):                               # <tool dir>/build/b
 
 def build_record_from_json(text: String) raises -> BuildRecord
 
-def sdk_files() -> List[String]                             # ["agents/mojo/qumo_agent/tool_sdk.mojo", "qumo/ai/json.mojo", "qumo/ai/mcp.mojo"]
+def sdk_files() -> List[String]                             # ["agents/mojo/qumo_agent/tool_sdk.mojo", "qumo/core/json.mojo", "qumo/ai/mcp.mojo"]
 def sdk_sha256(repo_root: String) raises -> String          # sha256_hex_text of the three file hashes (sdk_files() order, main checkout) joined with "\n"
 def tool_store_dir(root: String) -> String                  # $QUMO_AGENT_TOOLS_DIR or <root>/build/agent-tools
 def load_manifest(store: String) raises -> Manifest         # missing file gives an empty manifest; entries failing check_entry_shape are kept but flagged (verify_entry refuses them)
@@ -2964,7 +2964,7 @@ A generated tool is one program with one tool:
 
 ```mojo
 """gen_bitstring_stats: counts, entropy and parity of measured bitstrings."""
-from qumo.ai.json import JsonValue
+from qumo.core.json import JsonValue
 from qumo_agent.tool_sdk import ToolInfo, ToolOutput, ok, fail, ok_json, arg_string, serve_tool
 
 def handle(args: JsonValue) raises -> ToolOutput:
@@ -2988,7 +2988,7 @@ other methods `-32601`. Input lines above 4 MiB are refused with `-32600`; outpu
 1,000,000 bytes is cut at a code-point boundary with `\n... [output truncated]`. It never reads
 the environment, never writes outside the working directory, and exits at stdin EOF.
 `sdk_sha256` in every build record and manifest entry identifies the SDK the binary was compiled
-against: the hash of the main checkout's `tool_sdk.mojo`, `qumo/ai/json.mojo` and
+against: the hash of the main checkout's `tool_sdk.mojo`, `qumo/core/json.mojo` and
 `qumo/ai/mcp.mojo` (`sdk_files()`, 2.9).
 
 ### 6.3 Files
@@ -3029,7 +3029,7 @@ for agents`) and a valid name (`refused: tool names must match gen_[a-z0-9_]{2,4
 | Tool | Behaviour | Result text |
 |---|---|---|
 | `toolsmith_new(name, description, source="", cases="", overwrite=false)` | writes `tool.mojo` (template with the name and description when `source` is empty) and `cases.json` (template when empty; must parse as `qumo.tool_cases.v1` with `tool == name`); existing files need `overwrite` | `created agents/mojo/tools/<name>/tool.mojo and cases.json (<n> cases)` or `refused: ...` |
-| `toolsmith_build(name, timeout_s=600)` | `hermetic_build`: `make_temp_dir("qumo-build-")`; copy `<tool dir>/tool.mojo` alone into it; `rec.source_sha256` = hash of that copy; `rec.sdk_sha256 = sdk_sha256(repo_root)`; `run_capture(confine([<repo_root>/.venv/bin/mojo, build, -I, <repo_root>, -I, <repo_root>/agents/mojo, -o, <tmp>/<name>, <tmp>/tool.mojo], CONF_BUILD with write_dirs = [<tmp>, <repo_root>/build/agent-sandbox-cache]), minimal env + TMPDIR=<tmp>/ + MODULAR_CACHE_DIR, cwd = <tmp>, timeout 60..1800 s)`. Never `-I <sandbox>`: the include paths are the main checkout, which no agent can write, so editing the sandbox's `qumo/ai/json.mojo` or `tool_sdk.mojo` changes nothing in the binary. On success copies the binary to `<tool dir>/build/<name>` (`0755`), sets `rec.binary_sha256`, writes `build.json`; the temp dir is removed | `exit <rc>\n<tail 12,000 of stdout+stderr, temp paths shown as agents/mojo/tools/<name>/>`, plus on success `\nbinary: agents/mojo/tools/<name>/build/<name>\nsha256: <hex>` |
+| `toolsmith_build(name, timeout_s=600)` | `hermetic_build`: `make_temp_dir("qumo-build-")`; copy `<tool dir>/tool.mojo` alone into it; `rec.source_sha256` = hash of that copy; `rec.sdk_sha256 = sdk_sha256(repo_root)`; `run_capture(confine([<repo_root>/.venv/bin/mojo, build, -I, <repo_root>, -I, <repo_root>/agents/mojo, -o, <tmp>/<name>, <tmp>/tool.mojo], CONF_BUILD with write_dirs = [<tmp>, <repo_root>/build/agent-sandbox-cache]), minimal env + TMPDIR=<tmp>/ + MODULAR_CACHE_DIR, cwd = <tmp>, timeout 60..1800 s)`. Never `-I <sandbox>`: the include paths are the main checkout, which no agent can write, so editing the sandbox's `qumo/core/json.mojo` or `tool_sdk.mojo` changes nothing in the binary. On success copies the binary to `<tool dir>/build/<name>` (`0755`), sets `rec.binary_sha256`, writes `build.json`; the temp dir is removed | `exit <rc>\n<tail 12,000 of stdout+stderr, temp paths shown as agents/mojo/tools/<name>/>`, plus on success `\nbinary: agents/mojo/tools/<name>/build/<name>\nsha256: <hex>` |
 | `toolsmith_test(name, timeout_s=30)` | needs the binary and `build.json` whose `binary_sha256` equals the binary's hash (else `refused: build the tool again`); `run_cases`: per case a fresh `make_temp_dir("qumo-tool-")`, the binary copied into it and hashed (must equal `build.json`), spawned through `McpStdioSession` with empty env, new process group, `stderr = STDIO_PIPE`, `confinement = CONF_TOOL` (6.8); `initialize`, `tools/list` (exactly one tool named `name`, else FAIL), `tools/call`, compare, `close`, remove the dir; per-case timeout 1..120 s; a failing case's line ends with `; stderr: <last 2,000 code points of stderr_tail()>` when non-empty; writes `last_test.json` = `{build, cases_sha256 (of the cases.json used), passed, total, results, at}`. Without an OS sandbox: `refused: no OS sandbox on this machine, so unreviewed tools cannot be tested. Hint: a human can pass --allow-unsandboxed-tool-tests` unless that flag was given | `PASS <p>/<t>` or `FAIL <p>/<t>`, then one line per case `- <name>: ok (<ms> ms)` / `- <name>: <reason>`, capped at 12,000 |
 | `toolsmith_publish(name, version="0.1.0")` | `valid_tool_version(version)` else `refused: version must look like 1.2.3 or 1.2.3-rc1`; needs a `last_test.json` (the hand-writable record: only its hashes count), `build.binary_sha256` equal to the current binary, `build.source_sha256` equal to the hash of the current `tool.mojo` and `cases_sha256` equal to the hash of the current `cases.json` (else `refused: tool.mojo, cases.json or the binary changed after the last passing toolsmith_test; build and test again`); then it re-runs every case itself against the binary (`run_case_list`, confined like `toolsmith_test`, `refused: no OS sandbox ...` when there is none; any failure gives `refused: publish re-ran the cases and <p>/<t> passed`) and takes `tests_passed`, `tests_total` and `description` from that run (the description is the binary's own `tools/list` answer); target `realpath(store) + "/" + entry_dir(name, version, binary_sha256)` must stay inside the store (`check_entry_shape`); copies source, cases and binary there (`0755` binary); adds or replaces the manifest entry with `reviewed: false`, `source_sha256`/`sdk_sha256`/`binary_sha256` from the build record, `published_by = "mojo-toolsmith"`, `sandbox_branch` from `git -C <sandbox> rev-parse --abbrev-ref HEAD` | `published <name> <version> (unreviewed). A human must run: qumo-agent tools review <name>` |
 
@@ -3309,7 +3309,7 @@ retyped). Goldens are committed; regenerating them needs `agents/.venv`.
 | T | `test_tools_research`, `test_tools_atom_html` | Atom fixture (namespaced feed with CDATA and entities) gives the same JSON as Python's `search_arxiv_raw` (golden); PyPI and GitHub fixtures give Python's JSON (goldens, key order starting with `package`), including the 16 MiB path; `strip_html` equals Python's regex pipeline on 8 HTML fixtures; URL building; network paths through the fixture server |
 | T | `test_tools_qumo_mcp`, `test_tools_alphaxiv` | 24 tools for qumo-operator with guided descriptions; Bell circuit through `qumo_run_qasm`; session restart after killing the server; the same call sequence gives identical results through one persistent session and through a fresh session per call (X3); alphaXiv emulated over SSE: only the 5 read tools, description composition, one session per call with `DELETE` |
 | T | `agents/tests/test_agents.py` (Python) | export fresh (`export.stale()` covers the new files); `tools.json` descriptions equal `convert_to_openai_tool`; `modules.json` round trip; `generated_tools` values |
-| S | `test_toolsmith_sdk`, `test_toolsmith_manifest`, `test_toolsmith_generated`, `test_toolsmith_flow` | the reference tool built and called over MCP with an empty env (ok, `isError`, wrong name, 4 MiB line); manifest round trip and hash verification; `check_entry_shape` (version `../../x`, `1.2`, `1.2.3-rc1`; `dir` with `..` or not equal to `entry_dir`; refused with QA-E150, `tools remove` never deletes outside the store); loading rules (unreviewed refused, flag allows, tampered binary refused at load and at call, platform mismatch); `specs_for` filtering; the executed binary is the hashed private copy (swapping the store file after loading has no effect); a test tool that sleeps is killed at its timeout; a test tool that reports `getenv("HOME")` sees nothing; a test tool that tries to read `$HOME/.zshrc`, open a socket or write outside its temp dir fails under `CONF_TOOL`; a test tool that writes 1 MiB to stderr fails with its own error and the stderr tail in the case line; `new` / `build` / `test` / `publish` called directly on a temp git repo sandbox; hermetic build ignores a modified sandbox `qumo/ai/json.mojo`; publish refuses after `tool.mojo` or `cases.json` changed since the passing test; `review_rebuild` replaces the binary, its hash and `dir` |
+| S | `test_toolsmith_sdk`, `test_toolsmith_manifest`, `test_toolsmith_generated`, `test_toolsmith_flow` | the reference tool built and called over MCP with an empty env (ok, `isError`, wrong name, 4 MiB line); manifest round trip and hash verification; `check_entry_shape` (version `../../x`, `1.2`, `1.2.3-rc1`; `dir` with `..` or not equal to `entry_dir`; refused with QA-E150, `tools remove` never deletes outside the store); loading rules (unreviewed refused, flag allows, tampered binary refused at load and at call, platform mismatch); `specs_for` filtering; the executed binary is the hashed private copy (swapping the store file after loading has no effect); a test tool that sleeps is killed at its timeout; a test tool that reports `getenv("HOME")` sees nothing; a test tool that tries to read `$HOME/.zshrc`, open a socket or write outside its temp dir fails under `CONF_TOOL`; a test tool that writes 1 MiB to stderr fails with its own error and the stderr tail in the case line; `new` / `build` / `test` / `publish` called directly on a temp git repo sandbox; hermetic build ignores a modified sandbox `qumo/core/json.mojo`; publish refuses after `tool.mojo` or `cases.json` changed since the passing test; `review_rebuild` replaces the binary, its hash and `dir` |
 | A | `test_app_cli`, `test_app_doctor`, `test_app_tools_cmd` | usage and exit codes (0/1/2/3); `list`; `--dry-run` JSON wire lists for all ten agents (the toolsmith has no `run_check`); `run qumo-operator` with `replay_bell.jsonl` (answer, stats) and `--module`; `doctor --offline` lines (sandbox kind); `tools list/show/review (name piped on stdin)/revoke/remove/verify` on a temp store; `review --yes` with stdin not a terminal is a usage error |
 | A | `test_app_serve_call`, `test_app_subagents` | `call` to `serve` with replay; orchestrator replay with two `task` calls in one turn runs two `subagent` children concurrently (overlapping time windows in `QUMO_AGENT_REPLAY_LOG`), results in call order, files merged, sandbox adopted; the children's environment is exactly `harness_child_env` (a `FOO_SECRET`/`AWS_ACCESS_KEY_ID` set in the parent is absent); a child result with a 1 MiB file dict and 200 KiB of stderr logs completes |
 | A | `test_app_toolsmith_e2e` | the full D6 flow, agent-driven: temp git repo (copies of `qumo/ai`, `agents/mojo/qumo_agent`, `agents/prompts`, `agents/mojo/specs`, `agents/mojo/prompts`, `.venv` symlink, committed); replayed `mojo-toolsmith` run: `open_sandbox`, `toolsmith_new` (reference source renamed), `toolsmith_build`, `toolsmith_test`, `toolsmith_publish`, answer; `tools review gen_x` with the name piped on stdin (rebuild and re-test happen); replayed `qumo-operator` run calls `gen_x` and gets its result; a fresh unreviewed publish is invisible without `--allow-unreviewed-tools` and visible with it; a tampered binary is refused |
@@ -3331,7 +3331,7 @@ runs `tests/test_live_net.mojo` (1, 2), `test_live_runs.mojo` (3 to 6) and
 4. `run execution` on a 20-qubit circuit (resources, simulator choice).
 5. `run research-watch --module compiler` with and without `ALPHAXIV_API_KEY`; a report is written;
    `sdk_releases qiskit` succeeds (X6).
-6. `run code-review` on `qumo/ai/json.mojo`: `run_check` used, report written.
+6. `run code-review` on `qumo/core/json.mojo`: `run_check` used, report written.
 7. `run orchestrator` on a task that needs two subagents in one turn: two `subagent` children run
    concurrently; the answer cites both.
 8. `run autoresearch` on a small, safe change: a sandbox worktree appears; afterwards
@@ -4392,7 +4392,7 @@ Generated QUMO tool built on qumo_agent.tool_sdk. It runs with an empty environm
 temporary directory, and a human reviews it before any agent can call it.
 """
 
-from qumo.ai.json import JsonValue
+from qumo.core.json import JsonValue
 from qumo_agent.tool_sdk import ToolInfo, ToolOutput, ok, fail, ok_json, arg_string, serve_tool
 
 comptime NAME = "@@NAME@@"
@@ -4445,7 +4445,7 @@ Method:
    to hide a bug.
 6. toolsmith_publish(name, version).
 Rules for tool code:
-- Mojo 1.2 as in docs/MOJO_GUIDE.md; import only std, qumo.ai.json and qumo_agent.tool_sdk.
+- Mojo 1.2 as in docs/MOJO_GUIDE.md; import only std, qumo.core.json and qumo_agent.tool_sdk.
 - tool.mojo is compiled alone, against the main checkout's qumo/ and qumo_agent/; changes you
   make to other files in the sandbox are not part of the build. Put everything in tool.mojo.
 - No network, no subprocesses, no environment variables (the tool runs with an empty
