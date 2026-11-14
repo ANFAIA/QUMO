@@ -70,7 +70,7 @@ scripts in scratch) answers and, if needed, has C0 add a fixture (16, rule 6).
 | qiskit 2.5.2 | only the optional Qiskit-O3 cost baseline in `synth/eval.py` | dropped from the training path (stays in `bench/neutral`) |
 | gymnasium 1.4.0 | installed by requirements, never imported by QUMO | nothing |
 | rustworkx (undeclared) | heavy-hex edges in `bench/neutral/targets.py` imported by `route/circuits.py` | existing `Target.heavy_hex_edges(d)` |
-| hashlib / zlib / random / json / os / subprocess (stdlib) | SHA-256, CRC-32, MT19937 job generator, JSON, filesystem, calling `mojo` | `digest.mojo`, `Rng`, `qumo.ai.json`, `std.os`, direct function calls |
+| hashlib / zlib / random / json / os / subprocess (stdlib) | SHA-256, CRC-32, MT19937 job generator, JSON, filesystem, calling `mojo` | `digest.mojo`, `Rng`, `qumo.core.json`, `std.os`, direct function calls |
 | inline `python3 -c` in `make models-verify` | sha256 check of all models | `rl/drivers/common/models_verify.mojo` |
 
 ### 1.2 Decisions (D1-D5 of repo.md resolved, plus new ones)
@@ -121,7 +121,7 @@ scripts in scratch) answers and, if needed, has C0 add a fixture (16, rule 6).
 | teacher / DAgger data generation, eval, episode traces | `rl/qumo_bridge/drivers/route_tool.mojo` (`gen`, `eval`, `episode`; helpers move to `rl/qrl/jobs.mojo`) |
 | block-level evaluation vs exact / greedy synthesizers | `rl/qumo_bridge/drivers/eval_blocks.mojo` (body moves to `rl/qumo_bridge/eval_blocks.mojo`) |
 | heavy-hex edges, BFS distances, `Target.from_edges` | `qumo/compiler/target.mojo::Target` |
-| JSON parse / compact writer | `qumo/ai/json.mojo::{parse_json, JsonValue, JsonWriter, pretty_json}` |
+| JSON parse / compact writer | `qumo/core/json.mojo::{parse_json, JsonValue, JsonWriter, pretty_json}` |
 | cosine schedule (Float64) | `qumo/algorithms/qml_train.mojo::cosine_lr` (same closed form `lr0 (1+cos(pi e/T))/2`) |
 | `parallelize`, `run_chunks` | `max.algorithm`, `qumo/sim/statevector.mojo::run_chunks` |
 
@@ -989,7 +989,7 @@ blocks. "Files not listed in any INDEX.json" check kept.
 
 Rows sorted by directory name: `{id, kind, num_qubits, edges, wl_hash, dir, sha256, bytes}` (+ `default` for the
 router registry). Output format is Python's `json.dump(indent=1)` (every array element on its own line, as in the
-committed files); `qumo.ai.json::pretty_json` is checked first and a dedicated `dump_indent1` is added to
+committed files); `qumo.core.json::pretty_json` is checked first and a dedicated `dump_indent1` is added to
 `container.mojo` only if it differs. Gate: regenerating the INDEX of the shipped `models/ai_transpiler/synth` from
 its manifests gives a semantically identical JSON (all fields equal); byte equality is a target, not a gate.
 
@@ -1339,7 +1339,7 @@ success rates. The generator script is not committed (D11); `PROVENANCE.md` reco
 | `test_rl_jobs` (C9) | determinism of `build_jobs`, op kinds, size bounds, connectivity of every topology, `topologies.json` match, eval-set rules (seeds >= 910000, CRC-32 placement), JSON loads in `route_tool` helpers; **distribution drift**: family mix, n, op count, 2q fraction, depth and topology mix of 2000 Mojo jobs per scale against `route/jobs_stats.json` (chi-square for categorical, two-sample KS for continuous, 4 sigma) | exact / 4 sigma |
 | `test_rl_export` (C11a, synthesis) | export a tiny trained synth run -> directory loads, `load_model_file` checksum ok, embedded vectors replay at 1e-5 through `MLPPolicy`, rollouts replay exactly; the pre-write independent checks of 9.2 (BasicNet vs MLPPolicy vs Float64) abort on a deliberately transposed tensor; `check_pauli_ensemble` on `ring:5` and the other fixture topologies | as listed |
 | `test_rl_export_route` (C10, router) | export a tiny BC run -> loads through `load_route_model`, embedded vectors replay at 1e-5 through `RouteModel`, parity episodes replay exactly, INDEX default preserved when exporting without `--default` | as listed |
-| `test_rl_fixtures` (C0) | every fixture parses with `qumo.ai.json`; sizes within budget; a few invariants per file | exact |
+| `test_rl_fixtures` (C0) | every fixture parses with `qumo.core.json`; sizes within budget; a few invariants per file | exact |
 | `test_rl_smoke` (C11c, slow) | train `perm:line:3` for 12 iterations (<= 15 s), difficulty >= 3 reached, export, load, greedy solves all 6 permutations; **T-RESUME**: 6 iterations equal 3 iterations, stop, `--resume`, 3 more (identical `weights.bin` sha256) | exact |
 | `test_rl_e2e` (C13, slow) | the staged-root replay of A7 and the determinism rerun of A10 | exact |
 
@@ -1517,7 +1517,7 @@ C0 also produces every oracle that only that code can produce: (a) `envs/pauli_t
 weights (13.1); (c) `route/jobs_stats.json` from the Python `build_jobs`; (d) `envs/reward_fma_cases.json`;
 (e) `route/py_bc_reference.json`: Python BC on a fixed `d0.bin` (13.1, A6); (f) `ppo/py_curve.json`: 400 s Python runs
 of `perm_grid3x3` and `lf_grid2x3` recording every promotion. (The r1 task "probe O-3" is dropped: the twisterl source
-answers it, 4.1.) DoD: every fixture parses with `qumo.ai.json`; sizes within budget; `rl/tests/test_rl_fixtures.mojo`
+answers it, 4.1.) DoD: every fixture parses with `qumo.core.json`; sizes within budget; `rl/tests/test_rl_fixtures.mojo`
 loads each fixture and checks a few invariants. About 400 LOC Mojo + data.
 
 ### C1 - digest and f16 (W1)

@@ -6,7 +6,7 @@ from std.os import getenv, listdir
 from std.os.path import isdir, exists
 from std.sys.defines import is_defined
 
-from qumo.ai.json import JsonWriter, JsonValue, parse_json, json_quote
+from qumo.core.json import JsonWriter, JsonValue, parse_json, json_quote
 from qumo.ai.mcp import McpServer, handle_request
 from qumo.ai.tools import default_registry
 from qumo.ai.describe import (

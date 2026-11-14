@@ -52,7 +52,7 @@ models/ai_transpiler; docs/AI_TRANSPILER.md):
   safetensors is copied or transliterated. Numerical reference data under
   rl/tests/fixtures are outputs of those packages obtained offline; they carry
   no code. None of these packages is required to train, run or test QUMO.
-  qrl carries copies of a few QUMO modules (qumo/ai/json.mojo,
+  qrl carries copies of a few QUMO modules (qumo/core/json.mojo,
   qumo/sim/rng.mojo, the opcode table of qumo/ir/gates.mojo, the reader half of
   qumo/compiler/policy.mojo and the environment dynamics of
   qumo/compiler/policy_synth.mojo, the heavy-hex builder of

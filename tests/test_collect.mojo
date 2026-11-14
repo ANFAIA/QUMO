@@ -18,7 +18,7 @@ from qumo.ir.qasm import to_qasm
 from qumo.sim.runner import evolve
 from qumo.sim.statevector import StateVector
 from qumo.sim.rng import Rng
-from qumo.compiler.common import GateSet
+from qumo.ir.gateset import GateSet
 from qumo.compiler.target import Target
 from qumo.compiler.kak import cx_cost
 from qumo.compiler.basis import translate_to_basis

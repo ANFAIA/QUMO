@@ -7,7 +7,16 @@ deliberately small and stable: build/load circuits, compile them for any target
 (coupling map + basis as plain Python data, vendor-neutral), inspect
 statistics, simulate. A `Program` adds classical variables and control flow at
 run time: `load_program`, `sample_program`, `transpile_program`. Used by the
-Benchpress `qumo_gym` and by `python/qumo/__init__.py`.
+Benchpress `qumo_gym`, the hardware plugins and the `qumo` Python package
+(python/qumo, docs/PYTHON.md), which gives these functions keyword arguments,
+defaults and `QumoError`.
+
+Conventions: every function and method is registered with a docstring whose
+first line is its call signature (`help(qumo_py.sample)`). Errors are raised as
+`Exception("QM-Exxx: message. Hint: ...")`; Mojo cannot raise another Python
+exception type, so a wrong argument type is QM-E911 here and a `TypeError` in
+the package. Existing functions keep their names and positional arguments;
+new behaviour is added as keyword arguments or new functions.
 """
 
 from std.python import PythonObject, Python
@@ -39,7 +48,7 @@ from qumo.qec.sparse_blossom import SparseBlossomDecoder
 from qumo.qec.correlated import CorrelatedMatchingDecoder
 from qumo.qec.stim_text import from_stim, parse_dem, sample_dem
 from qumo.qec.lint import missing_detectors, count_determined_measurements
-from qumo.ai.json import JsonWriter
+from qumo.core.json import JsonWriter
 from std.collections import Dict
 from qumo.ir.gates import Op, op_name, op_arity, op_is_unitary, op_from_name
 from qumo.ir.pauli import parse_pauli_sum, PauliSum
@@ -50,9 +59,8 @@ from qumo.ir.qasm2 import to_qasm2
 from qumo.sim.program_runner import DEFAULT_MAX_ITERATIONS, sample_program
 from qumo.compiler.program_compile import compile_program
 from qumo.ai.describe import program_from_json, program_to_json
-from qumo.ai.json import parse_json
+from qumo.core.json import parse_json
 from qumo.ai.diagnostics import diagnostic_from_error, lint_program
-from qumo.compiler.target import Target
 from qumo.exec.dispatch import sample_on
 from qumo.gpu.device import query_gpu
 from qumo.compiler.pass_manager import transpile, compile_spec, transpile_ai, CompileResult
@@ -68,11 +76,55 @@ from qumo.sim.frame import FrameSimulator, DetectorSamples, BATCH, FW
 from qumo.gpu.frame_gpu import GpuFrameSampler
 from qumo.gpu.device import gpu_available
 from std.sys.defines import is_defined
+from std.runtime import parallelism_level
+from max.algorithm import parallelize
+from qumo.sim.statevector import StateVector
+from qumo.compiler.target import Target, parse_target
+from qumo.ir.kraus import KrausChannel
+from qumo.exec.emulate import emulate
+from qumo.algorithms.variational import vqe, qaoa_maxcut
+from qumo.algorithms.hamiltonians import (
+    Graph, maxcut, transverse_field_ising, heisenberg_xxz, fermi_hubbard, h2_sto3g, ground_energy,
+)
+from qumo.algorithms.library import (
+    ghz, qft, hardware_efficient_ansatz, qaoa_maxcut_ansatz, uccsd_ansatz, h2_ansatz, trotter,
+)
+from qumo.qec.experiments import memory_experiment, threshold_sweep_results, ExperimentResult, canonical_decoder_name
+from qumo.ir.gates import op_num_params
+from qumo.ir.param import Param
 from qumo.bench.circuits import (
     quantum_volume, efficient_su2, dtc_unitary, random_clifford_circuit,
     bv_all_ones, trivial_bvlike_circuit, multi_control_circuit, pauli_twirl_2q,
     hamiltonian_circuit_from_labels,
 )
+
+
+def _type_name(x: PythonObject) raises -> String:
+    return String(py=Python.import_module("builtins").type(x).__name__)
+
+
+def _is_str(x: PythonObject) raises -> Bool:
+    var b = Python.import_module("builtins")
+    return Bool(py=b.isinstance(x, b.str))
+
+
+def _int_arg(x: PythonObject, where: String, arg: String) raises -> Int:
+    """A whole number (int, bool, numpy integer): QM-E911 for '100' or 100.5, which
+    Int(py=) would convert without a word."""
+    var op = Python.import_module("operator")
+    var v = 0
+    var ok = True
+    try:
+        v = Int(py=op.index(x))
+    except:
+        ok = False
+    if not ok:
+        raise Error("QM-E911: " + where + "() argument '" + arg + "' must be an int, got " + _type_name(x) + ". Hint: pass a whole number, e.g. " + arg + "=1000.")
+    return v
+
+
+comptime PACKED_C_IF = -1  # extend_packed pseudo-operation: condition the last instruction
+comptime PACKED_WIDTH = 5  # ints per operation: kind, q0, q1, q2, aux
 
 
 struct PyCircuit(Movable, Writable):
@@ -128,7 +180,27 @@ struct PyCircuit(Movable, Writable):
     def depth_of(py_self: PythonObject, name: PythonObject) raises -> PythonObject:
         """Depth counting only gates named `name` (e.g. 2q depth)."""
         ref c = Self._get(py_self)[].c
-        var k = op_from_name(String(py=name))
+        var names = List[String]()
+        if _is_str(name):
+            names.append(String(py=name))
+        else:
+            var ok = True
+            try:
+                for item in name:
+                    if not _is_str(item):
+                        ok = False
+                        break
+                    names.append(String(py=item))
+            except:
+                ok = False
+            if not ok or len(names) == 0:
+                raise Error("QM-E911: depth_of() takes a gate name or a list of gate names, got " + _type_name(name) + ". Hint: e.g. depth_of('cz') or depth_of(['cx', 'cz']).")
+        var counted = List[Bool](length=Op.NUM_OPS, fill=False)
+        for nm in names:
+            var k = op_from_name(nm)
+            if k < 0:
+                raise Error("QM-E913: depth_of() got the unknown gate name '" + nm + "'. Hint: use lower-case names such as 'cx', 'cz', 'ecr', 'rzz'.")
+            counted[k] = True
         var level = List[Int](length=c.num_qubits, fill=0)
         var d = 0
         for g in c.ops:
@@ -138,7 +210,7 @@ struct PyCircuit(Movable, Writable):
             var l = 0
             for j in range(a):
                 l = max(l, level[g.qubit(j)])
-            if g.kind == k:
+            if counted[g.kind]:
                 l += 1
             for j in range(a):
                 level[g.qubit(j)] = l
@@ -167,6 +239,41 @@ struct PyCircuit(Movable, Writable):
         return PythonObject(alloc=PyCircuit(out^))
 
     @staticmethod
+    def add_kraus(py_self: PythonObject, name: PythonObject, arity: PythonObject, data: PythonObject,
+                  q0: PythonObject, q1: PythonObject) raises -> PythonObject:
+        """Append a Kraus channel in place: the qumo builder flushes its pending gates first, so order holds.
+
+        data: flat (re, im) pairs, row-major, one matrix after the other (dim 2^arity); q1 = -1 for arity 1.
+        Errors: QM-E001 qubit out of range, QM-E414 wrong matrix shape or not trace preserving.
+        """
+        var k = _int_arg(arity, "add_kraus", "arity")
+        var a = _int_arg(q0, "add_kraus", "qubit")
+        var b = _int_arg(q1, "add_kraus", "qubit")
+        var channel_name = String(py=name)
+        if k != 1 and k != 2:
+            raise Error("QM-E414: Kraus channel '" + channel_name + "' acts on " + String(k) + " qubit(s). Hint: kraus1 or kraus2.")
+        ref c = Self._get(py_self)[].c
+        if a < 0 or a >= c.num_qubits or (k == 2 and (b < 0 or b >= c.num_qubits or b == a)):
+            raise Error("QM-E001: Kraus channel '" + channel_name + "' uses a qubit outside 0.." + String(c.num_qubits - 1) + ". Hint: pass distinct qubits in range.")
+        var vals = _floats(data)
+        var dim = 1 << k
+        var step = 2 * dim * dim
+        if len(vals) == 0 or len(vals) % step != 0:
+            raise Error("QM-E414: Kraus channel '" + channel_name + "' needs (re, im) pairs for whole " + String(dim) + "x" + String(dim) + " matrices. Hint: matrices are row-major, one after the other.")
+        var ch = KrausChannel(channel_name, k)
+        var at = 0
+        while at < len(vals):
+            var re = List[Float64]()
+            var im = List[Float64]()
+            for j in range(dim * dim):
+                re.append(vals[at + 2 * j])
+                im.append(vals[at + 2 * j + 1])
+            ch.add(re^, im^)
+            at += step
+        c.apply_channel(ch, a, b if k == 2 else -1)
+        return len(c.ops)
+
+    @staticmethod
     def bind(py_self: PythonObject, values: PythonObject) raises -> PythonObject:
         var vals = List[Float64]()
         for v in values:
@@ -184,6 +291,102 @@ struct PyCircuit(Movable, Writable):
     @staticmethod
     def text(py_self: PythonObject) raises -> PythonObject:
         return String(Self._get(py_self)[].c)
+
+    @staticmethod
+    def name(py_self: PythonObject) raises -> PythonObject:
+        return String(Self._get(py_self)[].c.name)
+
+    @staticmethod
+    def num_ops(py_self: PythonObject) raises -> PythonObject:
+        return len(Self._get(py_self)[].c.ops)
+
+    @staticmethod
+    def num_measurements(py_self: PythonObject) raises -> PythonObject:
+        return Self._get(py_self)[].c.num_measurements
+
+    @staticmethod
+    def num_2q_gates(py_self: PythonObject) raises -> PythonObject:
+        return Self._get(py_self)[].c.num_2q_gates()
+
+    @staticmethod
+    def t_count(py_self: PythonObject) raises -> PythonObject:
+        return Self._get(py_self)[].c.t_count()
+
+    @staticmethod
+    def parameter_names(py_self: PythonObject) raises -> PythonObject:
+        var out = Python.list()
+        for nm in Self._get(py_self)[].c.param_names:
+            out.append(String(nm))
+        return out
+
+    @staticmethod
+    def has_noise(py_self: PythonObject) raises -> PythonObject:
+        return Self._get(py_self)[].c.has_noise()
+
+    @staticmethod
+    def is_clifford(py_self: PythonObject) raises -> PythonObject:
+        return Self._get(py_self)[].c.is_clifford()
+
+    @staticmethod
+    def is_dynamic(py_self: PythonObject) raises -> PythonObject:
+        return Self._get(py_self)[].c.is_dynamic()
+
+    @staticmethod
+    def inverse(py_self: PythonObject) raises -> PythonObject:
+        return PythonObject(alloc=PyCircuit(Self._get(py_self)[].c.inverse()))
+
+    @staticmethod
+    def extend_packed(py_self: PythonObject, ops_addr: PythonObject, num_ops: PythonObject, params_addr: PythonObject,
+                      num_params: PythonObject, new_parameters: PythonObject) raises -> PythonObject:
+        ref c = Self._get(py_self)[].c
+        for nm in new_parameters:
+            _ = c.parameter(String(py=nm))
+        var n = Int(py=num_ops)
+        var np_total = Int(py=num_params)
+        if n == 0:
+            return len(c.ops)
+        var ip = Pointer[Int, MutAnyOrigin](unsafe_from_address=Int(py=ops_addr))
+        var fp = Pointer[Float64, MutAnyOrigin](unsafe_from_address=Int(py=params_addr))
+        var cur = 0
+        var nq = c.num_qubits
+        var declared = len(c.param_names)
+        for i in range(n):
+            var base = PACKED_WIDTH * i
+            var kind = ip[unsafe_offset=base]
+            var q0 = ip[unsafe_offset=base + 1]
+            var q1 = ip[unsafe_offset=base + 2]
+            var q2 = ip[unsafe_offset=base + 3]
+            var aux = ip[unsafe_offset=base + 4]
+            if kind == PACKED_C_IF:
+                if len(c.ops) == 0 or q0 < 0:
+                    raise Error("QM-E913: extend_packed() operation " + String(i) + " is a condition with nothing to condition. Hint: c_if follows the instruction it controls.")
+                c.c_if(q0, q1)
+                continue
+            if (
+                kind < 0 or kind >= Op.NUM_OPS or kind == Op.KRAUS1 or kind == Op.KRAUS2 or kind == Op.PAULI_CHANNEL_2
+                or kind == Op.CORRELATED_ERROR or kind == Op.DETECTOR or kind == Op.OBSERVABLE
+            ):
+                raise Error("QM-E913: extend_packed() operation " + String(i) + " has kind " + String(kind) + ", which the packed form does not carry. Hint: use op_table() kinds; load Kraus channels, correlated errors and detectors from OpenQASM text.")
+            var a = op_arity(kind)
+            if (a >= 1 and (q0 < 0 or q0 >= nq)) or (a >= 2 and (q1 < 0 or q1 >= nq)) or (a >= 3 and (q2 < 0 or q2 >= nq)):
+                raise Error("QM-E001: instruction #" + String(len(c.ops)) + " '" + op_name(kind) + "' uses a qubit outside 0.." + String(nq - 1) + " (circuit has " + String(nq) + " qubits).")
+            if kind == Op.MEASURE:
+                if aux < 0:
+                    raise Error("QM-E913: extend_packed() operation " + String(i) + " measures into classical bit " + String(aux) + ". Hint: classical bits start at 0.")
+                c.measure(q0, aux)
+                continue
+            var k = op_num_params(kind)
+            if cur + 3 * k > np_total:
+                raise Error("QM-E913: extend_packed() ran out of parameter values at operation " + String(i) + ". Hint: pass 3 numbers (offset, index, coeff) per gate angle.")
+            var ps: List[Param] = [Param(0.0), Param(0.0), Param(0.0)]
+            for j in range(k):
+                var index = Int(fp[unsafe_offset=cur + 1])
+                if index >= declared:
+                    raise Error("QM-E913: extend_packed() operation " + String(i) + " uses parameter " + String(index) + " but the circuit declares " + String(declared) + ". Hint: list new names in new_parameters.")
+                ps[j] = Param(fp[unsafe_offset=cur], index if index >= 0 else -1, fp[unsafe_offset=cur + 2] if index >= 0 else 0.0)
+                cur += 3
+            c.add(kind, q0, q1 if a >= 2 else -1, q2 if a >= 3 else -1, ps[0], ps[1], ps[2])
+        return len(c.ops)
 
     def write_to(self, mut w: Some[Writer]):
         w.write("<qumo.Circuit qubits=", self.c.num_qubits, " ops=", len(self.c.ops), ">")
@@ -423,6 +626,10 @@ def py_load_qasm_file(path: PythonObject) raises -> PythonObject:
 
 
 def _basis_spec(basis: PythonObject) raises -> String:
+    """Gate names -> the spec text Target takes. A str is one spec: a basis-set
+    name ('sc_cz') or a comma list ('rz,sx,x,cz'), not a sequence of characters."""
+    if _is_str(basis):
+        return String(py=basis)
     var spec = String()
     for b in basis:
         if spec.byte_length() > 0:
@@ -530,7 +737,8 @@ def _counts_dict(r: SampleResult) raises -> PythonObject:
 
 def py_sample_ptsbe(circ: PythonObject, shots: PythonObject, seed: PythonObject) raises -> PythonObject:
     """Static noisy circuit, one simulation per distinct Pauli error pattern -> counts."""
-    return _counts_dict(sample_ptsbe(PyCircuit._get(circ)[].c, Int(py=shots), UInt64(Int(py=seed))))
+    return _counts_dict(sample_ptsbe(PyCircuit._get(circ)[].c, _int_arg(shots, "sample_ptsbe", "shots"),
+                                     UInt64(_int_arg(seed, "sample_ptsbe", "seed"))))
 
 
 def py_inject_noise(text: PythonObject, p1: PythonObject, p2: PythonObject, pm: PythonObject) raises -> PythonObject:
@@ -769,7 +977,8 @@ def py_plan_trajectories(circ: PythonObject, shots: PythonObject, seed: PythonOb
 
 def py_sample_branching(circ: PythonObject, shots: PythonObject, seed: PythonObject) raises -> PythonObject:
     """Stabilizer branching sampler: near-Clifford circuits on up to 512 qubits -> counts."""
-    return _counts_dict(sample_branching(PyCircuit._get(circ)[].c, Int(py=shots), UInt64(Int(py=seed))))
+    return _counts_dict(sample_branching(PyCircuit._get(circ)[].c, _int_arg(shots, "sample_branching", "shots"),
+                                         UInt64(_int_arg(seed, "sample_branching", "seed"))))
 
 
 def py_density_probabilities(circ: PythonObject) raises -> PythonObject:
@@ -782,7 +991,7 @@ def py_density_probabilities(circ: PythonObject) raises -> PythonObject:
 
 def py_density_expectation(circ: PythonObject, observable: PythonObject) raises -> PythonObject:
     """Tr(rho H) for a Pauli-sum string."""
-    return density_evolve(PyCircuit._get(circ)[].c).expectation(parse_pauli_sum(String(py=observable)))
+    return density_evolve(PyCircuit._get(circ)[].c).expectation(_pauli(observable))
 
 
 def py_mitigate_m3(counts: PythonObject, p01: PythonObject, p10: PythonObject, hamming: PythonObject) raises -> PythonObject:
@@ -852,8 +1061,17 @@ def py_sample_dem(text: PythonObject, shots: PythonObject, seed: PythonObject) r
 def py_decode_dem(text: PythonObject, shots: PythonObject, decoder: PythonObject) raises -> PythonObject:
     """Decode with a DEM given as text: (dem_text, [[fired detector ids], ...], 'mwpm' or
     'mwpm_correlated') -> list of observable masks."""
+    var bi = Python.import_module("builtins")
+    if _is_str(shots) or Bool(py=bi.isinstance(shots, bi.int)) or Bool(py=bi.isinstance(shots, bi.float)):
+        raise Error("QM-E911: decode_dem() argument 'shots' must be a list with one list of fired detector ids per shot, got " + _type_name(shots) + ". Hint: decode_dem(dem_text, [[0, 3], [], [1]], 'mwpm'); a number of shots belongs to sample_dem(dem_text, shots, seed).")
+    if not _is_str(decoder):
+        raise Error("QM-E911: decode_dem() argument 'decoder' must be a str, got " + _type_name(decoder) + ". Hint: use 'mwpm' or 'mwpm_correlated'.")
     var d = parse_dem(String(py=text))
-    var name = String(py=decoder)
+    var name = canonical_decoder_name(String(py=decoder))
+    if name == "sparse_blossom":
+        name = "mwpm"
+    if name != "mwpm" and name != "mwpm_correlated":
+        raise Error("QM-E707: unknown decoder '" + String(py=decoder) + "'. Hint: decode_dem takes 'mwpm' or 'mwpm_correlated'.")
     var out = Python.list()
     if name == "mwpm_correlated":
         var dec = CorrelatedMatchingDecoder(d)
@@ -951,7 +1169,7 @@ def py_compile_spec_full(circ: PythonObject, num_qubits: PythonObject, edges: Py
 
 
 def py_sample(circ: PythonObject, shots: PythonObject, seed: PythonObject) raises -> PythonObject:
-    var r = sample(PyCircuit._get(circ)[].c, Int(py=shots), UInt64(Int(py=seed)))
+    var r = sample(PyCircuit._get(circ)[].c, _int_arg(shots, "sample", "shots"), UInt64(_int_arg(seed, "sample", "seed")))
     var d = Python.dict()
     for kv in r.counts.items():
         d[kv.key] = kv.value
@@ -973,15 +1191,20 @@ def py_sample_device(circ: PythonObject, shots: PythonObject, seed: PythonObject
     on an Apple GPU.
     """
     var precision = String("auto")
+    var params = List[Float64]()
+    var d = Python.dict()
     for kv in kwargs.items():
         if kv.key == "precision":
             precision = String(py=kv.value)
+        elif kv.key == "params":
+            params = _floats(kv.value)
+        elif kv.key == "counts":
+            d = kv.value
         else:
-            raise Error("QM-E913: sample_device() got an unexpected keyword argument '" + kv.key + "'. Hint: the only keyword argument is precision='auto'|'fp32'|'fp64'.")
+            raise Error("QM-E913: sample_device() got an unexpected keyword argument '" + kv.key + "'. Hint: the keyword arguments are precision='auto'|'fp32'|'fp64', params=[...] and counts=<dict to fill>.")
     var note = String()
-    var r = sample_on(PyCircuit._get(circ)[].c, Int(py=shots), UInt64(Int(py=seed)), List[Float64](), String(py=device), note,
-                      precision)
-    var d = Python.dict()
+    var r = sample_on(PyCircuit._get(circ)[].c, _int_arg(shots, "sample_device", "shots"),
+                      UInt64(_int_arg(seed, "sample_device", "seed")), params, String(py=device), note, precision)
     for kv in r.counts.items():
         d[kv.key] = kv.value
     return Python.tuple(d, r.method, note)
@@ -1012,9 +1235,15 @@ def py_gpu_info() raises -> PythonObject:
     return d
 
 
-def py_expectation(circ: PythonObject, observable: PythonObject) raises -> PythonObject:
-    var sv = evolve(PyCircuit._get(circ)[].c)
-    return sv.expectation(parse_pauli_sum(String(py=observable)))
+def py_expectation(circ: PythonObject, observable: PythonObject, var **kwargs: PythonObject) raises -> PythonObject:
+    var params = List[Float64]()
+    for kv in kwargs.items():
+        if kv.key == "params":
+            params = _floats(kv.value)
+        else:
+            raise Error("QM-E913: expectation() got an unexpected keyword argument '" + kv.key + "'. Hint: the only keyword argument is params=[...].")
+    var sv = evolve(PyCircuit._get(circ)[].c, params)
+    return sv.expectation(_pauli(observable))
 
 
 # ---------------------------------------------------------------------------
@@ -1051,7 +1280,7 @@ def py_expectation_device(circ: PythonObject, observable: PythonObject, device: 
         else:
             raise Error("QM-E913: expectation_device() got an unexpected keyword argument '" + kv.key + "'. Hint: the only keyword argument is precision='auto'|'fp32'|'fp64'.")
     var obs = List[PauliSum]()
-    obs.append(parse_pauli_sum(String(py=observable)))
+    obs.append(_pauli(observable))
     var note = String()
     var method = String()
     var vals = expectations_on(PyCircuit._get(circ)[].c, obs, List[Float64](), String(py=device), note, method, prec)
@@ -1073,7 +1302,7 @@ def py_expectations_device(circ: PythonObject, observables: PythonObject, device
             raise Error("QM-E913: expectations_device() got an unexpected keyword argument '" + kv.key + "'. Hint: the only keyword argument is precision='auto'|'fp32'|'fp64'.")
     var obs = List[PauliSum]()
     for o in observables:
-        obs.append(parse_pauli_sum(String(py=o)))
+        obs.append(_pauli(o))
     var note = String()
     var method = String()
     var vals = expectations_on(PyCircuit._get(circ)[].c, obs, List[Float64](), String(py=device), note, method, prec)
@@ -1100,7 +1329,7 @@ def py_value_and_gradient(circ: PythonObject, observable: PythonObject, params: 
         else:
             raise Error("QM-E913: value_and_gradient() got an unexpected keyword argument '" + kv.key + "'. Hint: keyword arguments: device, precision.")
     var note = String()
-    var r = value_and_gradient_on(PyCircuit._get(circ)[].c, parse_pauli_sum(String(py=observable)), _floats(params),
+    var r = value_and_gradient_on(PyCircuit._get(circ)[].c, _pauli(observable), _floats(params),
                                   dev, note, prec)
     return Python.tuple(r.value, _float_list(r.grad), r.method, note)
 
@@ -1111,7 +1340,7 @@ def py_batch_value_and_gradient(circ: PythonObject, observable: PythonObject, pa
     var sets = List[List[Float64]]()
     for ps in param_sets:
         sets.append(_floats(ps))
-    var r = batch_value_and_gradient(PyCircuit._get(circ)[].c, parse_pauli_sum(String(py=observable)), sets,
+    var r = batch_value_and_gradient(PyCircuit._get(circ)[].c, _pauli(observable), sets,
                                      Grad.ADJOINT)
     var gs = Python.list()
     for g in r[1]:
@@ -1141,7 +1370,7 @@ def py_subspace_ground_state(observable: PythonObject, basis_states: PythonObjec
     for b in basis_states:
         states.append(Int(py=b))
     var t0 = perf_counter_ns()
-    var r = subspace_ground_state(parse_pauli_sum(String(py=observable)), states, Int(py=num_qubits), tol, krylov)
+    var r = subspace_ground_state(_pauli(observable), states, Int(py=num_qubits), tol, krylov)
     var secs = Float64(perf_counter_ns() - t0) / 1e9
     var d = Python.dict()
     d["energy"] = r.energy
@@ -1431,6 +1660,425 @@ def py_qec_memory(code: PythonObject, distance: PythonObject, rounds: PythonObje
     return PythonObject(alloc=PyQecMemory(cc^))
 
 
+# ---------------------------------------------------------------------------
+# Surface of the `qumo` Python package (python/qumo): bulk circuit building,
+# NumPy state vectors, target specs, research drivers. Arguments are positional
+# and all required here; the package gives them names and defaults.
+# ---------------------------------------------------------------------------
+def _dense_label(label: String) -> Bool:
+    if label.byte_length() == 0:
+        return False
+    for b in label.as_bytes():
+        if b != 73 and b != 88 and b != 89 and b != 90:  # I X Y Z
+            return False
+    return True
+
+
+def _pauli(obs: PythonObject) raises -> PauliSum:
+    """Observable argument: a Pauli-sum string ("0.5 * Z0 Z1 - X0", "ZZI + XIX"),
+    or a list of (label, coeff) pairs ((coeff, label) is taken too). A label is
+    dense ("XZI", leftmost = highest qubit) or sparse ("Z0 Z1")."""
+    if _is_str(obs):
+        return parse_pauli_sum(String(py=obs))
+    var out = PauliSum()
+    var ok = True
+    var count = 0
+    try:
+        for term in obs:
+            var first = term[0]
+            var label: String
+            var coeff: Float64
+            if _is_str(first):
+                label = String(py=first)
+                coeff = Float64(py=term[1])
+            else:
+                label = String(py=term[1])
+                coeff = Float64(py=first)
+            if _dense_label(label):
+                out.add_label(coeff, label)
+            else:
+                var ps = parse_pauli_sum(label)
+                for t in ps.terms:
+                    out.add(coeff * t.coeff, t.x, t.z)
+            count += 1
+    except e:
+        var msg = String(e)
+        if msg.startswith("QM-"):
+            raise Error(msg)
+        ok = False
+    if not ok or count == 0:
+        raise Error("QM-E911: an observable is a Pauli-sum string or a non-empty list of (label, coeff) pairs, got " + _type_name(obs) + ". Hint: e.g. \"Z0 Z1 + 0.5 * X0\" or [(\"ZZ\", 1.0), (\"XI\", 0.5)].")
+    return out^
+
+
+def _py_pauli(h: PauliSum, num_qubits: Int) raises -> PythonObject:
+    """PauliSum -> [(label, coeff), ...] with dense labels (leftmost = highest qubit)."""
+    var n = max(num_qubits, max(h.num_qubits(), 1))
+    var out = Python.list()
+    for t in h.terms:
+        out.append(Python.tuple(t.label(n), t.coeff))
+    return out
+
+
+def _graph(num_nodes: PythonObject, edges: PythonObject) raises -> Graph:
+    """edges: [(u, v)] or [(u, v, weight)]; num_nodes <= 0 = one more than the largest node."""
+    var us = List[Int]()
+    var vs = List[Int]()
+    var ws = List[Float64]()
+    var top = -1
+    for e in edges:
+        var u = Int(py=e[0])
+        var v = Int(py=e[1])
+        var w = 1.0
+        if Int(py=e.__len__()) > 2:
+            w = Float64(py=e[2])
+        us.append(u)
+        vs.append(v)
+        ws.append(w)
+        top = max(top, max(u, v))
+    var n = Int(py=num_nodes)
+    var g = Graph(n if n > 0 else top + 1)
+    for i in range(len(us)):
+        g.add_edge(us[i], vs[i], ws[i])
+    return g^
+
+
+def py_op_table() raises -> PythonObject:
+    var d = Python.dict()
+    for k in range(Op.NUM_OPS):
+        var nm = op_name(k)
+        if nm.byte_length() == 0 or op_from_name(nm) != k:
+            continue
+        d[nm] = Python.tuple(k, op_arity(k), op_num_params(k))
+    return d
+
+
+def _fill_amplitudes(mut sv: StateVector, addr: Int, squared: Bool):
+    """Write the state into a NumPy buffer: interleaved (re, im) pairs, or |amplitude|^2.
+    `sv` is borrowed for the whole call, so its buffers outlive the worker tasks."""
+    var total = sv.size()
+    var dst = Pointer[Float64, MutAnyOrigin](unsafe_from_address=addr)
+    var rp = sv._rp()
+    var ip = sv._ip()
+    var nw = max(1, parallelism_level()) if total >= (1 << 16) else 1
+    var chunk = (total + nw - 1) // nw
+
+    def task(k: Int) {imm rp, imm ip, imm dst, imm chunk, imm total, imm squared}:
+        var lo = k * chunk
+        var hi = min(lo + chunk, total)
+        if squared:
+            for i in range(lo, hi):
+                var re = rp[unsafe_offset=i]
+                var im = ip[unsafe_offset=i]
+                dst[unsafe_offset=i] = re * re + im * im
+        else:
+            for i in range(lo, hi):
+                dst[unsafe_offset=2 * i] = rp[unsafe_offset=i]
+                dst[unsafe_offset=2 * i + 1] = ip[unsafe_offset=i]
+
+    if nw == 1:
+        task(0)
+    else:
+        parallelize(task, nw)
+
+
+def py_statevector(circ: PythonObject, var **kwargs: PythonObject) raises -> PythonObject:
+    var params = List[Float64]()
+    for kv in kwargs.items():
+        if kv.key == "params":
+            params = _floats(kv.value)
+        else:
+            raise Error("QM-E913: statevector() got an unexpected keyword argument '" + kv.key + "'. Hint: the only keyword argument is params=[...].")
+    var sv = evolve(PyCircuit._get(circ)[].c, params)
+    var np = Python.import_module("numpy")
+    var arr = np.empty(sv.size(), np.complex128)
+    _fill_amplitudes(sv, Int(py=arr.ctypes.data), False)
+    return arr
+
+
+def py_probabilities(circ: PythonObject, var **kwargs: PythonObject) raises -> PythonObject:
+    var params = List[Float64]()
+    for kv in kwargs.items():
+        if kv.key == "params":
+            params = _floats(kv.value)
+        else:
+            raise Error("QM-E913: probabilities() got an unexpected keyword argument '" + kv.key + "'. Hint: the only keyword argument is params=[...].")
+    ref c = PyCircuit._get(circ)[].c
+    var np = Python.import_module("numpy")
+    if c.has_noise():
+        var probs = density_evolve(c, params).probabilities()
+        var arr = np.empty(len(probs), np.float64)
+        var dst = Pointer[Float64, MutAnyOrigin](unsafe_from_address=Int(py=arr.ctypes.data))
+        for i in range(len(probs)):
+            dst[unsafe_offset=i] = probs[i]
+        return arr
+    var sv = evolve(c, params)
+    var arr = np.empty(sv.size(), np.float64)
+    _fill_amplitudes(sv, Int(py=arr.ctypes.data), True)
+    return arr
+
+
+def _target_dict(t: Target) raises -> PythonObject:
+    var d = Python.dict()
+    d["name"] = String(t.name)
+    d["modality"] = String(t.modality)
+    d["num_qubits"] = t.num_qubits
+    d["all_to_all"] = t.full
+    var edges = Python.list()
+    var i = 0
+    while i + 1 < len(t.edges):
+        edges.append(Python.tuple(t.edges[i], t.edges[i + 1]))
+        i += 2
+    d["edges"] = edges
+    var basis = Python.list()
+    for k in t.basis:
+        basis.append(op_name(k))
+    d["basis"] = basis
+    return d
+
+
+def py_parse_target(spec: PythonObject) raises -> PythonObject:
+    return _target_dict(parse_target(String(py=spec)))
+
+
+def _compile_tuple(r: CompileResult) raises -> PythonObject:
+    var lay = _layouts(r)
+    return Python.tuple(_wrap(r.circuit.copy()), lay[0], lay[1], r.to_json())
+
+
+def py_transpile_target(circ: PythonObject, spec: PythonObject, level: PythonObject, seed: PythonObject) raises -> PythonObject:
+    var t = parse_target(String(py=spec))
+    return _compile_tuple(transpile(PyCircuit._get(circ)[].c, t, _int_arg(level, "transpile_target", "level"),
+                                    _int_arg(seed, "transpile_target", "seed")))
+
+
+def py_transpile_report(circ: PythonObject, num_qubits: PythonObject, edges: PythonObject,
+                        basis: PythonObject, level: PythonObject, seed: PythonObject) raises -> PythonObject:
+    var t = _target(num_qubits, edges, basis)
+    return _compile_tuple(transpile(PyCircuit._get(circ)[].c, t, _int_arg(level, "transpile_report", "level"),
+                                    _int_arg(seed, "transpile_report", "seed")))
+
+
+def py_emulate(circ: PythonObject, spec: PythonObject, shots: PythonObject, seed: PythonObject,
+               compile: PythonObject, level: PythonObject) raises -> PythonObject:
+    """Emulate a circuit under a target's noise (what `qumo emulate` runs, without calibration data).
+
+    emulate(circuit, spec, shots, seed, compile, level) -> (counts, method, num_qubits, estimated_fidelity, target).
+    compile=True transpiles to the target first; compile=False requires a circuit that already fits it
+    (QM-E615 otherwise). The Python `qumo.emulate` retries with compile=True, as the CLI does.
+    """
+    var t = parse_target(String(py=spec))
+    var c = PyCircuit._get(circ)[].c.copy()
+    var sd = _int_arg(seed, "emulate", "seed")
+    if Bool(py=compile):
+        c = transpile(c, t, _int_arg(level, "emulate", "level"), sd).circuit.copy()
+    var r = emulate(c, t, _int_arg(shots, "emulate", "shots"), UInt64(sd))
+    return Python.tuple(_counts_dict(r), String(r.method), c.num_qubits, t.estimate_fidelity(c), String(t.name))
+
+
+def _grad_method(name: String) raises -> Int:
+    var k = name.lower()
+    if k == "adjoint":
+        return Grad.ADJOINT
+    if k == "parameter-shift" or k == "parameter_shift" or k == "param_shift" or k == "shift":
+        return Grad.PARAM_SHIFT
+    if k == "finite-diff" or k == "finite_diff" or k == "fd":
+        return Grad.FINITE_DIFF
+    raise Error("QM-E913: unknown gradient method '" + name + "'. Hint: use 'adjoint', 'parameter-shift' or 'finite-diff'.")
+
+
+def py_vqe(circ: PythonObject, observable: PythonObject, method: PythonObject, x0: PythonObject,
+           maxiter: PythonObject, tol: PythonObject, grad: PythonObject, seed: PythonObject) raises -> PythonObject:
+    var r = vqe(PyCircuit._get(circ)[].c, _pauli(observable), String(py=method), _floats(x0),
+                _int_arg(maxiter, "vqe", "maxiter"), Float64(py=tol), _grad_method(String(py=grad)),
+                UInt64(_int_arg(seed, "vqe", "seed")))
+    var d = Python.dict()
+    d["energy"] = r.energy
+    d["params"] = _float_list(r.params)
+    var names = Python.list()
+    for nm in r.param_names:
+        names.append(String(nm))
+    d["param_names"] = names
+    d["history"] = _float_list(r.history)
+    d["nit"] = r.nit
+    d["nfev"] = r.nfev
+    d["ngrad"] = r.ngrad
+    d["circuit_evals"] = r.circuit_evals
+    d["wall_time_s"] = r.wall_time_s
+    d["converged"] = r.converged
+    d["message"] = String(r.message)
+    d["optimizer"] = String(r.optimizer)
+    d["grad_method"] = String(r.grad_method)
+    return d
+
+
+def py_qaoa_maxcut(num_nodes: PythonObject, edges: PythonObject, p: PythonObject, method: PythonObject,
+                   restarts: PythonObject, shots: PythonObject, seed: PythonObject, maxiter: PythonObject) raises -> PythonObject:
+    var g = _graph(num_nodes, edges)
+    var r = qaoa_maxcut(g, _int_arg(p, "qaoa_maxcut", "p"), String(py=method), _int_arg(restarts, "qaoa_maxcut", "restarts"),
+                        _int_arg(shots, "qaoa_maxcut", "shots"), UInt64(_int_arg(seed, "qaoa_maxcut", "seed")),
+                        _int_arg(maxiter, "qaoa_maxcut", "maxiter"))
+    var d = Python.dict()
+    d["p"] = r.p
+    d["energy"] = r.energy
+    d["expected_cut"] = r.expected_cut
+    d["max_cut"] = r.max_cut
+    d["approx_ratio"] = r.approx_ratio
+    d["gammas"] = _float_list(r.gammas)
+    d["betas"] = _float_list(r.betas)
+    d["best_bitstring"] = String(r.best_bitstring)
+    d["best_cut"] = r.best_cut
+    d["sampled_ratio"] = r.sampled_ratio
+    d["prob_optimal"] = r.prob_optimal
+    d["most_frequent"] = String(r.most_frequent)
+    d["shots"] = r.shots
+    d["history"] = _float_list(r.history)
+    d["nfev"] = r.nfev
+    d["circuit_evals"] = r.circuit_evals
+    d["wall_time_s"] = r.wall_time_s
+    d["optimizer"] = String(r.optimizer)
+    return d
+
+
+def py_h2_sto3g(num_qubits: PythonObject, include_nuclear_repulsion: PythonObject) raises -> PythonObject:
+    var n = Int(py=num_qubits)
+    return _py_pauli(h2_sto3g(n, Bool(py=include_nuclear_repulsion)), n)
+
+
+def py_transverse_field_ising(n: PythonObject, j: PythonObject, h: PythonObject, periodic: PythonObject) raises -> PythonObject:
+    return _py_pauli(transverse_field_ising(Int(py=n), Float64(py=j), Float64(py=h), Bool(py=periodic)), Int(py=n))
+
+
+def py_heisenberg_xxz(n: PythonObject, j: PythonObject, delta: PythonObject, periodic: PythonObject,
+                      field: PythonObject) raises -> PythonObject:
+    return _py_pauli(heisenberg_xxz(Int(py=n), Float64(py=j), Float64(py=delta), Bool(py=periodic), Float64(py=field)),
+                     Int(py=n))
+
+
+def py_fermi_hubbard(num_sites: PythonObject, edges: PythonObject, t: PythonObject, u: PythonObject,
+                     mu: PythonObject) raises -> PythonObject:
+    var g = _graph(num_sites, edges)
+    return _py_pauli(fermi_hubbard(g, Float64(py=t), Float64(py=u), Float64(py=mu)), 2 * len(g))
+
+
+def py_maxcut_hamiltonian(num_nodes: PythonObject, edges: PythonObject, include_offset: PythonObject) raises -> PythonObject:
+    var g = _graph(num_nodes, edges)
+    return _py_pauli(maxcut(g, Bool(py=include_offset)), len(g))
+
+
+def py_ground_energy(observable: PythonObject, num_qubits: PythonObject) raises -> PythonObject:
+    return ground_energy(_pauli(observable), Int(py=num_qubits))
+
+
+def py_ghz(n: PythonObject) raises -> PythonObject:
+    return _wrap(ghz(Int(py=n)))
+
+
+def py_qft(n: PythonObject, do_swaps: PythonObject) raises -> PythonObject:
+    return _wrap(qft(Int(py=n), Bool(py=do_swaps)))
+
+
+def py_hardware_efficient_ansatz(n: PythonObject, layers: PythonObject, entanglement: PythonObject,
+                                 rotations: PythonObject) raises -> PythonObject:
+    return _wrap(hardware_efficient_ansatz(Int(py=n), Int(py=layers), String(py=entanglement), String(py=rotations)))
+
+
+def py_qaoa_maxcut_ansatz(num_nodes: PythonObject, edges: PythonObject, p: PythonObject) raises -> PythonObject:
+    return _wrap(qaoa_maxcut_ansatz(_graph(num_nodes, edges), Int(py=p)))
+
+
+def py_uccsd_ansatz(num_qubits: PythonObject, num_electrons: PythonObject) raises -> PythonObject:
+    return _wrap(uccsd_ansatz(Int(py=num_qubits), Int(py=num_electrons)))
+
+
+def py_h2_ansatz() raises -> PythonObject:
+    return _wrap(h2_ansatz())
+
+
+def py_trotter(observable: PythonObject, time: PythonObject, steps: PythonObject, order: PythonObject,
+               num_qubits: PythonObject) raises -> PythonObject:
+    return _wrap(trotter(_pauli(observable), Float64(py=time), Int(py=steps), Int(py=order), Int(py=num_qubits)))
+
+
+def _experiment_dict(r: ExperimentResult) raises -> PythonObject:
+    var wi = r.wilson_interval()
+    var d = Python.dict()
+    d["code"] = String(r.code)
+    d["basis"] = String(r.basis)
+    d["decoder"] = String(r.decoder)
+    d["distance"] = r.distance
+    d["rounds"] = r.rounds
+    d["p"] = r.p
+    d["shots"] = r.shots
+    d["errors"] = r.errors
+    d["logical_error_rate"] = r.logical_error_rate()
+    d["std_error"] = r.std_error()
+    d["wilson"] = Python.tuple(wi[0], wi[1])
+    d["per_round_error_rate"] = r.per_round_error_rate()
+    d["seconds"] = r.seconds
+    d["setup_seconds"] = r.setup_seconds
+    d["shots_per_second"] = r.shots_per_second()
+    d["num_qubits"] = r.num_qubits
+    d["num_detectors"] = r.num_detectors
+    d["num_dem_errors"] = r.num_dem_errors
+    d["num_edges"] = r.num_edges
+    d["seed"] = Int(r.seed)
+    return d
+
+
+def py_memory_experiment(code: PythonObject, distance: PythonObject, rounds: PythonObject, p: PythonObject,
+                         shots: PythonObject, decoder: PythonObject, seed: PythonObject,
+                         max_errors: PythonObject) raises -> PythonObject:
+    return _experiment_dict(memory_experiment(
+        String(py=code), _int_arg(distance, "memory_experiment", "distance"), _int_arg(rounds, "memory_experiment", "rounds"),
+        Float64(py=p), _int_arg(shots, "memory_experiment", "shots"), String(py=decoder),
+        UInt64(_int_arg(seed, "memory_experiment", "seed")), _int_arg(max_errors, "memory_experiment", "max_errors")))
+
+
+def py_threshold_sweep(code: PythonObject, distances: PythonObject, ps: PythonObject, shots: PythonObject,
+                       decoder: PythonObject, seed: PythonObject, max_errors: PythonObject,
+                       rounds: PythonObject) raises -> PythonObject:
+    var rs = threshold_sweep_results(
+        String(py=code), _int_list(distances), _floats(ps), _int_arg(shots, "threshold_sweep", "shots"), String(py=decoder),
+        UInt64(_int_arg(seed, "threshold_sweep", "seed")), _int_arg(max_errors, "threshold_sweep", "max_errors"),
+        _int_arg(rounds, "threshold_sweep", "rounds"))
+    var shots_out = Python.list()
+    var errors = Python.list()
+    var rate = Python.list()
+    var stderr = Python.list()
+    var lo = Python.list()
+    var hi = Python.list()
+    var per_round = Python.list()
+    var seconds = Python.list()
+    var rounds_out = Python.list()
+    for r in rs:
+        var wi = r.wilson_interval()
+        shots_out.append(r.shots)
+        errors.append(r.errors)
+        rate.append(r.logical_error_rate())
+        stderr.append(r.std_error())
+        lo.append(wi[0])
+        hi.append(wi[1])
+        per_round.append(r.per_round_error_rate())
+        seconds.append(r.seconds)
+        rounds_out.append(r.rounds)
+    var d = Python.dict()
+    d["code"] = code
+    d["decoder"] = decoder
+    d["distances"] = _py_int_list(_int_list(distances))
+    d["ps"] = _float_list(_floats(ps))
+    d["rounds"] = rounds_out
+    d["shots"] = shots_out
+    d["errors"] = errors
+    d["logical_error_rate"] = rate
+    d["std_error"] = stderr
+    d["wilson_lo"] = lo
+    d["wilson_hi"] = hi
+    d["per_round_error_rate"] = per_round
+    d["seconds"] = seconds
+    return d
+
+
 # Environment variables the Mojo runtime sets at the C level when its Python
 # interop starts: it discovers *a* Python on the machine (e.g. a Homebrew
 # 3.14) and exports PYTHONEXECUTABLE, PYTHONPATH (":"-prefixed) and
@@ -1463,120 +2111,156 @@ def PyInit_qumo_py() abi("C") -> PythonObject:
         var m = PythonModuleBuilder("qumo_py")
         _ = (
             m.add_type[PyCircuit]("Circuit")
-            .def_method[PyCircuit.num_qubits]("num_qubits")
-            .def_method[PyCircuit.num_clbits]("num_clbits")
-            .def_method[PyCircuit.size]("size")
-            .def_method[PyCircuit.num_parameters]("num_parameters")
-            .def_method[PyCircuit.depth]("depth")
-            .def_method[PyCircuit.count_ops]("count_ops")
-            .def_method[PyCircuit.count_gate]("count_gate")
-            .def_method[PyCircuit.depth_of]("depth_of")
-            .def_method[PyCircuit.two_qubit_edges]("two_qubit_edges")
-            .def_method[PyCircuit.copy]("copy")
-            .def_method[PyCircuit.compose]("compose")
-            .def_method[PyCircuit.bind]("bind")
-            .def_method[PyCircuit.text]("text")
-            .def_method[PyCircuit.to_qasm2]("to_qasm2")
-            .def_method[PyCircuit.to_qasm3]("to_qasm3")
+            .def_method[PyCircuit.num_qubits]("num_qubits", docstring="num_qubits() -> int\n\nNumber of qubits.")
+            .def_method[PyCircuit.num_clbits]("num_clbits", docstring="num_clbits() -> int\n\nNumber of classical bits.")
+            .def_method[PyCircuit.size]("size", docstring="size() -> int\n\nNumber of unitary gates (no measurements, resets, barriers or noise).")
+            .def_method[PyCircuit.num_parameters]("num_parameters", docstring="num_parameters() -> int\n\nNumber of unbound symbolic parameters.")
+            .def_method[PyCircuit.depth]("depth", docstring="depth() -> int\n\nDepth over unitary gates.")
+            .def_method[PyCircuit.count_ops]("count_ops", docstring="count_ops() -> dict\n\n{gate name: count} over every instruction.")
+            .def_method[PyCircuit.count_gate]("count_gate", docstring="count_gate(name) -> int\n\nHow many instructions are called `name` (0 for an unknown name).")
+            .def_method[PyCircuit.depth_of]("depth_of", docstring="depth_of(name) -> int\n\nDepth counting only the gates called `name`, e.g. depth_of('cz') for the two-qubit depth. `name` is one gate name or a list of names (depth_of(['cx', 'cz'])). Errors: QM-E911 for another type, QM-E913 for an unknown gate name.")
+            .def_method[PyCircuit.two_qubit_edges]("two_qubit_edges", docstring="two_qubit_edges() -> list\n\n[(q0, q1), ...] for every two-qubit gate, in order (to check a coupling map).")
+            .def_method[PyCircuit.copy]("copy", docstring="copy() -> Circuit\n\nAn independent copy.")
+            .def_method[PyCircuit.compose]("compose", docstring="compose(other) -> Circuit\n\nA new circuit: this one followed by `other`.")
+            .def_method[PyCircuit.bind]("bind", docstring="bind(values) -> Circuit\n\nA new circuit with every symbolic parameter replaced: `values` has one number per parameter, in parameter_names() order. Errors: QM-E101 wrong count.")
+            .def_method[PyCircuit.text]("text", docstring="text() -> str\n\nOne instruction per line (QUMO's own listing).")
+            .def_method[PyCircuit.to_qasm2]("to_qasm2", docstring="to_qasm2() -> str\n\nOpenQASM 2 text.")
+            .def_method[PyCircuit.to_qasm3]("to_qasm3", docstring="to_qasm3() -> str\n\nCanonical OpenQASM 3 text; load_qasm reads it back to the same circuit.")
+            .def_method[PyCircuit.name]("name", docstring="name() -> str\n\nThe circuit's name.")
+            .def_method[PyCircuit.num_ops]("num_ops", docstring="num_ops() -> int\n\nNumber of instructions of every kind.")
+            .def_method[PyCircuit.num_measurements]("num_measurements", docstring="num_measurements() -> int\n\nNumber of measurement instructions.")
+            .def_method[PyCircuit.num_2q_gates]("num_2q_gates", docstring="num_2q_gates() -> int\n\nNumber of two-qubit gates.")
+            .def_method[PyCircuit.t_count]("t_count", docstring="t_count() -> int\n\nNumber of T and Tdg gates.")
+            .def_method[PyCircuit.parameter_names]("parameter_names", docstring="parameter_names() -> list\n\nNames of the symbolic parameters, in the order bind() takes their values.")
+            .def_method[PyCircuit.has_noise]("has_noise", docstring="has_noise() -> bool\n\nTrue when the circuit holds a noise channel.")
+            .def_method[PyCircuit.is_clifford]("is_clifford", docstring="is_clifford() -> bool\n\nTrue when every gate is Clifford (rotations by multiples of pi/2 count).")
+            .def_method[PyCircuit.is_dynamic]("is_dynamic", docstring="is_dynamic() -> bool\n\nTrue with classical conditions, resets or gates after a measurement.")
+            .def_method[PyCircuit.inverse]("inverse", docstring="inverse() -> Circuit\n\nThe inverse of a unitary circuit.")
+            .def_method[PyCircuit.add_kraus]("add_kraus", docstring="add_kraus(name, arity, data, q0, q1) -> int\n\nAppend a Kraus channel (arity 1 or 2; q1 = -1 for arity 1) with `data` = flat (re, im) pairs, row-major, one matrix after the other. Used by the qumo builder (kraus1 / kraus2); returns the instruction count.")
+            .def_method[PyCircuit.extend_packed]("extend_packed", docstring="extend_packed(ops_addr, num_ops, params_addr, num_params, new_parameters) -> int\n\nAppend many instructions in one call, read from two C buffers (the `qumo` package builds them; array('q') and array('d') give the addresses through buffer_info()). Returns the new instruction count.\n\nops: 5 int64 per instruction: kind, q0, q1, q2, aux. kind comes from op_table(); unused qubits are -1; aux is the classical bit of a measure. kind -1 conditions the previous instruction on classical bit q0 having value q1.\nparams: 3 float64 per gate angle, in order: offset, parameter index (-1 = a constant, the value is `offset`), coeff; the angle is coeff * parameter + offset.\nnew_parameters: names to declare before appending.\nErrors: QM-E001 qubit out of range, QM-E913 malformed buffers.")
         )
         _ = (
             m.add_type[PyProgram]("Program")
-            .def_method[PyProgram.num_qubits]("num_qubits")
-            .def_method[PyProgram.num_clbits]("num_clbits")
-            .def_method[PyProgram.num_parameters]("num_parameters")
-            .def_method[PyProgram.has_runtime_regions]("has_runtime_regions")
-            .def_method[PyProgram.to_circuit]("to_circuit")
-            .def_method[PyProgram.to_qasm3]("to_qasm3")
-            .def_method[PyProgram.to_json]("to_json")
-            .def_method[PyProgram.lint]("lint")
-            .def_method[PyProgram.text]("text")
+            .def_method[PyProgram.num_qubits]("num_qubits", docstring="num_qubits() -> int")
+            .def_method[PyProgram.num_clbits]("num_clbits", docstring="num_clbits() -> int")
+            .def_method[PyProgram.num_parameters]("num_parameters", docstring="num_parameters() -> int\n\nNumber of `input` declarations.")
+            .def_method[PyProgram.has_runtime_regions]("has_runtime_regions", docstring="has_runtime_regions() -> bool\n\nFalse when the program is one plain circuit.")
+            .def_method[PyProgram.to_circuit]("to_circuit", docstring="to_circuit() -> Circuit\n\nThe plain circuit of a program without run-time regions (QM-E585 otherwise).")
+            .def_method[PyProgram.to_qasm3]("to_qasm3", docstring="to_qasm3() -> str\n\nOpenQASM 3 text.")
+            .def_method[PyProgram.to_json]("to_json", docstring="to_json() -> str\n\nProgram JSON (qumo.program.v1).")
+            .def_method[PyProgram.lint]("lint", docstring="lint() -> list\n\nWarnings of the parser and of the program: [(code, message), ...].")
+            .def_method[PyProgram.text]("text", docstring="text() -> str\n\nQUMO's own listing.")
         )
-        m.def_function[py_load_program]("load_program")
-        m.def_function[py_program_from_json]("program_from_json")
-        m.def_function[py_draw_program]("draw_program")
-        m.def_function[py_sample_program]("sample_program")
-        m.def_function[py_transpile_program]("transpile_program")
-        m.def_function[py_empty]("circuit", docstring="Empty circuit with n qubits")
-        m.def_function[py_quantum_volume]("quantum_volume")
-        m.def_function[py_efficient_su2]("efficient_su2")
-        m.def_function[py_dtc_unitary]("dtc_unitary")
-        m.def_function[py_random_clifford]("random_clifford_circuit")
-        m.def_function[py_bv_all_ones]("bv_all_ones")
-        m.def_function[py_bvlike]("trivial_bvlike_circuit")
-        m.def_function[py_multi_control]("multi_control_circuit")
-        m.def_function[py_twirl]("pauli_twirl_2q")
-        m.def_function[py_hamiltonian_circuit]("hamiltonian_circuit")
-        m.def_function[py_version]("version")
-        m.def_function[py_transpile_calibrated]("transpile_calibrated")
-        m.def_function[py_mcx_circuit]("mcx_circuit")
-        m.def_function[py_draw]("draw")
-        m.def_function[py_sample_ptsbe]("sample_ptsbe")
-        m.def_function[py_plan_trajectories]("plan_trajectories")
-        m.def_function[py_inject_noise]("inject_noise")
-        m.def_function[py_ionq_request]("ionq_request")
-        m.def_function[py_ionq_counts]("ionq_counts")
-        m.def_function[py_ionq_submit]("ionq_submit")
-        m.def_function[py_ionq_status]("ionq_status")
-        m.def_function[py_ionq_result]("ionq_result")
-        m.def_function[py_ionq_backends]("ionq_backends")
-        m.def_function[py_spq_payload_document]("speqtrum_payload_document")
-        m.def_function[py_spq_unsafe_construct]("speqtrum_unsafe_construct")
-        m.def_function[py_spq_decode_result]("speqtrum_decode_result")
-        m.def_function[py_spq_devices]("speqtrum_devices")
-        m.def_function[py_spq_execute]("speqtrum_execute")
-        m.def_function[py_spq_status]("speqtrum_status")
-        m.def_function[py_spq_result]("speqtrum_result")
-        m.def_function[py_ibm_backends]("ibm_backends")
-        m.def_function[py_ibm_target]("ibm_target")
-        m.def_function[py_ibm_isa_payload]("ibm_isa_payload")
-        m.def_function[py_ibm_submit]("ibm_submit")
-        m.def_function[py_ibm_status]("ibm_status")
-        m.def_function[py_ibm_result]("ibm_result")
-        m.def_function[py_qtm_native_circuit]("quantinuum_native_circuit")
-        m.def_function[py_qtm_submit]("quantinuum_submit")
-        m.def_function[py_qtm_status]("quantinuum_status")
-        m.def_function[py_qtm_result]("quantinuum_result")
-        m.def_function[py_qtm_devices]("quantinuum_devices")
-        m.def_function[py_sample_branching]("sample_branching")
-        m.def_function[py_density_probabilities]("density_probabilities")
-        m.def_function[py_density_expectation]("density_expectation")
-        m.def_function[py_mitigate_m3]("mitigate_m3")
-        m.def_function[py_to_pbc]("to_pbc")
-        m.def_function[py_from_stim]("from_stim")
-        m.def_function[py_to_stim]("to_stim")
-        m.def_function[py_dem_text]("dem_text")
-        m.def_function[py_parse_dem]("parse_dem")
-        m.def_function[py_sample_dem]("sample_dem")
-        m.def_function[py_decode_dem]("decode_dem")
-        m.def_function[py_missing_detectors]("missing_detectors")
-        m.def_function[py_count_determined]("count_determined_measurements")
-        m.def_function[py_load_qasm]("load_qasm")
-        m.def_function[py_load_qasm_file]("load_qasm_file")
-        m.def_function[py_transpile]("transpile")
-        m.def_function[py_translate]("translate")
-        m.def_function[py_compile_spec]("compile_spec")
-        m.def_function[py_transpile_ai]("transpile_ai")
-        m.def_function[py_compile_spec_full]("compile_spec_full")
-        m.def_function[py_transpile_ai_report]("transpile_ai_report")
-        m.def_function[py_sample]("sample")
-        m.def_function[py_expectation]("expectation")
-        m.def_function[py_sample_device]("sample_device")
-        m.def_function[py_gpu_info]("gpu_info")
+        m.def_function[py_load_program]("load_program", docstring="load_program(text) -> Program\n\nParse OpenQASM 2 or 3 into a Program: everything a Circuit holds, plus while, break, continue and classical variables.")
+        m.def_function[py_program_from_json]("program_from_json", docstring="program_from_json(text) -> Program\n\nInverse of Program.to_json(). Malformed input raises QM-E587.")
+        m.def_function[py_draw_program]("draw_program", docstring="draw_program(program, width, style) -> str\n\nText drawing by blocks. style: 'ascii' | 'unicode'; width 0 = no folding.")
+        m.def_function[py_sample_program]("sample_program", docstring="sample_program(program, shots, seed, params=[], max_iterations=65536, method='auto') -> dict\n\nSample a program -> {counts, method, iterations, outputs, warnings}. params: values of the `input` declarations, in order. method: 'auto' | 'statevector' | 'tableau' | 'branching' | 'gpu'. Errors: QM-E480 past max_iterations, QM-E483 unsupported method.")
+        m.def_function[py_transpile_program]("transpile_program", docstring="transpile_program(program, num_qubits, edges, basis, level, seed) -> (program, initial_layout, final_layout, report)\n\nCompile a Program; same target arguments as transpile(). num_qubits: physical qubits; edges: [(a, b), ...] couplings ([] = all-to-all); basis: list of gate names, or one str: a basis-set name ('sc_cz', 'sc_cx', 'sc_ecr', 'sc_iswap', 'ion_ms', 'ion_zz', 'atom_cz', 'clifford_t', 'generic', 'any') or a comma list ('rz,sx,x,cz').")
+        m.def_function[py_empty]("circuit", docstring="circuit(n) -> Circuit\n\nEmpty circuit on n qubits.")
+        m.def_function[py_quantum_volume]("quantum_volume", docstring="quantum_volume(n, depth, seed) -> Circuit\n\nQuantum-volume model circuit.")
+        m.def_function[py_efficient_su2]("efficient_su2", docstring="efficient_su2(n, reps, entanglement) -> Circuit\n\nRY/RZ layers with CX entanglers ('linear', 'circular', 'full'); parametric.")
+        m.def_function[py_dtc_unitary]("dtc_unitary", docstring="dtc_unitary(n, g, seed) -> Circuit\n\nOne Floquet step of a discrete time crystal.")
+        m.def_function[py_random_clifford]("random_clifford_circuit", docstring="random_clifford_circuit(n, num_gates, seed) -> Circuit")
+        m.def_function[py_bv_all_ones]("bv_all_ones", docstring="bv_all_ones(n) -> Circuit\n\nBernstein-Vazirani with the all-ones secret.")
+        m.def_function[py_bvlike]("trivial_bvlike_circuit", docstring="trivial_bvlike_circuit(n) -> Circuit")
+        m.def_function[py_multi_control]("multi_control_circuit", docstring="multi_control_circuit(n) -> Circuit")
+        m.def_function[py_twirl]("pauli_twirl_2q", docstring="pauli_twirl_2q(circuit, seed) -> Circuit\n\nPauli-twirl every two-qubit gate.")
+        m.def_function[py_hamiltonian_circuit]("hamiltonian_circuit", docstring="hamiltonian_circuit(labels, coeffs, time) -> Circuit\n\nFirst-order Trotter step of sum(coeff * label) for `time`.")
+        m.def_function[py_version]("version", docstring="version() -> str\n\nQUMO version.")
+        m.def_function[py_transpile_calibrated]("transpile_calibrated", docstring="transpile_calibrated(circuit, num_qubits, edges, basis, level, seed, calibration) -> (circuit, initial_layout, final_layout, est_fidelity)\n\ntranspile() with device data. calibration: dict with optional error_1q, readout, t1_us, t2_us (one value per qubit), edge_errors ({'a-b': e}) and angle_bounds ({'rzz': (lo, hi)}). num_qubits: physical qubits; edges: [(a, b), ...] couplings ([] = all-to-all); basis: list of gate names, or one str: a basis-set name ('sc_cz', 'sc_cx', 'sc_ecr', 'sc_iswap', 'ion_ms', 'ion_zz', 'atom_cz', 'clifford_t', 'generic', 'any') or a comma list ('rz,sx,x,cz').")
+        m.def_function[py_mcx_circuit]("mcx_circuit", docstring="mcx_circuit(num_controls, mode, num_ancillas, clean) -> Circuit\n\nMulti-controlled X on qubits 0..k-1 -> k, ancillas after.")
+        m.def_function[py_draw]("draw", docstring="draw(circuit, width, style) -> str\n\nText drawing. style: 'ascii' | 'unicode'; width 0 = no folding.")
+        m.def_function[py_sample_ptsbe]("sample_ptsbe", docstring="sample_ptsbe(circuit, shots, seed) -> dict\n\nCounts of a static circuit with Pauli noise: one simulation per distinct error pattern. Errors: QM-E409 for dynamic circuits, QM-E911 when shots or seed is not an int.")
+        m.def_function[py_plan_trajectories]("plan_trajectories", docstring="plan_trajectories(circuit, shots, seed) -> (distinct_patterns, noise_sites, error_free_shots)\n\nWhat sample_ptsbe would run.")
+        m.def_function[py_inject_noise]("inject_noise", docstring="inject_noise(qasm2_text, p1, p2, pm) -> (text, inserted_1q, inserted_2q, inserted_readout)\n\nAdd `#pragma qumo` channels to OpenQASM 2 text: depolarize1(p1) after each one-qubit gate, depolarize2(p2) after each two-qubit gate, x_error(pm) before each measurement. Any layout is read (several statements per line, statements over several lines); `measure q -> c;` gets one channel per qubit of the register. Errors: QM-E913 for what the pragmas cannot address (a register not named q, a statement without ';').")
+        m.def_function[py_ionq_request]("ionq_request", docstring="ionq_request(qasm2_text, shots, noise, seed, name) -> (json_body, clbit_to_qubit, num_clbits, dense_qubits)\n\nIonQ ionq.circuit.v1 request for a compiled circuit.")
+        m.def_function[py_ionq_counts]("ionq_counts", docstring="ionq_counts(keys, probs, clbit_qubit, shots, seed) -> dict\n\nIonQ probability histogram -> counts over the classical bits.")
+        m.def_function[py_ionq_submit]("ionq_submit", docstring="ionq_submit(qasm2_text, shots, noise, seed, name) -> (job_id, clbit_to_qubit, num_clbits, dense_qubits)\n\nNative IonQ submission (key read from IONQ_API_KEY).")
+        m.def_function[py_ionq_status]("ionq_status", docstring="ionq_status(job_id) -> str")
+        m.def_function[py_ionq_result]("ionq_result", docstring="ionq_result(job_id, clbit_qubit, shots, seed) -> dict")
+        m.def_function[py_ionq_backends]("ionq_backends", docstring="ionq_backends() -> list\n\n[(name, status, qubits), ...].")
+        m.def_function[py_spq_payload_document]("speqtrum_payload_document", docstring="speqtrum_payload_document(backend, shots, qasm, num_qubits, num_clbits, initial, final, measure_clbits, measure_qubits, auto) -> str\n\nqumo.payload.v1 document.")
+        m.def_function[py_spq_unsafe_construct]("speqtrum_unsafe_construct", docstring="speqtrum_unsafe_construct(text) -> str")
+        m.def_function[py_spq_decode_result]("speqtrum_decode_result", docstring="speqtrum_decode_result(encoded, job_id) -> dict")
+        m.def_function[py_spq_devices]("speqtrum_devices", docstring="speqtrum_devices(base, user, key, audience) -> list\n\n[(code, qubits, status, notes), ...].")
+        m.def_function[py_spq_execute]("speqtrum_execute", docstring="speqtrum_execute(base, user, key, audience, device, document, shots) -> str\n\nSubmit; returns the job id.")
+        m.def_function[py_spq_status]("speqtrum_status", docstring="speqtrum_status(base, user, key, audience, job_id) -> str")
+        m.def_function[py_spq_result]("speqtrum_result", docstring="speqtrum_result(base, user, key, audience, job_id) -> dict")
+        m.def_function[py_ibm_backends]("ibm_backends", docstring="ibm_backends(account, instance) -> list\n\n[(name, qubits, status, pending_jobs), ...].")
+        m.def_function[py_ibm_target]("ibm_target", docstring="ibm_target(account, instance, backend, fractional) -> dict\n\nCoupling map, basis and calibration of an IBM backend.")
+        m.def_function[py_ibm_isa_payload]("ibm_isa_payload", docstring="ibm_isa_payload(qasm, num_qubits, basis, edges, symmetric, d1, d2, dr) -> (qasm3, duration_s, two_qubit_gates, active_qubits)")
+        m.def_function[py_ibm_submit]("ibm_submit", docstring="ibm_submit(account, instance, backend, qasm3, shots, cap) -> str\n\nSubmit; returns the job id.")
+        m.def_function[py_ibm_status]("ibm_status", docstring="ibm_status(account, instance, job_id) -> (state, reason)")
+        m.def_function[py_ibm_result]("ibm_result", docstring="ibm_result(account, instance, job_id, num_clbits) -> dict")
+        m.def_function[py_qtm_native_circuit]("quantinuum_native_circuit", docstring="quantinuum_native_circuit(qasm2_text) -> (pytket_json, n_qubits, n_clbits, n1q, n2q, n_measure_reset, registers)")
+        m.def_function[py_qtm_submit]("quantinuum_submit", docstring="quantinuum_submit(device, project, name, qasm, shots, max_cost) -> (job_id, project_id, circuit_id)")
+        m.def_function[py_qtm_status]("quantinuum_status", docstring="quantinuum_status(job_id) -> (state, detail)")
+        m.def_function[py_qtm_result]("quantinuum_result", docstring="quantinuum_result(job_id, num_clbits) -> dict")
+        m.def_function[py_qtm_devices]("quantinuum_devices", docstring="quantinuum_devices() -> list\n\n[(name, qubits), ...].")
+        m.def_function[py_sample_branching]("sample_branching", docstring="sample_branching(circuit, shots, seed) -> dict\n\nStabilizer branching sampler: near-Clifford circuits on up to 512 qubits. Errors: QM-E412 too many branches, QM-E911 when shots or seed is not an int.")
+        m.def_function[py_density_probabilities]("density_probabilities", docstring="density_probabilities(circuit) -> list\n\nExact outcome probabilities of all qubits from the density matrix (noise included). Limit 15 qubits (QM-E410).")
+        m.def_function[py_density_expectation]("density_expectation", docstring="density_expectation(circuit, observable) -> float\n\nTr(rho H) with the circuit's noise applied. observable: a Pauli-sum str ('0.5 * Z0 Z1 - X0' or 'ZZI + 0.5*XIX') or a list of (label, coeff) pairs; a dense label reads left to right from the highest qubit. Limit 15 qubits (QM-E410).")
+        m.def_function[py_mitigate_m3]("mitigate_m3", docstring="mitigate_m3(counts, p01, p10, hamming) -> dict\n\nM3 readout mitigation: {bitstring: count} and per-qubit flip rates -> {bitstring: quasi-probability}.")
+        m.def_function[py_to_pbc]("to_pbc", docstring="to_pbc(circuit, fix_clifford) -> str\n\nPauli-based computation form as JSON text.")
+        m.def_function[py_from_stim]("from_stim", docstring="from_stim(text) -> Circuit\n\nStim circuit text -> Circuit.")
+        m.def_function[py_to_stim]("to_stim", docstring="to_stim(circuit) -> str\n\nClifford + Pauli-noise circuit -> Stim circuit text.")
+        m.def_function[py_dem_text]("dem_text", docstring="dem_text(circuit) -> str\n\nDetector error model of a noisy Clifford circuit, in Stim DEM text.")
+        m.def_function[py_parse_dem]("parse_dem", docstring="parse_dem(text) -> (num_detectors, num_observables, num_errors, text)\n\nRound trip Stim DEM text through QUMO.")
+        m.def_function[py_sample_dem]("sample_dem", docstring="sample_dem(dem_text, shots, seed) -> list\n\nFiring rate of each detector, then of each observable, over `shots` samples.")
+        m.def_function[py_decode_dem]("decode_dem", docstring="decode_dem(dem_text, shots, decoder) -> list\n\nDecode detection events with a DEM given as text. shots: [[fired detector ids], ...], one list per shot (not a number of shots); decoder: 'mwpm' or 'mwpm_correlated'. Returns one observable mask per shot. Errors: QM-E911 wrong argument type, QM-E707 unknown decoder.")
+        m.def_function[py_missing_detectors]("missing_detectors", docstring="missing_detectors(circuit, unknown_input) -> list\n\nDeterministic measurement parities the circuit does not declare as detectors: a list of record lists.")
+        m.def_function[py_count_determined]("count_determined_measurements", docstring="count_determined_measurements(circuit, unknown_input) -> int\n\nStim's count_determined_measurements.")
+        m.def_function[py_load_qasm]("load_qasm", docstring="load_qasm(text) -> Circuit\n\nParse OpenQASM 2 or 3 text (not a file path: use load_qasm_file). Errors: QM-E5xx with line and column.")
+        m.def_function[py_load_qasm_file]("load_qasm_file", docstring="load_qasm_file(path) -> Circuit\n\nRead an OpenQASM 2 or 3 file.")
+        m.def_function[py_transpile]("transpile", docstring="transpile(circuit, num_qubits, edges, basis, level, seed) -> (circuit, initial_layout, final_layout)\n\nCompile for a target. num_qubits: physical qubits; edges: [(a, b), ...] couplings ([] = all-to-all); basis: list of gate names, or one str: a basis-set name ('sc_cz', 'sc_cx', 'sc_ecr', 'sc_iswap', 'ion_ms', 'ion_zz', 'atom_cz', 'clifford_t', 'generic', 'any') or a comma list ('rz,sx,x,cz'). level: 0..3. initial_layout[l] / final_layout[l]: physical qubit of logical qubit l before / after routing.")
+        m.def_function[py_translate]("translate", docstring="translate(circuit, basis) -> Circuit\n\nBasis translation only (no layout, routing or optimisation). basis: list of gate names or one basis-set name.")
+        m.def_function[py_compile_spec]("compile_spec", docstring="compile_spec(circuit, num_qubits, edges, basis, spec) -> (circuit, report_json)\n\nRun an explicit text pipeline, e.g. 'basis,layout,route,optimize'. num_qubits: physical qubits; edges: [(a, b), ...] couplings ([] = all-to-all); basis: list of gate names, or one str: a basis-set name ('sc_cz', 'sc_cx', 'sc_ecr', 'sc_iswap', 'ion_ms', 'ion_zz', 'atom_cz', 'clifford_t', 'generic', 'any') or a comma list ('rz,sx,x,cz').")
+        m.def_function[py_transpile_ai]("transpile_ai", docstring="transpile_ai(circuit, num_qubits, edges, basis, level, seed) -> (circuit, initial_layout, final_layout)\n\nHybrid heuristic + learned compile, AI level 1..3. Models come from $QUMO_MODEL_DIR, then ./models/ai_transpiler; every learned proposal is verified exactly.")
+        m.def_function[py_compile_spec_full]("compile_spec_full", docstring="compile_spec_full(circuit, num_qubits, edges, basis, spec, seed) -> (circuit, initial_layout, final_layout, report_json)")
+        m.def_function[py_transpile_ai_report]("transpile_ai_report", docstring="transpile_ai_report(circuit, num_qubits, edges, basis, level, seed) -> (circuit, initial_layout, final_layout, report_json)")
+        m.def_function[py_sample]("sample", docstring="sample(circuit, shots, seed) -> dict\n\nCounts {bitstring: count} from the CPU state-vector simulator (static sampling, or per-shot trajectories for dynamic and noisy circuits). Bit c of the register is character -1-c of the key. Limit 32 qubits (QM-E404): sample_device(circuit, shots, seed, 'auto') picks the stabilizer or Pauli-frame simulator for Clifford circuits of any width.\nErrors: QM-E402 no measurements, QM-E101 unbound parameters, QM-E911 when shots or seed is not an int.\n\n    c = qumo_py.load_qasm('OPENQASM 3.0; qubit[2] q; bit[2] c; h q[0]; cx q[0], q[1]; c = measure q;')\n    qumo_py.sample(c, 1024, 1234)   # {'00': 520, '11': 504}")
+        m.def_function[py_expectation]("expectation", docstring="expectation(circuit, observable, params=[]) -> float\n\n<psi|H|psi> from the state vector. Noise channels and measurements are skipped: use density_expectation for a noisy circuit. observable: a Pauli-sum str ('0.5 * Z0 Z1 - X0' or 'ZZI + 0.5*XIX') or a list of (label, coeff) pairs; a dense label reads left to right from the highest qubit. params: values of the symbolic parameters.")
+        m.def_function[py_sample_device]("sample_device", docstring="sample_device(circuit, shots, seed, device, precision='auto', params=[], counts=None) -> (counts, method, note)\n\nSample on a device. device: 'auto' (state vector, stabilizer or Pauli frames, GPU when built with -D QUMO_GPU and worth it) | 'cpu' | 'gpu' (falls back to the CPU and says why in `note`). precision: 'auto' | 'fp32' | 'fp64' for GPU state vectors. params: values of the symbolic parameters. counts: a dict (or dict subclass) to fill and return.\nErrors: QM-E940 unknown device, QM-E941 unknown precision, QM-E472 fp64 on an Apple GPU, QM-E911 when shots or seed is not an int.")
+        m.def_function[py_gpu_info]("gpu_info", docstring="gpu_info() -> dict\n\ncompiled, available, name, api, vendor, precision, precisions, precision_note, ...")
         _ = (
             m.add_type[PyQecMemory]("QecMemory")
-            .def_method[PyQecMemory.info]("info")
-            .def_method[PyQecMemory.dem_text]("dem_text")
-            .def_method[PyQecMemory.stim_text]("stim_text")
-            .def_method[PyQecMemory.sample]("sample")
-            .def_method[PyQecMemory.decode]("decode")
+            .def_method[PyQecMemory.info]("info", docstring="info() -> dict\n\ncode, basis, distance, rounds, num_qubits, num_detectors, num_observables, dem_errors, p.")
+            .def_method[PyQecMemory.dem_text]("dem_text", docstring="dem_text() -> str\n\nGraph-like detector error model in Stim DEM text (what the matching decoders use).")
+            .def_method[PyQecMemory.stim_text]("stim_text", docstring="stim_text() -> str\n\nThe memory circuit as Stim text.")
+            .def_method[PyQecMemory.sample]("sample", docstring="sample(shots, seed, device, threads) -> (dets_hex, obs_hex, method, note, seconds)\n\nSample detection events with Pauli frames. device: 'cpu' | 'gpu' | 'auto'; threads: CPU workers (0 = all cores). Packed hex, like Stim's b8: ceil(D/8) bytes per shot, bit k of byte j = detector 8j + k; observables likewise.")
+            .def_method[PyQecMemory.decode]("decode", docstring="decode(dets_hex, shots, threads) -> (predictions_hex, seconds, detection_events)\n\nSparse-blossom predictions for packed detection events from sample(). threads=1: this thread only; 0: every core.")
         )
-        m.def_function[py_expectation_device]("expectation_device")
-        m.def_function[py_expectations_device]("expectations_device")
-        m.def_function[py_value_and_gradient]("value_and_gradient")
-        m.def_function[py_batch_value_and_gradient]("batch_value_and_gradient")
-        m.def_function[py_subspace_ground_state]("subspace_ground_state")
-        m.def_function[py_schedule]("schedule")
-        m.def_function[py_qec_memory]("qec_memory")
+        m.def_function[py_expectation_device]("expectation_device", docstring="expectation_device(circuit, observable, device, precision='auto') -> (value, method, note)\n\n<observable> of a bound circuit on 'auto' | 'cpu' | 'gpu'.")
+        m.def_function[py_expectations_device]("expectations_device", docstring="expectations_device(circuit, observables, device, precision='auto') -> (values, method, note)\n\nMany observables from one simulation.")
+        m.def_function[py_value_and_gradient]("value_and_gradient", docstring="value_and_gradient(circuit, observable, params, device='cpu', precision='auto') -> (value, grad, method, note)\n\nExact E(params) and its adjoint gradient. Shared and affine parameters are exact.")
+        m.def_function[py_batch_value_and_gradient]("batch_value_and_gradient", docstring="batch_value_and_gradient(circuit, observable, param_sets) -> (values, grads)\n\nAdjoint values and gradients for many parameter sets in one call (parallel over sets up to 14 qubits).")
+        m.def_function[py_subspace_ground_state]("subspace_ground_state", docstring="subspace_ground_state(observable, basis_states, num_qubits, tol=1e-9, krylov=40) -> dict\n\nLowest eigenpair of a Pauli-sum Hamiltonian projected onto basis states (the SQD classical stage).")
+        m.def_function[py_schedule]("schedule", docstring="schedule(jobs, devices, cost_weight=0.0) -> dict\n\nHEFT plan of quantum jobs over a device pool, without running them.")
+        m.def_function[py_qec_memory]("qec_memory", docstring="qec_memory(code, distance, rounds, p) -> QecMemory\n\nMemory experiment for streaming: 'surface_z' | 'surface_x' | 'repetition' under uniform circuit noise p.")
+        m.def_function[py_op_table]("op_table", docstring="op_table() -> dict\n\n{gate name: (kind, arity, num_params)} for every instruction; `kind` is what Circuit.extend_packed takes.")
+        m.def_function[py_statevector]("statevector", docstring="statevector(circuit, params=[]) -> numpy.ndarray\n\nFinal state as a complex128 array of 2^n amplitudes; amplitude i has qubit q in bit q of i. Measurements, resets and noise are skipped. The simulator's state is written once into the array (no Python lists). Needs NumPy. Limit 32 qubits (QM-E404).")
+        m.def_function[py_probabilities]("probabilities", docstring="probabilities(circuit, params=[]) -> numpy.ndarray\n\nfloat64 array of 2^n outcome probabilities. A circuit with noise goes through the density matrix (limit 15 qubits).")
+        m.def_function[py_emulate]("emulate", docstring="emulate(circuit, spec, shots, seed, compile, level) -> (counts, method, num_qubits, estimated_fidelity, target)\n\nSample `circuit` under the noise of the target `spec` (e.g. 'grid:2x2/sc_cz'), as `qumo emulate` does. compile=True transpiles first. Errors: QM-E615 when the circuit does not fit the target and compile is False.")
+        m.def_function[py_parse_target]("parse_target", docstring="parse_target(spec) -> dict\n\nA one-line target, as the CLI takes it: '<topology>:<size>[/<basis>]', e.g. 'grid:2x2/sc_cz', 'line:20', 'heavy_hex:5/rz,sx,x,ecr', 'trapped_ion:11'. Returns name, modality, num_qubits, all_to_all, edges, basis. Errors: QM-E611.")
+        m.def_function[py_transpile_target]("transpile_target", docstring="transpile_target(circuit, spec, level, seed) -> (circuit, initial_layout, final_layout, report_json)\n\nCompile for a one-line target spec (see parse_target). level 0..3.")
+        m.def_function[py_transpile_report]("transpile_report", docstring="transpile_report(circuit, num_qubits, edges, basis, level, seed) -> (circuit, initial_layout, final_layout, report_json)\n\ntranspile() plus the per-pass report as JSON. num_qubits: physical qubits; edges: [(a, b), ...] couplings ([] = all-to-all); basis: list of gate names, or one str: a basis-set name ('sc_cz', 'sc_cx', 'sc_ecr', 'sc_iswap', 'ion_ms', 'ion_zz', 'atom_cz', 'clifford_t', 'generic', 'any') or a comma list ('rz,sx,x,cz').")
+        m.def_function[py_vqe]("vqe", docstring="vqe(circuit, observable, method, x0, maxiter, tol, grad, seed) -> dict\n\nVariational quantum eigensolver; the optimiser loop runs natively. method: 'bfgs' | 'adam' | 'gradient-descent' | 'spsa' | 'nelder-mead'; x0: start point ([] = seeded default); grad: 'adjoint' | 'parameter-shift' | 'finite-diff'. Returns energy, params, param_names, history, nit, nfev, ngrad, circuit_evals, wall_time_s, converged, message, optimizer, grad_method.")
+        m.def_function[py_qaoa_maxcut]("qaoa_maxcut", docstring="qaoa_maxcut(num_nodes, edges, p, method, restarts, shots, seed, maxiter) -> dict\n\nDepth-p QAOA for MaxCut; edges: [(u, v)] or [(u, v, weight)], num_nodes 0 = from the edges. Returns expected_cut, max_cut, approx_ratio, gammas, betas, best_bitstring, best_cut, prob_optimal, history, ...")
+        m.def_function[py_h2_sto3g]("h2_sto3g", docstring="h2_sto3g(num_qubits, include_nuclear_repulsion) -> list\n\nH2 in STO-3G at 0.735 A as [(label, coeff), ...]; num_qubits 4 (Jordan-Wigner) or 2 (tapered).")
+        m.def_function[py_transverse_field_ising]("transverse_field_ising", docstring="transverse_field_ising(n, j, h, periodic) -> list\n\n-j sum Z Z - h sum X on a chain, as [(label, coeff), ...].")
+        m.def_function[py_heisenberg_xxz]("heisenberg_xxz", docstring="heisenberg_xxz(n, j, delta, periodic, field) -> list\n\nXXZ chain as [(label, coeff), ...].")
+        m.def_function[py_fermi_hubbard]("fermi_hubbard", docstring="fermi_hubbard(num_sites, edges, t, u, mu) -> list\n\nFermi-Hubbard model on a graph (Jordan-Wigner, 2 qubits per site) as [(label, coeff), ...].")
+        m.def_function[py_maxcut_hamiltonian]("maxcut_hamiltonian", docstring="maxcut_hamiltonian(num_nodes, edges, include_offset) -> list\n\nMaxCut cost Hamiltonian (<H> = -<cut>) as [(label, coeff), ...].")
+        m.def_function[py_ground_energy]("ground_energy", docstring="ground_energy(observable, num_qubits) -> float\n\nExact ground-state energy by Lanczos; num_qubits <= 0 = from the observable.")
+        m.def_function[py_ghz]("ghz", docstring="ghz(n) -> Circuit\n\nGHZ state preparation (no measurements).")
+        m.def_function[py_qft]("qft", docstring="qft(n, do_swaps) -> Circuit\n\nQuantum Fourier transform.")
+        m.def_function[py_hardware_efficient_ansatz]("hardware_efficient_ansatz", docstring="hardware_efficient_ansatz(n, layers, entanglement, rotations) -> Circuit\n\nParametric ansatz: rotation layers ('ry,rz') and entanglers ('linear', 'circular', 'full').")
+        m.def_function[py_qaoa_maxcut_ansatz]("qaoa_maxcut_ansatz", docstring="qaoa_maxcut_ansatz(num_nodes, edges, p) -> Circuit\n\nQAOA ansatz for MaxCut; parameters gamma[0..p-1], beta[0..p-1].")
+        m.def_function[py_uccsd_ansatz]("uccsd_ansatz", docstring="uccsd_ansatz(num_qubits, num_electrons) -> Circuit\n\nUCCSD ansatz (Jordan-Wigner).")
+        m.def_function[py_h2_ansatz]("h2_ansatz", docstring="h2_ansatz() -> Circuit\n\nOne-parameter ansatz for 4-qubit H2.")
+        m.def_function[py_trotter]("trotter", docstring="trotter(observable, time, steps, order, num_qubits) -> Circuit\n\nTrotter-Suzuki circuit of exp(-i H time); order 1, 2 or 4; num_qubits <= 0 = from the observable.")
+        m.def_function[py_memory_experiment]("memory_experiment", docstring="memory_experiment(code, distance, rounds, p, shots, decoder, seed, max_errors) -> dict\n\nQEC memory experiment: sampling and decoding fused natively over all cores, no per-shot data in Python. code: 'surface_z' | 'surface_x' | 'repetition'; rounds < 1 = distance; decoder: 'mwpm' | 'mwpm_correlated' | 'mwpm_dense' | 'uf' | 'lookup'; max_errors > 0 stops early. Returns shots, errors, logical_error_rate, std_error, wilson, per_round_error_rate, seconds, ...")
+        m.def_function[py_threshold_sweep]("threshold_sweep", docstring="threshold_sweep(code, distances, ps, shots, decoder, seed, max_errors, rounds) -> dict\n\nGrid of memory experiments. Lists of len(distances) * len(ps) values, distance-major: shots, errors, logical_error_rate, std_error, wilson_lo, wilson_hi, per_round_error_rate, seconds, rounds.")
         var mod = m.finalize()
         _restore_host_environment()
         return mod

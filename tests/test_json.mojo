@@ -1,6 +1,6 @@
-"""Tests for qumo.ai.json: writer escaping/precision and arena parser."""
+"""Tests for qumo.core.json: writer escaping/precision and arena parser."""
 
-from qumo.ai.json import (
+from qumo.core.json import (
     JsonWriter, JsonKind, JsonValue, parse_json, pretty_json, json_quote, json_number,
 )
 from std.testing import assert_equal, assert_true, assert_false, assert_almost_equal

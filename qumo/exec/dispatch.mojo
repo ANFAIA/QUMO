@@ -162,6 +162,14 @@ def _auto_gpu_precision(precision: String) -> String:
         return ""
 
 
+def _check_measured(c: Circuit) raises:
+    """QM-E402 for a circuit without measurements, whatever simulator the
+    dispatch would pick (the tableau and Pauli-frame samplers would return the
+    single empty outcome `{"": shots}`)."""
+    if c.num_measurements == 0:
+        raise Error("QM-E402: circuit has no measurements. Hint: call measure_all() or use evolve()/expectation().")
+
+
 def sample_auto(c: Circuit, shots: Int, seed: UInt64 = 1234,
                 params: List[Float64] = List[Float64](), precision: String = "auto") raises -> SampleResult:
     """Sample with the method `choose_method` selects. `precision` ("auto" |
@@ -173,6 +181,8 @@ def sample_auto(c: Circuit, shots: Int, seed: UInt64 = 1234,
     _ = parse_gpu_precision(precision)
     if len(params) == 0:
         var m = choose_method(c, shots)
+        if m == "frame" or m == "stabilizer":
+            _check_measured(c)
         if m == "frame":
             return sample_frame(c, shots, seed)
         if m == "stabilizer":
@@ -200,6 +210,8 @@ def sample_auto(c: Circuit, shots: Int, seed: UInt64 = 1234,
 def _sample_cpu(c: Circuit, shots: Int, seed: UInt64, params: List[Float64]) raises -> SampleResult:
     if len(params) == 0:
         var m = choose_method_cpu(c, shots)
+        if m == "frame" or m == "stabilizer":
+            _check_measured(c)
         if m == "frame":
             return sample_frame(c, shots, seed)
         if m == "stabilizer":

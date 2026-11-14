@@ -2,7 +2,7 @@
 
 from std.testing import assert_equal, assert_true
 
-from qumo.ai.json import parse_json
+from qumo.core.json import parse_json
 from qumo.ai.yaml_io import pauli_sum_from_yaml, pauli_sum_to_yaml, refuse_unsafe, yaml_load_flow
 from qumo.ir.pauli import PauliSum
 

@@ -38,7 +38,7 @@ under extensions/src/*/ops.rs; re-derived as a QUMO-native IR.
 Error codes: QM-E727 (malformed logical program).
 """
 
-from qumo.ai.json import JsonWriter
+from qumo.core.json import JsonWriter
 from qumo.ft.classical import CExpr
 
 

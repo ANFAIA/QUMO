@@ -5,7 +5,7 @@ from std.testing import assert_equal, assert_false, assert_true
 
 from qumo.ai.describe import program_from_json, program_to_json
 from qumo.ai.diagnostics import error_catalog, lint_program
-from qumo.ai.json import JsonValue, parse_json, json_quote
+from qumo.core.json import JsonValue, parse_json, json_quote
 from qumo.ai.registry import full_registry
 from qumo.ai.tools import ToolRegistry
 from qumo.compiler.program_compile import compile_program

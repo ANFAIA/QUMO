@@ -14,7 +14,7 @@ from qumo.ir.param import Param
 from qumo.sim.runner import evolve, sample
 from qumo.sim.statevector import StateVector
 from qumo.sim.rng import Rng
-from qumo.compiler.common import GateSet
+from qumo.ir.gateset import GateSet
 from qumo.compiler.target import Target, parse_target, parse_basis
 from qumo.compiler.optimize import (
     remove_identities, cancel_inverses, merge_rotations, commute_rotations, fuse_1q, eject_z,

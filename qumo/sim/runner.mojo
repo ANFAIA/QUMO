@@ -76,6 +76,21 @@ struct SampleResult(Copyable, Writable):
             w.write("\"", k, "\": ", self.counts.get(k, 0))
         w.write("}")
 
+    def to_json(self) -> String:
+        """`{"counts": {"00": 512, ...}, "shots": N, "num_clbits": n, "method": "..."}`,
+        keys sorted: the fields of the CLI's `qumo run --json` that this result holds
+        (the per-shot `memory` is left out)."""
+        var s = String("{\"counts\": {")
+        var first = True
+        for k in self.sorted_keys():
+            if not first:
+                s += ", "
+            first = False
+            s += "\"" + k + "\": " + String(self.counts.get(k, 0))
+        s += "}, \"shots\": " + String(self.shots) + ", \"num_clbits\": " + String(self.num_clbits)
+        s += ", \"method\": \"" + self.method + "\"}"
+        return s^
+
 
 def bitstring(value: Int, width: Int) -> String:
     """Qiskit-style big-endian key: leftmost char = highest clbit."""

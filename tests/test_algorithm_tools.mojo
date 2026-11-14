@@ -8,7 +8,7 @@ values (1e-12), with the parameters in the same order.
 from std.testing import assert_equal, assert_true, assert_false
 from std.math import sqrt, sin, cos
 
-from qumo.ai.json import JsonValue, parse_json
+from qumo.core.json import JsonValue, parse_json
 from qumo.ai.registry import full_registry
 from qumo.ai.tools import ToolRegistry
 from qumo.ai.algorithm_tools import build_algorithm_circuit

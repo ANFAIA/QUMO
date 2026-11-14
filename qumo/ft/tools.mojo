@@ -25,7 +25,7 @@ from std.math import pi
 
 from qumo.ir.circuit import Circuit
 from qumo.ir.qasm import to_qasm, parse_qasm_with_warnings
-from qumo.ai.json import JsonWriter, JsonValue
+from qumo.core.json import JsonWriter, JsonValue
 from qumo.ai.tools import ToolRegistry, ToolResult, ToolContext, tool_ok, arg_circuit, arg_int, arg_required
 from qumo.exec.resources import estimate_resources
 from qumo.qec.codes import NoiseParams

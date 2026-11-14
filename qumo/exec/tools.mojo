@@ -13,7 +13,7 @@ from qumo.ir.circuit import Circuit
 from qumo.ir.pauli import parse_pauli_sum
 from qumo.ir.program import Program
 from qumo.ir.qasm import to_qasm
-from qumo.ai.json import JsonWriter, JsonValue
+from qumo.core.json import JsonWriter, JsonValue
 from qumo.ai.tools import (
     ToolRegistry, ToolResult, ToolContext, tool_ok, arg_circuit, arg_int, arg_max_iterations, arg_program,
     arg_program_params, arg_required, arg_params, write_program_outputs, write_warnings,
@@ -289,12 +289,25 @@ def _emulate_tool(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
     var shots = arg_int(args, "shots", 1024, 1, 100000000)
     var seed = arg_int(args, "seed", 1234, 0, 1 << 62)
     var compiled = c.copy()
-    if args.get_bool("compile", False):
+    var do_compile = args.get_bool("compile", False)
+    if do_compile:
         compiled = transpile(c, t, arg_int(args, "level", 2, 0, 3), seed).circuit.copy()
-    var r = emulate(compiled, t, shots, UInt64(seed))
+    var r: SampleResult
+    try:
+        r = emulate(compiled, t, shots, UInt64(seed))
+    except e:
+        var msg = String(e)
+        var h = msg.find(" Hint: ")
+        if do_compile or not msg.startswith("QM-E615") or h < 0:
+            raise e^
+        raise Error(String(msg[byte=0:h]) + " Hint: pass \"compile\": true to transpile it for the target before emulating (CLI: 'qumo emulate <file> --target " + t.name + "' compiles when needed), or compile it first with qumo_transpile and the same target.")
     var w = JsonWriter()
     w.begin_object()
     _write_counts(w, r)
+    w.kv_int("shots", shots)
+    w.kv_int("seed", seed)
+    w.kv_int("num_qubits", compiled.num_qubits)
+    w.kv_bool("compiled", do_compile)
     w.kv_float("estimated_fidelity", t.estimate_fidelity(compiled))
     w.kv_string("target", t.name)
     w.end_object()
@@ -520,7 +533,7 @@ def register_exec_tools(mut reg: ToolRegistry):
     )
     reg.add(
         "qumo_emulate", "Emulate on a device model",
-        "Sample a circuit under the noise of a target (per-qubit T1/T2, 1q and readout errors, per-edge 2q errors, gate durations) without any real device. The circuit must already fit the target (set compile=true to transpile first; QM-E615 otherwise). Takes 'target' or 'edges'+'basis' as qumo_transpile, plus 'calibration' {error_1q, readout, t1_us, t2_us, edge_errors: [[a, b, e], ...]}. Returns counts, the method that ran and the estimated fidelity.",
+        "Sample a circuit under the noise of a target (per-qubit T1/T2, 1q and readout errors, per-edge 2q errors, gate durations) without any real device. The circuit must already fit the target (set compile=true to transpile first; QM-E615 otherwise). Takes 'target' or 'edges'+'basis' as qumo_transpile, plus 'calibration' {error_1q, readout, t1_us, t2_us, edge_errors: [[a, b, e], ...]}. Returns counts, the method that ran, shots, seed, whether it compiled first ('compiled') and the estimated fidelity.",
         "{\"type\":\"object\",\"properties\":{" + _CIRC + ",\"target\":{\"type\":\"string\"},\"edges\":{\"type\":\"array\"},\"basis\":{\"type\":\"string\"},\"num_qubits\":{\"type\":\"integer\"},\"calibration\":{\"type\":\"object\"},\"angle_bounds\":{\"type\":\"object\"},\"compile\":{\"type\":\"boolean\",\"default\":false},\"level\":{\"type\":\"integer\",\"default\":2},\"shots\":{\"type\":\"integer\",\"default\":1024},\"seed\":{\"type\":\"integer\",\"default\":1234}},\"additionalProperties\":false}",
         _emulate_tool,
     )

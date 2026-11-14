@@ -13,7 +13,7 @@ from qumo.ir.circuit import Instruction
 from qumo.ir.gates import Op, op_arity
 from qumo.sim.rng import Rng
 from qumo.compiler.target import Target
-from qumo.compiler.common import GateSet
+from qumo.ir.gateset import GateSet
 from qumo.compiler.blockalg import (
     BlockKind, SubGraph, Perm, GF2Mat, SympTab, PauliRot, PauliNet, emit_rotation,
     ops_cost, ops_cx_count, ops_depth2q, ops_on_edges, local_ops, global_ops, inverse_ops,

@@ -10,7 +10,7 @@ identical to its QUMO source, or fixtures, checkpoints and exported models drift
     WL hash on random graphs, f16 -> f32 on all 65,536 bit patterns, format strings;
   * `qrl.env_core.PolicyEnv` vs `qumo.compiler.policy_synth.PolicyEnv`: random action walks from training resets
     of all four kinds on several topologies (states, emitted gates, observations, solved flags, keys, inverses);
-  * `qrl.json` vs `qumo.ai.json`: pretty printing and compact re-serialisation of every JSON fixture, number and
+  * `qrl.json` vs `qumo.core.json`: pretty printing and compact re-serialisation of every JSON fixture, number and
     string formatting.
 
 Run from the QUMO root with `-I . -I rl` (rl/Makefile `test-bridge`).
@@ -43,7 +43,7 @@ from qrl.topology import parse_topology
 from qrl.testutil import fixture_root, read_text
 from qumo.sim.rng import Rng as URng
 from qumo.ir.gates import Op as UOp, op_name as u_op_name
-from qumo.ai.json import parse_json as u_parse, pretty_json as u_pretty, json_number as u_number, json_quote as u_quote
+from qumo.core.json import parse_json as u_parse, pretty_json as u_pretty, json_number as u_number, json_quote as u_quote
 from qumo.compiler.policy import (
     ModelFile as UModelFile,
     model_kind_code as u_kind_code,

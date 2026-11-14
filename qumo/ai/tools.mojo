@@ -14,7 +14,7 @@ Extending (other QUMO modules)
 ```mojo
 # qumo/compiler/tools.mojo
 from qumo.ai.tools import ToolRegistry, ToolResult, ToolContext, tool_ok, arg_circuit
-from qumo.ai.json import JsonValue
+from qumo.core.json import JsonValue
 def _transpile(args: JsonValue, ctx: ToolContext) raises -> ToolResult: ...
 def register_compiler_tools(mut reg: ToolRegistry):
     reg.add("qumo_transpile", "Transpile", "Optimize/route a circuit ...",
@@ -38,7 +38,7 @@ from qumo.sim.runner import sample, evolve, bitstring
 from qumo.sim.program_runner import DEFAULT_MAX_ITERATIONS, ProgramResult, is_clifford_program, sample_program
 from qumo.exec.dispatch import sample_auto, choose_method
 from qumo.compiler.program_compile import program_metrics
-from qumo.ai.json import JsonWriter, JsonValue, JsonKind, parse_json, json_quote
+from qumo.core.json import JsonWriter, JsonValue, JsonKind, parse_json, json_quote
 from qumo.ai.diagnostics import (
     Diagnostic, diagnostic_from_error, lint, lint_program, parse_error_code,
 )
@@ -597,6 +597,116 @@ def write_program_summary(p: Program, mut w: JsonWriter):
     w.end_object()
 
 
+comptime VALIDATE_MAX_ERRORS = 20
+
+
+def _line_span(bs: Span[Byte, _], line: Int) -> Tuple[Int, Int]:
+    """Byte range [start, end) of 1-based `line`, newline excluded; (-1, -1) past the end."""
+    var start = 0
+    var cur = 1
+    var n = len(bs)
+    while cur < line and start < n:
+        if Int(bs[start]) == 10:
+            cur += 1
+        start += 1
+    if cur != line:
+        return (-1, -1)
+    var end = start
+    while end < n and Int(bs[end]) != 10:
+        end += 1
+    return (start, end)
+
+
+def _code_of_line(source: String, line: Int) -> String:
+    """`line` without its `//` comment and surrounding blanks ("" past the end)."""
+    var sp = _line_span(source.as_bytes(), line)
+    if sp[0] < 0:
+        return String()
+    var text = String(source[byte=sp[0]:sp[1]])
+    var c = text.find("//")
+    if c >= 0:
+        var head = String(text[byte=0:c])
+        text = head^
+    return String(text.strip())
+
+
+def _count_byte(s: String, ch: Int) -> Int:
+    var n = 0
+    for b in s.as_bytes():
+        if Int(b) == ch:
+            n += 1
+    return n
+
+
+comptime _NOT_SKIPPABLE = " OPENQASM include qubit bit qreg creg gate def defcal defcalgrammar cal opaque extern input output const let int uint float bool angle complex duration stretch array if else while for switch case default box "
+
+
+def _skippable_statement(source: String, line: Int) -> Bool:
+    """True when `line` holds exactly one whole simple statement (a gate call,
+    measurement, reset, assignment, ...), so that leaving it out cannot make a
+    later line fail: not a declaration, not a block header, and the statement
+    neither starts on an earlier line nor shares the line with another one."""
+    var code = _code_of_line(source, line)
+    if not code.endswith(";") or _count_byte(code, ord(";")) != 1:
+        return False
+    if code.find("{") >= 0 or code.find("}") >= 0 or code.startswith("#") or code.find("/*") >= 0 or code.find("*/") >= 0:
+        return False
+    var bs = code.as_bytes()
+    var e = 0
+    while e < len(bs) and ((Int(bs[e]) >= ord("a") and Int(bs[e]) <= ord("z")) or (Int(bs[e]) >= ord("A") and Int(bs[e]) <= ord("Z")) or Int(bs[e]) == ord("_")):
+        e += 1
+    if e > 0 and String(_NOT_SKIPPABLE).find(" " + String(code[byte=0:e]) + " ") >= 0:
+        return False
+    var prev = line - 1
+    while prev >= 1:
+        var pc = _code_of_line(source, prev)
+        if pc.byte_length() > 0:
+            return pc.endswith(";") or pc.endswith("{") or pc.endswith("}") or pc.startswith("#") or pc.endswith("*/")
+        prev -= 1
+    return True
+
+
+def _without_line(source: String, line: Int) -> String:
+    """`source` with `line` emptied: later lines keep their numbers."""
+    var sp = _line_span(source.as_bytes(), line)
+    return String(source[byte=0:sp[0]]) + String(source[byte=sp[1]:])
+
+
+def collect_parse_errors(source: String, first_error: String, mut complete: Bool) -> List[Diagnostic]:
+    """Every independent parse error of `source`, the first one given.
+
+    The parser stops at its first error, so recovery happens here, off every hot
+    path: the failing line is left out and the source parsed again, at most
+    `VALIDATE_MAX_ERRORS` times. That is only sound for a line that holds one
+    whole simple statement (`_skippable_statement`); at a declaration, a block
+    header, an error without a line, an error that does not move forward or one
+    that repeats the previous message (the usual sign of a cascade), collection
+    stops and `complete` is False: more errors may follow the last one listed.
+    `complete` is True when the source parses once the listed lines are left out."""
+    var out = List[Diagnostic]()
+    var src = source
+    var err = first_error
+    var last_line = 0
+    complete = False
+    while True:
+        var d = diagnostic_from_error(err)
+        if len(out) > 0 and (d.line <= last_line or d.message == out[len(out) - 1].message):
+            return out^
+        out.append(d.copy())
+        if d.line <= 0 or len(out) >= VALIDATE_MAX_ERRORS or not _skippable_statement(src, d.line):
+            return out^
+        last_line = d.line
+        var next = _without_line(src, d.line)
+        src = next^
+        var scratch = List[String]()
+        try:
+            _ = load_any_with_warnings(src, scratch)
+            complete = True
+            return out^
+        except e:
+            err = String(e)
+
+
 def _validate(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
     var src = arg_required(args, "qasm", "OpenQASM source text").as_string()
     var warnings = List[String]()
@@ -606,15 +716,20 @@ def _validate(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
     try:
         p = load_any_with_warnings(src, warnings)
     except e:
-        var d = diagnostic_from_error(String(e))
+        var complete = False
+        var ds = collect_parse_errors(src, String(e), complete)
+        var text = String("INVALID")
         w.kv_bool("valid", False)
         w.key("errors")
         w.begin_array()
-        d.write_json(w)
+        for d in ds:
+            d.write_json(w)
+            text += "\n" + String(d)
         w.end_array()
+        w.kv_bool("errors_complete", complete)
         write_warnings(w, warnings)
         w.end_object()
-        return ToolResult(w.finish(), "INVALID\n" + String(d), False)
+        return ToolResult(w.finish(), text, False)
     var flat = p.try_flatten()
     var diags = lint(flat.value()) if flat else lint_program(p)
     var nerr = 0
@@ -827,7 +942,7 @@ def register_core_tools(mut reg: ToolRegistry):
     )
     reg.add(
         "qumo_validate_qasm", "Validate OpenQASM",
-        "Parse and lint OpenQASM 2/3 without simulating, including programs with while and classical variables. Returns valid=true/false, structured errors (stable QM-Exxx code, message, line, col, snippet, hint) and lint warnings (QM-Wxxx), plus a summary when valid.",
+        "Parse and lint OpenQASM 2/3 without simulating, including programs with while and classical variables. Returns valid=true/false, structured errors (stable QM-Exxx code, message, line, col, snippet, hint) and lint warnings (QM-Wxxx), plus a summary when valid. Every independent parse error is listed, not only the first: a failing gate call, measurement or assignment is skipped and parsing goes on; 'errors_complete' is false when collection had to stop (an error in a declaration or a block header, which later lines depend on), so more errors may follow the last one.",
         "{\"type\":\"object\",\"properties\":{" + _QASM_PROP + "},\"required\":[\"qasm\"],\"additionalProperties\":false}",
         _validate,
     )

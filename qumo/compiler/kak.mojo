@@ -29,9 +29,8 @@ from qumo.ir.gates import (
     Op, M2, M4, matrix_1q, matrix_2q, op_arity, op_is_unitary, zyz_decompose,
 )
 from qumo.ir.circuit import Circuit, Instruction
-from qumo.compiler.common import (
-    GateSet, HALF_PI, QUARTER_PI, is_plain_gate, is_bound, is_all_wire_op, inst_matrix_1q,
-)
+from qumo.compiler.common import is_plain_gate, is_bound, is_all_wire_op, inst_matrix_1q
+from qumo.ir.gateset import GateSet, HALF_PI, QUARTER_PI
 from qumo.compiler.synth import synth_1q
 from max.algorithm import parallelize
 

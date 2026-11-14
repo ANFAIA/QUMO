@@ -48,7 +48,7 @@ Error codes: QM-E727 (invalid architecture or policy option).
 
 from qumo.ft.code import StabilizerCode, steane_code, iceberg_code
 from qumo.ft.logical import LOp, lop_name
-from qumo.ai.json import JsonWriter
+from qumo.core.json import JsonWriter
 
 
 struct QECPolicy(Copyable, Writable):

@@ -737,12 +737,23 @@ struct StateVector(Copyable, Writable):
         return ip_[0] * ip_[0] + ip_[1] * ip_[1]
 
     def write_to(self, mut w: Some[Writer]):
+        """Header + the first 16 nonzero amplitudes, one per line, labelled by
+        bitstring as the CLI and the counts are: leftmost character = highest
+        qubit, so basis index 3 of 2 qubits is `|11>` and index 1 is `|01>`."""
         w.write("StateVector(", self.num_qubits, " qubits)")
         var shown = 0
         for i in range(self.size()):
             var p = self.re[i] * self.re[i] + self.im[i] * self.im[i]
-            if p > 1e-12 and shown < 16:
-                w.write("\n  |", i, ">: ", self.re[i], " + ", self.im[i], "j")
+            if p > 1e-12:
+                if shown == 16:
+                    w.write("\n  ... (first 16 nonzero amplitudes shown)")
+                    break
+                var label = String()
+                var b = self.num_qubits - 1
+                while b >= 0:
+                    label += "1" if (i >> b) & 1 == 1 else "0"
+                    b -= 1
+                w.write("\n  |", label, ">: ", self.re[i], " + ", self.im[i], "j")
                 shown += 1
 
 

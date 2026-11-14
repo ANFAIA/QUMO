@@ -52,9 +52,13 @@ seeding and JSON conventions.
   the control-flow graph, used by the interpreter and by the verifier. It is a
   separate type so that a route that was not adapted does not compile
   ([CONTROL_FLOW.md](CONTROL_FLOW.md)).
-* **Text formats**: OpenQASM 3 is canonical (`qasm.mojo`, round-trip exact,
+* **Text formats**: OpenQASM 3 is canonical (`qasm.mojo` re-exports the lexer `qasm_lexer.mojo`,
+  the parser `qasm_parser.mojo` and the emitter `qasm_emit.mojo`; round-trip exact,
   `#pragma qumo` for noise/detectors); OpenQASM 2 export (`qasm2.mojo`) for
   interoperability with every other SDK.
+* **Shared utilities**: `qumo/core` (JSON writer and parser) imports nothing from QUMO and is
+  used by every layer above the IR. `GateSet` and the multi-qubit rewrite rules (`expand_rule`)
+  live in `qumo/ir/gateset.mojo`, so the simulator does not depend on the compiler.
 
 ## 2. Simulation (`qumo/sim`)
 

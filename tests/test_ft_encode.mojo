@@ -15,7 +15,7 @@ from qumo.ir.gates import Op
 from qumo.sim.runner import evolve
 from qumo.ai.tools import ToolRegistry
 from qumo.ft.tools import register_ft_tools
-from qumo.ai.json import parse_json
+from qumo.core.json import parse_json
 from qumo.ft.classical import CExpr
 from qumo.ft.logical import LogicalProgram, LOp
 from qumo.ft.arch import SteaneBuilder, IcebergBuilder, QECPolicy, FactoryConf, architecture_by_name

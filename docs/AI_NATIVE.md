@@ -2,20 +2,21 @@
 
 QUMO treats LLM agents (Claude Code, MCP clients, scripted pipelines) as
 first-class users, alongside humans. This document explains the design of the
-interface layer (`qumo/ir/qasm.mojo`, `qumo/ai/*`, `cli/main.mojo`) and how
+interface layer (`qumo/ir/qasm.mojo`, `qumo/ai/*`, `cli/app.mojo`) and how
 other QUMO modules plug their features into it.
 
 | Piece | File | What it gives an agent |
 |---|---|---|
 | OpenQASM 2/3 parser + emitter | `qumo/ir/qasm.mojo` | A circuit format models already write fluently, with exact round trips |
 | OpenQASM 2 emitter | `qumo/ir/qasm2.mojo` | Portable `qelib1.inc` output that every SDK parser loads (Qiskit strict and legacy, pytket, Cirq) |
-| JSON | `qumo/ai/json.mojo` | Streaming writer and arena parser, deterministic output, error positions |
+| JSON | `qumo/core/json.mojo` | Streaming writer and arena parser, deterministic output, error positions |
 | Diagnostics | `qumo/ai/diagnostics.mojo` | Stable codes, line/col, snippet, fix hint, lint warnings |
 | Self-description | `qumo/ai/describe.mojo` | Gate set, error catalog, capabilities and circuit JSON, generated from the implementation |
 | Tool registry | `qumo/ai/tools.mojo`, `qumo/ai/registry.mojo` | One implementation per operation, shared by MCP and CLI; `full_registry()` adds the module tools |
 | Module tools | `qumo/exec/tools.mojo` | Compile, resources, VQE, QAOA, QEC experiments (all decoders), GPU status, device-explicit runs |
 | MCP server | `qumo/ai/mcp.mojo` | JSON-RPC 2.0 over stdio (MCP 2025-06-18) |
-| CLI | `cli/main.mojo` -> `build/qumo` | `qumo <command> [--json]`, plus generic `qumo tool <name> '<json>'` |
+| CLI | `cli/app.mojo` (commands, options, help; `run_cli(args)`), `cli/main.mojo` (the entry file) -> `build/qumo` | `qumo <command> [--json]`, plus generic `qumo tool <name> '<json>'` |
+| CLI help for tools | `qumo/ai/cli_help.mojo` | `qumo tool <name> --help` generated from the tool's JSON Schema, "did you mean" hints |
 
 ```bash
 .venv/bin/mojo build -I . -o build/qumo cli/main.mojo
@@ -24,8 +25,11 @@ other QUMO modules plug their features into it.
 ./build/qumo mcp            # MCP server on stdio
 ```
 
-> The entry file is `cli/main.mojo`. A main module named `qumo.mojo` would
-> shadow the `qumo` package, and every `from qumo...` import would fail.
+> The entry file is `cli/main.mojo`: it calls `run_cli` of `cli/app.mojo`, prints
+> the result and exits with its code. All of the interface is in `cli/app.mojo`, so
+> tests call it in process (`tests/test_cli_frontdoor.mojo`). A main module named
+> `qumo.mojo` would shadow the `qumo` package, and every `from qumo...` import
+> would fail.
 
 ---
 
@@ -135,6 +139,10 @@ Not supported: subroutines (QM-E504), hexadecimal, octal and binary integer lite
 
 The trailing `;` is optional on pragma lines. `pragma qumo ...` without the
 `#` is accepted too.
+
+The full table of noise channels, including `pauli_channel_2`, `correlated_error`
+and Kraus channels (`kraus1`, `kraus2`), with the matching `Circuit` methods, is in
+[SIMULATION.md](SIMULATION.md#noise-channels-and-the-pragma-syntax).
 
 ### Size limits
 
@@ -287,7 +295,7 @@ tool (with `data` `{code: "QM-E912", available: [...]}`).
 | `qumo_run_qasm` | `qasm` \| `circuit` \| `program`, `shots`=1024, `seed`=1234, `params`, `max_qubits`=28, `max_iterations`=65536 | `counts` (sorted), `method` (`statevector:static` or `:trajectories`), `most_frequent`, `warnings`, `timing_ms`; a program adds `iterations` and `outputs`. Circuits without measurements are measured on all qubits (QM-W004). |
 | `qumo_statevector` | `qasm`, `params`, `max_amplitudes`=64, `threshold`, `max_qubits`=24 | `amplitudes[{index, bitstring, re, im, probability}]`, `num_nonzero`, `truncated`, `norm` |
 | `qumo_expectation` | `qasm`, `observable` (string or array), `params` | `expectation`, `results[]` |
-| `qumo_validate_qasm` | `qasm` | `valid`, `errors[]`, `warnings[]` (lint; QM-W054 for a program), `summary` |
+| `qumo_validate_qasm` | `qasm` | `valid`, `errors[]` (every error the parser can reach, not only the first), `errors_complete`, `warnings[]` (lint; QM-W054 for a program), `summary` when valid. After a failing gate call, measurement or assignment the check goes on to the next statement; an error in a declaration or a block header stops it, and `errors_complete` is then `false` (later lines were not checked) |
 | `qumo_describe` | `topic`: gates \| gate \| errors \| error \| capabilities, `name`, `format`: json \| markdown | self-description JSON (`markdown`, topic `errors` only: the text of docs/ERRORS.md) |
 | `qumo_circuit_info` | `qasm` \| `program`, `include_instructions`, `include_qasm`, `include_lint` | `summary`, `lint`, and optionally `circuit` (`program` for a program) and `qasm` |
 | `qumo_draw` | `qasm` \| `circuit` \| `program`, `width`=80, `style`: ascii \| unicode | `drawing`: one line per qubit, columns of gates (also `qumo draw file.qasm`, `Circuit.draw()`); a program draws by blocks, under indented headers |
@@ -308,7 +316,7 @@ Module tools (`qumo/exec/tools.mojo`, registered by `full_registry()`):
 | `qumo_vqe`, `qumo_qaoa_maxcut` | Pauli-sum `hamiltonian` / edge-list `graph`, optimizer options, `seed` | energy or cut, parameters, convergence |
 | `qumo_qec_memory` | `code`: surface_z \| surface_x \| repetition, `distance`, `rounds`, `p`, `shots`, `decoder`, `seed`, `max_errors` | logical error rate, std error, Wilson interval, per-round rate, timing |
 | `qumo_qec_dem` | `code`, `distance`, `rounds`, `p`, `include_stim` | detector error model in Stim DEM text |
-| `qumo_emulate` | `qasm` \| `circuit`, target as `qumo_transpile`, `calibration`, `compile`, `level`, `shots`, `seed` | counts under the target's noise, `method`, `estimated_fidelity`; nothing touches a device |
+| `qumo_emulate` | `qasm` \| `circuit`, target as `qumo_transpile`, `calibration`, `compile`, `level`, `shots`=1024, `seed`=1234 | `counts` under the target's noise, `method`, `shots`, `seed`, `num_qubits`, `compiled` (whether it was transpiled first), `estimated_fidelity`, `target`; nothing touches a device. A circuit that does not fit the target is QM-E615 unless `compile` is true |
 | `qumo_density` | `qasm` \| `circuit`, `observable` | exact `probabilities`, `trace`, `purity`, `expectation`; up to 15 qubits |
 | `qumo_to_pbc` | `qasm` \| `circuit`, `fix_clifford` | Pauli-product rotations and measurements in the input frame, with `counts` |
 | `qumo_stim_import` | `stim`, `include_dem`, `include_qasm` | sizes, `missing_detectors`, optionally the DEM and OpenQASM |
@@ -414,22 +422,76 @@ line without a newline. Tool latency is well under 1 ms for small circuits.
 ## 6. CLI
 
 ```
-qumo run <file|-> [--shots N] [--seed S] [--params JSON] [--max-iterations N] [--json]
-qumo statevector <file|-> [--max-amplitudes N] [--params JSON]
-qumo expect <file|-> "0.5*Z0 Z1 - X0" [more...] [--params JSON]
-qumo validate <file|->                 # exit 1 when invalid
+qumo run <file|-> [--shots N] [--seed S] [--params JSON] [--max-qubits N] [--max-iterations N] [--device auto|cpu|gpu] [--precision auto|fp32|fp64]
+qumo statevector <file|-> [--max-amplitudes N] [--params JSON] [--max-qubits N]
+qumo expect <file|-> "0.5*Z0 Z1 - X0" [more...] [--observable PAULI_SUM]... [--params JSON]
+qumo transpile <file|-> [--target SPEC] [--level 0-3] [--seed S] [--basis GATES] [--pipeline SPEC] [--ai] [--ai-level 1-3] [-o FILE] [--qasm]
+qumo emulate <file|-> --target SPEC [--shots N] [--seed S] [--compile|--no-compile] [--level 0-3]
+qumo vqe "<hamiltonian>" [--layers N] [--entanglement E] [--optimizer O] [--gradient G] [--maxiter N] [--qubits N] [--seed S]
+qumo validate <file|->                 # exit 1 when invalid; lists every error it can find
 qumo info <file|-> [--qasm] [--instructions]
-qumo describe [gates|gate <name>|errors|error <code>|capabilities]
-qumo convert <file|-> [--to qasm3|qasm2|json] [-o out]
-qumo tool list | qumo tool <name> '<json-args>'|-
-qumo mcp | version | help [command]
+qumo draw <file|-> [--width N] [--unicode]
+qumo describe [gates|gate <name>|errors|error <code>|capabilities|passes|models]
+qumo convert <file|-> [--to qasm3|qasm2|json] [--params JSON] [-o out]
+qumo tool list | qumo tool <name> '<json-args>'|- | qumo tool <name> --help
+qumo mcp | version | help [command | tool <name>]
 ```
+
+Every command also takes `--json`, `--pretty` and `--help`.
 
 The CLI prints human-readable output by default. With `--json` it prints the
 tool's `structuredContent` byte for byte, and `--pretty` indents it. Exit codes
 are 0 for success, 1 when the operation failed (the diagnostic goes to stderr,
 or to stdout as JSON with `--json`), and 2 for usage errors (QM-E921/QM-E912).
 Use `-` as the file argument to read from stdin.
+
+**Each command is a thin adapter over one tool** and adds no simulation or
+compilation logic: `run` -> `qumo_run_qasm` (`qumo_run_device` with `--device`),
+`transpile` -> `qumo_transpile`, `emulate` -> `qumo_emulate`, `vqe` -> `qumo_vqe`,
+and so on. `qumo transpile x.qasm --target grid:2x2/sc_cz --json` therefore prints
+what the MCP tool returns.
+
+**Options are strict.** A command declares its options in `command_table()`
+(`cli/app.mojo`) and the help text is generated from the same declaration. An
+option the command does not declare is a usage error, never ignored:
+
+```
+$ qumo run examples/foundations/bell.qasm --shot 10
+error[QM-E921]: unknown option '--shot' for 'qumo run'
+  hint: did you mean '--shots'? Options of 'qumo run': --shots, --seed, --params, --max-qubits, --max-iterations, --device, --precision, --json, --pretty, --help (see 'qumo run --help')
+$ echo $?
+2
+```
+
+Options are written `--name value` or `--name=value`. There is no `--quiet`
+option (it was accepted and ignored before; it is QM-E921 now). `qumo help
+<unknown>` and an unknown command are QM-E912 with exit code 2, and
+`qumo emulate` without `--target` is QM-E921.
+
+**`expect --observable`.** Observables are positional arguments, or
+`--observable "<pauli sum>"`, which may be repeated. Both forms can be mixed;
+the positional ones are evaluated first.
+
+**`emulate`.** A circuit that already fits the target runs as written. One
+that does not is compiled first, and the output says so (`"compiled": true`
+in JSON); `--compile` always compiles and `--no-compile` makes a circuit that
+does not fit an error (QM-E615).
+
+**Tools from the command line.** `qumo tool list` prints one line per tool.
+`qumo tool <name> --help` (or `qumo help tool <name>`) prints the tool's
+description, its arguments with types, defaults and ranges, and an example,
+all generated from the tool's JSON Schema. Three conveniences exist only in
+the CLI and change nothing for MCP clients:
+
+* the `qumo_` prefix is optional: `qumo tool draw '{...}'` calls `qumo_draw`;
+* a tool that takes OpenQASM text in `"qasm"` also takes `"file": "path"`
+  (`"-"` is stdin): the CLI reads the file and passes its text as `qasm`. The
+  MCP server does not read files, and `file` is not in the tool's schema;
+* the JSON arguments may come from stdin: `qumo tool <name> -`.
+
+**Seeds.** Defaults are stated once in
+[GETTING_STARTED.md](GETTING_STARTED.md#cli): 1234 for sampling and `emulate`,
+7 for `transpile` and `vqe`, 1 for QEC experiments.
 
 ---
 
@@ -441,7 +503,7 @@ Use `-` as the file argument to read from stdin.
 ```mojo
 # qumo/compiler/tools.mojo  (owned by the compiler module)
 from qumo.ai.tools import ToolRegistry, ToolResult, ToolContext, tool_ok, arg_circuit, arg_int
-from qumo.ai.json import JsonValue, JsonWriter
+from qumo.core.json import JsonValue, JsonWriter
 from qumo.ai.describe import write_circuit_summary
 from qumo.ir.qasm import to_qasm
 from qumo.compiler.pass_manager import transpile
@@ -491,15 +553,20 @@ The rules for tool handlers:
   `arg_required` so argument errors keep their uniform codes
   (QM-E910 missing argument, QM-E911 wrong type, QM-E913 bad value).
 
-**A new CLI command:** append a
-`Command("name", "summary", "usage", handler)` to `command_table()` in
-`cli/main.mojo`, where `handler` is `def(CliArgs) raises thin -> Int`. Most
-commands build a JSON argument object, call `call_tool(...)`, and format the
-structured result. Every registered tool is also reachable without a dedicated
-command:
+**A new CLI command:** in `command_table()` of `cli/app.mojo`, build a
+`Command("name", "summary", "<positional synopsis>", max_positional, handler)`,
+declare each option with `.opt("name", "METAVAR", "help")` (an empty metavar
+makes a flag), add `.example(...)` lines, and append it. `handler` is
+`def(CliArgs) raises thin -> CliOut`. The help text, the option check
+(QM-E921) and the "did you mean" hints come from that declaration. Most
+commands build a JSON argument object, call the tool, and format the
+structured result; `tests/test_cli_frontdoor.mojo` shows how to test one in
+process with `run_cli`. Every registered tool is also reachable, and
+documented by `--help`, without a dedicated command:
 
 ```bash
-qumo tool qumo_transpile '{"qasm": "...", "target": "grid:3x3"}' --pretty
+qumo tool qumo_transpile '{"file": "examples/foundations/bell.qasm", "target": "grid:3x3"}' --pretty
+qumo tool qumo_transpile --help
 ```
 
 **New error codes:** add an `_e(c, "QM-E6xx", ...)` line to `error_catalog()`

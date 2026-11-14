@@ -255,4 +255,4 @@ def main() raises:
     test_6_symbolic_offsets_reduce()
     test_11_blocks_past_ten_wires_are_checked()
     test_11_over_budget_is_counted_and_not_an_error()
-    print("test_program_compile_review2 OK")
+    print("test_program_compile_regressions_verifier OK")

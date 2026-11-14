@@ -2,11 +2,24 @@
 MOJO ?= .venv/bin/mojo
 PY ?= bench/.venv/bin/python
 # the RL tests live in rl/ (make test runs the fast ones once, via make test-rl; make test-rl-slow runs the rest)
-TESTS := $(wildcard tests/test_*.mojo)
+# GPU test files need a device; `make test` leaves them out and `make test-gpu-fallback` runs them on the CPU
+TESTS := $(filter-out tests/test_gpu%,$(wildcard tests/test_*.mojo))
+# CI splits the Mojo tests into SHARDS jobs; shard SHARD (1-based) runs every SHARDS-th file of FILES
+SHARDS ?= 1
+SHARD ?= 1
+FILES ?= $(TESTS)
 
-.PHONY: all setup setup-py test cli py bench-sv bench-neutral bench-charts benchpress clean examples examples-all examples-gpu test-py
+.PHONY: all help setup setup-py setup-py-locked test test-shard test-gpu-fallback cli py bench-sv bench-neutral bench-charts clean examples examples-all examples-gpu test-py test-python install-py
 
 all: cli py
+
+# The targets a new user needs, in the order to run them; `make help` marks them with *.
+ESSENTIAL := setup cli py test examples
+
+help:  ## list the documented targets (* = the ones a new user needs)
+	@echo "QUMO make targets (* = start here: make setup, then make cli; docs/GETTING_STARTED.md)"; echo
+	@awk -v ess="$(ESSENTIAL)" 'BEGIN { n = split(ess, e, " "); for (i = 1; i <= n; i++) mark[e[i]] = 1; FS = ":.*## " } \
+		/^[a-zA-Z0-9_-]+:.*## / { printf "  %s %-20s %s\n", (($$1 in mark) ? "*" : " "), $$1, $$2 }' $(MAKEFILE_LIST)
 
 # Mojo changes dialect between releases and QUMO pins the one it is written in
 # (docs/MOJO_GUIDE.md); bump these together with the guide.
@@ -17,17 +30,37 @@ setup:  ## create .venv, or update an existing one, to the pinned Mojo toolchain
 	[ -x .venv/bin/python ] || uv venv .venv --python 3.12
 	uv pip install --python .venv/bin/python "mojo==$(MOJO_VERSION)" "max-mojo-libs==$(MAX_VERSION)" "max-core==$(MAX_VERSION)"
 
-setup-py:  ## bench/.venv: Python 3.12 + latest Qiskit, Aer, TKET, Cirq, Stim, PyMatching (examples, benchmarks, plugin tests)
+setup-py:  ## bench/.venv: Python 3.12 + latest Qiskit, Aer, TKET, Cirq, Stim, PyMatching (examples, benchmarks, plugin tests); setup-py-locked pins them
 	[ -x bench/.venv/bin/python ] || uv venv bench/.venv --python 3.12
 	uv pip install --python bench/.venv/bin/python -U qiskit qiskit-aer qiskit-ibm-runtime pytket pytket-qiskit \
 		cirq-core ply stim pymatching numpy scipy matplotlib altair vl-convert-python psutil pytest nbformat "openqasm3[parser]"
 	uv pip install --python bench/.venv/bin/python -U "./plugins/hardware[all]"
 
+setup-py-locked:  ## bench/.venv from bench/requirements.lock: the exact versions of the last measured run (reproducible; setup-py takes the latest)
+	[ -x bench/.venv/bin/python ] || uv venv bench/.venv --python 3.12
+	uv pip install --python bench/.venv/bin/python -r bench/requirements.lock
+	uv pip install --python bench/.venv/bin/python "./plugins/hardware[all]"
+
 test:  ## run every Mojo test file (tests/ and, once, the fast RL tests of rl/ through make test-rl)
 	@fail=0; for t in $(TESTS); do \
-		out=$$($(MOJO) run -I . $$t 2>&1 | grep -v Crashpad | tail -1); \
-		case "$$out" in *OK*) echo "PASS $$t";; *) echo "FAIL $$t: $$out"; fail=1;; esac; \
+		log=$$(mktemp); $(MOJO) run -I . $$t > $$log 2>&1; \
+		out=$$(grep -v Crashpad $$log | tail -1); \
+		case "$$out" in *OK*) echo "PASS $$t";; *) echo "FAIL $$t: $$out"; grep -v Crashpad $$log | tail -25; fail=1;; esac; \
+		rm -f $$log; \
 	done; $(MAKE) --no-print-directory test-rl || fail=1; exit $$fail
+
+test-shard:  ## the Mojo test files of shard SHARD of SHARDS (round robin over FILES); the CI test jobs use this
+	@fail=0; i=0; for t in $(FILES); do \
+		if [ $$((i % $(SHARDS))) -eq $$(($(SHARD) - 1)) ]; then \
+			log=$$(mktemp); $(MOJO) run -I . $$t > $$log 2>&1; \
+			out=$$(grep -v Crashpad $$log | tail -1); \
+			case "$$out" in *OK*) echo "PASS $$t";; *) echo "FAIL $$t: $$out"; grep -v Crashpad $$log | tail -25; fail=1;; esac; \
+			rm -f $$log; \
+		fi; i=$$((i + 1)); \
+	done; exit $$fail
+
+test-gpu-fallback:  ## the GPU test files on the CPU (no device needed); the nightly CI job runs them
+	@$(MAKE) --no-print-directory test-shard FILES="$(GPU_TESTS)"
 
 cli:  ## native CLI + MCP server (build/qumo)
 	@mkdir -p build
@@ -216,7 +249,15 @@ examples-all:  ## every example tier
 examples-gpu: cli-gpu py-gpu  ## fast tier with GPU builds
 	$(PY) examples/run_examples.py --tier fast --gpu
 
-test-py:  ## Python tests: examples runner, heterogeneous example, hardware plugins
+install-py: py  ## install the Python package `qumo` (editable) into the environment of $(PY); docs/PYTHON.md
+	uv pip install --python $(PY) -e .
+
+test-python: py  ## tests of the Python package `qumo` (python/tests; needs numpy and pytest in $(PY))
+	PYTHONPATH=python $(PY) -m pytest -q python/tests
+
+# two pytest runs: python/tests and plugins/hardware/tests both have a conftest.py and a test_compile.py
+test-py:  ## every Python test: the `qumo` package, examples runner, heterogeneous example, hardware plugins
+	PYTHONPATH=python $(PY) -m pytest -q python/tests
 	PYTHONPATH=build:plugins/hardware $(PY) -m pytest -q examples/heterogeneous examples/test_run_examples.py plugins/hardware/tests
 
 clean:
