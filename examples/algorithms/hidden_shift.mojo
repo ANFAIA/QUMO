@@ -1,7 +1,7 @@
 """Hidden shift for Boolean bent functions: the notebook's three algorithms on QUMO.
 
 Reproduces: Classiq library - Hidden-Shift Problem for Bent Functions
-Framework: QUMO - https://github.com/ANFAIA/QUMO
+Framework: Classiq - https://github.com/Classiq/classiq-library
 Source: https://github.com/Classiq/classiq-library/blob/main/algorithms/number_theory_and_cryptography/hidden_shift/hidden_shift.ipynb (Classiq Library, MIT)
 
 A Boolean function f is bent when every Walsh coefficient W(a) = sum_x (-1)^(f(x) + a.x) has magnitude 2^(n/2); its dual f~ is the function with W(a) = 2^(n/2) (-1)^f~(a). The notebook hides a shift s in g(x) = f(x XOR s) and recovers s with three algorithms, all reproduced here. (1) On n = 4 qubits with f = x0 x1 XOR x2 x3 and s = e0, H, O_g, H, O_f, H leaves |s> with certainty. (2) On n = 16 with the Maiorana-McFarland function f(x, y) = x . p(y) XOR AND(y), the shift s = bits {1, 3, 9} and the dual f~(x, y) = x . p(y) XOR AND(x), the same circuit leaves |s> with certainty. (3) Without the dual, an ancilla takes f(x) and then f(x) XOR g(x) around a Z gate, H is applied to the register, and each measured pair (y, c) satisfies c = s . y (mod 2); 1000 shots solved over GF(2) give s.

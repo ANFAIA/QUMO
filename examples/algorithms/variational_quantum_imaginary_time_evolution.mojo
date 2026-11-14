@@ -1,7 +1,7 @@
 """VarQITE for Max-Cut: Y-Z counteradiabatic-style ansatz, G theta_dot = D, exact expectations.
 
 Reproduces: Classiq library - Variational Quantum Imaginary Time Evolution (VarQITE) for Combinatorial Problems
-Framework: QUMO - https://github.com/ANFAIA/QUMO
+Framework: Classiq - https://github.com/Classiq/classiq-library
 Source: https://github.com/Classiq/classiq-library/blob/main/applications/optimization/variational_quantum_imaginary_time_evolution/variational_quantum_imaginary_time_evolution.ipynb (Classiq Library, MIT)
 
 The notebook prepares |+>^V, applies exp(-i theta_j Z_a Y_b) for every node pair (V(V-1)/2 angles, pairs ordered by vertex weight, Z on the lighter node), and iterates theta <- theta + dtau * theta_dot with G theta_dot = D (SVD pseudo-inverse, cutoff 0.01 s_max), G_{a,j} = Re<psi|P_a d_j psi>, D_a = <P_a (E - H_c)>, E the previous energy, H_c the CS-convention Max-Cut Hamiltonian. This example runs the same loop on a 4-node complete graph with QUMO's state vector.
