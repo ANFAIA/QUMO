@@ -1,6 +1,7 @@
 """Elliptic curve discrete logarithm: the notebook's Shor ECDLP circuit on E(F_7) on QUMO.
 
 Reproduces: Classiq library - Solving Elliptic Curve Discrete Logarithm Problem with Shor's Algorithm
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 Source: https://github.com/Classiq/classiq-library/blob/main/algorithms/number_theory_and_cryptography/elliptic_curves/elliptic_curve_discrete_log.ipynb (Classiq Library, MIT)
 
 The curve is y^2 = x^3 + 5x + 4 over F_7, G = (0, 5) has order 5, the notebook's start point is P0 = (4, 2) and its target is P = (0, 2) = 4G, so -P = G. Two 3-qubit registers x1 and x2 are put in uniform superposition, the point register starts at P0 and receives x1 G and x2 (-P) = x2 G by controlled point additions (bit i adds 2^i G), then inverse QFTs act on x1 and x2 and the registers are measured. The point register holds P0 + (x1 + x2) G, so the outcomes concentrate on y1 = y2 (mod 5), and the logarithm is -a1 a2^-1 (mod 5) with a = round(5 y / 8) taken mod 5 (ties to even, as in the notebook's closest_fraction), which is 4. Only the pairs whose a2 is coprime to 5 are kept, and about 78% of those decode to 4 (exactly 0.7836 in QUMO's law); the other outcomes are the algorithm's usual noise.

@@ -1,6 +1,7 @@
 """Maximum independent set with CVaR-QAOA on an 8-node graph, exact on QUMO.
 
 Reproduces: Classiq library - Max Independent Set
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 Source: https://github.com/Classiq/classiq-library/blob/main/applications/optimization/max_independent_set/max_independent_set.ipynb (Classiq Library, MIT)
 
 The notebook states max sum x_v subject to x_u + x_v <= 1 on every edge as a Pyomo model, lets Classiq's CombinatorialProblem turn it into a 3-layer QAOA, optimises it with CVaR (quantile 0.7, at most 60 iterations), samples it, and compares with the classical solver Couenne (independent set of size 3). The graph is networkx fast_gnp_random_graph(8, 0.4, seed=12345); its 14 edges are read from the notebook's printed constraint list. This file builds the same 3-layer QAOA on QUMO's state vector with a penalised diagonal cost, optimises the exact CVaR with Nelder-Mead, and checks: the edge count and the printed edges; the brute-force maximum independent set size 3 (the notebook's classical answer {0, 1, 3} is one of them, and so are the five sampled sets it prints, whose cost is -3); the cost layer's phases against exp(-i gamma cost) on all 256 basis states; that the penalised cost is minimised exactly on the maximum independent sets; and that the optimised QAOA beats the uniform state in probability of a maximum independent set, with the best of 1000 samples being a maximum independent set.

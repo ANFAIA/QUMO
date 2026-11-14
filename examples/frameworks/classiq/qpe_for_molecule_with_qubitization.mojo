@@ -1,6 +1,7 @@
 """Qubitization QPE for the H2 molecular energy: the notebook's walk operator and both QPE designs, from QUMO gates.
 
 Reproduces: Classiq library - Qubitization Based Quantum Phase Estimation (QPE) for Solving Molecular Energies
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 Source: https://github.com/Classiq/classiq-library/blob/main/algorithms/quantum_phase_estimation/qpe_with_qubitization/qpe_for_molecule_with_qubitization.ipynb (Classiq Library, MIT)
 
 The notebook takes H2 (STO-3G, 0.735 Angstrom), block-encodes its 15-term Pauli Hamiltonian with scaling s = sum |c| = 1.98507 as U = PREP^dag SEL PREP, forms the walk W = (2 Pi_0 - I) U, and runs 5-bit QPE on W from the Hartree-Fock state. This file builds the same objects from QUMO gates on 13 qubits (data q0-q3, LCU block q4-q7, phase q8-q12) and simulates them exactly. Both QPE designs of the notebook are built: the naive one with controlled W^(2^j), and the optimized one, which applies W^(2^i) uncontrolled inside the phase flip I - 2 Pi(phase bit i+1 = 0, block = 0). The checks compare the block encoding with H/s on all 16 data inputs, U^2 = I (amplitudes, so a sign or phase would be caught), the walk powers with T_k(H/s) for k = 1, 2, 3, 15, both output distributions with closed-form QPE kernels built from the Hamiltonian's own eigendecomposition, and the notebook's printed FCI energy, scaling, error bound, most probable energy and block-zero probabilities.

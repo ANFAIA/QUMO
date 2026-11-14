@@ -1,6 +1,7 @@
 """Jordan's gradient estimation: the notebook's linear, quadratic and 2-D examples on QUMO.
 
 Reproduces: Classiq library - Fast Quantum Algorithm for Numerical Gradient Estimation
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 Source: https://github.com/Classiq/classiq-library/blob/main/algorithms/quantum_primitives/gradient_estimation/gradient_estimation.ipynb (Classiq Library, MIT)
 
 The notebook estimates the gradient at the origin with one query: Hadamards on a signed n-bit register of N = 2^n grid points, the phase 2 pi f_norm(delta) with f_norm(delta) = N f(l delta / N) / (l m), then an inverse QFT whose outcome k gives the gradient m k / N. The file runs the notebook's defaults (n = 3, N = 8, l = 0.5, m = 2) on its examples: the phase table of f = 0.5 x + 0.25, the linear slopes -0.5 and 0.55, the quadratic 0.6 x^2 + 0.25 x + 0.1 at l = 0.1 and l = 1, the 2-D quadratic, and the m sweep (all 17 printed points) and l sweep (all 9) of the performance section. Checks: the phase state equals the notebook's printed phase table, every output law (including every point of both sweeps) equals a brute-force Fourier sum of the notebook's own f_norm, the majority gradients and the notebook's asserts hold, and the success rates match the notebook's printed sampling frequencies (2048 shots).

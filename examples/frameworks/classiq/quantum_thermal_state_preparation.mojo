@@ -1,6 +1,7 @@
 """Quantum thermal state preparation: the Gibbs state of Z1 Z2 + Z1 at beta = 0.2 from the notebook's block-encoded Linbladian.
 
 Reproduces: Classiq library - Quantum Thermal State Preparation Algorithm Implementation
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 Source: https://github.com/Classiq/classiq-library/blob/main/algorithms/quantum_state_preparation/gibbs/quantum_thermal_state_preparation.ipynb (Classiq Library, MIT)
 
 The notebook runs 50 delta steps of the Chen, Kastoryano, Brandao and Gilyen Gibbs sampler on two qubits. One step writes the energy differences of a jump operator (X0, Y0, X1 or Y1, chosen by a 2-qubit register) into a 4-qubit Bohr-frequency register with an operator Fourier transform (Gaussian window, controlled Hamiltonian evolution, inverse QFT); writes Glauber amplitudes sqrt(1/(exp(beta w0 f) + 1)) on a Boltzmann qubit; rotates a flag qubit where the Boltzmann qubit is 0; undoes the block encoding where the flag is 0; and resets the ancillas. QUMO builds the same 10-qubit step unitary and checks its parts against closed forms: the Gaussian window, the 16 Glauber amplitudes, the 64 amplitudes of the operator Fourier transform with O = H x H (a discrete Fourier sum), and trace preservation of the step channel. The 50 steps are then evaluated exactly, and the final populations are compared with the notebook's printed 1000-shot sample (three binomial standard errors), with its printed Gibbs weights (1e-7), and with its own assertion (atol 0.1).

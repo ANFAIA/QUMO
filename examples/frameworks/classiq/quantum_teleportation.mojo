@@ -1,6 +1,7 @@
 """Quantum teleportation: the notebook's protocol with deferred and mid-circuit corrections.
 
 Reproduces: Classiq library - Quantum Teleportation Algorithm (Protocol)
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 Source: https://github.com/Classiq/classiq-library/blob/main/algorithms/foundational/quantum_teleportation/quantum_teleportation.ipynb (Classiq Library, MIT)
 
 The notebook prepares Alice's qubit in |+> (H), makes a Bell pair with Bob's qubit, applies CX(alice, bell) and H(alice), measures Alice's two qubits, and applies X to Bob if the bell-pair bit is 1 and Z if the alice bit is 1. Its Technical Notes give Bob's four branch states. This file checks QUMO's amplitudes against those states before any measurement (exact, 1e-12), checks that the corrections turn every branch into the input state (exact), and runs the measure + c_if circuit by trajectory sampling: each Alice branch occurs with probability 1/4, and Bob's Z, X and Y readouts in every branch match the input's Bloch components within 5 binomial standard errors (fixed seeds). The notebook's |+> input is included: Bob reads 0 with probability 1/2 in the Z basis, and never 1 in the X basis.

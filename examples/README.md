@@ -58,7 +58,7 @@ Every example below is run and verified by `bench/.venv/bin/python examples/run_
 |---|---|---|---|
 | [`examples/`](.) | 15 | qumo (legacy smoke tests) | 15 / 0 |
 | [`control_flow/`](control_flow/) | 2 | qumo | 2 / 0 |
-| [`frameworks/`](frameworks/) | 39 | braket, cirq, cudaq, pennylane, qibo, qiskit, qsharp, tket | 36 / 3 |
+| [`frameworks/`](frameworks/) | 78 | braket, cirq, classiq, cudaq, pennylane, qibo, qiskit, qsharp, tket | 75 / 3 |
 | [`ft/`](ft/) | 6 | guppyft | 5 / 1 |
 | [`heterogeneous/`](heterogeneous/) | 6 | qumo | 6 / 0 |
 | [`qml/`](qml/) | 11 | pennylane | 11 / 0 |

@@ -1,6 +1,7 @@
 """HHL linear solver: the notebook's exact-simulation model for A x = b on a 4 x 4 matrix, reproduced on QUMO.
 
 Reproduces: Classiq library - HHL Algorithm
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 Source: https://github.com/Classiq/classiq-library/blob/main/algorithms/quantum_linear_solvers/hhl/hhl.ipynb (Classiq Library, MIT)
 
 The notebook solves A x = b for a 4 x 4 symmetric A and the normalised b = (1, 2, 4, 3) / sqrt(30), with 4-bit phase estimation of the exact unitary U = exp(2 pi i A), controlled inversion of the estimated eigenvalues, and postselection on estimator = 0 and indicator = 1. QUMO builds the same circuit on 7 qubits. The memory register is held in the eigenbasis of A, where the controlled powers U^(2^j) are exact diagonal phase gates; the basis change V is a Givens network of two-level rotations, applied after state preparation (which loads V^T b) and once more after the inverse QPE. The checks compare the classical solution, the eigenvalues and the eigenvector residuals, the V network against A, and the notebook's printed quantum solution (normalised and phase-corrected) and fidelity.

@@ -1,6 +1,7 @@
 """QMCI with a user-defined Grover operator: amplitude estimation of a Monte Carlo sum.
 
 Reproduces: Classiq library - Quantum Monte Carlo Integration (QMCI)
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 Source: https://github.com/Classiq/classiq-library/blob/main/algorithms/amplitude_amplification_and_estimation/qmc_user_defined/qmc_user_defined.ipynb (Classiq Library, MIT)
 
 The notebook estimates a = sum_i p_i f_i with p_i = i/28 on 3 qubits and f_i = sin^2(0.25 i + 0.2), exact value 0.83384. It loads A|0> = sum_i sqrt(p_i)|i>(sqrt(f_i)|1> + sqrt(1 - f_i)|0>), builds the Grover operator from A, the zero reflection and the good-state reflection, and runs 3-qubit QPE on it. QUMO builds the same construction on 7 qubits. Checks: the joint law of (x, ind) after A against p_i f_i, P(ind = 1) against the notebook's exact amplitude, the exact QPE phase distribution against the ideal QPE kernel of the eigenphases +-arcsin(sqrt(a))/pi, every one of the 8 seeded sampled histogram bins against that distribution (3 sigma each, sigma = sqrt(p (1 - p) / shots)), and the notebook's printed measured amplitude 0.8535533905932737 with its |measured - exact| < 0.1 assertion.

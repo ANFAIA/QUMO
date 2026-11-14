@@ -1,6 +1,7 @@
 """Oblivious amplitude amplification of an LCU block encoding: the notebook's H tensor H example on QUMO.
 
 Reproduces: Classiq library - Oblivious Amplitude Amplification
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 Source: https://github.com/Classiq/classiq-library/blob/main/algorithms/amplitude_amplification_and_estimation/oblivious_amplitude_amplification/oblivious_amplitude_amplification.ipynb (Classiq Library, MIT)
 
 The notebook block-encodes A = (X+Z)/sqrt2 tensor (X+Z)/sqrt2 = H tensor H, written as the Pauli sum 0.5 (Z0 X1 + X0 Z1 + X0 X1 + Z0 Z1), with s = 2. It then wraps the block encoding W in one oblivious amplitude amplification step, Q = W R W^dag O, where R reflects about |00> on the block register only. Before the step the block-00 probability is ||A psi||^2 / 4 = 1/4 (the notebook prints 0.2314 from 2048 shots); after it, sin^2(3 arcsin(1/2)) = 1 and the data register holds A psi. The checks: the Pauli sum is unitary and equals H tensor H; the block-00 part of W equals A/2 on all four data inputs; the block-00 probabilities and the data law |A psi|^2 are exact; 2048 seeded shots of the amplified circuit always read block 00 and follow |A psi|^2; the notebook's printed frequencies lie within 4 sigma of the exact law.

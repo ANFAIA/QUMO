@@ -1,6 +1,7 @@
 """Quantum counting: the notebook's (a + b) <= 2 oracle, counted by QPE and by iterative amplitude estimation.
 
-Adapted from: Classiq library - Quantum Counting Using the Iterative Quantum Amplitude Estimation Algorithm
+Reproduces: Classiq library - Quantum Counting Using the Iterative Quantum Amplitude Estimation Algorithm
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 Source: https://github.com/Classiq/classiq-library/blob/main/algorithms/amplitude_amplification_and_estimation/quantum_counting/quantum_counting.ipynb (Classiq Library, MIT)
 
 The notebook counts the six solutions of (a + b) <= 2 over 2-bit a and b (16 inputs). QPE with 5 phase qubits on the Grover operator reads out the two equal peaks 7/32 and 25/32 (the notebook's 0.21875), and 16 sin^2(pi 7/32) = 6.4393. Iterative amplitude estimation (IQAE) on an indicator qubit gives the count with a confidence interval. The checks compare the exact Grover powers with sin^2((2m+1) theta), the exact QPE distribution with the analytic QPE kernel, the sampled frequencies of readouts 7 and 25 and the pooled frequency of the other 30 bins with the same analytic values, the notebook's worst-case QPE precision 1.5681 with an independent numpy-style recomputation, and the IQAE count with the exact count 6 at the notebook's own tolerance 1/15. The notebook's IQAE run itself (counts, 5.9748, accuracy 0.1202) is not reproduced, only its tolerance is checked.

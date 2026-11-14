@@ -1,6 +1,7 @@
 """Quantum phase estimation of a 2-qubit Hermitian matrix: eigenvalues from a 7-qubit phase register.
 
 Reproduces: Classiq library - Quantum Phase Estimation for Solving Matrix Eigenvalues
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 Source: https://github.com/Classiq/classiq-library/blob/main/algorithms/quantum_phase_estimation/qpe_for_matrix/qpe_for_matrix.ipynb (Classiq Library, MIT)
 
 The notebook normalises M by c = 2 sum|Pauli coefficients| and runs QPE on U = exp(2 pi i M / c) (its exact model); the two most probable bins give 0.8993 and 0.4038 for the eigenvalues 0.9 and 0.4. QUMO has no matrix-gate primitive, so the controlled powers U^(2^j) are built exactly in the eigenbasis of M (diagonal phase gates), with the basis change folded into the state preparation. The initial vector is the notebook's np.random.rand(4) with seed 8, copied from its printed output. The notebook's Suzuki-Trotter model is not ported. Checks: the Pauli expansion, the normalisation and resolution, the 128-bin distribution against the analytic QPE kernel, the notebook's printed estimates, and 10000 sampled shots.

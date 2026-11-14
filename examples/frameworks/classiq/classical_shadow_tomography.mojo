@@ -1,6 +1,7 @@
 """Classical shadow tomography of the Phi^- Bell state with Pauli and random-Clifford snapshots.
 
 Reproduces: Classiq library - Classical Shadow Tomography
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 Source: https://github.com/Classiq/classiq-library/blob/main/algorithms/metrology/classical_shadow_tomography.ipynb (Classiq Library, MIT)
 
 The notebook prepares the Phi^- Bell state and takes one snapshot per random measurement: a random X, Y or Z basis on each

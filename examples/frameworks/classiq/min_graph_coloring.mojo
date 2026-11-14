@@ -1,6 +1,7 @@
 """Minimum graph colouring with QAOA on a QUBO, checked against brute force on QUMO.
 
 Reproduces: Classiq library - Min Graph Coloring Problem
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 Source: https://github.com/Classiq/classiq-library/blob/main/applications/optimization/min_graph_coloring/min_graph_coloring.ipynb (Classiq Library, MIT)
 
 The notebook colours the graph nx.erdos_renyi_graph(5, 0.3, seed=79) with a one-hot matrix x[color][vertex] (3 colours, the maximum degree, so 15 binary variables). Each vertex gets exactly one colour, adjacent vertices must differ, and the objective is the number of colours in use. Classiq's CombinatorialProblem turns the Pyomo model into a 6-layer CVaR-QAOA (penalty factor 10, COBYLA, quantile 0.7) and prints the five lowest-cost samples (cost 3 each) and the best colouring [[1,0,1,0,0],[0,1,0,0,0],[0,0,0,1,1]].

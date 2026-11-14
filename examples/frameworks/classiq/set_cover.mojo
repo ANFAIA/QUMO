@@ -1,6 +1,7 @@
 """Set cover by CVaR-QAOA on a penalty cost, exact on QUMO.
 
 Reproduces: Classiq library - Set Cover Problem
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 Source: https://github.com/Classiq/classiq-library/blob/main/applications/optimization/set_cover/set_cover.ipynb (Classiq Library, MIT)
 
 The notebook covers the universe {1..10} with the fewest of eight subsets. It writes a Pyomo model (one binary variable per subset, a "covered at least once" constraint per element, objective = number of chosen subsets), lets Classiq's CombinatorialProblem turn it into a 3-layer QAOA with penalty_factor 10, optimises with CVaR (quantile 0.7, at most 60 iterations) and prints the five lowest-cost samples (all cost 23: three subsets and one uncovered element) next to a classical solution with four subsets. This file builds the same eight-qubit QAOA on QUMO's state vector. It checks the brute-force optimum (four subsets, attained by seven covers including the notebook's classical answer), the cost model against the notebook's five printed samples (cost 23, three subsets, exactly one uncovered element, and 23 is the lowest cost among infeasible states), the cost layer's phases against the analytic formula on all 256 basis states, and a CVaR Nelder-Mead run against the uniform-state baselines and the brute-force optimum.

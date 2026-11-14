@@ -1,6 +1,7 @@
 """One-dimensional Fermi-Hubbard model: Slater-determinant state, five-stage Trotter quench, charge and spin densities.
 
 Reproduces: Classiq library - One-Dimensional Fermi-Hubbard Model
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 Source: https://github.com/Classiq/classiq-library/blob/main/applications/physical_systems/fermi_hubbard_model_1D/fermi_hubbard_1D.ipynb (Classiq Library, MIT)
 
 The notebook prepares the ground state of a non-interacting Hubbard chain with a Gaussian potential on the spin-up species (N = 4 sites, 8 Jordan-Wigner qubits, spin-up on qubits 0..3 and spin-down on 4..7) as a Slater determinant of adjacent-mode Givens rotations, quenches with a first-order Trotter step tau = 0.1 (J = 1, U = 3) built from the five stages hop-odd, interact-odd, fermionic mode swap, interact-even, hop-even + inverse swap, and measures the charge and spin densities and spreads at num_iter = 0..9. It then validates the circuit in the two exactly solvable limits: U = 0 with one electron and J = 0 at half filling.

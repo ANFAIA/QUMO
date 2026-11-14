@@ -1,6 +1,7 @@
 """Deutsch-Jozsa: the notebook's two predicates on QUMO, each decided by one query.
 
 Reproduces: Classiq library - Deutsch-Jozsa Algorithm
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 Source: https://github.com/Classiq/classiq-library/blob/main/algorithms/foundational/deutsch_jozsa/deutsch_jozsa.ipynb (Classiq Library, MIT)
 
 The notebook runs H^n on x, a phase oracle (-1)^f(x), then H^n, and reads constant or balanced from the measured x: the outcome 0 alone means constant, a single other outcome means balanced. Its two predicates are f(x) = x > 7 on 4 qubits and f(x) = max(x ^ 4, x & 3) >= 4 on 3 qubits; both are balanced, and the notebook prints "The function is balanced" for each. This file runs the same circuit on QUMO for both, sampling 1000 shots (the notebook passes no shot count). Checks: the phase oracle's sign on every basis input against the predicate, the exact output law against the Walsh-Hadamard formula of the notebook's Technical Notes (a point mass at 8 and at 4), the ancilla returning to |0>, and the sampled decision. The file also runs the two constant functions on 4 qubits (f = 0 and f = 1), which the notebook does not run, so the constant branch of the post-processing is exercised against the analytic P(0) = 1.

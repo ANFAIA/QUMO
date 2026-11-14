@@ -1,6 +1,7 @@
 """Quantum volume: the Classiq notebook's heavy-output test on QUMO.
 
 Reproduces: Classiq library - Quantum Volume
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 Source: https://github.com/Classiq/classiq-library/blob/main/applications/benchmarking/quantum_volume/quantum_volume.ipynb (Classiq Library, MIT)
 
 The notebook builds the quantum-volume model circuit for n = 3..6 qubits (n layers, each a random pairing of the qubits with a random SU(4) gate per pair, one qubit idle when n is odd), samples 10 circuits per width with 100 shots on the ideal simulator, and computes the heavy-output probability with its own statistic: for each circuit it takes the median of the observed counts of the outcomes that appeared, and sums the counts of outcomes with count >= that median. It prints 0.872, 0.871, 0.906, 0.903 for n = 3..6 in one run and 0.846 (n = 4), 0.835 (n = 5), 0.861 (n = 6) in a second run, and the rule "mean - 2 sigma >= 2/3" gives quantum volume 64 both times.

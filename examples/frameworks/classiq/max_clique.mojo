@@ -1,6 +1,7 @@
 """Max clique with CVaR-QAOA on a 7-node random graph, exact on QUMO.
 
 Reproduces: Classiq library - Max Clique Problem
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 Source: https://github.com/Classiq/classiq-library/blob/main/applications/optimization/max_clique/max_clique.ipynb (Classiq Library, MIT)
 
 The notebook builds a Pyomo model on networkx.erdos_renyi_graph(7, 0.6, seed=79): binary x_i per node, the constraint x^T C x == 0 (C marks the non-edges, so no two chosen nodes may be non-adjacent) and the objective max sum x_i. Classiq turns it into a 3-layer QAOA and minimises the CVaR of the cost (quantile 0.7, at most 50 iterations). It prints the five cheapest samples (cost -4 for {1,2,3,5} and {0,1,2,3}, then cost -3), and a classical solver returns the clique [1, 1, 1, 1, 0, 0, 0]. This file rebuilds the same graph, writes the same problem as a diagonal cost Hamiltonian, runs the 3-layer QAOA on the QUMO state vector, minimises the exact CVaR, and checks: the edge list (15 edges) reproduces the notebook's printed cliques and costs, the brute-force maximum clique has size 4 with exactly the two cliques the notebook shows, no 5-clique exists, the cost layer's phases against the analytic formula on all 128 basis states, and that the optimised circuit beats the uniform state in expected cost, CVaR and probability of a maximum clique, and that 1000 samples contain a maximum clique.

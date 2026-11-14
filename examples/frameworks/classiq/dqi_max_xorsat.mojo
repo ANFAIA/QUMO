@@ -1,6 +1,7 @@
 """Decoded quantum interferometry (DQI) for max-XORSAT: the notebook's Max-Cut instance on QUMO.
 
 Reproduces: Classiq library - Decoded Quantum Interferometry Algorithm
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 Source: https://github.com/Classiq/classiq-library/blob/main/algorithms/search_and_optimization/dqi/dqi_max_xorsat.ipynb (Classiq Library, MIT)
 
 The notebook runs DQI on Max-Cut for a 6-cycle: m = 6 constraints (edges) on n = 6 variables (nodes), MAX_ERRORS = 2, the optimal w_k of the tridiagonal matrix of the paper, and a lookup-table decoder for the 22 errors of weight at most 2. QUMO builds the same 12-qubit circuit (y on qubits 0..5, the solution on qubits 6..11): the Dicke-weighted state, the phase (-1)^(v.y), the map y -> B^T y, the lookup decoder that returns y to |0>, and the Hadamard transform. The checks compare the optimal w_k and the 22 error syndromes with the notebook's printed values, the state before decoding and the output amplitudes with the closed form of the algorithm, the cleanup of y, the expected objective (exactly 4 in closed form; the notebook prints 4.0012 from 10000 shots), the probability 75/256 of each of the two optimal cuts, and a 10000-shot sample (fixed seed) with the notebook's printed counts (2925 and 2916 of 10000) within four standard errors.

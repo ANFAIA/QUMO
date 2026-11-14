@@ -1,6 +1,7 @@
 """Hadamard test for the QFT unitary: Re<0000|QFT|0000> = 1/4, read from P(0) = 5/8 on the control.
 
 Reproduces: Classiq library - Hadamard Test
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 Source: https://github.com/Classiq/classiq-library/blob/main/algorithms/quantum_primitives/hadamard_test/hadamard_test.ipynb (Classiq Library, MIT)
 
 The notebook puts a control qubit in |+>, applies the QFT on a 4-qubit target psi conditioned on the control being |1>, applies H to the control again and measures it. Then P(0) = (1 + Re<psi|U|psi>) / 2, so Re<psi|U|psi> = 2 P(0) - 1. For psi = |0000> the QFT gives |++++>, so Re<0000|U|0000> = 1/4, P(0) = 0.625 and P(1) = 0.375. The checks compare the exact statevector with these values, read the amplitude <0000|QFT|0000> off the unitary, sweep the Hadamard test over all 16 basis inputs against Re<j|QFT|j> = cos(2 pi j^2 / 16) / 4 (from the QFT definition), and compare 100000 sampled shots with the analytic values and with the notebook's printed P_0 = 0.62788 and Re(<U>) = 0.25576, at 4 standard errors of shot noise.

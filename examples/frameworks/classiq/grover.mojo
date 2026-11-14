@@ -1,6 +1,7 @@
 """Grover search: the Classiq notebook's 3-SAT and MaxCut instances on QUMO.
 
 Reproduces: Classiq library - Grover's Search Algorithm
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 Source: https://github.com/Classiq/classiq-library/blob/main/algorithms/search_and_optimization/grover/grover.ipynb (Classiq Library, MIT)
 
 The notebook finds the solutions of two 3-SAT formulas (2 of 8 and 2 of 16 assignments) and the cuts of size >= 4 of a 5-node graph (10 of 32) by repeating Grover iterations until a marked item is sampled above a threshold. QUMO marks the same basis states (the predicate's truth table) for phase_oracle; the checks compare the solution sets, the selected iteration counts, exact success probabilities with sin^2((2r+1) theta), sampled success, and the MaxCut optimum (5).

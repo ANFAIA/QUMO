@@ -1,6 +1,7 @@
 """Bernstein-Vazirani: one query recovers the hidden string 01101 (13).
 
 Reproduces: Classiq library - Bernstein-Vazirani Algorithm
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 Source: https://github.com/Classiq/classiq-library/blob/main/algorithms/foundational/bernstein_vazirani/bernstein_vazirani.ipynb (Classiq Library, MIT)
 
 The notebook builds H^n, then the predicate f(x) = a.x mod 2 as CX(x_i, f) into an ancilla

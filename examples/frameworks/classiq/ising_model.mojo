@@ -1,6 +1,7 @@
 """1D Ising chain solved with QAOA (CVaR objective), exact on QUMO.
 
 Reproduces: Classiq library - Ising Model
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 Source: https://github.com/Classiq/classiq-library/blob/main/applications/physical_systems/ising_model/ising_model.ipynb (Classiq Library, MIT)
 
 The notebook minimises the periodic 1D Ising Hamiltonian H = sum over the six bonds of [-J s_i s_j - (h/2)(s_i + s_j)], s = 2z - 1, for J = 10, h = -20, n = 6. It runs a 5-layer QAOA with Classiq's CombinatorialProblem (maxiter 100, CVaR quantile 0.7) and prints the five lowest-cost samples: the all-zero state at cost -180 (probability 0.698) and single-spin flips at cost -100. This file checks the Hamiltonian against the printed costs by brute force over all 64 states (ground state z = 000000 at -180, the six single flips at -100, the printed best solution), checks that the QAOA cost layer built from RZZ and RZ gates applies the phase exp(-i gamma H / J) to every basis state, then optimises a 5-layer QAOA with the CVaR(0.7) objective on exact probabilities and checks that the most probable state is the brute-force ground state and that its probability beats the uniform value 1/64 and a 0.5 floor, and that the optimised expected energy beats the uniform average.

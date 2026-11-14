@@ -1,6 +1,7 @@
 """Discrete logarithm: the notebook's two-register circuit for Z_5^x and Z_13^x on QUMO.
 
 Reproduces: Classiq library - Discrete Logarithm
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 Source: https://github.com/Classiq/classiq-library/blob/main/algorithms/number_theory_and_cryptography/discrete_log/discrete_log.ipynb (Classiq Library, MIT)
 
 The notebook prepares two exponent registers alpha and beta of t qubits in uniform superposition, writes f(alpha, beta) = x^alpha g^beta mod N into a work register, applies inverse QFTs to alpha and beta and measures them. With beta coprime to r = N - 1, the logarithm is alpha beta^-1 mod r. Z_5^x (g = 3, x = 2, r = 4 = 2^2, t = 2) is the notebook's exact case and gives 3. Z_13^x (g = 7, x = 3, r = 12, t = 5) rounds alpha and beta to multiples of 1/r and gives 8.

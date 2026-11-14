@@ -1,6 +1,7 @@
 """Swap test: the notebook's overlap estimate for two random 3-qubit states on QUMO.
 
 Reproduces: Classiq library - Swap Test Algorithm
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 Source: https://github.com/Classiq/classiq-library/blob/main/algorithms/quantum_primitives/swap_test/swap_test.ipynb (Classiq Library, MIT)
 
 The notebook prepares two real 8-amplitude states (numpy seed 0, entries 1 - 2 rand(8), normalised), runs the swap test on them (H on a test qubit, a controlled-SWAP of each qubit pair of the two registers, H again) and reads the overlap from P(0) as |<psi1|psi2>| = sqrt(2 P(0) - 1). The exact value is P(0) = (1 + |<psi1|psi2>|^2) / 2. The checks compare the QUMO statevector with that value and with the brute-force overlap, which reproduces the notebook's printed 0.10746808371981542. They also check the amplitude preparation, the notebook's own ATOL = 0.05 test on 100000 sampled shots, and the two cases the notebook text describes: identical states give P(0) = 1 and orthogonal states give P(0) = 1/2.

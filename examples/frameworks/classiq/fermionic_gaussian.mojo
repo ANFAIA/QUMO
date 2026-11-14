@@ -1,6 +1,7 @@
 """Fermionic Gaussian states: the notebook's Slater determinant and general quadratic ground state, prepared on QUMO.
 
 Reproduces: Classiq library - Preparation of Fermionic Gaussian States
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 Source: https://github.com/Classiq/classiq-library/blob/main/algorithms/quantum_state_preparation/fermionic_gaussian/fermionic_gaussian.ipynb (Classiq Library, MIT)
 
 The notebook prepares ground states of quadratic fermionic Hamiltonians under the Jordan-Wigner map. Part 1 is a number-conserving one-body matrix h (the notebook's periodic 4-site chain with two spin species, 8 modes) with one particle: its lowest eigenvector is prepared from the state with mode 0 occupied by adjacent two-mode rotations. Part 2 is the notebook's general quadratic Hamiltonian on two modes, with a pairing term: its Majorana matrix A is brought to canonical form by a real orthogonal frame, the frame is written as planar rotations between adjacent Majoranas (an RZ on a mode, an RXX across neighbouring modes), and these gates act on the Fock state whose occupations fix the signs of the canonical energies. The checks compare the QUMO states with exact diagonalization (of the one-body h in Part 1, and of the Fock-space Hamiltonian in Part 2: fidelity 1, plus the Part 2 amplitude magnitudes and relative sign), check the canonical energies against the Fock spectrum, and compare the notebook's printed values: the Majorana matrix A, the canonical energies 1.292 and 0.511, the Fock spectrum, and the ground-state amplitudes.

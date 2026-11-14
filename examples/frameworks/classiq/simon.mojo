@@ -1,6 +1,7 @@
 """Simon's algorithm: the notebook's two oracles, secret strings recovered by GF(2) elimination.
 
 Reproduces: Classiq library - Simon's Algorithm
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 Source: https://github.com/Classiq/classiq-library/blob/main/algorithms/foundational/simon/simon.ipynb (Classiq Library, MIT)
 
 The notebook runs H^n, a 2-to-1 oracle f with f(x) = f(x XOR s), H^n, then measures x; n-1 outcomes y with y.s = 0 (mod 2) give s.

@@ -1,6 +1,7 @@
 """Hamiltonian simulation with Suzuki-Trotter, exponentiate and qDRIFT for two coupled spins.
 
 Reproduces: Classiq library - Hamiltonian Simulation
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 Source: https://github.com/Classiq/classiq-library/blob/main/algorithms/hamiltonian_simulation/hamiltonian_simulation_guide/hamiltonian_simulation_guide.ipynb (Classiq Library, MIT)
 
 The notebook evolves H = 0.3 Z0 Z1 + 0.7 X0 + 0.2 X1 from |00> and plots the magnetization M(t) = (<Z0> + <Z1>)/2 on 100 times in [0, 2]: first-order Suzuki-Trotter with 30 steps, exponentiate (one step), and qDRIFT with N = 288 random Pauli rotations, against the exact evolution. The notebook prints no numbers, so the checks use analytic values and dense brute-force matrices, not the figure. QUMO builds the same circuits with trotter() and append_pauli_exponential(). The exact qDRIFT ensemble average is computed on the density-matrix simulator, with one two-qubit mixed-unitary channel per step (Kraus operators sqrt(p_j) exp(-i lambda t P_j / N)). A seeded sample of 2000 qDRIFT circuits per time is checked against the exact ensemble average.

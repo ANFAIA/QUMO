@@ -1,6 +1,7 @@
 """QAOA for Max-Cut and a constrained knapsack, exact on QUMO.
 
 Reproduces: Classiq library - Quantum Approximate Optimization Algorithm
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 Source: https://github.com/Classiq/classiq-library/blob/main/algorithms/search_and_optimization/QAOA/qaoa.ipynb (Classiq Library, MIT)
 
 The notebook builds QAOA circuits (H on every qubit, then alternating cost and RX mixer layers). Max-Cut on a 5-node, 6-edge graph uses 4 layers with cost phase exp(i gamma cut / |E|). The knapsack 2a + 3b <= 12, value 3a + 5b, a in 0..7, b in 0..3, uses 3 layers with phase exp(-i gamma value) on the feasible states only. The notebook tunes the angles with COBYLA on shot-sampled cost estimates and samples the result. This file runs the same circuits on QUMO's state vector. It checks the brute-force optima (cut 5 on the four states the notebook prints, knapsack (3, 2) with value 19), the cost layers' phases against the analytic formulas on all 32 basis states, the exact distributions at the notebook's printed angles against its printed frequencies within 4 binomial standard errors, and a Nelder-Mead run from the notebook's starting angles against the uniform-state baselines and the brute-force optima.

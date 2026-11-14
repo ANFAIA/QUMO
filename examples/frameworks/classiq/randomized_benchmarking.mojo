@@ -1,6 +1,7 @@
 """Randomized benchmarking: random Clifford sequences followed by their inverse return to |0>.
 
 Reproduces: Classiq library - Randomized Benchmarking
+Framework: QUMO - https://github.com/ANFAIA/QUMO
 Source: https://github.com/Classiq/classiq-library/blob/main/applications/benchmarking/randomized_benchmarking/randomized_benchmarking.ipynb (Classiq Library, MIT)
 
 The notebook builds one 1-qubit model per sequence length (5, 10, 15, 20, 25 Cliffords). Each draws random gates from the hardware basis {id, rz, sx, x, cx} restricted to its Clifford map (id, x, rz(pi), sx), applies them, then applies the inverse of the whole sequence. It runs each program on two noiseless Classiq simulators and the analysis reports the trivial result: survival probability 1 for every length.
