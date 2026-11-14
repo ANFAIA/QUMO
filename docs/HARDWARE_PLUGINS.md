@@ -154,12 +154,26 @@ Each provider has up to two client implementations:
 | `speqtrum` | `qumo/exec/speqtrum_api.mojo` | `speqtrum.py` (urllib) |
 | `ibm` | `qumo/exec/ibm_api.mojo` (real backends) | `ibm.py` (qiskit-ibm-runtime) |
 | `local` | QUMO's Mojo simulator | none |
+| `qbraid` | `qumo/exec/qbraid_api.mojo` (aggregator: device QRNs, credits) | none |
 | `quantinuum` | `qumo/exec/quantinuum_api.mojo` (H2 devices in Nexus) | `quantinuum.py` (qnexus, pytket, guppylang) |
 
 Native clients run the whole provider protocol inside the `qumo_py` extension
 (`make py`): request bodies, QUMO's HTTP/1.1 + TLS stack (`qumo/net`, OpenSSL 3
 loaded at run time), JSON parsing (`qumo/core/json.mojo`), and results. Credentials
 are read in Mojo, and access tokens never leave the native call.
+
+**No Python dependencies by default.** `pip install qumo-hardware` installs no third-party
+package (`dependencies = []`), and the default native path imports none. That covers the
+whole default path: planning, compiling, submitting, status, results and offline listings for
+every built-in provider (`tests/test_no_python_sdks.py` runs it with those imports blocked).
+The vendor SDKs are optional extras, and only these need them:
+
+| Extra | Needed for |
+|---|---|
+| `ibm` | the `--client python` fallback, `fake_*` snapshots with Aer, Eagle `ecr`, fractional `rzz`, dynamic circuits, `--ibm-dry-run`, `--provider-transpile` |
+| `quantinuum` | the `--client python` fallback, Helios (HUGR), TKET comparison mode |
+| `ionq` | the `--client python` fallback |
+| `helios`, `local-quantinuum` | the Guppy/Selene and `H2-1LE` local emulators |
 
 Pick the client with `--client native|python`, `QUMO_HW_CLIENT=native|python`, or
 per provider with `QUMO_HW_CLIENT_<PROVIDER>` (for example `QUMO_HW_CLIENT_IBM=python`).

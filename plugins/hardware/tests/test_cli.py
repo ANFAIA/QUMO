@@ -132,7 +132,7 @@ def test_backends_and_target(capsys):
     code, out, _ = run_cli(capsys, "backends", "--provider", "quantinuum", "--json")
     names = {b["name"] for b in json.loads(out)["backends"]}
     assert {"H2-1", "H2-1E", "H2-1SC", "Helios-1", "H2-1LE", "selene"} <= names
-    code, out, _ = run_cli(capsys, "backends", "--provider", "ibm", "--json")
+    code, out, _ = run_cli(capsys, "backends", "--provider", "ibm", "--client", "python", "--json")
     assert "fake_torino" in {b["name"] for b in json.loads(out)["backends"]}
     code, out, _ = run_cli(capsys, "target", "--provider", "ibm", "--backend", "fake_torino", "--json")
     d = json.loads(out)
@@ -177,7 +177,7 @@ def test_fractional_note_and_fake_fractional_listed(capsys, qasm):
     code, out, err = run_cli(capsys, "estimate", qasm(BELL), "-p", "ibm", "-b", "fake_torino", "--fractional")
     assert code == EXIT_OK, err
     assert "note" in out and "--fractional ignored" in out
-    code, out, _ = run_cli(capsys, "backends", "--provider", "ibm", "--json")
+    code, out, _ = run_cli(capsys, "backends", "--provider", "ibm", "--client", "python", "--json")
     rows = {b["name"]: b for b in json.loads(out)["backends"]}
     assert "fake_fractional" in rows and "--fractional" in rows["fake_fractional"]["notes"]
 
