@@ -14,7 +14,7 @@ Extending (other QUMO modules)
 ```mojo
 # qumo/compiler/tools.mojo
 from qumo.ai.tools import ToolRegistry, ToolResult, ToolContext, tool_ok, arg_circuit
-from qumo.ai.json import JsonValue
+from qumo.core.json import JsonValue
 def _transpile(args: JsonValue, ctx: ToolContext) raises -> ToolResult: ...
 def register_compiler_tools(mut reg: ToolRegistry):
     reg.add("qumo_transpile", "Transpile", "Optimize/route a circuit ...",
@@ -38,7 +38,7 @@ from qumo.sim.runner import sample, evolve, bitstring
 from qumo.sim.program_runner import DEFAULT_MAX_ITERATIONS, ProgramResult, is_clifford_program, sample_program
 from qumo.exec.dispatch import sample_auto, choose_method
 from qumo.compiler.program_compile import program_metrics
-from qumo.ai.json import JsonWriter, JsonValue, JsonKind, parse_json, json_quote
+from qumo.core.json import JsonWriter, JsonValue, JsonKind, parse_json, json_quote
 from qumo.ai.diagnostics import (
     Diagnostic, diagnostic_from_error, lint, lint_program, parse_error_code,
 )

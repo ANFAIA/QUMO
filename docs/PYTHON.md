@@ -116,6 +116,7 @@ Every public function has a docstring with a runnable example:
 | Three qubits | `ccx cswap ccz` `(a, b, c)` |
 | Non-unitary | `measure(q, c=None)`, `measure_all()`, `reset(q)`, `barrier()`, `c_if(clbit, value=1)` |
 | Noise channels | `depolarize1(p, q)`, `depolarize2(p, a, b)`, `x_error y_error z_error (p, q)`, `pauli_channel_1(px, py, pz, q)` |
+| General channels | `kraus1(name, matrices, q)`, `kraus2(name, matrices, q0, q1)`: Kraus operators (complex matrices, sum K^dagger K = I); written as `#pragma qumo kraus1 "name" (re, im, ...)` in QASM |
 | Parameters | `parameter(name)`, `parameters(prefix, count)`, `bind(values)` |
 | Inspection | `num_qubits`, `num_clbits`, `parameter_names`, `num_parameters` (properties); `len(c)`, `size()`, `depth()`, `depth_of(name)`, `count_ops()`, `count_gate(name)`, `num_2q_gates()`, `t_count()`, `two_qubit_edges()`, `has_noise()`, `has_measurements()`, `is_clifford()`, `is_dynamic()` |
 | Transformations | `copy()`, `compose(other)`, `inverse()`, `bind(values)` (each returns a new circuit) |
@@ -170,6 +171,7 @@ The defaults of `sample`, `run` and `transpile` are those of the command line.
 | `expectation(circuit, observable, params=None, *, noise="auto", device="cpu")` | `float` |
 | `value_and_gradient(circuit, observable, params, *, device="cpu")` | `(float, ndarray)` |
 | `batch_value_and_gradient(circuit, observable, param_sets)` | `(ndarray (S,), ndarray (S, P))` |
+| `emulate(circuit, target, shots=1024, seed=1234, *, compile=None, level=2)` | `Emulation`: `.counts` (a `Counts`), `.method`, `.compiled`, `.estimated_fidelity`, `.target`, `.num_qubits` |
 
 * `sample` dispatches as `qumo run` does: stabilizer tableau or Pauli frames
   for Clifford circuits (hundreds of qubits), state vector otherwise (32
@@ -183,11 +185,20 @@ The defaults of `sample`, `run` and `transpile` are those of the command line.
 * An **observable** is a Pauli-sum string (`"Z0 Z1 + 0.5 * X0"`, or dense
   labels `"ZZ + 0.5*IX"`), or a list of `(label, coeff)` pairs
   (`[("ZZ", 1.0), ("IX", 0.5)]`; a dict works too). A dense label reads left
-  to right from the highest qubit, as in Qiskit.
+  to right from the highest qubit, as in Qiskit. Complex coefficients, as
+  `SparsePauliOp.to_list()` gives them, are accepted when their imaginary part
+  is zero (`[("ZZ", 1+0j)]`); a non-zero imaginary part raises QM-E913.
 * `expectation` with `noise="auto"` evaluates a circuit that holds noise
   channels as `Tr(rho H)` on the density matrix (15 qubits at most; past that
   it raises QM-E410 instead of returning the ideal value). `noise="ignore"`
   gives the ideal value, `noise="error"` raises if there is noise.
+
+* `emulate` is `qumo emulate`: the circuit is sampled under the noise of a
+  device model built from the target spec (per-qubit T1/T2, gate and readout
+  errors, per-edge two-qubit errors), with no device. A circuit that does not
+  fit the target is compiled first (`compiled` says so); `compile=False`
+  refuses it with QM-E615 instead, `compile=True` always compiles. The same
+  seed gives the same counts as the command line.
 
 ### Compilation
 

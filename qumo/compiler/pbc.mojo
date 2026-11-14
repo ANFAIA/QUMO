@@ -19,7 +19,7 @@ from std.bit import pop_count
 from qumo.ir.gates import Op, op_name, op_is_unitary, op_is_annotation
 from qumo.ir.circuit import Circuit, Instruction, QUARTER_TURN_LIMIT
 from qumo.compiler.pauli_simp import _Extract, _process
-from qumo.ai.json import JsonWriter
+from qumo.core.json import JsonWriter
 
 
 struct PauliOp(Copyable):

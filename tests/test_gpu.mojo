@@ -49,7 +49,7 @@ from qumo.gpu.device import (
 from qumo.exec.dispatch import choose_method, sample_auto, sample_on
 from qumo.exec.orchestrator import Workflow, Device
 from qumo.ai.registry import full_registry
-from qumo.ai.json import parse_json
+from qumo.core.json import parse_json
 
 
 def max_diff(a: StateVector, b: StateVector) -> Float64:

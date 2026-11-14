@@ -12,7 +12,7 @@ from qumo.sim.branching import sample_branching, BranchingSimulator
 from qumo.sim.rng import Rng
 from qumo.sim.stabilizer import TableauSimulator
 from qumo.ai.describe import circuit_to_json, circuit_from_json
-from qumo.ai.json import parse_json
+from qumo.core.json import parse_json
 from qumo.exec.primitives import EstimatorPub, run_estimator
 
 

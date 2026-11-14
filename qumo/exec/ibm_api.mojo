@@ -30,7 +30,7 @@ from std.math import isinf, isnan
 from std.os import getenv
 from std.time import sleep
 
-from qumo.ai.json import JsonValue, json_quote, parse_json
+from qumo.core.json import JsonValue, json_quote, parse_json
 from qumo.ir.circuit import Instruction
 from qumo.ir.gates import Op, op_arity
 from qumo.ir.qasm import parse_qasm

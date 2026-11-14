@@ -17,7 +17,7 @@ Errors reuse QM-E834 (dataset or fixture file missing or malformed).
 from std.os.path import exists
 from std.time import perf_counter_ns
 
-from qumo.ai.json import parse_json, JsonValue
+from qumo.core.json import parse_json, JsonValue
 
 
 comptime FIXTURE_PATH = "examples/qml/reference/pennylane_reference.json"

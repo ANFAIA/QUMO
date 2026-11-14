@@ -8,7 +8,7 @@ from std.os.path import exists
 from std.testing import assert_true, assert_equal
 from qumo.ir.circuit import Instruction
 from qumo.ir.gates import Op
-from qumo.ai.json import parse_json, JsonValue
+from qumo.core.json import parse_json, JsonValue
 from qumo.sim.rng import Rng
 from qumo.compiler.blockalg import (
     SubGraph, BlockKind, Perm, GF2Mat, SympTab, PauliNet, dense_equiv,

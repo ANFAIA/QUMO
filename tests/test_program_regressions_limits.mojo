@@ -3,7 +3,7 @@
 Each test names its finding by number, or `depth` for the parser nesting limit that
 came with them. The fixes are on top of commit fb44177, and each of these failed
 there, most of the JSON ones by ending the process; the exceptions are named in the
-report. Finding 1 lives in tests/test_program_compile_review3.mojo.
+report. Finding 1 lives in tests/test_program_compile_regressions_angles.mojo.
 """
 
 from std.math import inf, nan, pi
@@ -11,7 +11,7 @@ from std.testing import assert_equal, assert_true
 
 from qumo.ai.describe import circuit_from_json, program_from_json, program_to_json
 from qumo.ai.diagnostics import error_catalog
-from qumo.ai.json import JsonWriter, parse_json
+from qumo.core.json import JsonWriter, parse_json
 from qumo.ai.mcp import McpServer
 from qumo.ai.tools import default_registry, write_program_outputs
 from qumo.compiler.pbc import to_pbc
@@ -597,4 +597,4 @@ def main() raises:
     test_13_a_remainder_that_differs_from_the_table_warns()
     test_13_only_integer_operands_go_through_the_table()
     test_14_a_shift_of_zero_is_zero()
-    print("test_program_review3 OK")
+    print("test_program_regressions_limits OK")

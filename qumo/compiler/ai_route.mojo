@@ -46,7 +46,7 @@ from qumo.compiler.routing import (
     vf2_layout, dense_layout, greedy_layout, InteractionGraph, routing_skeleton,
     slide_swaps,
 )
-from qumo.ai.json import parse_json, JsonValue
+from qumo.core.json import parse_json, JsonValue
 from qumo.compiler.policy import (
     load_model_file, model_search_dirs, read_model_index, MODEL_FORMAT_ROUTE, MODEL_KIND_ROUTING,
 )

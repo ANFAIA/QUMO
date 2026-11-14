@@ -40,7 +40,7 @@ from std.bit import pop_count
 from qumo.ir.gates import Op, op_arity, op_inverse_kind, op_is_unitary, matrix_1q, matrix_2q, M2, M4
 from qumo.ir.circuit import Instruction, QUARTER_TURN_LIMIT
 from qumo.ir.param import Param
-from qumo.compiler.common import GateSet
+from qumo.ir.gateset import GateSet
 from qumo.compiler.kak import cx_cost
 from qumo.compiler.target import Target
 

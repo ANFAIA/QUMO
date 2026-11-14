@@ -54,7 +54,7 @@ from qumo.gpu.kernels import (
     tile_smem_typical, tile_smem_worst,
 )
 
-from qumo.ai.json import JsonWriter
+from qumo.core.json import JsonWriter
 
 comptime GPU_COMPILED = is_defined["QUMO_GPU"]()
 comptime GPU_IS_APPLE = gpu_target_is_apple()

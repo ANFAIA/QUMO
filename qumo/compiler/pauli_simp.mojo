@@ -35,10 +35,9 @@ from std.bit import pop_count
 from qumo.ir.gates import Op, op_arity, op_is_unitary, op_num_params
 from qumo.ir.param import Param
 from qumo.ir.circuit import Circuit, Instruction, QUARTER_TURN_LIMIT
-from qumo.compiler.common import (
-    GateSet, HALF_PI, QUARTER_PI, TWO_PI, ANG_TOL, EXACT_TOL, wrap_angle, shell_like,
-)
-from qumo.compiler.basis import expand_rule
+from qumo.compiler.common import TWO_PI, wrap_angle, shell_like
+from qumo.ir.gateset import GateSet, HALF_PI, QUARTER_PI, ANG_TOL, EXACT_TOL
+from qumo.ir.gateset import expand_rule
 from qumo.compiler.optimize import cancel_inverses, commute_rotations
 from qumo.compiler.kak import consolidate_2q
 from qumo.compiler.phase_fold import phase_fold

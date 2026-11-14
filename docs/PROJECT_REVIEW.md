@@ -172,16 +172,16 @@ decoder) were read from source, not exercised.
 | Finding | Status |
 |---|---|
 | A1 front door | Done (prelude, Python package) |
-| A2 surface consistency | Mostly done; default seeds still differ (item 7 below) |
-| A3 dependency cycles | Pending (item 2) |
-| A4 duplicated hardware layer | Pending (item 3) |
-| A5 top-level layout | README table done; moving directories pending (item 4) |
-| A6 distribution | Editable install done; relocatable binary and wheel pending (item 1) |
-| A7 stale claims | Text corrected; re-measuring pending (item 5) |
-| A8 large files and leftovers | Pending (item 9) |
+| A2 surface consistency | Mostly done; default seeds not unified (item 7, owner decision) |
+| A3 dependency cycles | Mostly done (item 2): json moved to `qumo/core`, `sim` no longer imports `compiler`. One cycle remains: `exec/tools` and `ft/tools` import `qumo.ai`; moving them is an owner decision |
+| A4 duplicated hardware layer | Plan written (`docs/HARDWARE_LAYER_PLAN.md`); not implemented (item 3, owner decision) |
+| A5 top-level layout | Done in the docs (item 4); directories not moved |
+| A6 distribution | Editable install done. Relocatable binary spiked and works; wheel not built: the licence needs confirmation (item 1) |
+| A7 stale claims | Text corrected. Re-measuring not done: machine was under load (item 5) |
+| A8 large files and leftovers | `qasm.mojo` split into lexer, parser and emitter (facade kept); test files renamed. `QasmParser` itself is still one 3.6k-line file (Mojo cannot split struct methods across files) |
 | A9 compile time | Documented; not reducible from this project |
-| U1 to U8, U10 | Done |
-| U9 extension points | Documented; registry pending (item 6) |
+| U1 to U8, U10 | Done (U8: CI and tags prepared; `v0.1.0` tag left to the owner) |
+| U9 extension points | Documented; registry not done (item 6): it needs a function-pointer table and touches several files |
 
 ## 6. Changes still to make
 
@@ -192,12 +192,12 @@ Ordered by value for the target audience.
 | 1 | Relocatable binary and a wheel bundling `qumo_py.so` with the runtime libraries (`@loader_path` rpath); then a Colab teaching notebook | Today the only install is clone, 850 MB toolchain and a 60 s build; this is the largest remaining barrier for students | Medium | None. Blocked on Modular's licence for redistributing the runtime libraries: check first |
 | 2 | Move `json` and diagnostics to `qumo/core`; move `GateSet` and `expand_rule` down to `ir` | Removes the cycles of A3 | Medium, mechanical | None at run time |
 | 3 | One hardware layer instead of two | A4: every provider is maintained twice | Large | None |
-| 4 | Group `rl/`, `training/` and `models/` under one research heading; drop the empty `training/` | A5 | Small, but moves paths used by docs and the Makefile | None |
+| 4 | Group `rl/`, `models/` under one research heading in the docs; remove `training/`, which held only a pointer README (corrected: it was not empty) | A5 | Small | None |
 | 5 | Re-run the benchmarks with Mojo 1.2 on an idle machine and re-date the README table | A7: the Aer comparison ran with load average 27 to 45 | Small | None |
 | 6 | Registry for compiler passes and decoders | U9: adding one means editing core files | Medium | Risky if done with dynamic dispatch: keep static dispatch for the built-ins |
 | 7 | One default seed across surfaces (sampling uses 1234, transpile and VQE 7, QEC 1) | A2 | Small | None, but it shifts pinned compiler and optimizer results and the goldens |
 | 8 | Python gaps: `qumo.emulate`, `qumo.grover`, complex coefficients in `expectation` (Qiskit `SparsePauliOp.to_list()`), Kraus channels and detectors in the builder, zero-copy `statevector`; CLI `transpile --edges/--calibration` | Small holes a newcomer or researcher hits next | Small each | Zero-copy state vector needs care: the simulator keeps real and imaginary parts in separate arrays |
-| 9 | Split `qumo/ir/qasm.mojo` into lexer, parser and emitter; rename the `test_program_review*` files; remove the JSON copy in `rl/` | A8 | Medium | None |
+| 9 | Split `qumo/ir/qasm.mojo` into lexer, parser and emitter; rename the `test_program_review*` files. (Corrected: keep the JSON copy in `rl/qrl/json.mojo`; `rl/` must not import `qumo.*`, and `make check-independence` enforces it.) | A8 | Medium | None |
 | 10 | Tag `v0.1.0`; run the CI workflow once and fix what fails; pin `bench/.venv` with a lock file | U8: nothing citable or reproducible by version yet | Small | None |
 | 11 | Verify on a Linux host | Everything Linux-specific is unverified | Small with a host | None |
 
@@ -213,3 +213,22 @@ Ordered by value for the target audience.
 5. PR #7 (native Mojo agent harness): a separate review recommends not merging it as is, because
    `run_check` runs unconfined without an open sandbox and the branch duplicates the network stack
    already on `main`.
+
+## 8. Applied on 2026-11-12 (section 6, batches A to D)
+
+| Item | Result |
+|---|---|
+| 1 relocatable binary, wheel | Licence reviewed (from a summarised page: confirm the text verbatim). Spike: binary with `@loader_path/lib` runs from a directory outside the repo with the libraries loaded from the bundled folder. No wheel built. Licence term to check before any wheel: MAX may not be used as training data or input to any AI system (s1.4(4)) |
+| 2 move json to `qumo/core`, GateSet to `ir` | Done. `sim` no longer imports `compiler`. Remaining cycle: `exec/tools` and `ft/tools` import `qumo.ai` (owner decision) |
+| 3 one hardware layer | Plan in `docs/HARDWARE_LAYER_PLAN.md`. No code changed: a parity test needs a definition of equivalence per provider |
+| 4 group research directories | Docs grouped; `training/` removed (held only a pointer README); `rl/` and `models/` not moved, because `rl/` must not be edited and many paths would change |
+| 5 re-measure benchmarks | Not run: machine load stayed above the idle threshold. Note: README says 2.5 to 4.7x against Aer; `docs/SIMULATION.md` table says 1.4 to 4.05x at 24 to 26 qubits. Reconcile when re-measuring |
+| 6 pass and decoder registry | Not done: needs a function-pointer table and edits in about ten places (`pass_manager.mojo`, `experiments.mojo`, diagnostics, tool enum, `qec.py`, `qumo_py.mojo`) |
+| 7 one default seed | Not done: nine seeds in use (1234, 7, 1, 2024, 12345, 0 and others). Changing one changes 144 golden hashes in `tests/fixtures/golden/manifest.txt` and routed circuits. Owner must pick a value and approve regenerating goldens |
+| 8 Python gaps | Done: `qumo.emulate`, complex coefficients accepted when the imaginary part is zero, `kraus1`/`kraus2` on the builder. Not done: zero-copy `statevector` (lifetime not proven safe), `qumo.grover`, detectors in the builder, CLI `transpile --edges/--calibration` |
+| 9 split qasm, rename tests | Done: `qasm.mojo` is a 48-line facade over `qasm_lexer.mojo`, `qasm_parser.mojo` and `qasm_emit.mojo`; test files renamed. JSON copy in `rl/` kept |
+| 10 tag, CI, lock | Lock file `bench/requirements.lock` and `make setup-py-locked` added. CI commands checked locally where the machine allowed. Tag `v0.1.0` not created: version identity is the owner's decision. CI has not run on GitHub |
+| 11 Linux host | Not possible here |
+
+Verification on the integrated tree: `make cli py` builds; `make check-independence` OK; `make test-python` 129 passed;
+`examples/run_examples.py --check-index` OK. Full `make test`: 90 PASS, 0 FAIL (exit 0).

@@ -28,7 +28,7 @@ from qumo.ir.kraus import KrausChannel
 from qumo.ir.classical import CF, CN, CNode, CT, CType, type_name
 from qumo.ir.program import CReg, CVar, FORR, MAX_NESTING, Program, SK, Stmt, TapeBuilder, check_program
 from qumo.ir.qasm import builtin_gate_table, format_param
-from qumo.ai.json import JsonWriter, JsonValue, JsonKind, parse_json
+from qumo.core.json import JsonWriter, JsonValue, JsonKind, parse_json
 from qumo.ai.diagnostics import error_catalog, error_ranges, range_index_of
 from qumo.compiler.pass_manager import PassId, pass_name, pass_description, is_synth_pass
 from std.os import getenv

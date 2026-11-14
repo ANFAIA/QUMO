@@ -1,7 +1,7 @@
 """IonQ cloud client in native Mojo: request bodies, HTTPS calls, result sampling.
 
 No vendor SDK and no Python on this path. The pieces are all QUMO's own:
-OpenQASM parsing (qumo.ir.qasm), JSON (qumo.ai.json), HTTP/1.1 + TLS over libc sockets
+OpenQASM parsing (qumo.ir.qasm), JSON (qumo.core.json), HTTP/1.1 + TLS over libc sockets
 with OpenSSL 3 loaded at run time (qumo.net), and the seeded RNG (qumo.sim.rng).
 plugins/hardware/qumo_hardware/ionq.py only adapts these functions to the plugin API.
 
@@ -28,7 +28,7 @@ from std.math import isinf, isnan
 from std.os import getenv
 from std.time import sleep
 
-from qumo.ai.json import JsonValue, json_quote, parse_json
+from qumo.core.json import JsonValue, json_quote, parse_json
 from qumo.ir.circuit import Instruction
 from qumo.ir.gates import Op, op_arity
 from qumo.ir.qasm import parse_qasm

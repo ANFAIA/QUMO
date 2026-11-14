@@ -158,7 +158,7 @@ Each provider has up to two client implementations:
 
 Native clients run the whole provider protocol inside the `qumo_py` extension
 (`make py`): request bodies, QUMO's HTTP/1.1 + TLS stack (`qumo/net`, OpenSSL 3
-loaded at run time), JSON parsing (`qumo/ai/json.mojo`), and results. Credentials
+loaded at run time), JSON parsing (`qumo/core/json.mojo`), and results. Credentials
 are read in Mojo, and access tokens never leave the native call.
 
 Pick the client with `--client native|python`, `QUMO_HW_CLIENT=native|python`, or
@@ -371,7 +371,7 @@ the syntax checker). Set `QUMO_QUANTINUUM_USD_PER_HQC` to get a USD figure
 `qumo/exec/ionq_api.mojo` builds the request, calls the IonQ API v0.4 over QUMO's
 own HTTP/1.1 + TLS stack (`qumo/net`, OpenSSL 3 loaded at run time with `dlopen`;
 `QUMO_LIBSSL` / `QUMO_LIBCRYPTO` select the library), parses the JSON with
-`qumo/ai/json.mojo` and samples the counts with QUMO's seeded RNG.
+`qumo/core/json.mojo` and samples the counts with QUMO's seeded RNG.
 `plugins/hardware/qumo_hardware/ionq.py` only adapts it to the plugin API through
 the `qumo_py` extension (`make py`). qiskit-ionq is not needed. The previous
 qiskit-ionq client stays as the fallback (`--client python`, `ionq_sdk.py`;

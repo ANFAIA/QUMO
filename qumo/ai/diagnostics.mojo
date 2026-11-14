@@ -37,7 +37,7 @@ from qumo.ir.gates import (
     Op, op_name, op_arity, op_num_params, op_is_unitary, op_is_noise,
     op_is_annotation, op_is_self_inverse, op_inverse_kind, op_is_symmetric,
 )
-from qumo.ai.json import JsonWriter
+from qumo.core.json import JsonWriter
 
 
 # ---------------------------------------------------------------------------

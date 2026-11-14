@@ -9,7 +9,7 @@ other QUMO modules plug their features into it.
 |---|---|---|
 | OpenQASM 2/3 parser + emitter | `qumo/ir/qasm.mojo` | A circuit format models already write fluently, with exact round trips |
 | OpenQASM 2 emitter | `qumo/ir/qasm2.mojo` | Portable `qelib1.inc` output that every SDK parser loads (Qiskit strict and legacy, pytket, Cirq) |
-| JSON | `qumo/ai/json.mojo` | Streaming writer and arena parser, deterministic output, error positions |
+| JSON | `qumo/core/json.mojo` | Streaming writer and arena parser, deterministic output, error positions |
 | Diagnostics | `qumo/ai/diagnostics.mojo` | Stable codes, line/col, snippet, fix hint, lint warnings |
 | Self-description | `qumo/ai/describe.mojo` | Gate set, error catalog, capabilities and circuit JSON, generated from the implementation |
 | Tool registry | `qumo/ai/tools.mojo`, `qumo/ai/registry.mojo` | One implementation per operation, shared by MCP and CLI; `full_registry()` adds the module tools |
@@ -503,7 +503,7 @@ the CLI and change nothing for MCP clients:
 ```mojo
 # qumo/compiler/tools.mojo  (owned by the compiler module)
 from qumo.ai.tools import ToolRegistry, ToolResult, ToolContext, tool_ok, arg_circuit, arg_int
-from qumo.ai.json import JsonValue, JsonWriter
+from qumo.core.json import JsonValue, JsonWriter
 from qumo.ai.describe import write_circuit_summary
 from qumo.ir.qasm import to_qasm
 from qumo.compiler.pass_manager import transpile

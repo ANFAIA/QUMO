@@ -33,7 +33,7 @@ from std.collections import List, Dict
 from std.os import getenv
 from std.os.path import exists
 from std.memory import bitcast
-from qumo.ai.json import parse_json, JsonValue
+from qumo.core.json import parse_json, JsonValue
 from qumo.ir.gates import Op
 from qumo.compiler.blockalg import SubGraph, BlockKind
 

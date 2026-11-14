@@ -95,7 +95,7 @@ Full install, update, GPU and hardware steps: [docs/GETTING_STARTED.md](docs/GET
 |---|---|---|
 | Core | `qumo/` (the library), `cli/` (the `qumo` tool and MCP server), `python/` (the `qumo` Python package and the `qumo_py` extension under it), `tests/`, `docs/` | everything; this is all the tutorial uses |
 | Optional | `examples/` (runnable, checked examples), `plugins/` (hardware providers), `agents/` (AI agents), `bench/` (benchmark harnesses and results) | learning by example, real devices, reproducing the numbers below |
-| Research | `rl/` (native Mojo reinforcement-learning stack that trains the AI-transpiler models), `models/` (the trained models, loaded only by the AI transpiler), `training/` (a pointer to `rl/`, where the training code moved) | the AI transpiler ([docs/AI_TRANSPILER.md](docs/AI_TRANSPILER.md)); nothing else depends on them |
+| Research | `rl/` (native Mojo reinforcement-learning stack that trains the AI-transpiler models), `models/` (the trained models, loaded only by the AI transpiler) | the AI transpiler ([docs/AI_TRANSPILER.md](docs/AI_TRANSPILER.md)); nothing else depends on them |
 
 ## Results (Apple M5 unless noted)
 

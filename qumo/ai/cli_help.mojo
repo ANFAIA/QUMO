@@ -11,7 +11,7 @@
 Nothing here is on a simulation or compilation path.
 """
 
-from qumo.ai.json import JsonWriter, JsonValue, parse_json
+from qumo.core.json import JsonWriter, JsonValue, parse_json
 from qumo.ai.tools import ToolSpec
 
 

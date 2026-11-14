@@ -23,7 +23,7 @@ MCP tool in a `register_*_tools` function - it is immediately callable as
 `qumo tool <name> '<json-args>'` and documented by `qumo tool <name> --help`.
 """
 
-from qumo.ai.json import JsonWriter, JsonValue, parse_json, pretty_json
+from qumo.core.json import JsonWriter, JsonValue, parse_json, pretty_json
 from qumo.ai.tools import ToolRegistry, ToolResult, tool_error
 from qumo.ai.registry import full_registry
 from qumo.ai.mcp import serve_stdio, LineReader, MCP_PROTOCOL_VERSION

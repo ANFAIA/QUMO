@@ -82,7 +82,7 @@ tensors, bit-identical logits for every symmetry and the ensemble, and identical
 ### Copies of QUMO code inside qrl
 
 To import nothing from QUMO, qrl carries copies (Apache-2.0, same authors; each file says where it comes from):
-`qrl/json.mojo` (qumo/ai/json.mojo), `qrl/rng.mojo` (qumo/sim/rng.mojo, bit-exact stream), `qrl/gates.mojo` (the
+`qrl/json.mojo` (qumo/core/json.mojo), `qrl/rng.mojo` (qumo/sim/rng.mojo, bit-exact stream), `qrl/gates.mojo` (the
 opcode subset of qumo/ir/gates.mojo, same numbers), `qrl/model.mojo` (the reader half of qumo/compiler/policy.mojo),
 `qrl/env_core.mojo` (the environment dynamics and greedy trace of qumo/compiler/policy_synth.mojo) and
 `heavy_hex_lattice_edges` in `qrl/targets.mojo` (Target.heavy_hex_edges). A change to one of the originals that

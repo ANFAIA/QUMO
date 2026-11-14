@@ -85,9 +85,8 @@ plugins/       hardware providers (qumo_hardware)
 agents/        deepagents-based agents and CLI (Python)
 examples/      runnable examples by category
 bench/         benchmarks and harnesses
-rl/            native Mojo RL stack that trains the AI-transpiler models
-models/        trained AI-transpiler models
-training/      pointer to rl/ (the training code moved there)
+rl/            research: native Mojo RL stack (package qrl) that trains the AI-transpiler models
+models/        research: trained AI-transpiler models, loaded only by the AI transpiler
 tests/         one test_<module>.mojo per module
 docs/          this documentation
 ```

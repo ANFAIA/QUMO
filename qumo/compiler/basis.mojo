@@ -22,7 +22,8 @@ from std.math import pi
 from qumo.ir.gates import Op, op_name, op_arity, op_is_unitary
 from qumo.ir.param import Param
 from qumo.ir.circuit import Circuit, Instruction
-from qumo.compiler.common import GateSet, HALF_PI, QUARTER_PI, inst_matrix_1q
+from qumo.ir.gateset import rule_gate as _g, GateSet, HALF_PI, QUARTER_PI, expand_rule
+from qumo.compiler.common import inst_matrix_1q
 from qumo.compiler.synth import synth_1q, synth_1q_symbolic, can_synthesize_1q
 from qumo.compiler.optimize import fuse_1q
 
@@ -34,11 +35,6 @@ def choose_entangler(gs: GateSet) -> Int:
         if gs.has(k):
             return k
     return -1
-
-
-@always_inline
-def _g(k: Int, q0: Int, q1: Int = -1, q2: Int = -1, p0: Param = 0.0) -> Instruction:
-    return Instruction.make(k, q0, q1, q2, p0)
 
 
 def cx_rule(ent: Int, c: Int, t: Int, mut seq: List[Instruction]) -> Float64:
@@ -98,190 +94,6 @@ def cx_rule(ent: Int, c: Int, t: Int, mut seq: List[Instruction]) -> Float64:
         seq.append(_g(Op.RX, t, p0=-HALF_PI))
         seq.append(_g(Op.RY, c, p0=-HALF_PI))
         return -QUARTER_PI
-    return 0.0
-
-
-def expand_rule(g: Instruction, gs: GateSet, mut seq: List[Instruction], mut dropped: Bool) -> Float64:
-    """One rewrite step for a multi-qubit gate: g = e^{i phase} * seq."""
-    var k = g.kind
-    var a = g.q0
-    var b = g.q1
-    var c = g.q2
-    var th = g.p0
-    var direct_zz = gs.has(Op.RZZ) and not gs.has(Op.CX)
-    if k == Op.CZ:
-        if gs.has(Op.CP):
-            seq.append(_g(Op.CP, a, b, -1, pi))
-            return 0.0
-        if direct_zz:
-            seq.append(_g(Op.RZ, a, p0=HALF_PI))
-            seq.append(_g(Op.RZ, b, p0=HALF_PI))
-            seq.append(_g(Op.RZZ, a, b, -1, -HALF_PI))
-            return QUARTER_PI
-        seq.append(_g(Op.H, b))
-        seq.append(_g(Op.CX, a, b))
-        seq.append(_g(Op.H, b))
-        return 0.0
-    if k == Op.CY:
-        seq.append(_g(Op.SDG, b))
-        seq.append(_g(Op.CX, a, b))
-        seq.append(_g(Op.S, b))
-        return 0.0
-    if k == Op.CH:
-        seq.append(_g(Op.S, b))
-        seq.append(_g(Op.H, b))
-        seq.append(_g(Op.T, b))
-        seq.append(_g(Op.CX, a, b))
-        seq.append(_g(Op.TDG, b))
-        seq.append(_g(Op.H, b))
-        seq.append(_g(Op.SDG, b))
-        return 0.0
-    if k == Op.SWAP:
-        seq.append(_g(Op.CX, a, b))
-        seq.append(_g(Op.CX, b, a))
-        seq.append(_g(Op.CX, a, b))
-        return 0.0
-    if k == Op.ISWAP and gs.has(Op.ISWAPDG):
-        # Z_a . iSWAPdg . Z_a = iSWAP
-        seq.append(_g(Op.Z, a))
-        seq.append(_g(Op.ISWAPDG, a, b))
-        seq.append(_g(Op.Z, a))
-        return 0.0
-    if k == Op.ISWAPDG and gs.has(Op.ISWAP):
-        seq.append(_g(Op.Z, a))
-        seq.append(_g(Op.ISWAP, a, b))
-        seq.append(_g(Op.Z, a))
-        return 0.0
-    if k == Op.ISWAP:
-        seq.append(_g(Op.S, a))
-        seq.append(_g(Op.S, b))
-        seq.append(_g(Op.H, a))
-        seq.append(_g(Op.CX, a, b))
-        seq.append(_g(Op.CX, b, a))
-        seq.append(_g(Op.H, b))
-        return 0.0
-    if k == Op.ISWAPDG:
-        seq.append(_g(Op.H, b))
-        seq.append(_g(Op.CX, b, a))
-        seq.append(_g(Op.CX, a, b))
-        seq.append(_g(Op.H, a))
-        seq.append(_g(Op.SDG, b))
-        seq.append(_g(Op.SDG, a))
-        return 0.0
-    if k == Op.ECR:
-        seq.append(_g(Op.X, a))
-        seq.append(_g(Op.CX, a, b))
-        seq.append(_g(Op.SDG, a))
-        seq.append(_g(Op.SXDG, b))
-        return QUARTER_PI
-    if k == Op.CP:
-        if direct_zz or (gs.has(Op.RXX) and not gs.has(Op.CX)):
-            # CP(l) = e^{i l/4} RZ(l/2) x RZ(l/2) . RZZ(-l/2)
-            seq.append(_g(Op.RZ, a, p0=th * 0.5))
-            seq.append(_g(Op.RZ, b, p0=th * 0.5))
-            seq.append(_g(Op.RZZ, a, b, -1, th * -0.5))
-            if th.is_symbolic():
-                dropped = True
-            return th.offset / 4
-        seq.append(_g(Op.P, a, p0=th * 0.5))
-        seq.append(_g(Op.CX, a, b))
-        seq.append(_g(Op.P, b, p0=th * -0.5))
-        seq.append(_g(Op.CX, a, b))
-        seq.append(_g(Op.P, b, p0=th * 0.5))
-        return 0.0
-    if k == Op.CRZ:
-        if direct_zz or (gs.has(Op.RXX) and not gs.has(Op.CX)):
-            # CRZ(t) = RZ(t/2)_target . RZZ(-t/2)
-            seq.append(_g(Op.RZ, b, p0=th * 0.5))
-            seq.append(_g(Op.RZZ, a, b, -1, th * -0.5))
-            return 0.0
-        seq.append(_g(Op.RZ, b, p0=th * 0.5))
-        seq.append(_g(Op.CX, a, b))
-        seq.append(_g(Op.RZ, b, p0=th * -0.5))
-        seq.append(_g(Op.CX, a, b))
-        return 0.0
-    if k == Op.CRY:
-        seq.append(_g(Op.RY, b, p0=th * 0.5))
-        seq.append(_g(Op.CX, a, b))
-        seq.append(_g(Op.RY, b, p0=th * -0.5))
-        seq.append(_g(Op.CX, a, b))
-        return 0.0
-    if k == Op.CRX:
-        seq.append(_g(Op.H, b))
-        seq.append(_g(Op.CRZ, a, b, -1, th))
-        seq.append(_g(Op.H, b))
-        return 0.0
-    if k == Op.RZZ:
-        if gs.has(Op.RXX):
-            seq.append(_g(Op.H, a))
-            seq.append(_g(Op.H, b))
-            seq.append(_g(Op.RXX, a, b, -1, th))
-            seq.append(_g(Op.H, a))
-            seq.append(_g(Op.H, b))
-            return 0.0
-        if gs.has(Op.RYY):
-            seq.append(_g(Op.RX, a, p0=-HALF_PI))
-            seq.append(_g(Op.RX, b, p0=-HALF_PI))
-            seq.append(_g(Op.RYY, a, b, -1, th))
-            seq.append(_g(Op.RX, a, p0=HALF_PI))
-            seq.append(_g(Op.RX, b, p0=HALF_PI))
-            return 0.0
-        seq.append(_g(Op.CX, a, b))
-        seq.append(_g(Op.RZ, b, p0=th))
-        seq.append(_g(Op.CX, a, b))
-        return 0.0
-    if k == Op.RXX:
-        if gs.has(Op.RYY) and not gs.has(Op.RZZ):
-            seq.append(_g(Op.RZ, a, p0=HALF_PI))
-            seq.append(_g(Op.RZ, b, p0=HALF_PI))
-            seq.append(_g(Op.RYY, a, b, -1, th))
-            seq.append(_g(Op.RZ, a, p0=-HALF_PI))
-            seq.append(_g(Op.RZ, b, p0=-HALF_PI))
-            return 0.0
-        seq.append(_g(Op.H, a))
-        seq.append(_g(Op.H, b))
-        seq.append(_g(Op.RZZ, a, b, -1, th))
-        seq.append(_g(Op.H, a))
-        seq.append(_g(Op.H, b))
-        return 0.0
-    if k == Op.RYY:
-        if gs.has(Op.RXX) and not gs.has(Op.RZZ):
-            seq.append(_g(Op.RZ, a, p0=-HALF_PI))
-            seq.append(_g(Op.RZ, b, p0=-HALF_PI))
-            seq.append(_g(Op.RXX, a, b, -1, th))
-            seq.append(_g(Op.RZ, a, p0=HALF_PI))
-            seq.append(_g(Op.RZ, b, p0=HALF_PI))
-            return 0.0
-        seq.append(_g(Op.RX, a, p0=HALF_PI))
-        seq.append(_g(Op.RX, b, p0=HALF_PI))
-        seq.append(_g(Op.RZZ, a, b, -1, th))
-        seq.append(_g(Op.RX, a, p0=-HALF_PI))
-        seq.append(_g(Op.RX, b, p0=-HALF_PI))
-        return 0.0
-    if k == Op.CCX or k == Op.CCZ:
-        if k == Op.CCX:
-            seq.append(_g(Op.H, c))
-        seq.append(_g(Op.CX, b, c))
-        seq.append(_g(Op.TDG, c))
-        seq.append(_g(Op.CX, a, c))
-        seq.append(_g(Op.T, c))
-        seq.append(_g(Op.CX, b, c))
-        seq.append(_g(Op.TDG, c))
-        seq.append(_g(Op.CX, a, c))
-        seq.append(_g(Op.T, b))
-        seq.append(_g(Op.T, c))
-        if k == Op.CCX:
-            seq.append(_g(Op.H, c))
-        seq.append(_g(Op.CX, a, b))
-        seq.append(_g(Op.T, a))
-        seq.append(_g(Op.TDG, b))
-        seq.append(_g(Op.CX, a, b))
-        return 0.0
-    if k == Op.CSWAP:
-        seq.append(_g(Op.CX, c, b))
-        seq.append(_g(Op.CCX, a, b, c))
-        seq.append(_g(Op.CX, c, b))
-        return 0.0
     return 0.0
 
 

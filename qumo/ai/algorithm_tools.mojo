@@ -49,7 +49,7 @@ from qumo.algorithms.library import (
 )
 from qumo.algorithms.qml import append_rot, append_angle_embedding, projector_zero
 from qumo.algorithms.qkernels import kernel_circuit
-from qumo.ai.json import JsonWriter, JsonValue
+from qumo.core.json import JsonWriter, JsonValue
 from qumo.ai.tools import ToolRegistry, ToolResult, ToolContext, tool_ok
 
 

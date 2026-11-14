@@ -475,4 +475,4 @@ def main() raises:
     test_e5_refusals()
     test_open_box_as_a_loop_body()
     test_open_input_angle_is_radians_in_both_parsers()
-    print("test_program_review OK")
+    print("test_program_regressions_semantics OK")

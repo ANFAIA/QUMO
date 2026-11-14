@@ -43,7 +43,7 @@ from qumo.sim.stabilizer import TableauSimulator
 from qumo.sim.rng import Rng
 from qumo.ft.pauli import SymPauli, StabilizerGroup
 from qumo.ft.code import StabilizerCode
-from qumo.ai.json import JsonWriter
+from qumo.core.json import JsonWriter
 
 
 struct VerifyReport(Copyable, Writable):

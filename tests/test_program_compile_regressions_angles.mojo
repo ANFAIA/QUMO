@@ -102,4 +102,4 @@ def main() raises:
     test_1_small_errors_add_up()
     test_1_small_angles_still_act()
     test_1_a_flat_compile_still_drops_what_it_did()
-    print("test_program_compile_review3 OK")
+    print("test_program_compile_regressions_angles OK")

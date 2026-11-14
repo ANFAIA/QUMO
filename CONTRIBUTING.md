@@ -22,6 +22,7 @@ make setup        # .venv with the pinned Mojo toolchain (about 850 MB)
 make cli          # build/qumo
 make py           # build/qumo_py.so (needed by the Python package qumo, Python examples and plugin tests)
 make setup-py     # optional: bench/.venv with Qiskit, Aer, TKET, Cirq, Stim (about 1.5 GB)
+make setup-py-locked  # the same environment at the exact versions in bench/requirements.lock (use this to reproduce a reported result)
 make help         # every documented target
 ```
 
@@ -107,7 +108,7 @@ Do not copy text or code from another project's tutorial beyond what its licence
 Numbers are only useful if someone else can get them again. This applies to results in pull requests, in issues and in the docs. A report needs:
 
 1. **What ran.** The exact command (for example `make bench-sv`, or `bench/.venv/bin/python bench/neutral/run_neutral.py ...`), the QUMO commit (`git rev-parse HEAD`) and whether the tree had local changes.
-2. **Versions.** `.venv/bin/mojo --version`, and the version of every SDK compared (`bench/.venv/bin/python -m pip freeze | grep -i -E "qiskit|tket|cirq|stim|pymatching"`). `make setup-py` installs the latest versions, so they drift: always record them.
+2. **Versions.** `.venv/bin/mojo --version`, and the version of every SDK compared (`bench/.venv/bin/python -m pip freeze | grep -i -E "qiskit|tket|cirq|stim|pymatching"`). `make setup-py` installs the latest versions, so they drift: always record them. `make setup-py-locked` installs the versions pinned in `bench/requirements.lock` (a freeze of the environment used for the current reports); if you use it, say so.
 3. **Machine.** CPU model and core count, RAM, OS version; for GPU runs the GPU model, driver and precision (fp32 or fp64).
 4. **Conditions.** Thread count if you set one, what else was running (load average), number of repetitions, and whether you report the median, the mean or the best. Prefer medians of at least 3 runs. For A/B comparisons alternate the two binaries.
 5. **Equal work.** Say how you know both sides did the same thing: same circuits, same basis and coupling map, same precision, same shots; and how correctness was checked (state-vector equivalence, counts within statistical error).

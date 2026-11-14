@@ -25,7 +25,7 @@ them in `qumo.ai.tools.default_registry()` - no protocol code changes.
 from std.ffi import c_int
 from std.io.file_descriptor import RawFileDescriptor
 
-from qumo.ai.json import JsonWriter, JsonValue, JsonKind, parse_json
+from qumo.core.json import JsonWriter, JsonValue, JsonKind, parse_json
 from qumo.ai.tools import ToolRegistry, ToolResult, tool_error
 from qumo.ai.registry import full_registry
 from qumo.ai.diagnostics import diagnostic_from_error
