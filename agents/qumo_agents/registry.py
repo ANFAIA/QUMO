@@ -8,6 +8,7 @@ from qumo_agents import prompts
 from qumo_agents.tools import repo, research
 
 ALL_MCP = None  # every QUMO MCP tool
+ALL_GENERATED = None  # every reviewed generated tool (Mojo harness only)
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,9 @@ class AgentSpec:
     mcp_tools: tuple[str, ...] | None = ()  # () none, None all, or a subset
     subagents: tuple[str, ...] = ()
     writes_code: bool = False
+    # Reviewed Mojo-generated tools (gen_*) this agent may call in the native Mojo harness:
+    # () none, None every reviewed tool, or a list of names. The Python agents ignore it.
+    generated_tools: tuple[str, ...] | None = ()
 
     @property
     def uses_mcp(self) -> bool:
@@ -50,11 +54,11 @@ AGENTS: dict[str, AgentSpec] = {a.name: a for a in [
         "Improves one QUMO module step by step in a sandbox branch: hypothesis, baseline, change, measurement, review.",
         prompts.AUTORESEARCH, ("read", "check", "report", "sandbox"), QUMO_SIM,
         subagents=("research-watch", "code-review", "algorithm-research", "qec-research", "compiler-research"),
-        writes_code=True),
+        writes_code=True, generated_tools=ALL_GENERATED),
     AgentSpec(
         "qumo-operator",
         "Uses QUMO through MCP: builds algorithms, simulates and compiles circuits, runs QEC experiments, explains error codes.",
-        prompts.QUMO_OPERATOR, ("report",), ALL_MCP),
+        prompts.QUMO_OPERATOR, ("report",), ALL_MCP, generated_tools=ALL_GENERATED),
     AgentSpec(
         "algorithm-research",
         "Explores new quantum algorithms, checks them against QUMO's library and prototypes toy instances.",

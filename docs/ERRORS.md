@@ -1268,3 +1268,26 @@ Fix: Assign a variable the condition reads, measure into a bit it reads, or add 
 
 **An integer division loses a remainder in a constant used as an angle or a float (float t = 3 / 4 * pi is 0), or a literal-only gate argument keeps real division where OpenQASM 3 and Qiskit truncate (rz(3/4*pi) is 3 pi / 4 here, 0 there).**  
 Fix: Write it in floats, such as 3.0 / 4, so that every tool reads the same value.
+
+## QA-E1xx — Agent harness (agents/mojo)
+
+Raised by `build/qumo-agent` (the native Mojo agents), in the text form
+`QA-Ennn: <message>. Hint: <fix>`. Exit code 3 for `QA-E140` and `QA-E105`, 1 for the rest.
+
+| Code | Raised when | Fix |
+|---|---|---|
+| `QA-E101` | The model endpoint answered non-2xx after the retries (`model request failed: HTTP <status> <reason>: <message>`). | Check the model id, the key and the endpoint in `agents/agents.json`. |
+| `QA-E102` | The prompt does not fit the model's context (HTTP 400/413/422 with an overflow marker) and summarization could not recover. | Shorten the task, or choose a model with a longer context. |
+| `QA-E103` | The model answered 200 with an error body, or without `choices`. | Retry; if it persists, try another model. |
+| `QA-E104` | Network failure: DNS, connect, TLS, timeout, a redirect from https to http, a truncated or oversized body. | Check the network; `build/qumo-agent doctor`. |
+| `QA-E105` | OpenSSL 3 or the CA certificates were not found (or lack a needed symbol). | Install OpenSSL 3, or set `SSL_CERT_FILE` / `QUMO_LIBSSL`. |
+| `QA-E110` | The recursion limit was reached without a final answer. | Raise `--recursion-limit`, or split the task. |
+| `QA-E120` | A subagent failed (`subagent <type> failed: ...`), or a subagent request or result was malformed. | Read the child's log on stderr; run with `--parallel 1` to see it inline. |
+| `QA-E130` | MCP transport or protocol error: an error response, no answer within the timeout, or the server closed the connection. | Rebuild `build/qumo` (`make cli`); check the server's stderr. |
+| `QA-E140` | Configuration: unknown agent, a key variable not set, `build/qumo` or a file not found, or a stale `agents/prompts/` export. | Follow the hint; `python -m qumo_agents export-prompts` refreshes the export. |
+| `QA-E150` | A generated tool was refused (not reviewed, hash mismatch, malformed manifest entry, unknown tool). | `qumo-agent tools verify`, then `tools review NAME`. |
+| `QA-E160` | Process or file-system failure (`[Errno N] ...`), or a child closed its input. | Check the path and permissions. |
+| `QA-E161` | A line from a child or MCP server was longer than the limit. | The peer is misbehaving; check its output. |
+| `QA-E162` | This libc has no `posix_spawn` chdir action. | Use glibc 2.29 or newer. |
+| `QA-E163` | No OS sandbox is available, or OS confinement failed to start. | Use macOS (`sandbox-exec`) or Linux with Landlock; a human can pass `--allow-unsandboxed-tool-tests`. |
+| `QA-E170` | The `--replay` file is unreadable or exhausted. | Add responses to the file, or drop `--replay`. |

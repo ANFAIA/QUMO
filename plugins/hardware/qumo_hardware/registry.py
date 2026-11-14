@@ -1,6 +1,6 @@
 """Provider registry.
 
-Built-in providers: `ibm`, `quantinuum`, `ionq`, `local`, `speqtrum`. Third-party packages can add
+Built-in providers: `ibm`, `quantinuum`, `ionq`, `local`, `speqtrum`, `qbraid`. Third-party packages can add
 providers without touching QUMO by declaring an entry point:
 
     [project.entry-points."qumo_hardware.providers"]
@@ -47,6 +47,12 @@ def _ionq():
     return IonQProvider
 
 
+def _qbraid():
+    from .qbraid import QbraidProvider
+
+    return QbraidProvider
+
+
 def _quantinuum_native():
     from .quantinuum_native import QuantinuumNativeProvider
 
@@ -75,11 +81,11 @@ def _ionq_python():
 # Mojo (the qumo_py extension); "python" uses the vendor's Python SDK. Native is the
 # default wherever it exists; Python stays available as an explicit fallback.
 NATIVE: dict[str, Callable[[], type]] = {"ionq": _ionq, "local": _local, "speqtrum": _speqtrum_native,
-                                         "ibm": _ibm_native, "quantinuum": _quantinuum_native}
+                                         "ibm": _ibm_native, "quantinuum": _quantinuum_native, "qbraid": _qbraid}
 PYTHON: dict[str, Callable[[], type]] = {"ionq": _ionq_python, "ibm": _ibm, "quantinuum": _quantinuum,
                                          "speqtrum": _speqtrum}
 BUILTIN: dict[str, Callable[[], type]] = {"ibm": _ibm, "quantinuum": _quantinuum, "ionq": _ionq,
-                                          "local": _local, "speqtrum": _speqtrum}
+                                          "local": _local, "speqtrum": _speqtrum, "qbraid": _qbraid}
 
 CLIENT_VAR = "QUMO_HW_CLIENT"  # native | python; QUMO_HW_CLIENT_<PROVIDER> overrides it per provider
 CLIENTS = ("native", "python")

@@ -11,6 +11,7 @@ byte-identical to the pre-AI pass manager.
 """
 
 from std.math import pi
+from std.sys import CompilationTarget
 from std.testing import assert_equal, assert_true, assert_false
 from qumo.ir.circuit import Circuit
 from qumo.ir.gates import Op, op_arity, op_num_params

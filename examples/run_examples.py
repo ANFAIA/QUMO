@@ -126,6 +126,8 @@ FRAMEWORK_NAMES = {
     "classiq": "Classiq",
     "guppyft": "Guppy FT (Quantinuum)",
     "qumo": "QUMO",
+    "pulser": "Pulser (Pasqal)",
+    "qbraid": "qBraid",
 }
 
 # Home page of each origin: what the `Framework:` header line must link to. Checked to exist on
@@ -133,6 +135,8 @@ FRAMEWORK_NAMES = {
 # so its public home is the library the notebooks come from).
 FRAMEWORK_URLS = {
     "qiskit": "https://github.com/Qiskit/qiskit",
+    "pulser": "https://github.com/pasqal-io/Pulser",
+    "qbraid": "https://github.com/qBraid/qBraid",
     "braket": "https://github.com/amazon-braket/amazon-braket-sdk-python",
     "qsharp": "https://github.com/microsoft/qdk",
     "tket": "https://github.com/Quantinuum/tket",

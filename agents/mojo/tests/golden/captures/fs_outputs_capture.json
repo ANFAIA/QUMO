@@ -1,0 +1,294 @@
+[
+ {
+  "call": [
+   "ls",
+   {
+    "path": "/"
+   }
+  ],
+  "status": "success",
+  "content": "No files found"
+ },
+ {
+  "call": [
+   "read_file",
+   {
+    "file_path": "/missing.txt"
+   }
+  ],
+  "status": "error",
+  "content": "Error: File '/missing.txt' not found"
+ },
+ {
+  "call": [
+   "edit_file",
+   {
+    "file_path": "/notes.md",
+    "old_string": "a",
+    "new_string": "b"
+   }
+  ],
+  "status": "error",
+  "content": "Error: File '/notes.md' not found"
+ },
+ {
+  "call": [
+   "write_file",
+   {
+    "file_path": "/notes.md",
+    "content": "line one\nline two\nalpha beta\n"
+   }
+  ],
+  "status": "success",
+  "content": "Updated file /notes.md"
+ },
+ {
+  "call": [
+   "write_file",
+   {
+    "file_path": "/notes.md",
+    "content": "again"
+   }
+  ],
+  "status": "success",
+  "content": "Updated file /notes.md"
+ },
+ {
+  "call": [
+   "read_file",
+   {
+    "file_path": "/notes.md"
+   }
+  ],
+  "status": "success",
+  "content": "@@ lines 1-1 of 1 @@\nagain"
+ },
+ {
+  "call": [
+   "read_file",
+   {
+    "file_path": "/notes.md",
+    "offset": 1,
+    "limit": 1
+   }
+  ],
+  "status": "error",
+  "content": "Error: Line offset 1 exceeds file length (1 lines)"
+ },
+ {
+  "call": [
+   "edit_file",
+   {
+    "file_path": "/notes.md",
+    "old_string": "alpha",
+    "new_string": "gamma"
+   }
+  ],
+  "status": "error",
+  "content": "Error: String not found in file: 'alpha'"
+ },
+ {
+  "call": [
+   "edit_file",
+   {
+    "file_path": "/notes.md",
+    "old_string": "zzz",
+    "new_string": "q"
+   }
+  ],
+  "status": "error",
+  "content": "Error: String not found in file: 'zzz'"
+ },
+ {
+  "call": [
+   "edit_file",
+   {
+    "file_path": "/notes.md",
+    "old_string": "line",
+    "new_string": "row"
+   }
+  ],
+  "status": "error",
+  "content": "Error: String not found in file: 'line'"
+ },
+ {
+  "call": [
+   "write_file",
+   {
+    "file_path": "/src/a.py",
+    "content": "print('alpha')\n"
+   }
+  ],
+  "status": "success",
+  "content": "Updated file /src/a.py"
+ },
+ {
+  "call": [
+   "ls",
+   {
+    "path": "/"
+   }
+  ],
+  "status": "success",
+  "content": "['/notes.md', '/src/']"
+ },
+ {
+  "call": [
+   "glob",
+   {
+    "pattern": "*.py"
+   }
+  ],
+  "status": "success",
+  "content": "['/src/a.py']"
+ },
+ {
+  "call": [
+   "grep",
+   {
+    "pattern": "alpha"
+   }
+  ],
+  "status": "success",
+  "content": "/src/a.py"
+ },
+ {
+  "call": [
+   "grep",
+   {
+    "pattern": "alpha",
+    "output_mode": "content"
+   }
+  ],
+  "status": "success",
+  "content": "/src/a.py:\n  1: print('alpha')"
+ },
+ {
+  "call": [
+   "grep",
+   {
+    "pattern": "alpha",
+    "output_mode": "count"
+   }
+  ],
+  "status": "success",
+  "content": "/src/a.py: 1"
+ },
+ {
+  "call": [
+   "grep",
+   {
+    "pattern": "nomatch"
+   }
+  ],
+  "status": "success",
+  "content": "No matches found"
+ },
+ {
+  "call": [
+   "read_file",
+   {
+    "file_path": "relative.txt"
+   }
+  ],
+  "status": "error",
+  "content": "Error: File '/relative.txt' not found"
+ },
+ {
+  "call": [
+   "write_file",
+   {
+    "file_path": "/empty.txt",
+    "content": ""
+   }
+  ],
+  "status": "success",
+  "content": "Updated file /empty.txt"
+ },
+ {
+  "call": [
+   "read_file",
+   {
+    "file_path": "/empty.txt"
+   }
+  ],
+  "status": "success",
+  "content": "System reminder: File exists but has empty contents"
+ },
+ {
+  "call": [
+   "delete",
+   {
+    "file_path": "/src/a.py"
+   }
+  ],
+  "status": "success",
+  "content": "Deleted /src/a.py"
+ },
+ {
+  "call": [
+   "delete",
+   {
+    "file_path": "/nope"
+   }
+  ],
+  "status": "error",
+  "content": "Error: File '/nope' not found"
+ },
+ {
+  "call": [
+   "execute",
+   {
+    "command": "ls"
+   }
+  ],
+  "status": "error",
+  "content": "Error: Execution not available. This agent's backend does not support command execution (SandboxBackendProtocol). To use the execute tool, provide a backend that implements SandboxBackendProtocol."
+ },
+ {
+  "call": [
+   "write_file",
+   {
+    "file_path": "/p.txt",
+    "content": "1"
+   }
+  ],
+  "status": "success",
+  "content": "Updated file /p.txt"
+ },
+ {
+  "call": [
+   "edit_file",
+   {
+    "file_path": "/p.txt",
+    "old_string": "1",
+    "new_string": "2"
+   }
+  ],
+  "status": "error",
+  "content": "Error: parallel file mutations to the same path are not allowed."
+ },
+ {
+  "call": [
+   "task",
+   {
+    "description": "x",
+    "subagent_type": "nobody"
+   }
+  ],
+  "status": "success",
+  "content": "We cannot invoke subagent nobody because it does not exist, the only allowed types are `general-purpose`"
+ },
+ {
+  "call": [
+   "task",
+   {
+    "description": "x",
+    "subagent_type": "general-purpose",
+    "prompt": "extra"
+   }
+  ],
+  "status": "error",
+  "content": "Error invoking tool 'task' with kwargs {'description': 'x', 'subagent_type': 'general-purpose', 'prompt': 'extra'} with error:\n prompt: Value error, Unexpected argument 'prompt'; put all instructions for the subagent in `description`.\n Please fix the error and try again."
+ }
+]

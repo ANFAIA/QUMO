@@ -96,6 +96,33 @@ test-agents:  ## agent layer tests (offline; the MCP tests need build/qumo from 
 agents-doctor:  ## check keys, the MCP server and the back-end CLIs the agents need
 	bin/qumo-agents doctor
 
+# Mojo agents (agents/mojo): qumo-operator and execution as a native executable, no Python at run time.
+AGENTS_MOJO_LIVE := $(wildcard agents/mojo/tests/test_live_*.mojo)
+AGENTS_MOJO_TESTS := $(filter-out $(AGENTS_MOJO_LIVE),$(wildcard agents/mojo/tests/test_*.mojo))
+.PHONY: agents-mojo agents-mojo-fixtures test-agents-mojo agents-mojo-live
+
+agents-mojo:  ## build/qumo-agent: the native Mojo agent harness (run / serve / call / tools / doctor); needs build/qumo (make cli) at run time
+	@mkdir -p build
+	$(MOJO) build -I . -I agents/mojo -o build/qumo-agent agents/mojo/main.mojo
+
+agents-mojo-fixtures:  ## test helper binaries (HTTP fixture server); the tests also rebuild them on demand
+	@mkdir -p build/test-fixtures
+	$(MOJO) build -I . -I agents/mojo -o build/test-fixtures/http_fixture_server agents/mojo/tests/support/http_fixture_server.mojo
+
+test-agents-mojo: agents-mojo agents-mojo-fixtures  ## Mojo agent tests (offline: replayed model, real build/qumo MCP server)
+	@[ -x build/qumo ] || $(MAKE) cli
+	@fail=0; for t in $(AGENTS_MOJO_TESTS); do \
+		out=$$($(MOJO) run -I . -I agents/mojo $$t 2>&1 | grep -v Crashpad | tail -1); \
+		case "$$out" in *OK*) echo "PASS $$t";; *) echo "FAIL $$t: $$out"; fail=1;; esac; \
+	done; exit $$fail
+
+agents-mojo-live: agents-mojo  ## live checks (DESIGN.md 8.3; OPENROUTER_API_KEY, ALPHAXIV_API_KEY, GITHUB_TOKEN); each SKIPs without its keys
+	@[ -x build/qumo ] || $(MAKE) cli
+	@fail=0; for t in $(AGENTS_MOJO_LIVE); do \
+		out=$$(QUMO_LIVE=1 $(MOJO) run -I . -I agents/mojo -I agents/mojo/tests/support $$t 2>&1 | grep -v Crashpad | tail -1); \
+		case "$$out" in *SKIP*) echo "SKIP $$t: $$out";; *OK*) echo "PASS $$t: $$out";; *) echo "FAIL $$t: $$out"; fail=1;; esac; \
+	done; exit $$fail
+
 # ---------------------------------------------------------------- AI transpiler (docs/AI_TRANSPILER.md)
 # Models live in models/ai_transpiler/{synth,route}/ with an INDEX.json registry (sha256 per file); the Mojo
 # loader re-checks an FNV-1a checksum. Training is the independent native Mojo package in rl/ (qrl, plus the

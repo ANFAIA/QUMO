@@ -260,7 +260,7 @@ def cmd_run(args, estimate_only: bool = False) -> int:
 
 
 def cmd_backends(args) -> int:
-    names = [args.provider] if args.provider else ["local", "ibm", "quantinuum", "ionq", "speqtrum"]
+    names = [args.provider] if args.provider else ["local", "ibm", "quantinuum", "ionq", "speqtrum", "qbraid"]
     rows, warnings = [], []
     for n in names:
         try:

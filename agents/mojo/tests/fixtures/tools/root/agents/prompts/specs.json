@@ -1,0 +1,29 @@
+{
+ "schema": "qumo.agent_specs.v1",
+ "agents": {
+  "alpha": {
+   "description": "First agent.",
+   "tool_groups": ["read", "report"],
+   "mcp_tools": "all",
+   "subagents": ["beta", "alpha", "gamma"],
+   "writes_code": false,
+   "generated_tools": "all"
+  },
+  "beta": {
+   "description": "Second agent.",
+   "tool_groups": ["research", "read", "check", "report", "sandbox"],
+   "mcp_tools": ["qumo_describe"],
+   "subagents": ["alpha", "gamma"],
+   "writes_code": true,
+   "generated_tools": []
+  },
+  "gamma": {
+   "description": "Third agent.",
+   "tool_groups": ["report"],
+   "mcp_tools": [],
+   "subagents": [],
+   "writes_code": false,
+   "generated_tools": ["gen_one"]
+  }
+ }
+}

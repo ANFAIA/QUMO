@@ -171,3 +171,39 @@ The tests run offline. They check the module table, the safety limits of the too
 Claude Code and Codex command lines (keys never appear), the arXiv parser, network
 failures, and that every agent compiles. A scripted model also drives the operator through
 QUMO's real MCP server.
+
+## 11. Mojo agents (native harness)
+
+All ten agents (the nine above and `mojo-toolsmith`) also exist as one native Mojo
+executable, `build/qumo-agent`, with no Python, `curl` or shell at run time. It ports the
+minimum of deepagents (virtual file system, large-result eviction, subagents, summarization,
+tool-call patching) to Mojo and calls the same QUMO MCP server. Models, prompts and tool
+guides come from `agents/agents.json` and `agents/prompts/`, so the two implementations
+share one source of truth.
+
+```bash
+make cli && make agents-mojo
+build/qumo-agent doctor
+build/qumo-agent run qumo-operator "Build a 3-qubit GHZ, simulate 1000 shots with seed 7, check the counts"
+build/qumo-agent serve qumo-operator     # an MCP server with one tool, run {task}
+build/qumo-agent call  qumo-operator "..."   # start `serve` as a child and call it like a library
+make test-agents-mojo                    # offline tests
+```
+
+* **Same commands and options** as `bin/qumo-agents` where they apply: `list`, `run`
+  (`--module`, `--model`, `--dry-run`, `-` for stdin), `doctor`, `reports`; plus `serve`,
+  `call`, `tools` and `--replay FILE` (an offline recorded model).
+* **Parallel subagents.** `--parallel N` (default 4) runs the `task` calls of one turn in
+  child processes at once.
+* **The toolsmith.** `build/qumo-agent run mojo-toolsmith "Build gen_x: ..."` writes,
+  compiles and tests a new native tool in a sandbox branch and publishes it as not reviewed.
+  Nobody can call it until you run `build/qumo-agent tools review gen_x`, which shows the
+  code, rebuilds the binary from exactly that source and re-runs the tests. Tools run
+  confined (no network, empty environment, temporary directory only). See
+  [agents/mojo/tools/README.md](../agents/mojo/tools/README.md).
+* **Not ported:** the Claude Code and Codex back ends (OpenAI-compatible HTTP endpoints
+  only), proxies, and the macOS Keychain trust store (set `SSL_CERT_FILE` for a corporate CA).
+  Linux is untested. Error codes: `QA-E1xx` in [ERRORS.md](ERRORS.md#qa-e1xx--agent-harness-agentsmojo).
+
+Design, limits and the review gate: [agents/mojo/README.md](../agents/mojo/README.md) and
+[agents/mojo/DESIGN.md](../agents/mojo/DESIGN.md).

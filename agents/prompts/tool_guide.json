@@ -1,0 +1,125 @@
+{
+ "schema": "qumo.tool_guide.v1",
+ "tools": {
+  "qumo_describe": {
+   "use_when": "you need facts about QUMO itself: gate list and syntax, an error code's meaning and fix, capabilities, compiler passes or AI models.",
+   "instead_or_first": "call it before guessing a gate name, a pass name or what an error code means.",
+   "watch_out": "topic is required in practice: 'gates', 'gate'+name, 'errors', 'error'+name (e.g. QM-E506), 'capabilities', 'passes', 'models'."
+  },
+  "qumo_build_circuit": {
+   "use_when": "a standard algorithm is wanted (ghz, qft, grover, bernstein_vazirani, deutsch_jozsa, qaoa_maxcut, hea, uccsd, trotter, kernels).",
+   "instead_or_first": "use it instead of writing gates by hand; pass its OpenQASM to the simulators.",
+   "watch_out": "unknown kinds or arguments are refused (QM-E801/QM-E802); parameterised output needs 'params' when simulated."
+  },
+  "qumo_validate_qasm": {
+   "use_when": "you wrote or received OpenQASM and want parse errors and lint before running anything.",
+   "instead_or_first": "always run it first on hand-written or user-supplied QASM.",
+   "watch_out": "it does not simulate; errors carry QM-E5xx codes with line and column."
+  },
+  "qumo_circuit_info": {
+   "use_when": "you need size facts without simulating: qubits, depth, gate counts, 2-qubit gates, lint.",
+   "instead_or_first": "use before choosing a simulator, or to report a circuit's cost.",
+   "watch_out": ""
+  },
+  "qumo_estimate_resources": {
+   "use_when": "you must decide how or where to run: recommended simulator, memory, NISQ success estimate, fault-tolerant cost.",
+   "instead_or_first": "call before simulating anything above ~20 qubits or before hardware.",
+   "watch_out": "profile is 'superconducting' | 'trapped_ion' | 'neutral_atom'."
+  },
+  "qumo_run_qasm": {
+   "use_when": "you need measurement counts of a circuit or a program with mid-circuit measurement or while loops.",
+   "instead_or_first": "qumo_statevector for exact amplitudes, qumo_expectation for <H>, qumo_emulate for a device's noise.",
+   "watch_out": "counts are bitstrings with the leftmost character as the highest qubit; set seed for reproducible runs."
+  },
+  "qumo_statevector": {
+   "use_when": "you need exact amplitudes (small circuits, debugging, checking an algorithm).",
+   "instead_or_first": "qumo_run_qasm when only counts matter.",
+   "watch_out": "memory grows as 2^n; respect max_qubits."
+  },
+  "qumo_expectation": {
+   "use_when": "you need an exact expectation value of a Pauli-sum observable, e.g. '0.5*Z0 Z1 - 1.2*X0'.",
+   "instead_or_first": "",
+   "watch_out": "observable syntax is coefficient*Pauli+index terms separated by + or -."
+  },
+  "qumo_density": {
+   "use_when": "noise must be exact (density matrix), up to 15 qubits.",
+   "instead_or_first": "qumo_emulate for larger noisy circuits (sampled).",
+   "watch_out": ""
+  },
+  "qumo_emulate": {
+   "use_when": "you want counts under a target device's noise model (T1/T2, gate and readout errors).",
+   "instead_or_first": "compile first with qumo_transpile or set compile=true.",
+   "watch_out": ""
+  },
+  "qumo_run_device": {
+   "use_when": "a specific simulator device or precision is required (CPU, NVIDIA, AMD, Apple GPU).",
+   "instead_or_first": "call qumo_gpu_info first to see if a GPU exists.",
+   "watch_out": ""
+  },
+  "qumo_gpu_info": {
+   "use_when": "you need to know whether this build has a usable GPU.",
+   "instead_or_first": "",
+   "watch_out": ""
+  },
+  "qumo_transpile": {
+   "use_when": "a circuit must run on a target topology and basis, or you want it optimised.",
+   "instead_or_first": "give target as a one-line spec ('grid:4x4/sc_cz', 'heavy_hex:5/rz,sx,x,ecr', 'line:20/u,cx') or edges+basis.",
+   "watch_out": "level 0-3 picks a preset; 'ai': true is refused for programs with runtime control flow (QM-E630)."
+  },
+  "qumo_draw": {
+   "use_when": "you need to show a circuit to a person.",
+   "instead_or_first": "",
+   "watch_out": ""
+  },
+  "qumo_convert": {
+   "use_when": "you need canonical OpenQASM 3 or circuit JSON from another form.",
+   "instead_or_first": "",
+   "watch_out": ""
+  },
+  "qumo_to_pbc": {
+   "use_when": "you study Pauli-based computation or T-count after commuting Cliffords out.",
+   "instead_or_first": "",
+   "watch_out": ""
+  },
+  "qumo_vqe": {
+   "use_when": "you need a ground-state energy of a Pauli-sum Hamiltonian.",
+   "instead_or_first": "set seed; compare with qumo_expectation on the returned circuit if you need a check.",
+   "watch_out": ""
+  },
+  "qumo_qaoa_maxcut": {
+   "use_when": "you solve MaxCut on a small graph given as '0-1 1-2 2-3:0.5'.",
+   "instead_or_first": "",
+   "watch_out": ""
+  },
+  "qumo_qec_memory": {
+   "use_when": "you need a logical error rate of a memory experiment for a code, distance, rounds and p.",
+   "instead_or_first": "qumo_qec_dem to inspect the detector error model.",
+   "watch_out": "set max_errors and shots to bound run time."
+  },
+  "qumo_qec_dem": {
+   "use_when": "you need the detector error model (Stim DEM text) of a memory circuit.",
+   "instead_or_first": "",
+   "watch_out": ""
+  },
+  "qumo_stim_import": {
+   "use_when": "you have Stim circuit text to analyse or convert.",
+   "instead_or_first": "",
+   "watch_out": ""
+  },
+  "qumo_ft_codes": {
+   "use_when": "you need QUMO's stabilizer codes for fault-tolerant programs.",
+   "instead_or_first": "",
+   "watch_out": ""
+  },
+  "qumo_ft_encode": {
+   "use_when": "you want to encode a logical circuit on a code and sample it with noise.",
+   "instead_or_first": "qumo_ft_codes first to choose the code.",
+   "watch_out": ""
+  },
+  "qumo_ft_verify": {
+   "use_when": "you must prove a physical gadget implements a logical operation exactly.",
+   "instead_or_first": "",
+   "watch_out": ""
+  }
+ }
+}
