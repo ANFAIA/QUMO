@@ -1,17 +1,18 @@
 # QUMO continuous integration.
 #
-# STATUS: NOT YET RUN. This workflow was written during the 2026-11 project review and has never
-# executed on GitHub Actions. Expect to adjust it after the first run.
-#   - macos-15 (Apple silicon, arm64) is the platform QUMO is developed on; these commands pass locally there.
-#   - ubuntu-latest (x86-64) is UNVERIFIED: the Mojo wheels exist for Linux, but `make test` and
-#     `make examples` have not been run on Linux by this project. The Linux job is allowed to fail
-#     (continue-on-error) until someone has seen it pass.
-#   - Timings are guesses: `make test` compiles about 70 test files with `mojo run` (several seconds each
-#     on an Apple M5; hosted runners are slower).
-#   - The tests of the Python package (make test-python) run in a small venv with NumPy and pytest only.
-#     They pass locally in such a venv on macOS; like the rest of this file they have not run here.
-#   - GPU targets (make gpu-check, test-gpu) and the suites that need Qiskit, TKET, Cirq or Stim
-#     (make setup-py, test-py) are not run here.
+# STATUS: the workflow has run on GitHub since 2026-11-13 (see the Actions tab). It was reshaped to make
+# pull requests faster; the jobs are:
+#   checks    (pull requests, blocking): build, smoke test, independence, example index, Python package tests
+#   tests     (pull requests, blocking): the Mojo test files, split over 4 parallel shards (about 10 min of wall time)
+#   rl        (pull requests, blocking): the fast RL tests (make test-rl)
+#   nightly   (nightly, push to main, manual): the full Mojo suite, the GPU test files on the CPU, the slow RL
+#             tests, GPU cross-compilation and the examples. Runs only when the change is merged or on schedule.
+#   nightly-linux (nightly, experimental): the full suite on ubuntu-latest (x86-64). UNVERIFIED on Linux:
+#             allowed to fail (continue-on-error) until someone has seen it pass.
+#
+# Platforms: macos-15 (Apple silicon) is what QUMO is developed on. The pull-request jobs run only there.
+# The GPU test files (tests/test_gpu*.mojo) are not run on pull requests: they need a device for the real
+# GPU suites, and their CPU fallback runs in the nightly job.
 
 name: CI
 
@@ -19,29 +20,23 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: '17 3 * * *'     # nightly, 03:17 UTC
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
 jobs:
-  build-and-test:
-    name: ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.experimental }}
-    timeout-minutes: 120
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-15        # arm64
-            experimental: false
-          - os: ubuntu-latest   # x86-64, UNVERIFIED (see the header)
-            experimental: true
+  checks:
+    name: checks (pull request gate)
+    if: github.event_name == 'pull_request'
+    runs-on: macos-15
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -57,26 +52,26 @@ jobs:
       - name: make setup (pinned Mojo toolchain into .venv)
         run: make setup
 
-      - name: Toolchain version
-        run: .venv/bin/mojo --version
-
       - name: make cli (build/qumo)
         run: make cli
 
       - name: Smoke test the CLI
         run: build/qumo run examples/foundations/bell.qasm --shots 1000 --seed 7
 
-      - name: make test (every tests/test_*.mojo and the fast RL tests)
-        run: make test
+      - name: Independence of rl/ from qumo.*
+        run: make check-independence
 
-      # `make test-python` builds build/qumo_py.so (make py) and runs python/tests with it. The extension
-      # is loaded by the Python that runs the tests, so that Python is 3.12, the version it is built for.
-      - name: Python 3.12 venv with NumPy and pytest (for the qumo package tests)
+      - name: Example headers and generated indexes are current
+        run: python3 examples/run_examples.py --check-index
+
+      # make test-python builds build/qumo_py.so (make py) and runs python/tests with the Python of
+      # build/ci-venv, which must be 3.12 (the version the extension is built for).
+      - name: Python 3.12 venv with NumPy and pytest
         run: |
           uv venv build/ci-venv --python 3.12
           uv pip install --python build/ci-venv/bin/python numpy pytest
 
-      - name: make test-python (build/qumo_py.so and the tests of the Python package)
+      - name: make test-python
         run: make test-python PY=build/ci-venv/bin/python
 
       - name: Editable install of the Python package, imported from another directory
@@ -84,11 +79,93 @@ jobs:
           uv pip install --python build/ci-venv/bin/python -e .
           cd "$RUNNER_TEMP" && "$GITHUB_WORKSPACE/build/ci-venv/bin/python" -c "import qumo; print(qumo.sample(qumo.ghz(3, measure=True), shots=100))"
 
-      # The examples runner needs only the Python standard library, so the runner's python3 replaces
-      # bench/.venv (which `make setup-py` would create with Qiskit, TKET, Cirq, ...). Examples whose
-      # requirements are missing (qumo_py, extra Python modules, GPU, network) are reported as SKIP.
-      - name: Example headers and generated indexes are current
-        run: python3 examples/run_examples.py --check-index
+  tests:
+    name: tests (shard ${{ matrix.shard }} of 4)
+    if: github.event_name == 'pull_request'
+    runs-on: macos-15
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Cache the Mojo toolchain (.venv)
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Makefile') }}
+
+      - name: make setup (pinned Mojo toolchain into .venv)
+        run: make setup
+
+      - name: make cli (some tests run build/qumo)
+        run: make cli
+
+      - name: make test-shard (shard ${{ matrix.shard }} of 4)
+        run: make test-shard SHARDS=4 SHARD=${{ matrix.shard }}
+
+  rl:
+    name: rl (pull request gate)
+    if: github.event_name == 'pull_request'
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Cache the Mojo toolchain (.venv)
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Makefile') }}
+
+      - name: make setup (pinned Mojo toolchain into .venv)
+        run: make setup
+
+      - name: make test-rl (fast RL tests)
+        run: make test-rl
+
+  nightly:
+    name: nightly (full suite, macos-15)
+    if: github.event_name != 'pull_request'
+    runs-on: macos-15
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Cache the Mojo toolchain (.venv)
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Makefile') }}
+
+      - name: make setup (pinned Mojo toolchain into .venv)
+        run: make setup
+
+      - name: make cli (build/qumo)
+        run: make cli
+
+      - name: make test (every Mojo test file and the fast RL tests)
+        run: make test
+
+      - name: make test-gpu-fallback (GPU test files on the CPU)
+        run: make test-gpu-fallback
+
+      - name: make test-rl-slow (statistical and end-to-end RL tests)
+        run: make test-rl-slow
+
+      - name: make gpu-check (cross-compile the GPU kernels, no device needed)
+        run: make gpu-check
 
       - name: make examples (fast tier, verified by CHECK lines)
         run: make examples PY=python3
@@ -97,6 +174,33 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: examples-report-${{ matrix.os }}
+          name: examples-report-macos
           path: build/examples_report.json
           if-no-files-found: ignore
+
+  nightly-linux:
+    name: nightly (full suite, ubuntu-latest, experimental)
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    continue-on-error: true   # UNVERIFIED on Linux: see the header
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Cache the Mojo toolchain (.venv)
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Makefile') }}
+
+      - name: make setup (pinned Mojo toolchain into .venv)
+        run: make setup
+
+      - name: make cli (build/qumo)
+        run: make cli
+
+      - name: make test (every Mojo test file and the fast RL tests)
+        run: make test
