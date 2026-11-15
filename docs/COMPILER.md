@@ -6,8 +6,8 @@ is preserved, global phase tracked in `Circuit.global_phase`). It is vendor
 neutral: targets are described by topology and gate family, not by vendor.
 
 ```mojo
-from qumo.compiler.target import Target, parse_target
-from qumo.compiler.pass_manager import transpile, compile_spec
+from qumo import Target, parse_target, transpile
+from qumo.compiler.pass_manager import compile_spec
 
 var t = Target.superconducting_heavy_hex(7)          # or parse_target("heavy_hex:7/sc_cz")
 var r = transpile(circuit, t, 2)                      # preset level 0..3
@@ -19,7 +19,7 @@ var out = r.circuit.copy()                            # physical-qubit circuit (
 var r2 = compile_spec(circuit, t, "remove_identities,cancel,route(sabre,trials=20),kak,basis,fuse1q,check")
 ```
 
-The lines above go inside a `def main() raises:` with a `Circuit` named `circuit`; a complete script is step 6 of [TUTORIAL.md](TUTORIAL.md). `from qumo.prelude import *` brings `Circuit`, `Target`, `parse_target`, `transpile` and `CompileResult` in one import.
+The lines above go inside a `def main() raises:` with a `Circuit` named `circuit`; a complete script is step 6 of [TUTORIAL.md](TUTORIAL.md). `from qumo import *` brings `Circuit`, `Target`, `parse_target`, `transpile` and `CompileResult` in one import.
 
 From the command line and from Python, with the same target specs:
 

@@ -58,7 +58,7 @@ print(qumo.sample(bell, shots=1000))
 **From Mojo**, one import brings the names a first program needs. Save this as `my.mojo` and run `.venv/bin/mojo run -I . my.mojo` from the repository root; it prints `{"00": 496, "11": 504}`:
 
 ```mojo
-from qumo.prelude import *
+from qumo import *
 
 
 def main() raises:

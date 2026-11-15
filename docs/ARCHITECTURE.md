@@ -26,6 +26,8 @@ seeding and JSON conventions.
 
 ## 1. IR (`qumo/ir`)
 
+The IR is self-contained: `qumo/ir` imports nothing from the simulators, the compiler, the algorithms, the GPU code or the hardware clients (only the JSON helpers of `qumo/core`), so it can be read, tested and changed on its own. The package root redirects to it for the common names (`from qumo import Circuit, parse_qasm, to_qasm`); the full paths (`from qumo.ir.circuit import Circuit`) are the same objects. The file-by-file list is in the docstring of [`qumo/ir/__init__.mojo`](../qumo/ir/__init__.mojo).
+
 * **`Instruction`** is a POD: opcode, up to 3 qubits, 3 affine `Param`s, clbit,
   classical condition (single bit, or a register condition via
   `cond_reg` → `Circuit.cond_table`). No heap allocation per gate.

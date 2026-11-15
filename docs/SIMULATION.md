@@ -8,8 +8,7 @@ vendor-neutral: it relies only on "there is a cache hierarchy and SIMD
 registers", and the two tunables (`W`, `BLOCK_BITS`) are portable constants.
 
 ```mojo
-from qumo.ir.pauli import parse_pauli_sum
-from qumo.sim.runner import evolve, sample, expectation
+from qumo import parse_pauli_sum, sample, evolve, expectation
 var sv = evolve(circuit)                  # StateVector, canonical qubit order
 var res = sample(circuit, 1000, seed=7)   # res.counts, res.method
 var e = expectation(circuit, parse_pauli_sum("Z0 Z1"))

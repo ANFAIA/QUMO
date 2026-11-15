@@ -1,6 +1,10 @@
 """The names a first QUMO program needs, in one import.
 
-    from qumo.prelude import *
+The package root re-exports this module, and that is the spelling the docs teach:
+`from qumo import *` or `from qumo import Circuit, sample_auto`. This module stays
+as the place the list is defined, and `from qumo.prelude import *` keeps working.
+
+    from qumo import *
 
     def main() raises:
         var c = parse_qasm("OPENQASM 3.0; include \"stdgates.inc\"; qubit[2] q; bit[2] c; h q[0]; cx q[0], q[1]; c = measure q;")
