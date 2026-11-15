@@ -12,12 +12,12 @@ from qumo.ir.mc import controlled_by
 from qumo.ir.kraus import KrausChannel
 from qumo.ir.param import Param
 from qumo.ir.classical import (
-    CExpr, CN, CF, CT, CType, type_name, bit_type, bool_type, int_type, uint_type, float_type, angle_type,
+    CExpr, CNodeOp, CFunc, CTypeKind, CType, type_name, bit_type, bool_type, int_type, uint_type, float_type, angle_type,
     ce_binary, ce_bnot, ce_cast, ce_explicit_cast, ce_function, ce_lnot, ce_logical, ce_neg, angle_radians,
     float_mod, never_negative, truncates)
-from qumo.ir.program import CReg, FORR, MAX_NESTING, Program, SK, TapeBuilder, check_program, slot_prefix
+from qumo.ir.program import CReg, ForRangeField, MAX_NESTING, Program, StmtKind, TapeBuilder, check_program, slot_prefix
 from qumo.ir.qasm_lexer import (
-    G, P, TK, Token, _quote_list, _span_eq, _special_arity, _special_nparams, builtin_gate_table,
+    SpecialGate, Punct, TokenKind, Token, _quote_list, _span_eq, _special_arity, _special_nparams, builtin_gate_table,
     decimal_to_bits, format_qasm_error, suggest_names, tokenize_qasm)
 
 
@@ -75,7 +75,7 @@ comptime _MAX_UNROLL = 1000000
 comptime MAX_SOURCE_ITEMS = 8000000
 
 
-struct NK:
+struct NameKind:
     """What a name of a program scope stands for."""
 
     comptime VAR = 0  # index: variable id
@@ -139,7 +139,7 @@ struct QasmParser(Movable):
     var input_types: Dict[String, CType]  # `input` of a type other than float
     var names: List[_Name]  # visible names of program scopes, innermost last
     var scope_marks: List[Int]  # len(names) at each open block
-    var const_vals: List[CExpr]  # values of NK.CONST names
+    var const_vals: List[CExpr]  # values of NameKind.CONST names
     var scoped_regs: Dict[Int, Int]  # token of a block's `bit` declaration -> its register
     var temp_count: Int
     var block_depth: Int  # open `{`, in both parsers
@@ -222,15 +222,15 @@ struct QasmParser(Movable):
         return String(unsafe_from_utf8=self.src.as_bytes()[t.start:t.end])
 
     def is_word(self, t: Token, w: StringSlice) -> Bool:
-        return t.kind == TK.IDENT and _span_eq(self.src.as_bytes(), t.start, t.end, w)
+        return t.kind == TokenKind.IDENT and _span_eq(self.src.as_bytes(), t.start, t.end, w)
 
     def is_punct(self, t: Token, sub: Int) -> Bool:
-        return t.kind == TK.PUNCT and t.sub == sub
+        return t.kind == TokenKind.PUNCT and t.sub == sub
 
     def describe(self, t: Token) -> String:
-        if t.kind == TK.EOF:
+        if t.kind == TokenKind.EOF:
             return "end of input"
-        if t.kind == TK.PUNCT and t.start == t.end:
+        if t.kind == TokenKind.PUNCT and t.start == t.end:
             return "end of pragma line"
         return "'" + self.text(t) + "'"
 
@@ -289,19 +289,19 @@ struct QasmParser(Movable):
         if not self.is_punct(t, sub):
             var h = hint
             var at = t
-            if sub == P.SEMI:
+            if sub == Punct.SEMI:
                 if h.byte_length() == 0:
                     h = "every statement ends with ';'"
                 # rustc-style: point just after the previous token
                 if self.pos > 0:
                     var prev = self.toks[self.pos - 1]
-                    at = Token(TK.PUNCT, 0, prev.end, prev.end, prev.line, 0.0)
+                    at = Token(TokenKind.PUNCT, 0, prev.end, prev.end, prev.line, 0.0)
             elif h.byte_length() == 0:
-                if sub == P.RPAREN:
+                if sub == Punct.RPAREN:
                     h = "a ')' is missing, or an operator (+ - * /) or ',' is missing between terms"
-                elif sub == P.RBRACK:
+                elif sub == Punct.RBRACK:
                     h = "a ']' is missing; indices look like q[0], q[0:2] or q[{0, 2}]"
-                elif sub == P.RBRACE:
+                elif sub == Punct.RBRACE:
                     h = "a '}' is missing"
                 else:
                     h = "check the syntax near this token (see 'qumo describe capabilities' for the supported OpenQASM subset)"
@@ -310,7 +310,7 @@ struct QasmParser(Movable):
 
     def expect_ident(mut self, what: String) raises -> Token:
         var t = self.peek()
-        if t.kind != TK.IDENT:
+        if t.kind != TokenKind.IDENT:
             raise self.err("QM-E500", "expected " + what + ", found " + self.describe(t), t, "an identifier (letters, digits, '_') is required here")
         return self.next()
 
@@ -424,7 +424,7 @@ struct QasmParser(Movable):
         var k = self.find_name(nm) if self.program_mode and self.depth == 0 else -1
         if k >= 0:
             ref e = self.names[k]
-            if e.kind == NK.CONST:
+            if e.kind == NameKind.CONST:
                 return Param(_const_radians(self.const_vals[e.index]))
             raise self.err("QM-E584", "'" + nm + "' changes at run time, and a constant is needed here", t, "qubit indices, sizes and modifiers are fixed at parse time; use a constant, or a for loop that can unroll")
         var c = self.consts.get(nm)
@@ -481,11 +481,11 @@ struct QasmParser(Movable):
         var a = self.parse_term()
         while True:
             var t = self.peek()
-            if self.is_punct(t, P.PLUS):
+            if self.is_punct(t, Punct.PLUS):
                 _ = self.next()
                 var b = self.parse_term()
                 a = self.p_add(a, b, t)
-            elif self.is_punct(t, P.MINUS):
+            elif self.is_punct(t, Punct.MINUS):
                 _ = self.next()
                 var b = self.parse_term()
                 a = self.p_add(a, -b, t)
@@ -496,11 +496,11 @@ struct QasmParser(Movable):
         var a = self.parse_unary()
         while True:
             var t = self.peek()
-            if self.is_punct(t, P.STAR):
+            if self.is_punct(t, Punct.STAR):
                 _ = self.next()
                 var b = self.parse_unary()
                 a = self.p_mul(a, b, t)
-            elif self.is_punct(t, P.SLASH):
+            elif self.is_punct(t, Punct.SLASH):
                 _ = self.next()
                 var b = self.parse_unary()
                 # `pi / 2` is the common case, and no integer division: a value with a
@@ -509,7 +509,7 @@ struct QasmParser(Movable):
                 if _is_whole(a) and _is_whole(b):
                     self.saw_division = True
                 a = self.p_div(a, b, t)
-            elif self.is_punct(t, P.PERCENT):
+            elif self.is_punct(t, Punct.PERCENT):
                 _ = self.next()
                 var b = self.parse_unary()
                 var x = self.need_const(a, t, "operand of %")
@@ -523,13 +523,13 @@ struct QasmParser(Movable):
 
     def parse_unary(mut self) raises -> Param:
         var t = self.peek()
-        if self.is_punct(t, P.MINUS):
+        if self.is_punct(t, Punct.MINUS):
             _ = self.next()
             self.enter(t)
             var v = self.parse_unary()
             self.nest -= 1
             return -v
-        if self.is_punct(t, P.PLUS):
+        if self.is_punct(t, Punct.PLUS):
             _ = self.next()
             self.enter(t)
             var v = self.parse_unary()
@@ -540,7 +540,7 @@ struct QasmParser(Movable):
     def parse_power(mut self) raises -> Param:
         var a = self.parse_primary()
         var t = self.peek()
-        if self.is_punct(t, P.POW):
+        if self.is_punct(t, Punct.POW):
             _ = self.next()
             self.enter(t)
             var b = self.parse_unary()
@@ -552,35 +552,35 @@ struct QasmParser(Movable):
 
     def parse_primary(mut self) raises -> Param:
         var t = self.peek()
-        if t.kind == TK.INT or t.kind == TK.FLOAT:
+        if t.kind == TokenKind.INT or t.kind == TokenKind.FLOAT:
             _ = self.next()
             return Param(t.num)
-        if self.is_punct(t, P.LPAREN):
+        if self.is_punct(t, Punct.LPAREN):
             _ = self.next()
             self.enter(t)
             var v = self.parse_expr()
             self.nest -= 1
-            _ = self.expect_punct(P.RPAREN, "')'")
+            _ = self.expect_punct(Punct.RPAREN, "')'")
             return v
-        if t.kind == TK.IDENT:
+        if t.kind == TokenKind.IDENT:
             _ = self.next()
-            if self.is_punct(self.peek(), P.LPAREN):
+            if self.is_punct(self.peek(), Punct.LPAREN):
                 return self.parse_call(t)
             return self.lookup_value(t)
         raise self.err("QM-E500", "expected an expression, found " + self.describe(t), t, "angles look like 0.5, pi/2, -theta or 2*theta + 0.1")
 
     def parse_call(mut self, f: Token) raises -> Param:
         var nm = self.text(f)
-        _ = self.expect_punct(P.LPAREN, "'('")
+        _ = self.expect_punct(Punct.LPAREN, "'('")
         self.enter(f)
         var args = List[Param]()
-        if not self.is_punct(self.peek(), P.RPAREN):
+        if not self.is_punct(self.peek(), Punct.RPAREN):
             args.append(self.parse_expr())
-            while self.is_punct(self.peek(), P.COMMA):
+            while self.is_punct(self.peek(), Punct.COMMA):
                 _ = self.next()
                 args.append(self.parse_expr())
         self.nest -= 1
-        _ = self.expect_punct(P.RPAREN, "')'")
+        _ = self.expect_punct(Punct.RPAREN, "')'")
         if nm == "float" or nm == "angle":
             if len(args) == 1:
                 return args[0]
@@ -634,23 +634,23 @@ struct QasmParser(Movable):
     def literal_ahead(self, at: Int) -> Bool:
         """The token at offset `at` ends a constant: no operator follows it."""
         var n = self.peek(at)
-        if n.kind != TK.PUNCT:
-            return n.kind == TK.IDENT or n.kind == TK.EOF
-        return n.sub == P.COMMA or n.sub == P.RPAREN or n.sub == P.RBRACK or n.sub == P.COLON or n.sub == P.RBRACE or n.sub == P.LBRACE or n.sub == P.SEMI or n.sub == P.ANDAND or n.sub == P.OROR
+        if n.kind != TokenKind.PUNCT:
+            return n.kind == TokenKind.IDENT or n.kind == TokenKind.EOF
+        return n.sub == Punct.COMMA or n.sub == Punct.RPAREN or n.sub == Punct.RBRACK or n.sub == Punct.COLON or n.sub == Punct.RBRACE or n.sub == Punct.LBRACE or n.sub == Punct.SEMI or n.sub == Punct.ANDAND or n.sub == Punct.OROR
 
     def parse_const_int(mut self, what: String) raises -> Int:
         var t = self.peek()
         # the common case, by the shortest path
-        var neg = self.is_punct(t, P.MINUS)
+        var neg = self.is_punct(t, Punct.MINUS)
         var lit = self.peek(1) if neg else t
-        if lit.kind == TK.INT and self.literal_ahead(2 if neg else 1):
+        if lit.kind == TokenKind.INT and self.literal_ahead(2 if neg else 1):
             if lit.num < 9007199254740992.0:  # the token's float is exact below 2^53
                 _ = self.next()
                 if neg:
                     _ = self.next()
                 return -Int(lit.num) if neg else Int(lit.num)
             var value = self.parse_c_literal(lit)
-            if value.root().ty.tag != CT.INT and not (neg and value.root().ty.tag == CT.UINT and value.const_int() == -9223372036854775807 - 1):
+            if value.root().ty.tag != CTypeKind.INT and not (neg and value.root().ty.tag == CTypeKind.UINT and value.const_int() == -9223372036854775807 - 1):
                 raise self.err("QM-E580", what + " does not fit a 64-bit int", lit, "use a smaller value")
             _ = self.next()
             if neg:
@@ -666,10 +666,10 @@ struct QasmParser(Movable):
             if self.program_mode:
                 raise self.err("QM-E584", what + " must be a constant", t, "use a constant, or a for loop that can unroll")
             raise self.err("QM-E530", what + " must be a constant", t, "bind the parameter first or use a numeric value")
-        if e.ty().tag == CT.ANGLE:
+        if e.ty().tag == CTypeKind.ANGLE:
             raise self.err("QM-E530", what + " must be an integer, not an angle", t, "use an integer constant")
-        if e.ty().tag != CT.FLOAT:
-            if e.ty().tag == CT.UINT and e.const_int() < 0:
+        if e.ty().tag != CTypeKind.FLOAT:
+            if e.ty().tag == CTypeKind.UINT and e.const_int() < 0:
                 raise self.err("QM-E580", what + " does not fit a 64-bit int", t, "use a smaller value")
             return e.const_int()
         var x = e.const_float()
@@ -684,29 +684,29 @@ struct QasmParser(Movable):
         """After '[': parse index / slice / set; appends absolute positions
         within the register. Returns True when it was a single index."""
         var t = self.peek()
-        if self.is_punct(t, P.LBRACE):
+        if self.is_punct(t, Punct.LBRACE):
             _ = self.next()
             while True:
                 var it = self.peek()
                 var v = self.parse_const_int("register index")
                 out.append(self.norm_index(v, size, reg_t, it))
-                if self.is_punct(self.peek(), P.COMMA):
+                if self.is_punct(self.peek(), Punct.COMMA):
                     _ = self.next()
                     continue
                 break
-            _ = self.expect_punct(P.RBRACE, "'}'")
-            _ = self.expect_punct(P.RBRACK, "']'")
+            _ = self.expect_punct(Punct.RBRACE, "'}'")
+            _ = self.expect_punct(Punct.RBRACK, "']'")
             return False
         var a = self.parse_const_int("register index")
-        if self.is_punct(self.peek(), P.COLON):
+        if self.is_punct(self.peek(), Punct.COLON):
             _ = self.next()
             var b = self.parse_const_int("slice bound")
             var step = 1
-            if self.is_punct(self.peek(), P.COLON):
+            if self.is_punct(self.peek(), Punct.COLON):
                 _ = self.next()
                 step = b
                 b = self.parse_const_int("slice bound")
-            _ = self.expect_punct(P.RBRACK, "']'")
+            _ = self.expect_punct(Punct.RBRACK, "']'")
             if step == 0:
                 raise self.err("QM-E530", "slice step must be non-zero", t, "write q[0:2] (inclusive) or q[0:2:6]")
             var i = a
@@ -714,7 +714,7 @@ struct QasmParser(Movable):
                 out.append(self.norm_index(i, size, reg_t, t))
                 i += step
             return False
-        _ = self.expect_punct(P.RBRACK, "']'")
+        _ = self.expect_punct(Punct.RBRACK, "']'")
         out.append(self.norm_index(a, size, reg_t, t))
         return True
 
@@ -734,7 +734,7 @@ struct QasmParser(Movable):
     def parse_qubit_operand_into(mut self, mut out: List[Int]) raises -> Int:
         """Append the global qubit indices of one operand; returns how many."""
         var t = self.peek()
-        if t.kind == TK.HWQUBIT:
+        if t.kind == TokenKind.HWQUBIT:
             _ = self.next()
             if t.num >= Float64(self.room):
                 raise self.over_budget(t)
@@ -747,7 +747,7 @@ struct QasmParser(Movable):
                         c.num_qubits = k + 1
             out.append(k)
             return 1
-        if t.kind != TK.IDENT:
+        if t.kind != TokenKind.IDENT:
             raise self.err("QM-E500", "expected a qubit operand, found " + self.describe(t), t, "operands look like q[0], q, q[0:2] or $0")
         _ = self.next()
         var nm = self.text(t)
@@ -757,7 +757,7 @@ struct QasmParser(Movable):
         while s >= 0:
             for i in range(len(self.scopes[s].qnames)):
                 if self.scopes[s].qnames[i] == nm:
-                    if self.is_punct(self.peek(), P.LBRACK):
+                    if self.is_punct(self.peek(), Punct.LBRACK):
                         raise self.err("QM-E500", "gate argument '" + nm + "' is a single qubit and cannot be indexed", self.peek(), "use '" + nm + "' directly")
                     out.append(self.scopes[s].qubits[i])
                     return 1
@@ -785,10 +785,10 @@ struct QasmParser(Movable):
             raise self.err("QM-E520", "gate bodies cannot reference global register '" + nm + "'", t, "pass the qubit as a gate argument")
         var offset = self.regs[r].offset
         var size = self.regs[r].size
-        if self.is_punct(self.peek(), P.LBRACK):
+        if self.is_punct(self.peek(), Punct.LBRACK):
             # fast path: q[INT]
             var it = self.peek(1)
-            if it.kind == TK.INT and self.is_punct(self.peek(2), P.RBRACK):
+            if it.kind == TokenKind.INT and self.is_punct(self.peek(2), Punct.RBRACK):
                 self.pos += 3
                 out.append(offset + self.norm_index(Int(it.num), size, t, it))
                 return 1
@@ -808,7 +808,7 @@ struct QasmParser(Movable):
 
     def parse_bit_operand(mut self) raises -> List[Int]:
         var t = self.peek()
-        if t.kind != TK.IDENT:
+        if t.kind != TokenKind.IDENT:
             raise self.err("QM-E500", "expected a classical bit operand, found " + self.describe(t), t, "write c[0] or c")
         _ = self.next()
         var nm = self.text(t)
@@ -827,7 +827,7 @@ struct QasmParser(Movable):
         if reg.is_qubit:
             raise self.err("QM-E520", "'" + nm + "' is a qubit register, expected classical bits", t, "measurement results go to a 'bit[n]' / 'creg' register")
         var out = List[Int]()
-        if self.is_punct(self.peek(), P.LBRACK):
+        if self.is_punct(self.peek(), Punct.LBRACK):
             _ = self.next()
             var rel = List[Int]()
             _ = self.parse_index_set(reg.size, t, rel)
@@ -844,7 +844,7 @@ struct QasmParser(Movable):
 
     # ------------------------------------------------------------ statements
     def parse_program(mut self) raises:
-        while self.peek().kind != TK.EOF:
+        while self.peek().kind != TokenKind.EOF:
             self.parse_statement()
 
     def forbid_in_gate(self, t: Token) raises:
@@ -875,26 +875,26 @@ struct QasmParser(Movable):
             self.spent += 1
         else:
             raise self.over_budget(t)
-        if t.kind == TK.PRAGMA:
+        if t.kind == TokenKind.PRAGMA:
             self.parse_pragma()
             return
-        if t.kind == TK.ANNOTATION:
+        if t.kind == TokenKind.ANNOTATION:
             _ = self.next()
             self.warn("QM-W052", "annotation '" + self.text(t) + "' is ignored", t, "annotations carry no meaning in QUMO; the statement after it still runs")
             return
-        if t.kind == TK.PUNCT:
-            if t.sub == P.SEMI:
+        if t.kind == TokenKind.PUNCT:
+            if t.sub == Punct.SEMI:
                 _ = self.next()
                 return
-            if t.sub == P.LBRACE:
+            if t.sub == Punct.LBRACE:
                 _ = self.next()
                 if self.block_depth >= MAX_NESTING:
                     raise self.too_deep(t)
                 self.push_scope()
                 self.block_depth += 1
                 self.open_statements -= 1  # braces count in block_depth, and only there
-                while not self.is_punct(self.peek(), P.RBRACE):
-                    if self.peek().kind == TK.EOF:
+                while not self.is_punct(self.peek(), Punct.RBRACE):
+                    if self.peek().kind == TokenKind.EOF:
                         raise self.err("QM-E500", "missing '}' to close block", t, "every '{' needs a matching '}'")
                     self.parse_statement()
                 self.open_statements += 1
@@ -903,11 +903,11 @@ struct QasmParser(Movable):
                 self.pop_scope()
                 return
             raise self.err("QM-E500", "unexpected " + self.describe(t) + " at start of statement", t, "statements start with a declaration, a gate name, measure, reset, barrier, if or for")
-        if t.kind != TK.IDENT:
+        if t.kind != TokenKind.IDENT:
             raise self.err("QM-E500", "unexpected " + self.describe(t) + " at start of statement", t, "statements start with a declaration, a gate name, measure, reset, barrier, if or for")
         # fast path: the vast majority of statements are gate calls
         var nt = self.peek(1)
-        if nt.kind == TK.IDENT or nt.kind == TK.HWQUBIT or self.is_punct(nt, P.LPAREN):
+        if nt.kind == TokenKind.IDENT or nt.kind == TokenKind.HWQUBIT or self.is_punct(nt, Punct.LPAREN):
             var nm0 = self.text(t)
             if nm0 in self.gate_table or nm0 in self.user_gates:
                 self.parse_gate_call()
@@ -917,10 +917,10 @@ struct QasmParser(Movable):
         elif self.is_word(t, "include"):
             _ = self.next()
             var s = self.peek()
-            if s.kind != TK.STRING:
+            if s.kind != TokenKind.STRING:
                 raise self.err("QM-E500", "expected a file name string after include", s, "write include \"stdgates.inc\";")
             _ = self.next()
-            _ = self.expect_punct(P.SEMI, "';'")
+            _ = self.expect_punct(Punct.SEMI, "';'")
         elif self.is_word(t, "qubit") or self.is_word(t, "qreg"):
             self.forbid_in_gate(t)
             self.parse_reg_decl(True)
@@ -962,17 +962,17 @@ struct QasmParser(Movable):
             self.forbid_in_gate(t)
             _ = self.next()
             var qs = self.parse_qubit_operand()
-            _ = self.expect_punct(P.SEMI, "';'")
+            _ = self.expect_punct(Punct.SEMI, "';'")
             for q in qs:
                 self.emit(Instruction.make(Op.RESET, q))
         elif self.is_word(t, "barrier"):
             _ = self.next()
-            if not self.is_punct(self.peek(), P.SEMI):
+            if not self.is_punct(self.peek(), Punct.SEMI):
                 _ = self.parse_qubit_operand()
-                while self.is_punct(self.peek(), P.COMMA):
+                while self.is_punct(self.peek(), Punct.COMMA):
                     _ = self.next()
                     _ = self.parse_qubit_operand()
-            _ = self.expect_punct(P.SEMI, "';'")
+            _ = self.expect_punct(Punct.SEMI, "';'")
             if self.depth == 0:
                 self.circs[self.top()].ops.append(Instruction.make(Op.BARRIER, -1))
         elif self.is_word(t, "if"):
@@ -994,9 +994,9 @@ struct QasmParser(Movable):
         elif self.program_mode and (self.is_word(t, "break") or self.is_word(t, "continue")):
             self.forbid_in_gate(t)
             _ = self.next()
-            _ = self.expect_punct(P.SEMI, "';'")
+            _ = self.expect_punct(Punct.SEMI, "';'")
             try:
-                self.tb.jump(SK.BREAK if self.is_word(t, "break") else SK.CONTINUE, self.ops_end(), t.line)
+                self.tb.jump(StmtKind.BREAK if self.is_word(t, "break") else StmtKind.CONTINUE, self.ops_end(), t.line)
             except e:
                 raise self.relocate(String(e), t)
         elif self.is_word(t, "box"):
@@ -1021,7 +1021,7 @@ struct QasmParser(Movable):
                 self.parse_measure_assign()
             elif ri:
                 raise self.err("QM-E500", "statement starts with qubit register '" + nm + "'", t, "a gate name is missing, e.g. 'h " + nm + "[0];'")
-            elif k >= 0 and self.names[k].kind == NK.VAR:
+            elif k >= 0 and self.names[k].kind == NameKind.VAR:
                 self.forbid_in_gate(t)
                 self.parse_var_assign()
             elif k >= 0 or self.is_loop_name(nm):
@@ -1038,7 +1038,7 @@ struct QasmParser(Movable):
         if self.stmt_count > 1:
             raise self.err("QM-E500", "OPENQASM version must be the first statement", t, "move 'OPENQASM 3.0;' to the top of the file")
         var v = self.peek()
-        if v.kind != TK.INT and v.kind != TK.FLOAT:
+        if v.kind != TokenKind.INT and v.kind != TokenKind.FLOAT:
             raise self.err("QM-E503", "expected a version number after OPENQASM", v, "write 'OPENQASM 3.0;' or 'OPENQASM 2.0;'")
         _ = self.next()
         var major = Int(floor(v.num))
@@ -1046,7 +1046,7 @@ struct QasmParser(Movable):
             raise self.err("QM-E503", "unsupported OpenQASM version " + self.text(v), v, "QUMO reads OpenQASM 2.0 and 3.x")
         self.version = major
         self.openqasm3 = major == 3
-        _ = self.expect_punct(P.SEMI, "';'")
+        _ = self.expect_punct(Punct.SEMI, "';'")
 
     def parse_reg_decl(mut self, is_qubit: Bool) raises:
         var kw = self.next()
@@ -1055,30 +1055,30 @@ struct QasmParser(Movable):
         var old_style = self.is_word(kw, "qreg") or self.is_word(kw, "creg")
         var size = 1
         var have_size = False
-        if not old_style and self.is_punct(self.peek(), P.LBRACK):
+        if not old_style and self.is_punct(self.peek(), Punct.LBRACK):
             _ = self.next()
             var st = self.peek()
             size = self.parse_const_int("register size")
-            _ = self.expect_punct(P.RBRACK, "']'")
+            _ = self.expect_punct(Punct.RBRACK, "']'")
             have_size = True
             if size <= 0:
                 raise self.err("QM-E523", "register size must be positive, got " + String(size), st, "write qubit[2] q;")
         var nt = self.expect_ident("register name")
         self.check_new_name(nt)
-        if old_style and self.is_punct(self.peek(), P.LBRACK):
+        if old_style and self.is_punct(self.peek(), Punct.LBRACK):
             _ = self.next()
             var st = self.peek()
             size = self.parse_const_int("register size")
-            _ = self.expect_punct(P.RBRACK, "']'")
+            _ = self.expect_punct(Punct.RBRACK, "']'")
             have_size = True
             if size <= 0:
                 raise self.err("QM-E523", "register size must be positive, got " + String(size), st, "write qreg q[2];")
-        elif not old_style and self.is_punct(self.peek(), P.LBRACK):
+        elif not old_style and self.is_punct(self.peek(), Punct.LBRACK):
             raise self.err("QM-E500", "OpenQASM 3 puts the size on the type", self.peek(), "write '" + self.text(kw) + "[n] " + self.text(nt) + ";' (or qreg/creg for OpenQASM 2)")
         _ = have_size
         var init_measure = False
         var init_value = False
-        if self.is_punct(self.peek(), P.EQ):
+        if self.is_punct(self.peek(), Punct.EQ):
             if not is_qubit and self.is_word(self.peek(1), "measure"):
                 init_measure = True  # `bit[2] c = measure q;`
             elif not is_qubit and self.program_mode:
@@ -1086,7 +1086,7 @@ struct QasmParser(Movable):
             else:
                 raise self.err("QM-E504", "initialized registers are only supported as 'bit[n] c = measure q;'", self.peek(), "declare 'bit[n] c;' (bits start at 0) and measure into it, or parse with parse_qasm_program or load_any")
         if not init_measure and not init_value:
-            _ = self.expect_punct(P.SEMI, "';'")
+            _ = self.expect_punct(Punct.SEMI, "';'")
         var nm = self.text(nt)
         var scoped = self.program_mode and not is_qubit and len(self.scope_marks) > 0
         var known = self.scoped_regs.get(kw.start) if scoped else None
@@ -1111,7 +1111,7 @@ struct QasmParser(Movable):
             if not known:
                 self.scoped_regs[kw.start] = len(self.regs)
                 self.regs.append(Register(nm, offset, size, False))
-            self.names.append(_Name(nm, NK.REG, self.scoped_regs[kw.start]))
+            self.names.append(_Name(nm, NameKind.REG, self.scoped_regs[kw.start]))
             if not init_measure and not init_value:
                 # a block's bit starts at 0 each time it is entered
                 self.assign_bits(offset, size, nm, CExpr.literal_int(0), kw)
@@ -1122,7 +1122,7 @@ struct QasmParser(Movable):
             _ = self.next()  # '='
             var mt = self.next()  # 'measure'
             var qs = self.parse_qubit_operand()
-            _ = self.expect_punct(P.SEMI, "';'")
+            _ = self.expect_punct(Punct.SEMI, "';'")
             var cs = List[Int]()
             for i in range(size):
                 cs.append(offset + i)
@@ -1130,22 +1130,22 @@ struct QasmParser(Movable):
         if init_value:
             var eq = self.next()
             var e = self.parse_cexpr()
-            _ = self.expect_punct(P.SEMI, "';'")
+            _ = self.expect_punct(Punct.SEMI, "';'")
             self.assign_bits(offset, size, nm, e, eq)
 
     def skip_type(mut self) raises -> Token:
         """Consume a classical type (+ optional [designator]); return its token."""
         var tt = self.expect_ident("a type")
-        if self.is_punct(self.peek(), P.LBRACK):
+        if self.is_punct(self.peek(), Punct.LBRACK):
             _ = self.next()
             var depth = 1
             while depth > 0:
                 var t = self.next()
-                if t.kind == TK.EOF:
+                if t.kind == TokenKind.EOF:
                     raise self.err("QM-E500", "missing ']' in type designator", tt)
-                if self.is_punct(t, P.LBRACK):
+                if self.is_punct(t, Punct.LBRACK):
                     depth += 1
-                elif self.is_punct(t, P.RBRACK):
+                elif self.is_punct(t, Punct.RBRACK):
                     depth -= 1
         return tt
 
@@ -1163,7 +1163,7 @@ struct QasmParser(Movable):
                 raise self.err("QM-E504", "only 'input float' / 'input angle' parameters are supported, got '" + self.text(tt) + "'", tt, "declare symbolic angles as 'input float theta;', or parse with parse_qasm_program or load_any")
         var nt = self.expect_ident("parameter name")
         self.check_new_name(nt)
-        _ = self.expect_punct(P.SEMI, "';'")
+        _ = self.expect_punct(Punct.SEMI, "';'")
         var nm = self.text(nt)
         var p = self.circs[0].parameter(nm)
         for i in range(1, len(self.circs)):
@@ -1196,8 +1196,8 @@ struct QasmParser(Movable):
             typed = self.is_word(tt, "float")  # float[32] folds as float does
         var nt = self.expect_ident("variable name")
         self.check_new_name(nt)
-        if not self.is_punct(self.peek(), P.EQ):
-            if (self.is_word(tt, "int") or self.is_word(tt, "uint")) and not is_const and self.is_punct(self.peek(), P.SEMI):
+        if not self.is_punct(self.peek(), Punct.EQ):
+            if (self.is_word(tt, "int") or self.is_word(tt, "uint")) and not is_const and self.is_punct(self.peek(), Punct.SEMI):
                 # Qiskit's `int switch_dummy; switch_dummy = c; switch (switch_dummy)`
                 _ = self.next()
                 self.int_vars[self.text(nt)] = List[Int]()
@@ -1211,7 +1211,7 @@ struct QasmParser(Movable):
             var value = CExpr()
             try:
                 var e = self.parse_cexpr()
-                if self.is_punct(self.peek(), P.SEMI):
+                if self.is_punct(self.peek(), Punct.SEMI):
                     value = ce_cast(e, ty)
                     ok = value.is_const()
             except err:
@@ -1220,7 +1220,7 @@ struct QasmParser(Movable):
                     raise self.relocate(msg, eq)
                 self.nest = nest
             if ok:
-                if ty.tag == CT.FLOAT or ty.tag == CT.ANGLE:
+                if ty.tag == CTypeKind.FLOAT or ty.tag == CTypeKind.ANGLE:
                     self.warn_truncations()
                 _ = self.next()
                 var radians = _const_radians(value)
@@ -1230,7 +1230,7 @@ struct QasmParser(Movable):
                 return
             self.pos = start  # depends on an input: an affine Param, below
         var v = self.parse_expr()
-        _ = self.expect_punct(P.SEMI, "';'")
+        _ = self.expect_punct(Punct.SEMI, "';'")
         if self.is_word(tt, "int") or self.is_word(tt, "uint"):
             if not v.is_symbolic():
                 v = Param(Float64(Int(v.offset)))
@@ -1245,28 +1245,28 @@ struct QasmParser(Movable):
         var nm = self.text(nt)
         var pnames = List[String]()
         var qnames = List[String]()
-        if self.is_punct(self.peek(), P.LPAREN):
+        if self.is_punct(self.peek(), Punct.LPAREN):
             _ = self.next()
-            if not self.is_punct(self.peek(), P.RPAREN):
+            if not self.is_punct(self.peek(), Punct.RPAREN):
                 pnames.append(self.text(self.expect_ident("parameter name")))
-                while self.is_punct(self.peek(), P.COMMA):
+                while self.is_punct(self.peek(), Punct.COMMA):
                     _ = self.next()
                     pnames.append(self.text(self.expect_ident("parameter name")))
-            _ = self.expect_punct(P.RPAREN, "')'")
+            _ = self.expect_punct(Punct.RPAREN, "')'")
         qnames.append(self.text(self.expect_ident("qubit argument name")))
-        while self.is_punct(self.peek(), P.COMMA):
+        while self.is_punct(self.peek(), Punct.COMMA):
             _ = self.next()
             qnames.append(self.text(self.expect_ident("qubit argument name")))
-        var lb = self.expect_punct(P.LBRACE, "'{' to start the gate body")
+        var lb = self.expect_punct(Punct.LBRACE, "'{' to start the gate body")
         var body_start = self.pos
         var depth = 1
         while depth > 0:
             var t = self.next()
-            if t.kind == TK.EOF:
+            if t.kind == TokenKind.EOF:
                 raise self.err("QM-E500", "missing '}' to close gate '" + nm + "'", lb, "every '{' needs a matching '}'")
-            if self.is_punct(t, P.LBRACE):
+            if self.is_punct(t, Punct.LBRACE):
                 depth += 1
-            elif self.is_punct(t, P.RBRACE):
+            elif self.is_punct(t, Punct.RBRACE):
                 depth -= 1
         var body_end = self.pos - 1
         var code = self.gate_table.get(nm)
@@ -1288,7 +1288,7 @@ struct QasmParser(Movable):
         var mt = self.next()
         var qs = self.parse_qubit_operand()
         var cs = List[Int]()
-        if self.is_punct(self.peek(), P.ARROW):
+        if self.is_punct(self.peek(), Punct.ARROW):
             _ = self.next()
             cs = self.parse_bit_operand()
         else:
@@ -1296,17 +1296,17 @@ struct QasmParser(Movable):
             var base = self.circs[0].num_clbits
             for i in range(len(qs)):
                 cs.append(base + i)
-        _ = self.expect_punct(P.SEMI, "';'")
+        _ = self.expect_punct(Punct.SEMI, "';'")
         self.emit_measures(qs, cs, mt)
 
     def parse_measure_assign(mut self) raises:
         var ct = self.peek()
         var cs = self.parse_bit_operand()
         var eq = self.peek()
-        if self.program_mode and (self.is_punct(eq, P.OPASSIGN) or (self.is_punct(eq, P.EQ) and not self.is_word(self.peek(1), "measure"))):
+        if self.program_mode and (self.is_punct(eq, Punct.OPASSIGN) or (self.is_punct(eq, Punct.EQ) and not self.is_word(self.peek(1), "measure"))):
             self.parse_bit_assign(ct, cs)
             return
-        if self.is_punct(eq, P.OPASSIGN) or not self.is_punct(eq, P.EQ):
+        if self.is_punct(eq, Punct.OPASSIGN) or not self.is_punct(eq, Punct.EQ):
             raise self.err("QM-E500", "expected '= measure ...' after bit operand, found " + self.describe(eq), eq, "write 'c[0] = measure q[0];'")
         _ = self.next()
         var mt = self.peek()
@@ -1314,7 +1314,7 @@ struct QasmParser(Movable):
             raise self.err("QM-E504", "only measurement results can be assigned to bits", mt, "write 'c[0] = measure q[0];', or parse with parse_qasm_program or load_any")
         _ = self.next()
         var qs = self.parse_qubit_operand()
-        _ = self.expect_punct(P.SEMI, "';'")
+        _ = self.expect_punct(Punct.SEMI, "';'")
         _ = ct
         self.emit_measures(qs, cs, mt)
 
@@ -1330,7 +1330,7 @@ struct QasmParser(Movable):
     def parse_bit_test(mut self) raises -> Tuple[Int, Int]:
         """One `c[i]`, `!c[i]`, `c[i] == v` or `c[i] != v` of an `&&` chain."""
         var neg = False
-        if self.is_punct(self.peek(), P.BANG):
+        if self.is_punct(self.peek(), Punct.BANG):
             _ = self.next()
             neg = True
         var bt = self.peek()
@@ -1339,13 +1339,13 @@ struct QasmParser(Movable):
             raise self.err("QM-E541", "an '&&' condition tests single bits, not a " + String(len(bits)) + "-bit register", bt, "write if (c[0] == 1 && c[1] == 0)")
         var val = 1
         var ct = self.peek()
-        if self.is_punct(ct, P.EQEQ) or self.is_punct(ct, P.NEQ):
+        if self.is_punct(ct, Punct.EQEQ) or self.is_punct(ct, Punct.NEQ):
             _ = self.next()
             var vt = self.peek()
             val = self.parse_const_int("condition value")
             if val != 0 and val != 1:
                 raise self.err("QM-E541", "a single bit can only be compared with 0 or 1", vt, "write if (c[0] == 1)")
-            if self.is_punct(ct, P.NEQ):
+            if self.is_punct(ct, Punct.NEQ):
                 val = 1 - val
         if neg:
             val = 1 - val
@@ -1357,26 +1357,26 @@ struct QasmParser(Movable):
         to_qasm writes a condition on part of the classical bits. Register and
         `&&` conditions are recorded in self.cond_reg_bits / cond_reg_vals; the
         returned pair is the first bit."""
-        var lp = self.expect_punct(P.LPAREN, "'(' after if")
+        var lp = self.expect_punct(Punct.LPAREN, "'(' after if")
         self.cond_reg_bits = List[Int]()
         self.cond_reg_vals = List[Int]()
         var negate = False
-        if self.is_punct(self.peek(), P.BANG):
+        if self.is_punct(self.peek(), Punct.BANG):
             _ = self.next()
             negate = True
         var bt = self.peek()
-        if bt.kind != TK.IDENT or self.text(bt) in self.consts or self.text(bt) in self.int_vars or self.text(bt) in self.inputs or self.is_word(bt, "true") or self.is_word(bt, "false"):
+        if bt.kind != TokenKind.IDENT or self.text(bt) in self.consts or self.text(bt) in self.int_vars or self.text(bt) in self.inputs or self.is_word(bt, "true") or self.is_word(bt, "false"):
             raise self.err("QM-E541", "a Circuit condition tests bits or a register", bt, "parse with parse_qasm_program or load_any for conditions on values")
         var bits = self.parse_bit_operand()
         var val = 1
         var ct = self.peek()
-        if self.is_punct(ct, P.EQEQ) or self.is_punct(ct, P.NEQ):
+        if self.is_punct(ct, Punct.EQEQ) or self.is_punct(ct, Punct.NEQ):
             _ = self.next()
             var vt = self.peek()
             if len(bits) > 1:
-                if self.is_punct(ct, P.NEQ) or negate:
+                if self.is_punct(ct, Punct.NEQ) or negate:
                     raise self.err("QM-E541", "'!=' / negation on a whole register is not supported", ct, "compare the register with '==' (OpenQASM 2 semantics)")
-                if vt.kind != TK.INT:
+                if vt.kind != TokenKind.INT:
                     raise self.err("QM-E541", "a register condition needs a non-negative integer literal", vt, "write if (c == 5)")
                 _ = self.next()
                 var vbits = decimal_to_bits(self.text(vt), len(bits))
@@ -1385,32 +1385,32 @@ struct QasmParser(Movable):
                 for i in range(len(bits)):
                     self.cond_reg_bits.append(bits[i])
                     self.cond_reg_vals.append(vbits[i])
-                if self.is_punct(self.peek(), P.ANDAND) or self.is_punct(self.peek(), P.OROR):
+                if self.is_punct(self.peek(), Punct.ANDAND) or self.is_punct(self.peek(), Punct.OROR):
                     raise self.err("QM-E541", "a whole-register test cannot be combined with other tests", self.peek(), "spell the bits out: if (c[0] == 1 && c[1] == 0)")
-                _ = self.expect_punct(P.RPAREN, "')' to close the condition")
+                _ = self.expect_punct(Punct.RPAREN, "')' to close the condition")
                 _ = lp
                 return (bits[0], vbits[0])
             var v = self.parse_const_int("condition value")
             if v != 0 and v != 1:
                 raise self.err("QM-E541", "a single bit can only be compared with 0 or 1", vt, "write if (c[0] == 1)")
             val = v
-            if self.is_punct(ct, P.NEQ):
+            if self.is_punct(ct, Punct.NEQ):
                 val = 1 - val
         elif len(bits) > 1:
             raise self.err("QM-E541", "condition on a " + String(len(bits)) + "-bit register is ambiguous", bt, "index one bit: if (" + self.text(bt) + "[0]) ... or compare the register: if (" + self.text(bt) + " == 3)")
         if negate:
             val = 1 - val
-        if self.is_punct(self.peek(), P.ANDAND):
+        if self.is_punct(self.peek(), Punct.ANDAND):
             self.cond_reg_bits.append(bits[0])
             self.cond_reg_vals.append(val)
-            while self.is_punct(self.peek(), P.ANDAND):
+            while self.is_punct(self.peek(), Punct.ANDAND):
                 _ = self.next()
                 var test = self.parse_bit_test()
                 self.cond_reg_bits.append(test[0])
                 self.cond_reg_vals.append(test[1])
-        if self.is_punct(self.peek(), P.OROR):
+        if self.is_punct(self.peek(), Punct.OROR):
             raise self.err("QM-E541", "'||' conditions are not supported", self.peek(), "nest the operations or test one bit per if")
-        _ = self.expect_punct(P.RPAREN, "')' to close the condition")
+        _ = self.expect_punct(Punct.RPAREN, "')' to close the condition")
         _ = lp
         return (bits[0], val)
 
@@ -1470,23 +1470,23 @@ struct QasmParser(Movable):
         var t = self.next()
         if self.cond_bit >= 0:
             raise self.err("QM-E541", "assignment to '" + self.text(t) + "' under a condition is not supported", t, "assign it before the if")
-        _ = self.expect_punct(P.EQ, "'=' in assignment")
+        _ = self.expect_punct(Punct.EQ, "'=' in assignment")
         var rt = self.peek()
         var nm = self.text(rt)
         var ri = self.reg_index.get(nm)
-        if rt.kind != TK.IDENT or not ri or self.regs[ri.value()].is_qubit:
+        if rt.kind != TokenKind.IDENT or not ri or self.regs[ri.value()].is_qubit:
             raise self.err("QM-E504", "an integer variable can only mirror a bit register", rt, "write '" + self.text(t) + " = c;' and use it as the target of a switch")
         self.int_vars[self.text(t)] = self.parse_bit_operand()
         self.int_var_at[self.text(t)] = len(self.circs[0].ops)
-        _ = self.expect_punct(P.SEMI, "';'")
+        _ = self.expect_punct(Punct.SEMI, "';'")
 
     def parse_box(mut self) raises:
         """`box [dur] { ... }`: gates cannot leave or enter, so a barrier on each side."""
         var bt = self.next()
-        if self.is_punct(self.peek(), P.LBRACK):
-            self.skip_balanced(P.LBRACK, P.RBRACK, self.peek())
+        if self.is_punct(self.peek(), Punct.LBRACK):
+            self.skip_balanced(Punct.LBRACK, Punct.RBRACK, self.peek())
             self.warn("QM-W053", "box duration is ignored (QUMO circuits have no timing model)", bt, "the box still keeps its gates together")
-        if not self.is_punct(self.peek(), P.LBRACE):
+        if not self.is_punct(self.peek(), Punct.LBRACE):
             raise self.err("QM-E500", "expected '{' after box, found " + self.describe(self.peek()), self.peek(), "write 'box { ... }'")
         self.circs[self.top()].ops.append(Instruction.make(Op.BARRIER, -1))
         self.parse_statement()
@@ -1531,11 +1531,11 @@ struct QasmParser(Movable):
             return
         if self.cond_bit >= 0:
             raise self.err("QM-E541", "nested conditions are not supported", st, "QUMO instructions carry one condition")
-        _ = self.expect_punct(P.LPAREN, "'(' after switch")
+        _ = self.expect_punct(Punct.LPAREN, "'(' after switch")
         var t = self.peek()
         if (self.is_word(t, "int") or self.is_word(t, "uint")) and not (self.text(t) in self.consts):
             _ = self.skip_type()
-            _ = self.expect_punct(P.LPAREN, "'(' after the cast")
+            _ = self.expect_punct(Punct.LPAREN, "'(' after the cast")
             t = self.peek()
         var bits = List[Int]()
         var is_const = False
@@ -1560,15 +1560,15 @@ struct QasmParser(Movable):
         else:
             cval = self.parse_const_int("switch target")
             is_const = True
-        while self.is_punct(self.peek(), P.RPAREN):
+        while self.is_punct(self.peek(), Punct.RPAREN):
             _ = self.next()
-        var lb = self.expect_punct(P.LBRACE, "'{' to open the switch")
+        var lb = self.expect_punct(Punct.LBRACE, "'{' to open the switch")
         var values = List[List[Int]]()  # values of each case
         var bodies = List[Int]()
         var default_body = -1
-        while not self.is_punct(self.peek(), P.RBRACE):
+        while not self.is_punct(self.peek(), Punct.RBRACE):
             var c = self.peek()
-            if c.kind == TK.EOF:
+            if c.kind == TokenKind.EOF:
                 raise self.err("QM-E500", "missing '}' to close the switch", lb, "every '{' needs a matching '}'")
             var vs = List[Int]()
             var is_default = False
@@ -1579,20 +1579,20 @@ struct QasmParser(Movable):
                 else:
                     _ = self.next()
                     vs.append(self.parse_const_int("case value"))
-                    while self.is_punct(self.peek(), P.COMMA):
+                    while self.is_punct(self.peek(), Punct.COMMA):
                         _ = self.next()
                         vs.append(self.parse_const_int("case value"))
-                if self.is_punct(self.peek(), P.COLON):
+                if self.is_punct(self.peek(), Punct.COLON):
                     _ = self.next()
             if len(vs) == 0 and not is_default:
                 raise self.err("QM-E500", "expected 'case' or 'default', found " + self.describe(c), c, "write 'case 0 { ... }' or 'default { ... }'")
-            if not self.is_punct(self.peek(), P.LBRACE):
+            if not self.is_punct(self.peek(), Punct.LBRACE):
                 raise self.err("QM-E500", "expected '{' to open the case, found " + self.describe(self.peek()), self.peek(), "write 'case 0 { ... }'")
             var body = self.pos
-            self.skip_balanced(P.LBRACE, P.RBRACE, self.peek())
+            self.skip_balanced(Punct.LBRACE, Punct.RBRACE, self.peek())
             if self.is_word(self.peek(), "break"):
                 _ = self.next()
-                _ = self.expect_punct(P.SEMI, "';'")
+                _ = self.expect_punct(Punct.SEMI, "';'")
             if is_default:
                 if default_body >= 0:
                     raise self.err("QM-E541", "a switch has one default", c, "merge the two bodies")
@@ -1647,7 +1647,7 @@ struct QasmParser(Movable):
         var depth = 0
         while True:
             var x = self.next()
-            if x.kind == TK.EOF:
+            if x.kind == TokenKind.EOF:
                 raise self.err("QM-E500", "unbalanced brackets", t, "check that every bracket is closed")
             if self.is_punct(x, open):
                 depth += 1
@@ -1660,12 +1660,12 @@ struct QasmParser(Movable):
         var t = self.peek()
         if level > MAX_NESTING:
             raise self.too_deep(t)
-        if self.is_punct(t, P.LBRACE):
-            self.skip_balanced(P.LBRACE, P.RBRACE, t)
+        if self.is_punct(t, Punct.LBRACE):
+            self.skip_balanced(Punct.LBRACE, Punct.RBRACE, t)
             return
         if self.is_word(t, "if"):
             _ = self.next()
-            self.skip_balanced(P.LPAREN, P.RPAREN, self.peek())
+            self.skip_balanced(Punct.LPAREN, Punct.RPAREN, self.peek())
             self.skip_statement(level + 1)
             if self.is_word(self.peek(), "else"):
                 _ = self.next()
@@ -1673,40 +1673,40 @@ struct QasmParser(Movable):
             return
         if self.is_word(t, "while") or self.is_word(t, "switch"):
             _ = self.next()
-            self.skip_balanced(P.LPAREN, P.RPAREN, self.peek())
+            self.skip_balanced(Punct.LPAREN, Punct.RPAREN, self.peek())
             self.skip_statement(level + 1)
             return
         if self.is_word(t, "box"):
             _ = self.next()
-            if self.is_punct(self.peek(), P.LBRACK):
-                self.skip_balanced(P.LBRACK, P.RBRACK, self.peek())
+            if self.is_punct(self.peek(), Punct.LBRACK):
+                self.skip_balanced(Punct.LBRACK, Punct.RBRACK, self.peek())
             self.skip_statement(level + 1)
             return
         if self.is_word(t, "for"):
             while not self.is_word(self.peek(), "in"):
-                if self.peek().kind == TK.EOF:
+                if self.peek().kind == TokenKind.EOF:
                     raise self.err("QM-E500", "malformed for loop", t)
                 _ = self.next()
             _ = self.next()
             var r = self.peek()
-            if self.is_punct(r, P.LBRACK):
-                self.skip_balanced(P.LBRACK, P.RBRACK, r)
-            elif self.is_punct(r, P.LBRACE):
-                self.skip_balanced(P.LBRACE, P.RBRACE, r)
+            if self.is_punct(r, Punct.LBRACK):
+                self.skip_balanced(Punct.LBRACK, Punct.RBRACK, r)
+            elif self.is_punct(r, Punct.LBRACE):
+                self.skip_balanced(Punct.LBRACE, Punct.RBRACE, r)
             self.skip_statement(level + 1)
             return
         while True:
             var x = self.peek()
-            if x.kind == TK.EOF:
+            if x.kind == TokenKind.EOF:
                 raise self.err("QM-E500", "missing ';'", t, "every statement ends with ';'")
-            if self.is_punct(x, P.LPAREN):
-                self.skip_balanced(P.LPAREN, P.RPAREN, x)
+            if self.is_punct(x, Punct.LPAREN):
+                self.skip_balanced(Punct.LPAREN, Punct.RPAREN, x)
                 continue
-            if self.is_punct(x, P.LBRACK):
-                self.skip_balanced(P.LBRACK, P.RBRACK, x)
+            if self.is_punct(x, Punct.LBRACK):
+                self.skip_balanced(Punct.LBRACK, Punct.RBRACK, x)
                 continue
             _ = self.next()
-            if self.is_punct(x, P.SEMI):
+            if self.is_punct(x, Punct.SEMI):
                 return
 
     def parse_for(mut self) raises:
@@ -1732,25 +1732,25 @@ struct QasmParser(Movable):
         if not self.is_word(it, "in"):
             raise self.err("QM-E500", "expected 'in' in for loop, found " + self.describe(it), it, "write 'for uint i in [0:3] { ... }' (ranges are inclusive)")
         _ = self.next()
-        if self.program_mode and self.depth == 0 and not (typed and (loop_ty.tag == CT.INT or loop_ty.tag == CT.UINT)):
+        if self.program_mode and self.depth == 0 and not (typed and (loop_ty.tag == CTypeKind.INT or loop_ty.tag == CTypeKind.UINT)):
             raise self.err("QM-E580", "a loop counts in int or uint, not " + type_name(loop_ty), vt, "write 'for int i in ...'")
-        typed = typed and (loop_ty.tag == CT.INT or loop_ty.tag == CT.UINT or loop_ty.tag == CT.FLOAT)
+        typed = typed and (loop_ty.tag == CTypeKind.INT or loop_ty.tag == CTypeKind.UINT or loop_ty.tag == CTypeKind.FLOAT)
         if self.program_mode and self.depth == 0 and self.for_needs_region(loop_ty, self.text(vt)):
             self.parse_for_region(loop_ty, vt)
             return
         var values = List[Int]()
         var rt = self.peek()
-        if self.is_punct(rt, P.LBRACK):
+        if self.is_punct(rt, Punct.LBRACK):
             _ = self.next()
             var a = self.parse_const_int("range start")
-            _ = self.expect_punct(P.COLON, "':' in range", "write [start:stop] or [start:step:stop] (inclusive)")
+            _ = self.expect_punct(Punct.COLON, "':' in range", "write [start:stop] or [start:step:stop] (inclusive)")
             var b = self.parse_const_int("range bound")
             var step = 1
-            if self.is_punct(self.peek(), P.COLON):
+            if self.is_punct(self.peek(), Punct.COLON):
                 _ = self.next()
                 step = b
                 b = self.parse_const_int("range stop")
-            _ = self.expect_punct(P.RBRACK, "']' to close the range")
+            _ = self.expect_punct(Punct.RBRACK, "']' to close the range")
             if step == 0:
                 raise self.err("QM-E570", "range step must be non-zero", rt, "write [0:2:10]")
             var i = a
@@ -1761,13 +1761,13 @@ struct QasmParser(Movable):
                 if _last_step(i, step, b):
                     break
                 i += step
-        elif self.is_punct(rt, P.LBRACE):
+        elif self.is_punct(rt, Punct.LBRACE):
             _ = self.next()
             values.append(self.parse_const_int("set element"))
-            while self.is_punct(self.peek(), P.COMMA):
+            while self.is_punct(self.peek(), Punct.COMMA):
                 _ = self.next()
                 values.append(self.parse_const_int("set element"))
-            _ = self.expect_punct(P.RBRACE, "'}' to close the set")
+            _ = self.expect_punct(Punct.RBRACE, "'}' to close the set")
         else:
             raise self.err("QM-E570", "for loops need a constant range [a:b] or set {a, b}", rt, "write 'for uint i in [0:3] { ... }' (ranges are inclusive)")
         if not self.program_mode and typed and self.depth == 0:
@@ -1786,12 +1786,12 @@ struct QasmParser(Movable):
         var nm = self.text(vt)
         var named = self.depth == 0
         if named:
-            self.loop_names.append(_LoopName(nm, self.block_depth + (1 if self.is_punct(self.peek(), P.LBRACE) else 0)))
+            self.loop_names.append(_LoopName(nm, self.block_depth + (1 if self.is_punct(self.peek(), Punct.LBRACE) else 0)))
         for v in values:
             self.pos = body
             if self.program_mode and self.depth == 0:
                 self.push_scope()
-                self.names.append(_Name(nm, NK.CONST, len(self.const_vals)))
+                self.names.append(_Name(nm, NameKind.CONST, len(self.const_vals)))
                 self.const_vals.append(_loop_value(v, loop_ty))
                 self.parse_statement()
                 self.pop_scope()
@@ -1813,29 +1813,29 @@ struct QasmParser(Movable):
 
     def parse_delay(mut self) raises:
         var dt = self.next()
-        if self.is_punct(self.peek(), P.LBRACK):
-            self.skip_balanced(P.LBRACK, P.RBRACK, self.peek())
-        if not self.is_punct(self.peek(), P.SEMI):
+        if self.is_punct(self.peek(), Punct.LBRACK):
+            self.skip_balanced(Punct.LBRACK, Punct.RBRACK, self.peek())
+        if not self.is_punct(self.peek(), Punct.SEMI):
             _ = self.parse_qubit_operand()
-            while self.is_punct(self.peek(), P.COMMA):
+            while self.is_punct(self.peek(), Punct.COMMA):
                 _ = self.next()
                 _ = self.parse_qubit_operand()
-        _ = self.expect_punct(P.SEMI, "';'")
+        _ = self.expect_punct(Punct.SEMI, "';'")
         self.warn("QM-W051", "delay is ignored (QUMO circuits have no timing model)", dt, "model idle noise with '#pragma qumo depolarize1(p) q[0];'")
 
     def parse_pragma_constants(mut self, what: String) raises -> List[Float64]:
         """`(a, b, ...)` of constant expressions after a pragma word."""
         var out = List[Float64]()
-        _ = self.expect_punct(P.LPAREN, "'(' after " + what)
+        _ = self.expect_punct(Punct.LPAREN, "'(' after " + what)
         while True:
             var vt = self.peek()
             var p = self.parse_expr()
             out.append(self.need_const(p, vt, what + " value"))
-            if self.is_punct(self.peek(), P.COMMA):
+            if self.is_punct(self.peek(), Punct.COMMA):
                 _ = self.next()
                 continue
             break
-        _ = self.expect_punct(P.RPAREN, "')'")
+        _ = self.expect_punct(Punct.RPAREN, "')'")
         return out^
 
     def parse_pragma(mut self) raises:
@@ -1855,11 +1855,11 @@ struct QasmParser(Movable):
             var index = 0
             var is_obs = self.is_word(t, "observable")
             if is_obs:
-                _ = self.expect_punct(P.LPAREN, "'(' after observable", "write '#pragma qumo observable(0) 3, 5'")
+                _ = self.expect_punct(Punct.LPAREN, "'(' after observable", "write '#pragma qumo observable(0) 3, 5'")
                 index = self.parse_const_int("observable index")
-                _ = self.expect_punct(P.RPAREN, "')'")
+                _ = self.expect_punct(Punct.RPAREN, "')'")
             var recs = List[Int]()
-            if not self.is_punct(self.peek(), P.SEMI):
+            if not self.is_punct(self.peek(), Punct.SEMI):
                 while True:
                     var rt = self.peek()
                     var r = self.parse_const_int("measurement record index")
@@ -1868,11 +1868,11 @@ struct QasmParser(Movable):
                     if r < 0 or r >= self.circs[0].num_measurements:
                         raise self.err("QM-E560", "measurement record " + String(r) + " does not exist yet (" + String(self.circs[0].num_measurements) + " measurements so far)", rt, "records are absolute measurement indices (0 = first measurement), or negative to count back")
                     recs.append(r)
-                    if self.is_punct(self.peek(), P.COMMA):
+                    if self.is_punct(self.peek(), Punct.COMMA):
                         _ = self.next()
                         continue
                     break
-            _ = self.expect_punct(P.SEMI, "end of pragma line")
+            _ = self.expect_punct(Punct.SEMI, "end of pragma line")
             if is_obs:
                 self.circs[0].observable(index, recs)
             else:
@@ -1880,17 +1880,17 @@ struct QasmParser(Movable):
             return
         if self.is_word(t, "tick"):
             _ = self.next()
-            _ = self.expect_punct(P.SEMI, "end of pragma line")
+            _ = self.expect_punct(Punct.SEMI, "end of pragma line")
             self.circs[self.top()].ops.append(Instruction.make(Op.TICK, -1))
             return
         if self.is_word(t, "param"):
             _ = self.next()
             var it = self.expect_ident("parameter identifier")
             var st = self.peek()
-            if st.kind != TK.STRING:
+            if st.kind != TokenKind.STRING:
                 raise self.err("QM-E560", "expected the original parameter name as a string", st, "write '#pragma qumo param theta_0 \"theta[0]\"'")
             _ = self.next()
-            _ = self.expect_punct(P.SEMI, "end of pragma line")
+            _ = self.expect_punct(Punct.SEMI, "end of pragma line")
             var ip = self.inputs.get(self.text(it))
             if not ip:
                 raise self.err("QM-E560", "'" + self.text(it) + "' is not a declared input parameter", it, "declare 'input float " + self.text(it) + ";' before the pragma")
@@ -1906,9 +1906,9 @@ struct QasmParser(Movable):
             if len(probs) != 15:
                 raise self.err("QM-E560", "pauli_channel_2 takes 15 probabilities, got " + String(len(probs)), t, "IX, IY, IZ, XI, ... ZZ, with the left Pauli on the first qubit")
             var pa = self.parse_qubit_operand()
-            _ = self.expect_punct(P.COMMA, "',' between the two qubits")
+            _ = self.expect_punct(Punct.COMMA, "',' between the two qubits")
             var pb = self.parse_qubit_operand()
-            _ = self.expect_punct(P.SEMI, "end of pragma line")
+            _ = self.expect_punct(Punct.SEMI, "end of pragma line")
             if len(pa) != 1 or len(pb) != 1:
                 raise self.err("QM-E560", "pauli_channel_2 takes two single qubits", t, "write q[0], q[1]")
             self.circs[self.top()].pauli_channel_2(probs, pa[0], pb[0])
@@ -1934,11 +1934,11 @@ struct QasmParser(Movable):
                     raise self.err("QM-E560", "each Pauli takes one qubit", lt, "write 'x q[0]', not a whole register")
                 eq.append(ot[0])
                 el.append(letter)
-                if self.is_punct(self.peek(), P.COMMA):
+                if self.is_punct(self.peek(), Punct.COMMA):
                     _ = self.next()
                     continue
                 break
-            _ = self.expect_punct(P.SEMI, "end of pragma line")
+            _ = self.expect_punct(Punct.SEMI, "end of pragma line")
             if is_else and self.cond_bit >= 0:
                 # an ELSE reads whether its chain fired: it must run under the
                 # same condition as the error before it, or the flag is stale
@@ -1954,7 +1954,7 @@ struct QasmParser(Movable):
             var knq = 1 if self.is_word(t, "kraus1") else 2
             _ = self.next()
             var kn = self.peek()
-            if kn.kind != TK.STRING:
+            if kn.kind != TokenKind.STRING:
                 raise self.err("QM-E560", "expected the channel name as a string", kn, "write '#pragma qumo kraus1 \"damp\" (re, im, ...) q[0];'")
             _ = self.next()
             var kv = self.parse_pragma_constants("kraus")
@@ -1974,15 +1974,15 @@ struct QasmParser(Movable):
             var ka = self.parse_qubit_operand()
             var kb = List[Int]()
             if knq == 2:
-                _ = self.expect_punct(P.COMMA, "',' between the two qubits")
+                _ = self.expect_punct(Punct.COMMA, "',' between the two qubits")
                 kb = self.parse_qubit_operand()
-            _ = self.expect_punct(P.SEMI, "end of pragma line")
+            _ = self.expect_punct(Punct.SEMI, "end of pragma line")
             if len(ka) != 1 or len(kb) != knq - 1:
                 raise self.err("QM-E560", "kraus takes single qubits", t, "write q[0] or q[0], q[1]")
             self.circs[self.top()].apply_channel(ch, ka[0], kb[0] if knq == 2 else -1)
             self.condition_last()
             return
-        if t.kind == TK.PUNCT and t.sub == P.SEMI:
+        if t.kind == TokenKind.PUNCT and t.sub == Punct.SEMI:
             raise self.err("QM-E560", "empty qumo pragma", pt, "e.g. '#pragma qumo depolarize1(0.01) q[0];', '#pragma qumo detector 0, 1'")
         # any other statement (noise channels, conditioned noise, ...)
         self.parse_statement()
@@ -1995,7 +1995,7 @@ struct QasmParser(Movable):
         var mtoks = List[Token]()
         while True:
             var t = self.peek()
-            if t.kind != TK.IDENT:
+            if t.kind != TokenKind.IDENT:
                 break
             var is_inv = self.is_word(t, "inv")
             var is_ctrl = self.is_word(t, "ctrl")
@@ -2007,7 +2007,7 @@ struct QasmParser(Movable):
             var save = self.pos
             _ = self.next()
             var arg = 1
-            if self.is_punct(self.peek(), P.LPAREN):
+            if self.is_punct(self.peek(), Punct.LPAREN):
                 _ = self.next()
                 var at = self.peek()
                 if is_pow:
@@ -2024,11 +2024,11 @@ struct QasmParser(Movable):
                     if arg < 1:
                         raise self.err("QM-E550", "ctrl count must be >= 1", at, "write ctrl(2) @ x a, b, c;")
                     self.charge(arg, at)  # before the counts are summed
-                _ = self.expect_punct(P.RPAREN, "')'")
+                _ = self.expect_punct(Punct.RPAREN, "')'")
             elif is_pow:
                 raise self.err("QM-E550", "pow needs an exponent", self.peek(), "write 'pow(2) @ gate ...'")
-            if not self.is_punct(self.peek(), P.AT):
-                if is_pow and not self.is_punct(self.peek(), P.AT):
+            if not self.is_punct(self.peek(), Punct.AT):
+                if is_pow and not self.is_punct(self.peek(), Punct.AT):
                     raise self.err("QM-E500", "expected '@' after modifier, found " + self.describe(self.peek()), self.peek(), "write 'pow(2) @ x q[0];'")
                 self.pos = save
                 break
@@ -2056,23 +2056,23 @@ struct QasmParser(Movable):
                     hint = "'" + nm + "' cannot take modifiers"
                 raise self.err("QM-E510", "unknown gate '" + nm + "'", nt, hint)
         var ps = List[Param]()
-        if self.is_punct(self.peek(), P.LPAREN):
+        if self.is_punct(self.peek(), Punct.LPAREN):
             _ = self.next()
-            if not self.is_punct(self.peek(), P.RPAREN):
+            if not self.is_punct(self.peek(), Punct.RPAREN):
                 var classical = self.program_mode or len(self.const_exprs) > 0 or len(self.scopes) > 0
                 ps.append(self.parse_gate_arg() if classical else self.parse_plain_arg())
-                while self.is_punct(self.peek(), P.COMMA):
+                while self.is_punct(self.peek(), Punct.COMMA):
                     _ = self.next()
                     ps.append(self.parse_gate_arg() if classical else self.parse_plain_arg())
-            _ = self.expect_punct(P.RPAREN, "')' to close the parameter list")
+            _ = self.expect_punct(Punct.RPAREN, "')' to close the parameter list")
         var flat = List[Int](capacity=4)
         var lens = List[Int](capacity=4)
-        if not self.is_punct(self.peek(), P.SEMI):
+        if not self.is_punct(self.peek(), Punct.SEMI):
             lens.append(self.parse_qubit_operand_into(flat))
-            while self.is_punct(self.peek(), P.COMMA):
+            while self.is_punct(self.peek(), Punct.COMMA):
                 _ = self.next()
                 lens.append(self.parse_qubit_operand_into(flat))
-        _ = self.expect_punct(P.SEMI, "';' after gate operands", "separate operands with ',' and end with ';'")
+        _ = self.expect_punct(Punct.SEMI, "';' after gate operands", "separate operands with ',' and end with ';'")
         # signature checks
         var np: Int
         var na: Int
@@ -2164,14 +2164,14 @@ struct QasmParser(Movable):
             var p2 = ps[2] if len(ps) > 2 else Param(0.0)
             self.emit(Instruction.make(code, q0, q1, q2, p0, p1, p2))
             return
-        if code == G.GPHASE:
+        if code == SpecialGate.GPHASE:
             var v = self.need_const(ps[0], t, "gphase angle")
             self.add_phase(v)
             return
-        if code == G.U2 or code == G.U3:
-            var th = Param(pi / 2) if code == G.U2 else ps[0]
-            var ph = ps[0] if code == G.U2 else ps[1]
-            var la = ps[1] if code == G.U2 else ps[2]
+        if code == SpecialGate.U2 or code == SpecialGate.U3:
+            var th = Param(pi / 2) if code == SpecialGate.U2 else ps[0]
+            var ph = ps[0] if code == SpecialGate.U2 else ps[1]
+            var la = ps[1] if code == SpecialGate.U2 else ps[2]
             # Qiskit semantics: u3 == U, u2(phi, lambda) == U(pi/2, phi, lambda)
             # exactly (no implicit global phase), matching qiskit.qasm2/qasm3.
             self.emit(Instruction.make(Op.U, qs[0], -1, -1, th, ph, la))
@@ -2180,7 +2180,7 @@ struct QasmParser(Movable):
         var c = qs[0]
         var tq = qs[1]
         self.push_target()
-        if code == G.CSX:
+        if code == SpecialGate.CSX:
             self.emit(Instruction.make(Op.SX, tq))
         else:
             self.emit(Instruction.make(Op.U, tq, -1, -1, ps[0], ps[1], ps[2]))
@@ -2190,7 +2190,7 @@ struct QasmParser(Movable):
             ctl = sub.controlled(c)
         except e:
             raise self.relocate(String(e), t)
-        if code == G.CU:
+        if code == SpecialGate.CU:
             self.emit(Instruction.make(Op.P, c, -1, -1, ps[3]))
         self.compose_sub(ctl)
 
@@ -2342,7 +2342,7 @@ struct QasmParser(Movable):
     def find_var(self, nm: String) -> Int:
         """Id of the variable `nm` names here, or -1."""
         var k = self.find_name(nm)
-        if k >= 0 and self.names[k].kind == NK.VAR:
+        if k >= 0 and self.names[k].kind == NameKind.VAR:
             return self.names[k].index
         return -1
 
@@ -2352,7 +2352,7 @@ struct QasmParser(Movable):
         if self.program_mode and self.depth == 0:
             var k = self.find_name(nm)
             if k >= 0:
-                if self.names[k].kind == NK.REG:
+                if self.names[k].kind == NameKind.REG:
                     return self.names[k].index
                 return None
         return self.reg_index.get(nm)
@@ -2365,7 +2365,7 @@ struct QasmParser(Movable):
 
     def declare_var(mut self, nm: String, ty: CType, is_output: Bool) -> Int:
         var v = self.prog.add_var(nm, ty, is_output)
-        self.names.append(_Name(nm, NK.VAR, v))
+        self.names.append(_Name(nm, NameKind.VAR, v))
         return v
 
     def prescan(mut self):
@@ -2375,18 +2375,18 @@ struct QasmParser(Movable):
         for i in range(1, len(self.toks) - 1):
             var t = self.toks[i]
             var n = self.toks[i + 1]
-            if t.kind != TK.IDENT or not (self.is_punct(n, P.EQ) or self.is_punct(n, P.OPASSIGN)):
+            if t.kind != TokenKind.IDENT or not (self.is_punct(n, Punct.EQ) or self.is_punct(n, Punct.OPASSIGN)):
                 continue
             var prev = self.toks[i - 1]
-            var declared = prev.kind == TK.IDENT and not self.is_word(prev, "else")
-            if self.is_punct(prev, P.RBRACK):
+            var declared = prev.kind == TokenKind.IDENT and not self.is_word(prev, "else")
+            if self.is_punct(prev, Punct.RBRACK):
                 # `int[8] x = 1;` declares; `for int i in [0:2] x = 1;` does not
                 var k = i - 2
                 var open = 1
                 while k > 0 and open > 0:
-                    if self.is_punct(self.toks[k], P.RBRACK):
+                    if self.is_punct(self.toks[k], Punct.RBRACK):
                         open += 1
-                    elif self.is_punct(self.toks[k], P.LBRACK):
+                    elif self.is_punct(self.toks[k], Punct.LBRACK):
                         open -= 1
                     k -= 1
                 declared = not self.is_word(self.toks[k], "in")
@@ -2400,11 +2400,11 @@ struct QasmParser(Movable):
         var has = False
         var width = 0
         var wt = self.peek()
-        if self.is_punct(wt, P.LBRACK):
+        if self.is_punct(wt, Punct.LBRACK):
             _ = self.next()
             wt = self.peek()
             width = self.parse_const_int("type width")
-            _ = self.expect_punct(P.RBRACK, "']'")
+            _ = self.expect_punct(Punct.RBRACK, "']'")
             has = True
         if nm == "bool":
             if has:
@@ -2502,13 +2502,13 @@ struct QasmParser(Movable):
             self.cexpr_open = False
             raise err^
         self.cexpr_open = False
-        if e.ty().tag == CT.FLOAT:
+        if e.ty().tag == CTypeKind.FLOAT:
             self.warn_truncations()
         return e^
 
     def parse_c_or(mut self) raises -> CExpr:
         var a = self.parse_c_and()
-        while self.is_punct(self.peek(), P.OROR):
+        while self.is_punct(self.peek(), Punct.OROR):
             var t = self.next()
             var b = self.parse_c_and()
             try:
@@ -2519,7 +2519,7 @@ struct QasmParser(Movable):
 
     def parse_c_and(mut self) raises -> CExpr:
         var a = self.parse_c_bor()
-        while self.is_punct(self.peek(), P.ANDAND):
+        while self.is_punct(self.peek(), Punct.ANDAND):
             var t = self.next()
             var b = self.parse_c_bor()
             try:
@@ -2530,35 +2530,35 @@ struct QasmParser(Movable):
 
     def parse_c_bor(mut self) raises -> CExpr:
         var a = self.parse_c_xor()
-        while self.is_punct(self.peek(), P.PIPE):
+        while self.is_punct(self.peek(), Punct.PIPE):
             var t = self.next()
-            a = self.rel(CN.OR, a, self.parse_c_xor(), t)
+            a = self.rel(CNodeOp.OR, a, self.parse_c_xor(), t)
         return a^
 
     def parse_c_xor(mut self) raises -> CExpr:
         var a = self.parse_c_band()
-        while self.is_punct(self.peek(), P.CARET):
+        while self.is_punct(self.peek(), Punct.CARET):
             var t = self.next()
-            a = self.rel(CN.XOR, a, self.parse_c_band(), t)
+            a = self.rel(CNodeOp.XOR, a, self.parse_c_band(), t)
         return a^
 
     def parse_c_band(mut self) raises -> CExpr:
         var a = self.parse_c_eq()
-        while self.is_punct(self.peek(), P.AMP):
+        while self.is_punct(self.peek(), Punct.AMP):
             var t = self.next()
-            a = self.rel(CN.AND, a, self.parse_c_eq(), t)
+            a = self.rel(CNodeOp.AND, a, self.parse_c_eq(), t)
         return a^
 
     def parse_c_eq(mut self) raises -> CExpr:
         var a = self.parse_c_rel()
         while True:
             var t = self.peek()
-            if self.is_punct(t, P.EQEQ):
+            if self.is_punct(t, Punct.EQEQ):
                 _ = self.next()
-                a = self.rel(CN.EQ, a, self.parse_c_rel(), t)
-            elif self.is_punct(t, P.NEQ):
+                a = self.rel(CNodeOp.EQ, a, self.parse_c_rel(), t)
+            elif self.is_punct(t, Punct.NEQ):
                 _ = self.next()
-                a = self.rel(CN.NE, a, self.parse_c_rel(), t)
+                a = self.rel(CNodeOp.NE, a, self.parse_c_rel(), t)
             else:
                 return a^
 
@@ -2567,10 +2567,10 @@ struct QasmParser(Movable):
         while True:
             var t = self.peek()
             var op = -1
-            if self.is_punct(t, P.LT): op = CN.LT
-            elif self.is_punct(t, P.LE): op = CN.LE
-            elif self.is_punct(t, P.GT): op = CN.GT
-            elif self.is_punct(t, P.GE): op = CN.GE
+            if self.is_punct(t, Punct.LT): op = CNodeOp.LT
+            elif self.is_punct(t, Punct.LE): op = CNodeOp.LE
+            elif self.is_punct(t, Punct.GT): op = CNodeOp.GT
+            elif self.is_punct(t, Punct.GE): op = CNodeOp.GE
             if op < 0:
                 return a^
             _ = self.next()
@@ -2580,12 +2580,12 @@ struct QasmParser(Movable):
         var a = self.parse_c_add()
         while True:
             var t = self.peek()
-            if self.is_punct(t, P.SHL):
+            if self.is_punct(t, Punct.SHL):
                 _ = self.next()
-                a = self.rel(CN.SHL, a, self.parse_c_add(), t)
-            elif self.is_punct(t, P.SHR):
+                a = self.rel(CNodeOp.SHL, a, self.parse_c_add(), t)
+            elif self.is_punct(t, Punct.SHR):
                 _ = self.next()
-                a = self.rel(CN.SHR, a, self.parse_c_add(), t)
+                a = self.rel(CNodeOp.SHR, a, self.parse_c_add(), t)
             else:
                 return a^
 
@@ -2593,12 +2593,12 @@ struct QasmParser(Movable):
         var a = self.parse_c_mul()
         while True:
             var t = self.peek()
-            if self.is_punct(t, P.PLUS):
+            if self.is_punct(t, Punct.PLUS):
                 _ = self.next()
-                a = self.rel(CN.ADD, a, self.parse_c_mul(), t)
-            elif self.is_punct(t, P.MINUS):
+                a = self.rel(CNodeOp.ADD, a, self.parse_c_mul(), t)
+            elif self.is_punct(t, Punct.MINUS):
                 _ = self.next()
-                a = self.rel(CN.SUB, a, self.parse_c_mul(), t)
+                a = self.rel(CNodeOp.SUB, a, self.parse_c_mul(), t)
             else:
                 return a^
 
@@ -2607,42 +2607,42 @@ struct QasmParser(Movable):
         while True:
             var t = self.peek()
             var op = -1
-            if self.is_punct(t, P.STAR): op = CN.MUL
-            elif self.is_punct(t, P.SLASH): op = CN.DIV
-            elif self.is_punct(t, P.PERCENT): op = CN.MOD
+            if self.is_punct(t, Punct.STAR): op = CNodeOp.MUL
+            elif self.is_punct(t, Punct.SLASH): op = CNodeOp.DIV
+            elif self.is_punct(t, Punct.PERCENT): op = CNodeOp.MOD
             if op < 0:
                 return a^
             _ = self.next()
             var b = self.parse_c_unary()
-            if op == CN.DIV and truncates(a, b):
+            if op == CNodeOp.DIV and truncates(a, b):
                 self.note_truncation(t)
             a = self.rel(op, a, b, t)
 
     def parse_c_unary(mut self) raises -> CExpr:
         var t = self.peek()
-        if self.is_punct(t, P.MINUS) or self.is_punct(t, P.PLUS) or self.is_punct(t, P.BANG) or self.is_punct(t, P.TILDE):
+        if self.is_punct(t, Punct.MINUS) or self.is_punct(t, Punct.PLUS) or self.is_punct(t, Punct.BANG) or self.is_punct(t, Punct.TILDE):
             _ = self.next()
             self.enter(t)
             try:
                 var v = self.parse_c_unary()
                 self.nest -= 1
-                if self.is_punct(t, P.MINUS):
+                if self.is_punct(t, Punct.MINUS):
                     return ce_neg(v)
-                if self.is_punct(t, P.BANG):
+                if self.is_punct(t, Punct.BANG):
                     return ce_lnot(v)
-                if self.is_punct(t, P.TILDE):
+                if self.is_punct(t, Punct.TILDE):
                     return ce_bnot(v)
                 return v^
             except e:
                 raise self.relocate(String(e), t)
         var a = self.parse_c_atom()
         var p = self.peek()
-        if self.is_punct(p, P.POW):
+        if self.is_punct(p, Punct.POW):
             _ = self.next()
             self.enter(p)
             var b = self.parse_c_unary()
             self.nest -= 1
-            return self.rel(CN.POW, a, b, p)
+            return self.rel(CNodeOp.POW, a, b, p)
         return a^
 
     def parse_c_literal(mut self, t: Token) raises -> CExpr:
@@ -2663,13 +2663,13 @@ struct QasmParser(Movable):
 
     def parse_c_atom(mut self) raises -> CExpr:
         var t = self.peek()
-        if t.kind == TK.INT:
+        if t.kind == TokenKind.INT:
             _ = self.next()
             return self.parse_c_literal(t)
-        if t.kind == TK.FLOAT:
+        if t.kind == TokenKind.FLOAT:
             _ = self.next()
             return CExpr.literal_float(t.num)
-        if t.kind == TK.STRING:
+        if t.kind == TokenKind.STRING:
             _ = self.next()
             var bs = self.src.as_bytes()
             var v = 0
@@ -2681,29 +2681,29 @@ struct QasmParser(Movable):
                     raise self.err("QM-E500", "a bit literal holds only 0 and 1", t, "write \"0101\"")
                 v = (v << 1) | (Int(bs[i]) - 0x30)
             return CExpr.typed_const(bit_type(n), v)
-        if self.is_punct(t, P.LPAREN):
+        if self.is_punct(t, Punct.LPAREN):
             _ = self.next()
             self.enter(t)
             var e = self.parse_cexpr()
             self.nest -= 1
-            _ = self.expect_punct(P.RPAREN, "')'")
+            _ = self.expect_punct(Punct.RPAREN, "')'")
             return e^
-        if t.kind != TK.IDENT:
+        if t.kind != TokenKind.IDENT:
             raise self.err("QM-E500", "expected an expression, found " + self.describe(t), t, "expressions read variables, bits, numbers and casts")
         var nm = self.text(t)
         var nx = self.peek(1)
-        if (nm == "int" or nm == "uint" or nm == "float" or nm == "angle" or nm == "bool" or nm == "bit") and (self.is_punct(nx, P.LPAREN) or self.is_punct(nx, P.LBRACK)):
+        if (nm == "int" or nm == "uint" or nm == "float" or nm == "angle" or nm == "bool" or nm == "bit") and (self.is_punct(nx, Punct.LPAREN) or self.is_punct(nx, Punct.LBRACK)):
             var ty = self.parse_ctype(True)
-            _ = self.expect_punct(P.LPAREN, "'(' after the type")
+            _ = self.expect_punct(Punct.LPAREN, "'(' after the type")
             self.enter(t)
             var e = self.parse_cexpr()
             self.nest -= 1
-            _ = self.expect_punct(P.RPAREN, "')'")
+            _ = self.expect_punct(Punct.RPAREN, "')'")
             try:
                 return ce_explicit_cast(e, ty)
             except err:
                 raise self.relocate(String(err), t)
-        if self.is_punct(nx, P.LPAREN):
+        if self.is_punct(nx, Punct.LPAREN):
             return self.parse_c_call(t)
         _ = self.next()
         if nm == "pi" or nm == "π":
@@ -2719,10 +2719,10 @@ struct QasmParser(Movable):
         var k = self.find_name(nm) if self.program_mode and self.depth == 0 else -1
         if k >= 0:
             ref e = self.names[k]
-            if e.kind == NK.VAR:
+            if e.kind == NameKind.VAR:
                 ref cv = self.prog.vars[e.index]
                 return CExpr.variable(cv.store, cv.ty)
-            if e.kind == NK.CONST:
+            if e.kind == NameKind.CONST:
                 return self.const_vals[e.index].copy()
             self.pos -= 1
             return self.parse_c_bits(t)
@@ -2769,7 +2769,7 @@ struct QasmParser(Movable):
     def param_expr(self, p: Param, t: Token) raises -> CExpr:
         """coeff * input + offset, which `affine` reads back as the same `Param`."""
         try:
-            return ce_binary(CN.ADD, ce_binary(CN.MUL, CExpr.input(p.index), CExpr.literal_float(p.coeff)), CExpr.literal_float(p.offset))
+            return ce_binary(CNodeOp.ADD, ce_binary(CNodeOp.MUL, CExpr.input(p.index), CExpr.literal_float(p.coeff)), CExpr.literal_float(p.offset))
         except e:
             raise self.relocate(String(e), t)
 
@@ -2783,35 +2783,35 @@ struct QasmParser(Movable):
     def parse_c_call(mut self, f: Token) raises -> CExpr:
         var nm = self.text(f)
         _ = self.next()
-        _ = self.expect_punct(P.LPAREN, "'('")
+        _ = self.expect_punct(Punct.LPAREN, "'('")
         self.enter(f)
         var args = List[CExpr]()
-        if not self.is_punct(self.peek(), P.RPAREN):
+        if not self.is_punct(self.peek(), Punct.RPAREN):
             args.append(self.parse_cexpr())
-            while self.is_punct(self.peek(), P.COMMA):
+            while self.is_punct(self.peek(), Punct.COMMA):
                 _ = self.next()
                 args.append(self.parse_cexpr())
         self.nest -= 1
-        _ = self.expect_punct(P.RPAREN, "')'")
+        _ = self.expect_punct(Punct.RPAREN, "')'")
         var func = -1
-        if nm == "sin": func = CF.SIN
-        elif nm == "cos": func = CF.COS
-        elif nm == "tan": func = CF.TAN
-        elif nm == "arcsin" or nm == "asin": func = CF.ASIN
-        elif nm == "arccos" or nm == "acos": func = CF.ACOS
-        elif nm == "arctan" or nm == "atan": func = CF.ATAN
-        elif nm == "exp": func = CF.EXP
-        elif nm == "ln" or nm == "log": func = CF.LOG
-        elif nm == "sqrt": func = CF.SQRT
-        elif nm == "abs": func = CF.ABS
-        elif nm == "floor": func = CF.FLOOR
-        elif nm == "ceil": func = CF.CEIL
-        elif nm == "popcount": func = CF.POPCOUNT
+        if nm == "sin": func = CFunc.SIN
+        elif nm == "cos": func = CFunc.COS
+        elif nm == "tan": func = CFunc.TAN
+        elif nm == "arcsin" or nm == "asin": func = CFunc.ASIN
+        elif nm == "arccos" or nm == "acos": func = CFunc.ACOS
+        elif nm == "arctan" or nm == "atan": func = CFunc.ATAN
+        elif nm == "exp": func = CFunc.EXP
+        elif nm == "ln" or nm == "log": func = CFunc.LOG
+        elif nm == "sqrt": func = CFunc.SQRT
+        elif nm == "abs": func = CFunc.ABS
+        elif nm == "floor": func = CFunc.FLOOR
+        elif nm == "ceil": func = CFunc.CEIL
+        elif nm == "popcount": func = CFunc.POPCOUNT
         try:
             if nm == "mod" and len(args) == 2:
-                return ce_function(CF.MOD, args[0], args[1].copy())
+                return ce_function(CFunc.MOD, args[0], args[1].copy())
             if nm == "pow" and len(args) == 2:
-                return ce_binary(CN.POW, args[0], args[1])
+                return ce_binary(CNodeOp.POW, args[0], args[1])
             if func >= 0 and len(args) == 1:
                 return ce_function(func, args[0])
         except e:
@@ -2826,8 +2826,8 @@ struct QasmParser(Movable):
         var nt = self.expect_ident("variable name")
         self.check_new_name(nt)
         var nm = self.text(nt)
-        if not self.is_punct(self.peek(), P.EQ):
-            _ = self.expect_punct(P.SEMI, "';'")
+        if not self.is_punct(self.peek(), Punct.EQ):
+            _ = self.expect_punct(Punct.SEMI, "';'")
             if is_const:
                 raise self.err("QM-E584", "a const needs a value", nt, "write 'const int x = 3;'")
             _ = self.declare_var(nm, ty, is_output)
@@ -2836,13 +2836,13 @@ struct QasmParser(Movable):
         if self.is_word(self.peek(), "measure"):
             raise self.err("QM-E504", "only bit registers take a measurement directly", self.peek(), "measure into a bit register, then assign")
         var e = self.parse_cexpr()
-        _ = self.expect_punct(P.SEMI, "';'")
-        if ty.tag == CT.FLOAT or ty.tag == CT.ANGLE:
+        _ = self.expect_punct(Punct.SEMI, "';'")
+        if ty.tag == CTypeKind.FLOAT or ty.tag == CTypeKind.ANGLE:
             self.warn_truncations()
         var value = self.cast_at(e, ty, eq)
         if value.is_const() and not is_output and (is_const or nm not in self.reassigned):
             if len(self.scope_marks) > 0:
-                self.names.append(_Name(nm, NK.CONST, len(self.const_vals)))
+                self.names.append(_Name(nm, NameKind.CONST, len(self.const_vals)))
                 self.const_vals.append(value^)
             else:
                 self.consts[nm] = Param(_const_radians(value))
@@ -2858,7 +2858,7 @@ struct QasmParser(Movable):
         var t = self.next()
         var v = self.find_var(self.text(t))
         var op = self.peek()
-        if not (self.is_punct(op, P.EQ) or self.is_punct(op, P.OPASSIGN)):
+        if not (self.is_punct(op, Punct.EQ) or self.is_punct(op, Punct.OPASSIGN)):
             raise self.err("QM-E500", "expected '=' after variable '" + self.text(t) + "', found " + self.describe(op), op, "write 'x = 1;'")
         _ = self.next()
         if self.is_word(self.peek(), "measure"):
@@ -2866,27 +2866,27 @@ struct QasmParser(Movable):
         var ty = self.prog.vars[v].ty
         var store = self.prog.vars[v].store
         var e = self.parse_cexpr()
-        _ = self.expect_punct(P.SEMI, "';'")
-        if ty.tag == CT.FLOAT or ty.tag == CT.ANGLE:
+        _ = self.expect_punct(Punct.SEMI, "';'")
+        if ty.tag == CTypeKind.FLOAT or ty.tag == CTypeKind.ANGLE:
             self.warn_truncations()
-        if self.is_punct(op, P.OPASSIGN):
+        if self.is_punct(op, Punct.OPASSIGN):
             e = self.compound(op, CExpr.variable(store, ty), e)
         self.tb.assign(v, self.add_expr(self.cast_at(e, ty, op)), self.ops_end(), t.line)
 
     def compound(mut self, op: Token, a: CExpr, b: CExpr) raises -> CExpr:
         """The value of `a op= b`."""
         var txt = self.text(op)
-        var code = CN.ADD
-        if txt == "-=": code = CN.SUB
-        elif txt == "*=": code = CN.MUL
-        elif txt == "/=": code = CN.DIV
-        elif txt == "%=": code = CN.MOD
-        elif txt == "**=": code = CN.POW
-        elif txt == "&=": code = CN.AND
-        elif txt == "|=": code = CN.OR
-        elif txt == "^=": code = CN.XOR
-        elif txt == "<<=": code = CN.SHL
-        elif txt == ">>=": code = CN.SHR
+        var code = CNodeOp.ADD
+        if txt == "-=": code = CNodeOp.SUB
+        elif txt == "*=": code = CNodeOp.MUL
+        elif txt == "/=": code = CNodeOp.DIV
+        elif txt == "%=": code = CNodeOp.MOD
+        elif txt == "**=": code = CNodeOp.POW
+        elif txt == "&=": code = CNodeOp.AND
+        elif txt == "|=": code = CNodeOp.OR
+        elif txt == "^=": code = CNodeOp.XOR
+        elif txt == "<<=": code = CNodeOp.SHL
+        elif txt == ">>=": code = CNodeOp.SHR
         return self.rel(code, a, b, op)
 
     def parse_bit_assign(mut self, ct: Token, cs: List[Int]) raises:
@@ -2896,8 +2896,8 @@ struct QasmParser(Movable):
             if cs[i] != cs[0] + i:
                 raise self.err("QM-E504", "an assignment writes consecutive ascending bits", ct, "assign the bits one by one")
         var e = self.parse_cexpr()
-        _ = self.expect_punct(P.SEMI, "';'")
-        if self.is_punct(op, P.OPASSIGN):
+        _ = self.expect_punct(Punct.SEMI, "';'")
+        if self.is_punct(op, Punct.OPASSIGN):
             e = self.compound(op, CExpr.bits(cs[0], len(cs)), e)
         self.assign_bits(cs[0], len(cs), self.text(ct), e, op)
 
@@ -2905,7 +2905,7 @@ struct QasmParser(Movable):
         var v = -1
         for i in range(len(self.prog.vars)):
             ref cv = self.prog.vars[i]
-            if cv.ty.tag == CT.BIT and cv.store == first and cv.ty.width == width:
+            if cv.ty.tag == CTypeKind.BIT and cv.store == first and cv.ty.width == width:
                 v = i
         if v < 0:
             v = self.prog.add_bit_var(nm + "[" + String(first) + "]", first, width)
@@ -2913,10 +2913,10 @@ struct QasmParser(Movable):
 
     def parse_if_region(mut self, it: Token) raises:
         self.forbid_in_gate(it)
-        _ = self.expect_punct(P.LPAREN, "'(' after if")
+        _ = self.expect_punct(Punct.LPAREN, "'(' after if")
         var e = self.parse_cexpr()
-        _ = self.expect_punct(P.RPAREN, "')' to close the condition")
-        self.tb.begin(SK.IF, self.add_expr(self.cast_at(e, bool_type(), it)), -1, self.ops_end(), it.line)
+        _ = self.expect_punct(Punct.RPAREN, "')' to close the condition")
+        self.tb.begin(StmtKind.IF, self.add_expr(self.cast_at(e, bool_type(), it)), -1, self.ops_end(), it.line)
         if self.pragma_if:
             self.pragma_if = False
             self.parse_pragma_body(it)
@@ -2930,10 +2930,10 @@ struct QasmParser(Movable):
 
     def parse_while(mut self) raises:
         var wt = self.next()
-        _ = self.expect_punct(P.LPAREN, "'(' after while")
+        _ = self.expect_punct(Punct.LPAREN, "'(' after while")
         var e = self.parse_cexpr()
-        _ = self.expect_punct(P.RPAREN, "')' to close the condition")
-        self.tb.begin(SK.WHILE, self.add_expr(self.cast_at(e, bool_type(), wt)), -1, self.ops_end(), wt.line)
+        _ = self.expect_punct(Punct.RPAREN, "')' to close the condition")
+        self.tb.begin(StmtKind.WHILE, self.add_expr(self.cast_at(e, bool_type(), wt)), -1, self.ops_end(), wt.line)
         self.parse_statement()
         self.tb.end(self.ops_end(), wt.line)
 
@@ -2955,9 +2955,9 @@ struct QasmParser(Movable):
                 continue
             if self.is_word(t, "switch"):
                 switch_depths.append(depth + 1)
-            elif self.is_punct(t, P.LBRACE):
+            elif self.is_punct(t, Punct.LBRACE):
                 depth += 1
-            elif self.is_punct(t, P.RBRACE):
+            elif self.is_punct(t, Punct.RBRACE):
                 if len(switch_depths) > 0 and switch_depths[len(switch_depths) - 1] == depth:
                     _ = switch_depths.pop()
                 depth -= 1
@@ -2979,9 +2979,9 @@ struct QasmParser(Movable):
         self.pos = save
         for i in range(save, stop):
             ref t = self.toks[i]
-            if t.kind == TK.IDENT and self.text(t) == "bit":
+            if t.kind == TokenKind.IDENT and self.text(t) == "bit":
                 ref before = self.toks[i - 1]
-                if i == save or before.kind != TK.PUNCT or before.sub == P.SEMI or before.sub == P.LBRACE or before.sub == P.RBRACE:
+                if i == save or before.kind != TokenKind.PUNCT or before.sub == Punct.SEMI or before.sub == Punct.LBRACE or before.sub == Punct.RBRACE:
                     return True
         return False
 
@@ -2993,7 +2993,7 @@ struct QasmParser(Movable):
         self.pos = save
         for i in range(save, stop):
             ref t = self.toks[i]
-            if t.kind == TK.IDENT and (self.is_punct(self.toks[i + 1], P.EQ) or self.is_punct(self.toks[i + 1], P.OPASSIGN)) and self.text(t) == nm:
+            if t.kind == TokenKind.IDENT and (self.is_punct(self.toks[i + 1], Punct.EQ) or self.is_punct(self.toks[i + 1], Punct.OPASSIGN)) and self.text(t) == nm:
                 return True
         return False
 
@@ -3008,27 +3008,27 @@ struct QasmParser(Movable):
         var fits = True
         var empty = False
         try:
-            if self.is_punct(r, P.LBRACK):
+            if self.is_punct(r, Punct.LBRACK):
                 _ = self.next()
                 var a = self.parse_const_int("range start")
-                _ = self.expect_punct(P.COLON, "':' in range")
+                _ = self.expect_punct(Punct.COLON, "':' in range")
                 var b = self.parse_const_int("range bound")
                 var step = 1
-                if self.is_punct(self.peek(), P.COLON):
+                if self.is_punct(self.peek(), Punct.COLON):
                     _ = self.next()
                     step = b
                     b = self.parse_const_int("range stop")
-                _ = self.expect_punct(P.RBRACK, "']'")
+                _ = self.expect_punct(Punct.RBRACK, "']'")
                 # empty ranges fit; otherwise the two ends bound every value
                 if step != 0 and ((step > 0 and a <= b) or (step < 0 and a >= b)):
                     fits = _value_fits(a, ty) and _value_fits(b, ty)
                 else:
                     empty = True
-            elif self.is_punct(r, P.LBRACE):
+            elif self.is_punct(r, Punct.LBRACE):
                 _ = self.next()
                 while True:
                     fits = _value_fits(self.parse_const_int("set element"), ty) and fits
-                    if not self.is_punct(self.peek(), P.COMMA):
+                    if not self.is_punct(self.peek(), Punct.COMMA):
                         break
                     _ = self.next()
             self.pos = save
@@ -3046,10 +3046,10 @@ struct QasmParser(Movable):
 
     def skip_iterable(mut self) raises:
         var r = self.peek()
-        if self.is_punct(r, P.LBRACK):
-            self.skip_balanced(P.LBRACK, P.RBRACK, r)
-        elif self.is_punct(r, P.LBRACE):
-            self.skip_balanced(P.LBRACE, P.RBRACE, r)
+        if self.is_punct(r, Punct.LBRACK):
+            self.skip_balanced(Punct.LBRACK, Punct.RBRACK, r)
+        elif self.is_punct(r, Punct.LBRACE):
+            self.skip_balanced(Punct.LBRACE, Punct.RBRACE, r)
         else:
             raise self.err("QM-E570", "for loops need a range [a:b] or set {a, b}", r, "write 'for uint i in [0:3] { ... }' (ranges are inclusive)")
 
@@ -3062,33 +3062,33 @@ struct QasmParser(Movable):
         var stops = -1
         var set_off = -1
         var unsigned_ = 0
-        if self.is_punct(rt, P.LBRACK):
+        if self.is_punct(rt, Punct.LBRACK):
             _ = self.next()
             var a = self.parse_cexpr()
-            _ = self.expect_punct(P.COLON, "':' in range", "write [start:stop] or [start:step:stop] (inclusive)")
+            _ = self.expect_punct(Punct.COLON, "':' in range", "write [start:stop] or [start:step:stop] (inclusive)")
             var b = self.parse_cexpr()
             var step = CExpr.literal_int(1)
             var has_step = False
-            if self.is_punct(self.peek(), P.COLON):
+            if self.is_punct(self.peek(), Punct.COLON):
                 _ = self.next()
                 step = b^
                 b = self.parse_cexpr()
                 has_step = True
-            _ = self.expect_punct(P.RBRACK, "']' to close the range")
+            _ = self.expect_punct(Punct.RBRACK, "']' to close the range")
             a = _integral_bound(a)  # 0.0 unrolls as 0, so it counts here too
             b = _integral_bound(b)
             step = _integral_bound(step)
-            if step.ty().tag == CT.FLOAT:
+            if step.ty().tag == CTypeKind.FLOAT:
                 raise self.err("QM-E570", "range step must be an integer, got " + type_name(step.ty()), rt, "write [0:2:10]")
-            if a.ty().tag == CT.FLOAT or b.ty().tag == CT.FLOAT:
-                raise self.err("QM-E570", "range " + ("start" if a.ty().tag == CT.FLOAT else "stop") + " must be an integer, got a float", rt, "write [0:3], or cast the bound with int(x)")
+            if a.ty().tag == CTypeKind.FLOAT or b.ty().tag == CTypeKind.FLOAT:
+                raise self.err("QM-E570", "range " + ("start" if a.ty().tag == CTypeKind.FLOAT else "stop") + " must be an integer, got a float", rt, "write [0:3], or cast the bound with int(x)")
             _ = has_step
             if step.is_const() and step.const_int() == 0:
                 raise self.err("QM-E570", "range step must be non-zero", rt, "write [0:2:10]")
-            unsigned_ = FORR.BOUNDS_UNSIGNED if never_negative(a) and never_negative(b) else 0
-            unsigned_ |= self.uint_flag(step, FORR.STEP_UINT, rt)
-            if unsigned_ & FORR.BOUNDS_UNSIGNED == 0:
-                unsigned_ |= self.uint_flag(a, FORR.START_UINT, rt) | self.uint_flag(b, FORR.STOP_UINT, rt)
+            unsigned_ = ForRangeField.BOUNDS_UNSIGNED if never_negative(a) and never_negative(b) else 0
+            unsigned_ |= self.uint_flag(step, ForRangeField.STEP_UINT, rt)
+            if unsigned_ & ForRangeField.BOUNDS_UNSIGNED == 0:
+                unsigned_ |= self.uint_flag(a, ForRangeField.START_UINT, rt) | self.uint_flag(b, ForRangeField.STOP_UINT, rt)
             starts = self.add_expr(self.cast_at(a, i64, rt))
             steps = self.add_expr(self.cast_at(step, i64, rt))
             stops = self.add_expr(self.cast_at(b, i64, rt))
@@ -3096,10 +3096,10 @@ struct QasmParser(Movable):
             _ = self.next()
             var vals = List[Int]()
             vals.append(self.parse_exact_int("set element", ty))
-            while self.is_punct(self.peek(), P.COMMA):
+            while self.is_punct(self.peek(), Punct.COMMA):
                 _ = self.next()
                 vals.append(self.parse_exact_int("set element", ty))
-            _ = self.expect_punct(P.RBRACE, "'}' to close the set")
+            _ = self.expect_punct(Punct.RBRACE, "'}' to close the set")
             set_off = len(self.prog.case_vals)
             self.prog.case_vals.append(len(vals))
             for v in vals:
@@ -3113,8 +3113,8 @@ struct QasmParser(Movable):
         self.prog.for_ranges.append(unsigned_)
         self.push_scope()
         var v = self.declare_var(self.text(vt), ty, False)
-        self.tb.begin(SK.FOR, v, off, self.ops_end(), vt.line)
-        self.loop_names.append(_LoopName(self.text(vt), self.block_depth + (1 if self.is_punct(self.peek(), P.LBRACE) else 0)))
+        self.tb.begin(StmtKind.FOR, v, off, self.ops_end(), vt.line)
+        self.loop_names.append(_LoopName(self.text(vt), self.block_depth + (1 if self.is_punct(self.peek(), Punct.LBRACE) else 0)))
         self.parse_statement()
         _ = self.loop_names.pop()
         self.tb.end(self.ops_end(), vt.line)
@@ -3122,19 +3122,19 @@ struct QasmParser(Movable):
 
     def parse_switch_region(mut self, st: Token) raises:
         self.forbid_in_gate(st)
-        _ = self.expect_punct(P.LPAREN, "'(' after switch")
+        _ = self.expect_punct(Punct.LPAREN, "'(' after switch")
         var e = self.parse_cexpr()
-        _ = self.expect_punct(P.RPAREN, "')'")
-        if e.ty().tag == CT.FLOAT:
+        _ = self.expect_punct(Punct.RPAREN, "')'")
+        if e.ty().tag == CTypeKind.FLOAT:
             raise self.err("QM-E580", "switch takes an integer or bits, not a float", st, "cast the target: switch (int(x))")
         var unsigned_target = not e.ty().is_signed()
-        self.tb.begin(SK.SWITCH, self.add_expr(self.cast_at(e, int_type(64), st)), -1, self.ops_end(), st.line)
-        var lb = self.expect_punct(P.LBRACE, "'{' to open the switch")
+        self.tb.begin(StmtKind.SWITCH, self.add_expr(self.cast_at(e, int_type(64), st)), -1, self.ops_end(), st.line)
+        var lb = self.expect_punct(Punct.LBRACE, "'{' to open the switch")
         var seen = List[Int]()
         var has_default = False
-        while not self.is_punct(self.peek(), P.RBRACE):
+        while not self.is_punct(self.peek(), Punct.RBRACE):
             var c = self.peek()
-            if c.kind == TK.EOF:
+            if c.kind == TokenKind.EOF:
                 raise self.err("QM-E500", "missing '}' to close the switch", lb, "every '{' needs a matching '}'")
             var vs = List[Int]()
             var is_default = False
@@ -3146,15 +3146,15 @@ struct QasmParser(Movable):
                 else:
                     _ = self.next()
                     self.parse_case_value(vs, unsigned_target)
-                    while self.is_punct(self.peek(), P.COMMA):
+                    while self.is_punct(self.peek(), Punct.COMMA):
                         _ = self.next()
                         self.parse_case_value(vs, unsigned_target)
                     has_label = True
-                if self.is_punct(self.peek(), P.COLON):
+                if self.is_punct(self.peek(), Punct.COLON):
                     _ = self.next()
             if not has_label and not is_default:
                 raise self.err("QM-E500", "expected 'case' or 'default', found " + self.describe(c), c, "write 'case 0 { ... }' or 'default { ... }'")
-            if not self.is_punct(self.peek(), P.LBRACE):
+            if not self.is_punct(self.peek(), Punct.LBRACE):
                 raise self.err("QM-E500", "expected '{' to open the case, found " + self.describe(self.peek()), self.peek(), "write 'case 0 { ... }'")
             for v in vs:
                 for u in seen:
@@ -3174,7 +3174,7 @@ struct QasmParser(Movable):
             self.parse_statement()
             if self.is_word(self.peek(), "break"):
                 _ = self.next()
-                _ = self.expect_punct(P.SEMI, "';'")
+                _ = self.expect_punct(Punct.SEMI, "';'")
         _ = self.next()
         self.tb.end(self.ops_end(), st.line)
 
@@ -3183,16 +3183,16 @@ struct QasmParser(Movable):
         by its bits at or above 2^63)."""
         var t = self.peek()
         var e = self.parse_cexpr()
-        if not e.is_const() or e.ty().tag == CT.FLOAT or e.ty().tag == CT.ANGLE:
+        if not e.is_const() or e.ty().tag == CTypeKind.FLOAT or e.ty().tag == CTypeKind.ANGLE:
             raise self.err("QM-E584", what + " must be a constant integer", t, "use an integer literal or a const")
-        if e.ty().tag == CT.UINT and e.const_int() < 0 and ty.tag == CT.INT:
+        if e.ty().tag == CTypeKind.UINT and e.const_int() < 0 and ty.tag == CTypeKind.INT:
             raise self.err("QM-E580", what + " does not fit a 64-bit int", t, "count in a uint")
         return e.const_int()
 
     def uint_flag(self, e: CExpr, flag: Int, t: Token) raises -> Int:
         """`flag` when `e` is a uint that a run has to look at, which a constant at or
         above 2^63 already fails, as it does in a flat range."""
-        if e.ty().tag != CT.UINT or e.ty().width < 64:
+        if e.ty().tag != CTypeKind.UINT or e.ty().width < 64:
             return 0
         if e.is_const():
             if e.const_int() < 0:
@@ -3205,10 +3205,10 @@ struct QasmParser(Movable):
         match by accident of its bits (-1 is not 2^64 - 1), so it is refused."""
         var t = self.peek()
         var e = self.parse_cexpr()
-        if not e.is_const() or e.ty().tag == CT.FLOAT or e.ty().tag == CT.ANGLE:
+        if not e.is_const() or e.ty().tag == CTypeKind.FLOAT or e.ty().tag == CTypeKind.ANGLE:
             raise self.err("QM-E584", "case value must be a constant integer", t, "use an integer literal or a const")
         var v = e.const_int()
-        if (unsigned_target and e.ty().is_signed() and v < 0) or (not unsigned_target and e.ty().tag == CT.UINT and v < 0):
+        if (unsigned_target and e.ty().is_signed() and v < 0) or (not unsigned_target and e.ty().tag == CTypeKind.UINT and v < 0):
             raise self.err("QM-E580", "this case value has the wrong sign for the switch target, so it can never match", t, "drop the case, or cast the target")
         vs.append(v)
 
@@ -3226,7 +3226,7 @@ struct QasmParser(Movable):
 
     def var_of_store(self, store: Int) -> Int:
         for i in range(len(self.prog.vars)):
-            if self.prog.vars[i].store == store and self.prog.vars[i].ty.tag != CT.BIT:
+            if self.prog.vars[i].store == store and self.prog.vars[i].ty.tag != CTypeKind.BIT:
                 return i
         return -1
 
@@ -3239,38 +3239,38 @@ struct QasmParser(Movable):
         index = -1
         coeff = 0.0
         offset = 0.0
-        if g.op == CN.CONST:
-            if g.ty.tag != CT.FLOAT:
+        if g.op == CNodeOp.CONST:
+            if g.ty.tag != CTypeKind.FLOAT:
                 return False
             offset = g.f
             return True
-        if g.op == CN.INPUT:
+        if g.op == CNodeOp.INPUT:
             kind = 2
             index = g.x
             coeff = 1.0
             return True
-        if g.op == CN.VAR:
-            if g.ty.tag != CT.FLOAT:
+        if g.op == CNodeOp.VAR:
+            if g.ty.tag != CTypeKind.FLOAT:
                 return False
             kind = 1
             index = g.x
             coeff = 1.0
             return True
-        if g.op == CN.CAST and g.ty.tag == CT.FLOAT:
+        if g.op == CNodeOp.CAST and g.ty.tag == CTypeKind.FLOAT:
             var src = e.nodes[g.x]
-            if src.op == CN.VAR and (src.ty.tag == CT.INT or src.ty.tag == CT.UINT):
+            if src.op == CNodeOp.VAR and (src.ty.tag == CTypeKind.INT or src.ty.tag == CTypeKind.UINT):
                 kind = 1
                 index = src.x
                 coeff = 1.0
                 return True
             return False
-        if g.op == CN.NEG:
+        if g.op == CNodeOp.NEG:
             if not self.affine(e, g.x, kind, index, coeff, offset):
                 return False
             coeff = -coeff
             offset = -offset
             return True
-        if g.op == CN.ADD or g.op == CN.SUB or g.op == CN.MUL or g.op == CN.DIV:
+        if g.op == CNodeOp.ADD or g.op == CNodeOp.SUB or g.op == CNodeOp.MUL or g.op == CNodeOp.DIV:
             var k1 = 0
             var i1 = -1
             var c1 = 0.0
@@ -3279,18 +3279,18 @@ struct QasmParser(Movable):
             var i2 = -1
             var c2 = 0.0
             var o2 = 0.0
-            if g.ty.tag != CT.FLOAT or not self.affine(e, g.x, k1, i1, c1, o1) or not self.affine(e, g.y, k2, i2, c2, o2):
+            if g.ty.tag != CTypeKind.FLOAT or not self.affine(e, g.x, k1, i1, c1, o1) or not self.affine(e, g.y, k2, i2, c2, o2):
                 return False
-            if g.op == CN.ADD or g.op == CN.SUB:
+            if g.op == CNodeOp.ADD or g.op == CNodeOp.SUB:
                 if k1 != 0 and k2 != 0 and (k1 != k2 or i1 != i2):
                     return False
-                var sg = 1.0 if g.op == CN.ADD else -1.0
+                var sg = 1.0 if g.op == CNodeOp.ADD else -1.0
                 kind = k1 if k1 != 0 else k2
                 index = i1 if k1 != 0 else i2
                 coeff = c1 + sg * c2
                 offset = o1 + sg * o2
                 return True
-            if g.op == CN.MUL:
+            if g.op == CNodeOp.MUL:
                 if k1 != 0 and k2 != 0:
                     return False
                 kind = k1 if k1 != 0 else k2
@@ -3320,29 +3320,29 @@ struct QasmParser(Movable):
         var i = self.pos
         while i < len(self.toks):
             ref t = self.toks[i]
-            if t.kind == TK.EOF:
+            if t.kind == TokenKind.EOF:
                 return False
-            if t.kind == TK.PUNCT:
-                if t.sub == P.LPAREN:
+            if t.kind == TokenKind.PUNCT:
+                if t.sub == Punct.LPAREN:
                     open += 1
-                elif t.sub == P.RPAREN:
+                elif t.sub == Punct.RPAREN:
                     if open == 0:
                         return False
                     open -= 1
-                elif t.sub == P.LBRACK:
+                elif t.sub == Punct.LBRACK:
                     square += 1
-                elif t.sub == P.RBRACK and square > 0:
+                elif t.sub == Punct.RBRACK and square > 0:
                     square -= 1
-                elif open == 0 and square == 0 and (t.sub == P.COMMA or t.sub == P.RBRACK or t.sub == P.COLON or t.sub == P.SEMI or t.sub == P.LBRACE or t.sub == P.RBRACE or t.sub == P.ANDAND or t.sub == P.OROR):
+                elif open == 0 and square == 0 and (t.sub == Punct.COMMA or t.sub == Punct.RBRACK or t.sub == Punct.COLON or t.sub == Punct.SEMI or t.sub == Punct.LBRACE or t.sub == Punct.RBRACE or t.sub == Punct.ANDAND or t.sub == Punct.OROR):
                     return False
-            elif t.kind == TK.IDENT:
+            elif t.kind == TokenKind.IDENT:
                 var nm = self.text(t)
-                if (nm == "int" or nm == "uint" or nm == "float" or nm == "angle" or nm == "bit") and self.is_punct(self.toks[i + 1], P.LBRACK):
+                if (nm == "int" or nm == "uint" or nm == "float" or nm == "angle" or nm == "bit") and self.is_punct(self.toks[i + 1], Punct.LBRACK):
                     return True  # a sized cast: only the classical table reads it
                 if self.program_mode and self.depth == 0:
                     var k = self.find_name(nm)
                     if k >= 0:
-                        if self.names[k].kind == NK.CONST:
+                        if self.names[k].kind == NameKind.CONST:
                             return True
                         i += 1
                         continue
@@ -3402,7 +3402,7 @@ struct QasmParser(Movable):
             var nest = self.nest
             try:
                 var value = self.parse_expr()
-                if self.is_punct(self.peek(), P.COMMA) or self.is_punct(self.peek(), P.RPAREN):
+                if self.is_punct(self.peek(), Punct.COMMA) or self.is_punct(self.peek(), Punct.RPAREN):
                     self.note_real_division(begin, t, value)
                     return value
             except:
@@ -3415,22 +3415,22 @@ struct QasmParser(Movable):
             self.check_finite_constant(radians, t)
             return Param(radians)
         var ty = e.ty()
-        if ty.tag == CT.ANGLE and self.program_mode and not in_body:
+        if ty.tag == CTypeKind.ANGLE and self.program_mode and not in_body:
             var root = e.root()
-            if root.op == CN.VAR:
+            if root.op == CNodeOp.VAR:
                 return Param.symbol(self.slot_for(self.var_of_store(root.x)))
             var a = self.temp_var(ty)
             self.tb.assign(a, self.add_expr(e), self.ops_end(), t.line)
             return Param.symbol(self.slot_for(a))
-        if ty.tag != CT.FLOAT and ty.tag != CT.ANGLE:
-            if ty.tag == CT.BIT or ty.tag == CT.BOOL:
+        if ty.tag != CTypeKind.FLOAT and ty.tag != CTypeKind.ANGLE:
+            if ty.tag == CTypeKind.BIT or ty.tag == CTypeKind.BOOL:
                 e = self.cast_at(e, uint_type(ty.width), t)
             e = self.cast_at(e, float_type(), t)
         var kind = 0
         var index = -1
         var coeff = 0.0
         var offset = 0.0
-        if ty.tag != CT.ANGLE and self.affine(e, len(e.nodes) - 1, kind, index, coeff, offset):
+        if ty.tag != CTypeKind.ANGLE and self.affine(e, len(e.nodes) - 1, kind, index, coeff, offset):
             if kind == 0:
                 return Param(offset)
             if kind == 2:
@@ -3482,30 +3482,30 @@ def _is_whole(p: Param) -> Bool:
 
 def _const_radians(e: CExpr) -> Float64:
     """A constant as parse_expr and gates read it: an angle in radians."""
-    if e.ty().tag == CT.ANGLE:
+    if e.ty().tag == CTypeKind.ANGLE:
         return angle_radians(e.const_int(), e.ty().width)
     return e.const_float()
 
 
 def _integral_bound(e: CExpr) -> CExpr:
     """A constant float range value with no fraction, as an integer."""
-    if e.is_const() and e.ty().tag == CT.FLOAT and e.root().f == floor(e.root().f) and abs(e.root().f) < 9007199254740992.0:
+    if e.is_const() and e.ty().tag == CTypeKind.FLOAT and e.root().f == floor(e.root().f) and abs(e.root().f) < 9007199254740992.0:
         return CExpr.literal_int(Int(e.root().f))
     return e.copy()
 
 
 def _value_fits(v: Int, ty: CType) -> Bool:
     """The int64 `v` is representable in the loop type `ty`."""
-    if ty.tag == CT.FLOAT or ty.width >= 64 and ty.tag == CT.INT:
+    if ty.tag == CTypeKind.FLOAT or ty.width >= 64 and ty.tag == CTypeKind.INT:
         return True
-    if ty.tag == CT.INT:
+    if ty.tag == CTypeKind.INT:
         return v >= -(1 << (ty.width - 1)) and v < (1 << (ty.width - 1))
     return v >= 0 and (ty.width >= 63 or v < (1 << ty.width))
 
 
 def _loop_value(v: Int, ty: CType) -> CExpr:
     """What a loop variable of type `ty` holds on the pass with value `v`."""
-    if ty.tag == CT.FLOAT:
+    if ty.tag == CTypeKind.FLOAT:
         return CExpr.typed_const(ty, 0, Float64(v))
     return CExpr.typed_const(ty, v)
 

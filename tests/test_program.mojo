@@ -6,11 +6,11 @@ from std.testing import assert_equal, assert_true, assert_raises, assert_almost_
 from qumo.ir.circuit import Circuit
 from qumo.ir.qasm import parse_qasm
 from qumo.ir.classical import (
-    CExpr, CN, CF, CT, CStore, CEval, NoBits, eval_nodes, int_type, uint_type, bit_type, bool_type, float_type,
+    CExpr, CNodeOp, CFunc, CTypeKind, CStore, CEval, NoBits, eval_nodes, int_type, uint_type, bit_type, bool_type, float_type,
     angle_type, ce_binary, ce_cast, ce_bool, ce_lnot, ce_bnot, ce_neg, ce_logical, ce_function, wrap_int,
     angle_radians, can_cast, type_name,
 )
-from qumo.ir.program import Program, ProgramBuilder, SK, TERM, cfg_of, check_program
+from qumo.ir.program import Program, ProgramBuilder, StmtKind, TermKind, cfg_of, check_program
 from qumo.sim.runner import sample
 from qumo.sim.program_runner import sample_program, sample_interpreted
 
@@ -48,19 +48,19 @@ def test_wrapping() raises:
     var b = ProgramBuilder(0)
     var k = b.declare("k", uint_type(4), True)
     b.assign(k, _lit(15))
-    b.assign(k, ce_binary(CN.ADD, b.read(k), _lit(1)))
+    b.assign(k, ce_binary(CNodeOp.ADD, b.read(k), _lit(1)))
     assert_equal(_run_one(b, "k"), 0)
     # int[3]: 3 + 1 wraps to -4
     var b2 = ProgramBuilder(0)
     var i = b2.declare("i", int_type(3), True)
     b2.assign(i, _lit(3))
-    b2.assign(i, ce_binary(CN.ADD, b2.read(i), _lit(1)))
+    b2.assign(i, ce_binary(CNodeOp.ADD, b2.read(i), _lit(1)))
     assert_equal(_run_one(b2, "i"), -4)
     # int[64] and uint[64] wrap at 2^64
     var b3 = ProgramBuilder(0)
     var u = b3.declare("u", uint_type(64), True)
     b3.assign(u, _lit(0))
-    b3.assign(u, ce_binary(CN.SUB, b3.read(u), _lit(1)))
+    b3.assign(u, ce_binary(CNodeOp.SUB, b3.read(u), _lit(1)))
     assert_equal(_run_one(b3, "u"), -1)  # the bits of 2^64 - 1
 
 
@@ -68,30 +68,30 @@ def test_division() raises:
     var i32 = int_type(32)
     var seven = CExpr.typed_const(i32, 7)
     var minus = CExpr.typed_const(i32, -7)
-    assert_equal(_ti(ce_binary(CN.DIV, seven, _lit(2))), 3)
-    assert_equal(_ti(ce_binary(CN.DIV, minus, _lit(2))), -3)
-    assert_equal(_ti(ce_binary(CN.DIV, seven, _lit(-2))), -3)
-    assert_equal(_ti(ce_binary(CN.MOD, minus, _lit(3))), -1)
-    assert_equal(_ti(ce_binary(CN.MOD, seven, _lit(-3))), 1)
+    assert_equal(_ti(ce_binary(CNodeOp.DIV, seven, _lit(2))), 3)
+    assert_equal(_ti(ce_binary(CNodeOp.DIV, minus, _lit(2))), -3)
+    assert_equal(_ti(ce_binary(CNodeOp.DIV, seven, _lit(-2))), -3)
+    assert_equal(_ti(ce_binary(CNodeOp.MOD, minus, _lit(3))), -1)
+    assert_equal(_ti(ce_binary(CNodeOp.MOD, seven, _lit(-3))), 1)
     # two literals follow the same rule: folding equals what the run would compute
-    assert_equal(_ti(ce_binary(CN.DIV, _lit(1), _lit(2))), 0)
-    assert_equal(_ti(ce_binary(CN.DIV, _lit(6), _lit(2))), 3)
-    assert_equal(_ti(ce_binary(CN.MOD, _lit(-7), _lit(3))), -1)
+    assert_equal(_ti(ce_binary(CNodeOp.DIV, _lit(1), _lit(2))), 0)
+    assert_equal(_ti(ce_binary(CNodeOp.DIV, _lit(6), _lit(2))), 3)
+    assert_equal(_ti(ce_binary(CNodeOp.MOD, _lit(-7), _lit(3))), -1)
     with assert_raises(contains="QM-E533"):
-        _ = ce_binary(CN.DIV, _lit(1), _lit(0))
+        _ = ce_binary(CNodeOp.DIV, _lit(1), _lit(0))
     with assert_raises(contains="QM-E533"):
-        _ = ce_binary(CN.MOD, _lit(1), _lit(0))
+        _ = ce_binary(CNodeOp.MOD, _lit(1), _lit(0))
     # INT64_MIN / -1 wraps instead of trapping
     var minv = -9223372036854775807 - 1
-    assert_equal(_ti(ce_binary(CN.DIV, CExpr.typed_const(int_type(64), minv), CExpr.typed_const(int_type(64), -1))), minv)
+    assert_equal(_ti(ce_binary(CNodeOp.DIV, CExpr.typed_const(int_type(64), minv), CExpr.typed_const(int_type(64), -1))), minv)
     # uint[64] above 2^63 divides as unsigned
-    assert_equal(_ti(ce_binary(CN.DIV, CExpr.typed_const(uint_type(64), -2), CExpr.typed_const(uint_type(64), 2))), (1 << 63) - 1)
+    assert_equal(_ti(ce_binary(CNodeOp.DIV, CExpr.typed_const(uint_type(64), -2), CExpr.typed_const(uint_type(64), 2))), (1 << 63) - 1)
     # a run-time zero reports QM-E481 with the shot
     var b = ProgramBuilder(0)
     var x = b.declare("x", int_type(32), True)
     var y = b.declare("y", int_type(32))
     b.assign(y, _lit(0))
-    b.assign(x, ce_binary(CN.DIV, _lit(1), b.read(y)))
+    b.assign(x, ce_binary(CNodeOp.DIV, _lit(1), b.read(y)))
     var p = b.finish()
     with assert_raises(contains="QM-E481"):
         _ = sample_program(p, 1, 1)
@@ -99,40 +99,40 @@ def test_division() raises:
 
 def test_shifts_and_bits() raises:
     var w = uint_type(8)
-    assert_equal(_ti(ce_binary(CN.SHL, CExpr.typed_const(w, 0x81), _lit(1))), 2)
-    assert_equal(_ti(ce_binary(CN.SHR, CExpr.typed_const(w, 0x81), _lit(1))), 0x40)
-    assert_equal(_ti(ce_binary(CN.SHL, CExpr.typed_const(w, 1), _lit(8))), 0)
-    assert_equal(_ti(ce_binary(CN.SHR, CExpr.typed_const(w, 0xFF), _lit(9))), 0)
-    assert_equal(_ti(ce_binary(CN.SHL, CExpr.typed_const(uint_type(64), 1), _lit(64))), 0)
-    assert_equal(_ti(ce_binary(CN.SHR, CExpr.typed_const(uint_type(64), -1), _lit(63))), 1)
+    assert_equal(_ti(ce_binary(CNodeOp.SHL, CExpr.typed_const(w, 0x81), _lit(1))), 2)
+    assert_equal(_ti(ce_binary(CNodeOp.SHR, CExpr.typed_const(w, 0x81), _lit(1))), 0x40)
+    assert_equal(_ti(ce_binary(CNodeOp.SHL, CExpr.typed_const(w, 1), _lit(8))), 0)
+    assert_equal(_ti(ce_binary(CNodeOp.SHR, CExpr.typed_const(w, 0xFF), _lit(9))), 0)
+    assert_equal(_ti(ce_binary(CNodeOp.SHL, CExpr.typed_const(uint_type(64), 1), _lit(64))), 0)
+    assert_equal(_ti(ce_binary(CNodeOp.SHR, CExpr.typed_const(uint_type(64), -1), _lit(63))), 1)
     with assert_raises(contains="QM-E580"):
-        _ = ce_binary(CN.SHL, CExpr.typed_const(int_type(8), 1), _lit(1))
+        _ = ce_binary(CNodeOp.SHL, CExpr.typed_const(int_type(8), 1), _lit(1))
     assert_equal(_ti(ce_bnot(CExpr.typed_const(w, 0x0F))), 0xF0)
-    assert_equal(_ti(ce_binary(CN.XOR, CExpr.typed_const(w, 0xF0), CExpr.typed_const(w, 0xFF))), 0x0F)
+    assert_equal(_ti(ce_binary(CNodeOp.XOR, CExpr.typed_const(w, 0xF0), CExpr.typed_const(w, 0xFF))), 0x0F)
     with assert_raises(contains="QM-E580"):
-        _ = ce_binary(CN.AND, CExpr.typed_const(int_type(8), 1), CExpr.typed_const(int_type(8), 1))
+        _ = ce_binary(CNodeOp.AND, CExpr.typed_const(int_type(8), 1), CExpr.typed_const(int_type(8), 1))
 
 
 def test_mixing_rules() raises:
     var a = CExpr.variable(0, int_type(8))
     var u = CExpr.variable(1, uint_type(8))
     with assert_raises(contains="QM-E580"):
-        _ = ce_binary(CN.ADD, a, u)
+        _ = ce_binary(CNodeOp.ADD, a, u)
     with assert_raises(contains="QM-E580"):
-        _ = ce_binary(CN.LT, a, u)
+        _ = ce_binary(CNodeOp.LT, a, u)
     # literals adapt to the other side
-    assert_equal(ce_binary(CN.ADD, u, _lit(3)).ty().tag, CT.UINT)
-    assert_equal(ce_binary(CN.ADD, a, _lit(-3)).ty().tag, CT.INT)
+    assert_equal(ce_binary(CNodeOp.ADD, u, _lit(3)).ty().tag, CTypeKind.UINT)
+    assert_equal(ce_binary(CNodeOp.ADD, a, _lit(-3)).ty().tag, CTypeKind.INT)
     # a negative literal never adapts to uint
     with assert_raises(contains="QM-E580"):
-        _ = ce_binary(CN.ADD, u, _lit(-3))
+        _ = ce_binary(CNodeOp.ADD, u, _lit(-3))
     # a literal too wide for the operand widens it: uint[4] k < 100 stays exact
     var k = CExpr.variable(0, uint_type(4))
-    var cmp = ce_binary(CN.LT, k, _lit(100))
+    var cmp = ce_binary(CNodeOp.LT, k, _lit(100))
     assert_equal(cmp.nodes[0].ty.width, 4)
     assert_equal(cmp.nodes[1].ty.width, 7)
     # bit registers read as unsigned
-    assert_equal(ce_binary(CN.EQ, CExpr.bits(0, 3), _lit(5)).ty().tag, CT.BOOL)
+    assert_equal(ce_binary(CNodeOp.EQ, CExpr.bits(0, 3), _lit(5)).ty().tag, CTypeKind.BOOL)
 
 
 def test_casts() raises:
@@ -182,44 +182,44 @@ def test_short_circuit() raises:
     var y = b.declare("y", int_type(32))
     var r = b.declare("r", bool_type(), True)
     b.assign(y, _lit(0))
-    var e = ce_logical(True, ce_binary(CN.NE, b.read(y), _lit(0)), ce_binary(CN.GT, ce_binary(CN.DIV, _lit(1), b.read(y)), _lit(0)))
+    var e = ce_logical(True, ce_binary(CNodeOp.NE, b.read(y), _lit(0)), ce_binary(CNodeOp.GT, ce_binary(CNodeOp.DIV, _lit(1), b.read(y)), _lit(0)))
     b.assign(r, e)
     assert_equal(_run_one(b, "r"), 0)
     var c = ProgramBuilder(0)
     var y2 = c.declare("y", int_type(32))
     var r2 = c.declare("r", bool_type(), True)
     c.assign(y2, _lit(0))
-    var e2 = ce_logical(False, ce_binary(CN.EQ, c.read(y2), _lit(0)), ce_binary(CN.GT, ce_binary(CN.DIV, _lit(1), c.read(y2)), _lit(0)))
+    var e2 = ce_logical(False, ce_binary(CNodeOp.EQ, c.read(y2), _lit(0)), ce_binary(CNodeOp.GT, ce_binary(CNodeOp.DIV, _lit(1), c.read(y2)), _lit(0)))
     c.assign(r2, e2)
     assert_equal(_run_one(c, "r"), 1)
 
 
 def test_functions_and_power() raises:
-    assert_equal(_ti(ce_binary(CN.POW, _lit(3), _lit(4))), 81)
-    assert_almost_equal(ce_function(CF.SQRT, _lit(2)).const_float(), sqrt(2.0))
-    assert_equal(_ti(ce_function(CF.POPCOUNT, CExpr.typed_const(uint_type(8), 0x13))), 3)
-    assert_equal(_ti(ce_function(CF.ABS, CExpr.typed_const(int_type(8), -3))), 3)
+    assert_equal(_ti(ce_binary(CNodeOp.POW, _lit(3), _lit(4))), 81)
+    assert_almost_equal(ce_function(CFunc.SQRT, _lit(2)).const_float(), sqrt(2.0))
+    assert_equal(_ti(ce_function(CFunc.POPCOUNT, CExpr.typed_const(uint_type(8), 0x13))), 3)
+    assert_equal(_ti(ce_function(CFunc.ABS, CExpr.typed_const(int_type(8), -3))), 3)
     # a negative exponent gives a float on constants with no width
-    assert_almost_equal(ce_binary(CN.POW, _lit(2), _lit(-1)).const_float(), 0.5)
+    assert_almost_equal(ce_binary(CNodeOp.POW, _lit(2), _lit(-1)).const_float(), 0.5)
     with assert_raises(contains="QM-E533"):
-        _ = ce_binary(CN.POW, CExpr.typed_const(int_type(32), 2), _lit(-1))
+        _ = ce_binary(CNodeOp.POW, CExpr.typed_const(int_type(32), 2), _lit(-1))
 
 
 def test_float_and_angle_vars() raises:
     var b = ProgramBuilder(0)
     var f = b.declare("f", float_type(), True)
     b.assign(f, CExpr.literal_float(0.25))
-    b.assign(f, ce_binary(CN.MUL, b.read(f), _lit(3)))
+    b.assign(f, ce_binary(CNodeOp.MUL, b.read(f), _lit(3)))
     assert_almost_equal(_run_real(b, "f"), 0.75)
     var c = ProgramBuilder(0)
     var a = c.declare("a", angle_type(4), True)
     c.assign(a, CExpr.literal_float(3.0 * pi / 2))  # 12 of 16 steps
-    c.assign(a, ce_binary(CN.ADD, c.read(a), c.read(a)))  # 24 mod 16
+    c.assign(a, ce_binary(CNodeOp.ADD, c.read(a), c.read(a)))  # 24 mod 16
     assert_equal(_run_one(c, "a"), 8)
     with assert_raises(contains="QM-E580"):
-        _ = ce_binary(CN.ADD, CExpr.variable(0, angle_type(4)), CExpr.variable(1, angle_type(8)))
+        _ = ce_binary(CNodeOp.ADD, CExpr.variable(0, angle_type(4)), CExpr.variable(1, angle_type(8)))
     with assert_raises(contains="QM-E580"):
-        _ = ce_binary(CN.ADD, CExpr.variable(0, angle_type(4)), CExpr.variable(1, float_type()))
+        _ = ce_binary(CNodeOp.ADD, CExpr.variable(0, angle_type(4)), CExpr.variable(1, float_type()))
 
 
 def test_definite_assignment() raises:
@@ -310,11 +310,11 @@ def test_cfg_shape() raises:
     var back = 0
     var halts = 0
     for bb in cfg.blocks:
-        if bb.term == TERM.BR:
+        if bb.term == TermKind.BR:
             br += 1
         if bb.back:
             back += 1
-        if bb.term == TERM.HALT:
+        if bb.term == TermKind.HALT:
             halts += 1
     assert_equal(br, 2)
     assert_equal(back, 2)  # continue + the end of the body
@@ -405,8 +405,8 @@ def test_infinite_loop_is_stopped() raises:
     var c = ProgramBuilder(1, 1)
     var k = c.declare("k", uint_type(16), True)
     c.assign(k, _lit(0))
-    c.begin_while(ce_binary(CN.LT, c.read(k), _lit(100)))
-    c.assign(k, ce_binary(CN.ADD, c.read(k), _lit(1)))
+    c.begin_while(ce_binary(CNodeOp.LT, c.read(k), _lit(100)))
+    c.assign(k, ce_binary(CNodeOp.ADD, c.read(k), _lit(1)))
     c.end()
     var q = c.finish()
     assert_equal(sample_program(q, 2, 1, max_iterations=100).iterations[1], 100)
@@ -421,13 +421,13 @@ def test_control_flow_paths() raises:
     var i = b.declare("i", int_type(16))
     b.assign(total, _lit(0))
     b.begin_for(i, _lit(0), _lit(1), _lit(6))
-    b.begin_if(ce_binary(CN.EQ, b.read(i), _lit(2)))
+    b.begin_if(ce_binary(CNodeOp.EQ, b.read(i), _lit(2)))
     b.continue_()
     b.end()
-    b.begin_if(ce_binary(CN.EQ, b.read(i), _lit(5)))
+    b.begin_if(ce_binary(CNodeOp.EQ, b.read(i), _lit(5)))
     b.break_()
     b.end()
-    b.assign(total, ce_binary(CN.ADD, b.read(total), b.read(i)))
+    b.assign(total, ce_binary(CNodeOp.ADD, b.read(total), b.read(i)))
     b.end()
     assert_equal(_run_one(b, "total"), 8)
     # negative step, inclusive; empty range
@@ -436,7 +436,7 @@ def test_control_flow_paths() raises:
     var j = c.declare("j", int_type(16))
     c.assign(t2, _lit(0))
     c.begin_for(j, _lit(6), _lit(-2), _lit(0))
-    c.assign(t2, ce_binary(CN.ADD, ce_binary(CN.MUL, c.read(t2), _lit(10)), c.read(j)))
+    c.assign(t2, ce_binary(CNodeOp.ADD, ce_binary(CNodeOp.MUL, c.read(t2), _lit(10)), c.read(j)))
     c.end()
     c.begin_for(j, _lit(3), _lit(1), _lit(2))
     c.assign(t2, _lit(-1))
@@ -467,10 +467,10 @@ def test_control_flow_paths() raises:
     e.assign(t4, _lit(0))
     e.begin_for(o, _lit(0), _lit(1), _lit(2))
     e.begin_for(a, _lit(0), _lit(1), _lit(9))
-    e.begin_if(ce_binary(CN.EQ, e.read(a), _lit(1)))
+    e.begin_if(ce_binary(CNodeOp.EQ, e.read(a), _lit(1)))
     e.break_()
     e.end()
-    e.assign(t4, ce_binary(CN.ADD, e.read(t4), _lit(1)))
+    e.assign(t4, ce_binary(CNodeOp.ADD, e.read(t4), _lit(1)))
     e.end()
     e.end()
     assert_equal(_run_one(e, "t"), 3)
@@ -483,7 +483,7 @@ def test_runtime_angle() raises:
     var i = b.declare("i", int_type(8))
     b.assign(a, CExpr.literal_float(0.0))
     b.begin_for(i, _lit(1), _lit(1), _lit(3))
-    b.assign(a, ce_binary(CN.ADD, b.read(a), CExpr.literal_float(pi / 3.0)))
+    b.assign(a, ce_binary(CNodeOp.ADD, b.read(a), CExpr.literal_float(pi / 3.0)))
     b.end()
     var ang = b.angle(a)
     b.body.ry(ang, 0)
@@ -504,7 +504,7 @@ def test_runtime_angle() raises:
     var d = ProgramBuilder(1, 1)
     var y = d.declare("y", float_type())
     d.assign(y, CExpr.literal_float(-1.0))
-    d.assign(y, ce_function(CF.SQRT, d.read(y)))
+    d.assign(y, ce_function(CFunc.SQRT, d.read(y)))
     d.body.ry(d.angle(y), 0)
     d.body.measure(0, 0)
     var r = d.finish()
@@ -529,7 +529,7 @@ def test_inputs() raises:
 def test_bit_assignment() raises:
     var b = ProgramBuilder(1, 3)
     b.assign_bits(0, 2, _lit(2))  # c[1:0] = 10
-    b.begin_if(ce_binary(CN.EQ, CExpr.bits(0, 2), _lit(2)))
+    b.begin_if(ce_binary(CNodeOp.EQ, CExpr.bits(0, 2), _lit(2)))
     b.assign_bits(2, 1, _lit(1))
     b.end()
     var p = b.finish()

@@ -13,7 +13,7 @@ from qumo.ft.gadgets import (
 from qumo.ft.verify import valid_clifford_implementation
 from qumo.ft.arch import Architecture, SteaneBuilder, QECPolicy
 from qumo.ft.encode import encode
-from qumo.ft.logical import LOp
+from qumo.ft.logical import LogicalOpKind
 from qumo.ft.emulate import run_encoded, reference_counts, total_variation
 from qumo.qec.codes import NoiseParams
 
@@ -147,8 +147,8 @@ def test_reichardt_style_encoded() raises:
     c.measure(0, 0)
     var plain = SteaneBuilder().with_qec_policy(QECPolicy("steane", 0.5)).build(2)
     var dense = SteaneBuilder().with_qec_policy(QECPolicy("reichardt", 0.5)).build(2)
-    plain.qec.costs[LOp.H] = 1.0
-    dense.qec.costs[LOp.H] = 1.0
+    plain.qec.costs[LogicalOpKind.H] = 1.0
+    dense.qec.costs[LogicalOpKind.H] = 1.0
     var p_plain = encode(plain, c)
     var p_dense = encode(dense, c)
     assert_true(p_dense.circuit.num_qubits < p_plain.circuit.num_qubits, "3 ancillas instead of a logical block: " + String(p_dense.circuit.num_qubits) + " vs " + String(p_plain.circuit.num_qubits))

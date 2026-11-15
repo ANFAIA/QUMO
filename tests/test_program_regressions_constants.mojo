@@ -9,7 +9,7 @@ from std.math import pi
 from std.testing import assert_equal, assert_true, assert_raises
 
 from qumo.ai.diagnostics import error_catalog
-from qumo.ir.classical import CN, CExpr, ce_binary, ce_neg
+from qumo.ir.classical import CNodeOp, CExpr, ce_binary, ce_neg
 from qumo.ir.gates import Op
 from qumo.ir.qasm import load_any, parse_qasm, parse_qasm_program, parse_qasm_with_warnings, to_qasm
 from qumo.sim.program_runner import ProgramResult, sample_program
@@ -88,7 +88,7 @@ def test_r1_constants_do_not_wrap() raises:
 def test_r1_a_negative_exponent_gives_a_float() raises:
     _angle("const float x = 2 ** -1; rz(x) q[0];", 0.5)
     _angle("const int e = -3; rz(10 ** e) q[0];", 0.001)
-    assert_true(ce_binary(CN.POW, CExpr.literal_int(2), CExpr.literal_int(-1)).const_float() == 0.5)
+    assert_true(ce_binary(CNodeOp.POW, CExpr.literal_int(2), CExpr.literal_int(-1)).const_float() == 0.5)
     # run time did not change
     _is(_err_prog("output int r; int a = 2; a = a; int b = -1; b = b; r = a ** b;"), "QM-E481")
 

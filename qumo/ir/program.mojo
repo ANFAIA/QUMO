@@ -27,14 +27,14 @@ from qumo.ir.circuit import Circuit, Instruction
 from qumo.ir.gates import Op, op_name, op_is_unitary, op_is_noise
 from qumo.ir.param import Param
 from qumo.ir.classical import (
-    CExpr, CNode, CN, CT, CType, bit_type, int_type, ce_bool, ce_cast, never_negative,
+    CExpr, CNode, CNodeOp, CTypeKind, CType, bit_type, int_type, ce_bool, ce_cast, never_negative,
 )
 
 
 comptime MAX_NESTING = 256  # blocks and expressions, in source and in a program file
 
 
-struct SK:
+struct StmtKind:
     """Statement kinds of the tape."""
 
     comptime OPS = 0  # a = first op, b = end op
@@ -76,7 +76,7 @@ struct CReg(Copyable):
     var width: Int
 
 
-struct FORR:
+struct ForRangeField:
     """Fields of one entry of `Program.for_ranges`."""
 
     comptime START = 0  # expression, or -1 for a set
@@ -124,7 +124,7 @@ struct Program(Copyable, Writable):
         """The same circuit as one block; `sample_program` then equals `sample`."""
         var p = Program(c.copy())
         if len(c.ops) > 0:
-            p.tape.append(Stmt(SK.OPS, 0, len(c.ops), -1, -1, 0))
+            p.tape.append(Stmt(StmtKind.OPS, 0, len(c.ops), -1, -1, 0))
         if c.num_clbits > 0:
             p.cregs.append(CReg("c", 0, c.num_clbits))
         for i in range(c.num_params()):
@@ -147,7 +147,7 @@ struct Program(Copyable, Writable):
     def has_runtime_region(self) -> Bool:
         """Anything but straight-line blocks on the tape."""
         for s in self.tape:
-            if s.kind != SK.OPS:
+            if s.kind != StmtKind.OPS:
                 return True
         return False
 
@@ -156,7 +156,7 @@ struct Program(Copyable, Writable):
         if self.has_runtime_region():
             return None
         for v in self.vars:
-            if v.is_output and v.ty.tag != CT.BIT:
+            if v.is_output and v.ty.tag != CTypeKind.BIT:
                 return None
         return self.body.copy()
 
@@ -189,7 +189,7 @@ struct Program(Copyable, Writable):
         var base = len(self.nodes)
         for n in e.nodes:
             var c = n
-            if c.op >= CN.NEG:
+            if c.op >= CNodeOp.NEG:
                 c.x += base
                 if c.y >= 0:
                     c.y += base
@@ -212,17 +212,17 @@ struct Program(Copyable, Writable):
         w.write("\n")
         var depth = 1
         for s in self.tape:
-            if s.kind == SK.END or s.kind == SK.ELSE or s.kind == SK.CASE:
+            if s.kind == StmtKind.END or s.kind == StmtKind.ELSE or s.kind == StmtKind.CASE:
                 depth -= 1
             for _ in range(depth):
                 w.write("  ")
             w.write(_kind_name(s.kind))
-            if s.kind == SK.OPS:
+            if s.kind == StmtKind.OPS:
                 w.write(" ", s.b - s.a, " ops")
-            elif s.kind == SK.ASSIGN:
+            elif s.kind == StmtKind.ASSIGN:
                 w.write(" ", self.vars[s.a].name)
             w.write("\n")
-            if s.kind == SK.IF or s.kind == SK.ELSE or s.kind == SK.WHILE or s.kind == SK.FOR or s.kind == SK.SWITCH or s.kind == SK.CASE:
+            if s.kind == StmtKind.IF or s.kind == StmtKind.ELSE or s.kind == StmtKind.WHILE or s.kind == StmtKind.FOR or s.kind == StmtKind.SWITCH or s.kind == StmtKind.CASE:
                 depth += 1
 
 
@@ -236,16 +236,16 @@ def _slot_name(var_id: Int, name: String) -> String:
 
 
 def _kind_name(k: Int) -> String:
-    if k == SK.OPS: return "ops"
-    if k == SK.ASSIGN: return "assign"
-    if k == SK.IF: return "if"
-    if k == SK.ELSE: return "else"
-    if k == SK.WHILE: return "while"
-    if k == SK.FOR: return "for"
-    if k == SK.SWITCH: return "switch"
-    if k == SK.CASE: return "case"
-    if k == SK.BREAK: return "break"
-    if k == SK.CONTINUE: return "continue"
+    if k == StmtKind.OPS: return "ops"
+    if k == StmtKind.ASSIGN: return "assign"
+    if k == StmtKind.IF: return "if"
+    if k == StmtKind.ELSE: return "else"
+    if k == StmtKind.WHILE: return "while"
+    if k == StmtKind.FOR: return "for"
+    if k == StmtKind.SWITCH: return "switch"
+    if k == StmtKind.CASE: return "case"
+    if k == StmtKind.BREAK: return "break"
+    if k == StmtKind.CONTINUE: return "continue"
     return "end"
 
 
@@ -268,7 +268,7 @@ struct TapeBuilder(Movable):
     def flush(mut self, ops_end: Int, line: Int):
         """Close the current block of quantum ops."""
         if ops_end > self.ops_lo:
-            self.tape.append(Stmt(SK.OPS, self.ops_lo, ops_end, -1, -1, line))
+            self.tape.append(Stmt(StmtKind.OPS, self.ops_lo, ops_end, -1, -1, line))
         self.ops_lo = ops_end
 
     def _push(mut self, kind: Int, a: Int, b: Int, alt: Int, end: Int, line: Int) -> Int:
@@ -277,7 +277,7 @@ struct TapeBuilder(Movable):
 
     def assign(mut self, target: Int, expr: Int, ops_end: Int, line: Int):
         self.flush(ops_end, line)
-        _ = self._push(SK.ASSIGN, target, expr, -1, -1, line)
+        _ = self._push(StmtKind.ASSIGN, target, expr, -1, -1, line)
 
     def begin(mut self, kind: Int, a: Int, b: Int, ops_end: Int, line: Int):
         """Open IF, WHILE, FOR or SWITCH."""
@@ -286,20 +286,20 @@ struct TapeBuilder(Movable):
 
     def else_(mut self, ops_end: Int, line: Int) raises:
         self.flush(ops_end, line)
-        if len(self.open) == 0 or self.tape[self.open[len(self.open) - 1]].kind != SK.IF:
+        if len(self.open) == 0 or self.tape[self.open[len(self.open) - 1]].kind != StmtKind.IF:
             raise Error("QM-E583: else without an open if. Hint: open the region with begin_if.")
         var op = self.open[len(self.open) - 1]
         if self.tape[op].alt >= 0:
             raise Error("QM-E583: an if takes one else. Hint: close the region with end.")
-        var at = self._push(SK.ELSE, -1, -1, -1, -1, line)
+        var at = self._push(StmtKind.ELSE, -1, -1, -1, -1, line)
         self.tape[op].alt = at
 
     def case_(mut self, lo: Int, hi: Int, ops_end: Int, line: Int) raises:
         """A CASE of the open switch: values case_vals[lo:hi], or default with lo = -1."""
         self.flush(ops_end, line)
-        if len(self.open) == 0 or self.tape[self.open[len(self.open) - 1]].kind != SK.SWITCH:
+        if len(self.open) == 0 or self.tape[self.open[len(self.open) - 1]].kind != StmtKind.SWITCH:
             raise Error("QM-E583: case without an open switch. Hint: open the region with begin_switch.")
-        var at = self._push(SK.CASE, lo, hi, -1, -1, line)
+        var at = self._push(StmtKind.CASE, lo, hi, -1, -1, line)
         var i = self.open[len(self.open) - 1]
         var last = i
         while True:
@@ -315,7 +315,7 @@ struct TapeBuilder(Movable):
         var i = len(self.open) - 1
         while i >= 0:
             var k = self.tape[self.open[i]].kind
-            if k == SK.WHILE or k == SK.FOR:
+            if k == StmtKind.WHILE or k == StmtKind.FOR:
                 _ = self._push(kind, -1, -1, -1, self.open[i], line)
                 return
             i -= 1
@@ -326,12 +326,12 @@ struct TapeBuilder(Movable):
         if len(self.open) == 0:
             raise Error("QM-E583: end without an open region. Hint: every end closes one begin_if, begin_while, begin_for or begin_switch.")
         var op = self.open.pop()
-        var at = self._push(SK.END, -1, -1, -1, op, line)
+        var at = self._push(StmtKind.END, -1, -1, -1, op, line)
         self.tape[op].end = at
         var k = self.tape[op].kind
-        if k == SK.IF and self.tape[op].alt >= 0:
+        if k == StmtKind.IF and self.tape[op].alt >= 0:
             self.tape[self.tape[op].alt].end = at
-        elif k == SK.SWITCH:
+        elif k == StmtKind.SWITCH:
             var c = self.tape[op].alt
             while c >= 0:
                 self.tape[c].end = at
@@ -345,7 +345,7 @@ struct TapeBuilder(Movable):
 # ---------------------------------------------------------------------------
 # Control-flow graph
 # ---------------------------------------------------------------------------
-struct TERM:
+struct TermKind:
     comptime JMP = 0  # to t0
     comptime BR = 1  # to t0 if `cond` holds, else t1; cond < 0: FOR at tape -1 - cond
     comptime SWITCH = 2  # value of `cond`: keys in sw_keys[t0:t1], default sw_bb[t1]
@@ -353,7 +353,7 @@ struct TERM:
 
 
 @fieldwise_init
-struct BB(ImplicitlyCopyable):
+struct BasicBlock(ImplicitlyCopyable):
     """A basic block: the tape range [lo, hi) holds only OPS and ASSIGN."""
 
     var lo: Int
@@ -369,13 +369,13 @@ struct BB(ImplicitlyCopyable):
 
 
 struct Cfg(Copyable):
-    var blocks: List[BB]
+    var blocks: List[BasicBlock]
     var sw_keys: List[Int]  # SWITCH case values
     var sw_bb: List[Int]  # the block of each key; one more entry holds the default
     var slot_ops: List[List[Int]]  # by tape index: the ops of an OPS block with runtime angles
 
     def __init__(out self):
-        self.blocks = List[BB]()
+        self.blocks = List[BasicBlock]()
         self.sw_keys = List[Int]()
         self.sw_bb = List[Int]()
         self.slot_ops = List[List[Int]]()
@@ -404,36 +404,36 @@ def cfg_of(p: Program) -> Cfg:
         var s = p.tape[i]
         var k = s.kind
         var reads = List[Int]()
-        if k == SK.OPS:
+        if k == StmtKind.OPS:
             for j in range(s.a, s.b):
                 ref g = p.body.ops[j]
                 if (g.p0.index >= 0 and mirrored[g.p0.index]) or (g.p1.index >= 0 and mirrored[g.p1.index]) or (g.p2.index >= 0 and mirrored[g.p2.index]):
                     reads.append(j)
         cfg.slot_ops.append(reads^)
-        if k == SK.OPS or k == SK.ASSIGN:
+        if k == StmtKind.OPS or k == StmtKind.ASSIGN:
             continue
         var close = True
-        var b = BB(lo, i, TERM.JMP, -1, (scale * _AT + i + 1), -1, False, -1, -1, s.line)
-        if k == SK.IF:
-            b.term = TERM.BR
+        var b = BasicBlock(lo, i, TermKind.JMP, -1, (scale * _AT + i + 1), -1, False, -1, -1, s.line)
+        if k == StmtKind.IF:
+            b.term = TermKind.BR
             b.cond = s.a
             b.t0 = (scale * _AT + i + 1)
             b.t1 = (scale * _AT + (s.alt if s.alt >= 0 else s.end) + 1)
-        elif k == SK.ELSE or k == SK.CASE:
-            if k == SK.CASE and lo == i and i > 0 and p.tape[i - 1].kind == SK.SWITCH:
+        elif k == StmtKind.ELSE or k == StmtKind.CASE:
+            if k == StmtKind.CASE and lo == i and i > 0 and p.tape[i - 1].kind == StmtKind.SWITCH:
                 close = False  # the first CASE only labels a position
             b.t0 = (scale * _AT + s.end + 1)
-        elif k == SK.WHILE or k == SK.FOR:
-            if k == SK.FOR:
+        elif k == StmtKind.WHILE or k == StmtKind.FOR:
+            if k == StmtKind.FOR:
                 b.init = i
             b.t0 = (scale * _HEAD + i)
-        elif k == SK.SWITCH:
-            b.term = TERM.SWITCH
+        elif k == StmtKind.SWITCH:
+            b.term = TermKind.SWITCH
             b.cond = s.a
             b.t0 = len(cfg.sw_keys)
             var c = s.alt
             var dflt = s.end + 1
-            while c >= 0 and c < n and p.tape[c].kind == SK.CASE:
+            while c >= 0 and c < n and p.tape[c].kind == StmtKind.CASE:
                 var cs = p.tape[c]
                 if cs.a < 0:
                     dflt = c + 1
@@ -445,18 +445,18 @@ def cfg_of(p: Program) -> Cfg:
             b.t1 = len(cfg.sw_keys)
             cfg.sw_keys.append(0)  # keeps sw_keys and sw_bb aligned
             cfg.sw_bb.append((scale * _AT + dflt))
-        elif k == SK.BREAK:
+        elif k == StmtKind.BREAK:
             b.t0 = (scale * _AT + p.tape[s.end].end + 1)
-        elif k == SK.CONTINUE:
+        elif k == StmtKind.CONTINUE:
             var loop = p.tape[s.end]
-            b.t0 = scale * (_LATCH if loop.kind == SK.FOR else _HEAD) + s.end
-            b.back = loop.kind == SK.WHILE
+            b.t0 = scale * (_LATCH if loop.kind == StmtKind.FOR else _HEAD) + s.end
+            b.back = loop.kind == StmtKind.WHILE
         else:  # END
             var op = p.tape[s.end]
-            if op.kind == SK.WHILE:
+            if op.kind == StmtKind.WHILE:
                 b.t0 = (scale * _HEAD + s.end)
                 b.back = True
-            elif op.kind == SK.FOR:
+            elif op.kind == StmtKind.FOR:
                 b.t0 = (scale * _LATCH + s.end)
             else:
                 b.t0 = (scale * _AT + i + 1)
@@ -464,21 +464,21 @@ def cfg_of(p: Program) -> Cfg:
             if at[lo] < 0:
                 at[lo] = len(cfg.blocks)
             cfg.blocks.append(b)
-        if k == SK.WHILE or k == SK.FOR:
+        if k == StmtKind.WHILE or k == StmtKind.FOR:
             head[i] = len(cfg.blocks)
-            var cond = s.a if k == SK.WHILE else -1 - i
-            cfg.blocks.append(BB(i, i, TERM.BR, cond, (scale * _AT + i + 1), (scale * _AT + s.end + 1), False, -1, -1, s.line))
-        if k == SK.END and p.tape[s.end].kind == SK.FOR:
+            var cond = s.a if k == StmtKind.WHILE else -1 - i
+            cfg.blocks.append(BasicBlock(i, i, TermKind.BR, cond, (scale * _AT + i + 1), (scale * _AT + s.end + 1), False, -1, -1, s.line))
+        if k == StmtKind.END and p.tape[s.end].kind == StmtKind.FOR:
             latch[s.end] = len(cfg.blocks)
-            cfg.blocks.append(BB(i, i, TERM.JMP, -1, (scale * _HEAD + s.end), -1, True, -1, s.end, s.line))
+            cfg.blocks.append(BasicBlock(i, i, TermKind.JMP, -1, (scale * _HEAD + s.end), -1, True, -1, s.end, s.line))
         lo = i + 1
     if at[lo] < 0:
         at[lo] = len(cfg.blocks)
-    cfg.blocks.append(BB(lo, n, TERM.HALT, -1, -1, -1, False, -1, -1, 0))
+    cfg.blocks.append(BasicBlock(lo, n, TermKind.HALT, -1, -1, -1, False, -1, -1, 0))
     for ref b in cfg.blocks:
-        if b.term == TERM.JMP or b.term == TERM.BR:
+        if b.term == TermKind.JMP or b.term == TermKind.BR:
             b.t0 = _resolve(b.t0, scale, at, head, latch)
-        if b.term == TERM.BR:
+        if b.term == TermKind.BR:
             b.t1 = _resolve(b.t1, scale, at, head, latch)
     for ref t in cfg.sw_bb:
         t = _resolve(t, scale, at, head, latch)
@@ -498,7 +498,7 @@ def _resolve(t: Int, scale: Int, at: List[Int], head: List[Int], latch: List[Int
 def _reads(p: Program, expr: Int, mut out: List[Int]):
     """Storage indices of the scalar variables an expression reads."""
     for i in range(p.expr_lo[expr], p.expr_root[expr] + 1):
-        if p.nodes[i].op == CN.VAR:
+        if p.nodes[i].op == CNodeOp.VAR:
             out.append(p.nodes[i].x)
 
 
@@ -523,21 +523,21 @@ def _gate_reads(p: Program, lo: Int, hi: Int, slots: List[Int], mut out: List[In
             out.append(slots[g.p2.index])
 
 
-def _block_reads(p: Program, b: BB, i: Int, slots: List[Int], mut out: List[Int]):
+def _block_reads(p: Program, b: BasicBlock, i: Int, slots: List[Int], mut out: List[Int]):
     """Reads of tape statement i, or of the terminator when i = b.hi."""
     if i < b.hi:
-        if p.tape[i].kind == SK.ASSIGN:
+        if p.tape[i].kind == StmtKind.ASSIGN:
             _reads(p, p.tape[i].b, out)
-        elif p.tape[i].kind == SK.OPS:
+        elif p.tape[i].kind == StmtKind.OPS:
             _gate_reads(p, p.tape[i].a, p.tape[i].b, slots, out)
         return
     if b.init >= 0:
         var off = p.tape[b.init].b
-        for f in range(FORR.START, FORR.STOP + 1):
+        for f in range(ForRangeField.START, ForRangeField.STOP + 1):
             var e = p.for_ranges[off + f]
             if e >= 0:
                 _reads(p, e, out)
-    if (b.term == TERM.BR or b.term == TERM.SWITCH) and b.cond >= 0:
+    if (b.term == TermKind.BR or b.term == TermKind.SWITCH) and b.cond >= 0:
         _reads(p, b.cond, out)
 
 
@@ -553,11 +553,11 @@ def _check_assigned(p: Program, cfg: Cfg) raises:
         preds.append(List[Int]())
     for b in range(nb):
         ref bb = cfg.blocks[b]
-        if bb.term == TERM.JMP or bb.term == TERM.BR:
+        if bb.term == TermKind.JMP or bb.term == TermKind.BR:
             preds[bb.t0].append(b)
-        if bb.term == TERM.BR:
+        if bb.term == TermKind.BR:
             preds[bb.t1].append(b)
-        if bb.term == TERM.SWITCH:
+        if bb.term == TermKind.SWITCH:
             for j in range(bb.t0, bb.t1 + 1):
                 preds[cfg.sw_bb[j]].append(b)
     # IN sets start full, the entry empty, and shrink to the greatest fixed point
@@ -577,11 +577,11 @@ def _check_assigned(p: Program, cfg: Cfg) raises:
             _apply_defs(p, cfg.blocks[b], cur)
             ref bb = cfg.blocks[b]
             var succs = List[Int]()
-            if bb.term == TERM.JMP or bb.term == TERM.BR:
+            if bb.term == TermKind.JMP or bb.term == TermKind.BR:
                 succs.append(bb.t0)
-            if bb.term == TERM.BR:
+            if bb.term == TermKind.BR:
                 succs.append(bb.t1)
-            if bb.term == TERM.SWITCH:
+            if bb.term == TermKind.SWITCH:
                 for j in range(bb.t0, bb.t1 + 1):
                     succs.append(cfg.sw_bb[j])
             for t in succs:
@@ -590,7 +590,7 @@ def _check_assigned(p: Program, cfg: Cfg) raises:
                     changed = True
                 # a FOR assigns its variable on the edge into the body, not on exit
                 var into_body = -1
-                if bb.term == TERM.BR and bb.cond < 0 and t == bb.t0:
+                if bb.term == TermKind.BR and bb.cond < 0 and t == bb.t0:
                     into_body = p.vars[p.tape[-1 - bb.cond].a].store
                 for v in range(ns):
                     if inn[t][v] and not cur[v] and v != into_body:
@@ -607,27 +607,27 @@ def _check_assigned(p: Program, cfg: Cfg) raises:
             for r in reads:
                 if not cur[r]:
                     _raise_unassigned(p, r, bb.line if i == bb.hi else p.tape[i].line)
-            if i < bb.hi and p.tape[i].kind == SK.ASSIGN:
+            if i < bb.hi and p.tape[i].kind == StmtKind.ASSIGN:
                 var t = p.vars[p.tape[i].a].copy()
-                if t.ty.tag != CT.BIT:
+                if t.ty.tag != CTypeKind.BIT:
                     cur[t.store] = True
-        if bb.term == TERM.HALT:
+        if bb.term == TermKind.HALT:
             for v in p.vars:
-                if v.is_output and v.ty.tag != CT.BIT and not cur[v.store]:
+                if v.is_output and v.ty.tag != CTypeKind.BIT and not cur[v.store]:
                     raise Error("QM-E581: output '" + v.name + "' is not assigned on every path. Hint: initialize it where it is declared.")
 
 
-def _apply_defs(p: Program, b: BB, mut cur: List[Bool]):
+def _apply_defs(p: Program, b: BasicBlock, mut cur: List[Bool]):
     for i in range(b.lo, b.hi):
         ref s = p.tape[i]
-        if s.kind == SK.ASSIGN and p.vars[s.a].ty.tag != CT.BIT:
+        if s.kind == StmtKind.ASSIGN and p.vars[s.a].ty.tag != CTypeKind.BIT:
             cur[p.vars[s.a].store] = True
 
 
 def _raise_unassigned(p: Program, store: Int, line: Int) raises:
     var name = String("a variable")
     for v in p.vars:
-        if v.ty.tag != CT.BIT and v.store == store:
+        if v.ty.tag != CTypeKind.BIT and v.store == store:
             name = "'" + v.name + "'"
     raise Error("QM-E581: " + name + " may be read before it is assigned (line " + String(line) + "). Hint: assign it on every path, for example where it is declared.")
 
@@ -649,21 +649,21 @@ def _can_leave(p: Program, at: Int) -> Bool:
     var last = List[Int]()
     for i in range(p.expr_lo[head.a], p.expr_root[head.a] + 1):
         ref n = p.nodes[i]
-        if n.op == CN.BITS:
+        if n.op == CNodeOp.BITS:
             first.append(n.x)
             last.append(n.x + n.y - 1)
     for j in range(at + 1, head.end):
         ref s = p.tape[j]
-        if s.kind == SK.BREAK and s.end == at:
+        if s.kind == StmtKind.BREAK and s.end == at:
             return True
-        if s.kind == SK.OPS:
+        if s.kind == StmtKind.OPS:
             for i in range(s.a, s.b):
                 ref g = p.body.ops[i]
                 if g.kind == Op.MEASURE and _reads_bits(first, last, g.clbit, g.clbit):
                     return True
-        elif s.kind == SK.ASSIGN or s.kind == SK.FOR:
+        elif s.kind == StmtKind.ASSIGN or s.kind == StmtKind.FOR:
             ref v = p.vars[s.a]
-            if v.ty.tag == CT.BIT:
+            if v.ty.tag == CTypeKind.BIT:
                 if _reads_bits(first, last, v.store, v.store + v.ty.width - 1):
                     return True
             else:
@@ -678,7 +678,7 @@ def stuck_loops(p: Program) -> List[Int]:
     body writes what the condition reads, and no `break` leaves it."""
     var out = List[Int]()
     for i in range(len(p.tape)):
-        if p.tape[i].kind == SK.WHILE and not _can_leave(p, i):
+        if p.tape[i].kind == StmtKind.WHILE and not _can_leave(p, i):
             out.append(i)
     return out^
 
@@ -694,7 +694,7 @@ def check_program(p: Program) raises -> Cfg:
     p.body.validate()
     var runtime = p.has_runtime_region()
     for s in p.tape:
-        if s.kind != SK.OPS:
+        if s.kind != StmtKind.OPS:
             continue
         for i in range(s.a, s.b):
             ref g = p.body.ops[i]
@@ -751,7 +751,7 @@ struct ProgramBuilder(Movable):
 
     def read(self, var_id: Int) -> CExpr:
         ref v = self.p.vars[var_id]
-        if v.ty.tag == CT.BIT:
+        if v.ty.tag == CTypeKind.BIT:
             return CExpr.bits(v.store, v.ty.width)
         return CExpr.variable(v.store, v.ty)
 
@@ -781,18 +781,18 @@ struct ProgramBuilder(Movable):
         return q
 
     def begin_if(mut self, cond: CExpr) raises:
-        self.tb.begin(SK.IF, self.p.add_expr(ce_bool(cond)), -1, self._end(), 0)
+        self.tb.begin(StmtKind.IF, self.p.add_expr(ce_bool(cond)), -1, self._end(), 0)
 
     def else_(mut self) raises:
         self.tb.else_(self._end(), 0)
 
     def begin_while(mut self, cond: CExpr) raises:
-        self.tb.begin(SK.WHILE, self.p.add_expr(ce_bool(cond)), -1, self._end(), 0)
+        self.tb.begin(StmtKind.WHILE, self.p.add_expr(ce_bool(cond)), -1, self._end(), 0)
 
     def begin_for(mut self, var_id: Int, start: CExpr, step: CExpr, stop: CExpr) raises:
         """for var in [start:step:stop], inclusive as in OpenQASM."""
         var tag = self.p.vars[var_id].ty.tag
-        if tag != CT.INT and tag != CT.UINT:
+        if tag != CTypeKind.INT and tag != CTypeKind.UINT:
             raise Error("QM-E580: a for loop counts in int or uint. Hint: declare the loop variable with one of them.")
         var off = len(self.p.for_ranges)
         self.p.for_ranges.append(self.p.add_expr(ce_cast(start, int_type(64))))
@@ -802,10 +802,10 @@ struct ProgramBuilder(Movable):
         self.p.num_store += 3
         self.p.for_ranges.append(-1)
         self.p.for_ranges.append(1 if never_negative(start) and never_negative(stop) else 0)
-        self.tb.begin(SK.FOR, var_id, off, self._end(), 0)
+        self.tb.begin(StmtKind.FOR, var_id, off, self._end(), 0)
 
     def begin_switch(mut self, e: CExpr) raises:
-        self.tb.begin(SK.SWITCH, self.p.add_expr(ce_cast(e, int_type(64))), -1, self._end(), 0)
+        self.tb.begin(StmtKind.SWITCH, self.p.add_expr(ce_cast(e, int_type(64))), -1, self._end(), 0)
 
     def case_(mut self, values: List[Int]) raises:
         var lo = len(self.p.case_vals)
@@ -817,10 +817,10 @@ struct ProgramBuilder(Movable):
         self.tb.case_(-1, -1, self._end(), 0)
 
     def break_(mut self) raises:
-        self.tb.jump(SK.BREAK, self._end(), 0)
+        self.tb.jump(StmtKind.BREAK, self._end(), 0)
 
     def continue_(mut self) raises:
-        self.tb.jump(SK.CONTINUE, self._end(), 0)
+        self.tb.jump(StmtKind.CONTINUE, self._end(), 0)
 
     def end(mut self) raises:
         self.tb.end(self._end(), 0)

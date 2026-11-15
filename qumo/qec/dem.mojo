@@ -43,7 +43,7 @@ from std.math import sqrt, pow
 from std.collections import Dict
 
 from qumo.ir.circuit import Circuit
-from qumo.sim.frame import FrameProgram, FrameOp, FK
+from qumo.sim.frame import FrameProgram, FrameOp, FrameKind
 
 
 struct DemError(Copyable, Writable):
@@ -449,65 +449,65 @@ def detector_error_model(circuit: Circuit, decompose: Bool = True) raises -> Det
         var fo = prog.ops[i]
         i -= 1
         var k = fo.kind
-        if k == FK.CX:
+        if k == FrameKind.CX:
             sx[fo.a] = _xor_sorted(sx[fo.a], sx[fo.b])
             sz[fo.b] = _xor_sorted(sz[fo.b], sz[fo.a])
-        elif k == FK.H:
+        elif k == FrameKind.H:
             var t = sx[fo.a].copy()
             sx[fo.a] = sz[fo.a].copy()
             sz[fo.a] = t^
-        elif k == FK.S:
+        elif k == FrameKind.S:
             sx[fo.a] = _xor_sorted(sx[fo.a], sz[fo.a])
-        elif k == FK.SX:
+        elif k == FrameKind.SX:
             sz[fo.a] = _xor_sorted(sz[fo.a], sx[fo.a])
-        elif k == FK.CZ:
+        elif k == FrameKind.CZ:
             sx[fo.a] = _xor_sorted(sx[fo.a], sz[fo.b])
             sx[fo.b] = _xor_sorted(sx[fo.b], sz[fo.a])
-        elif k == FK.SWAP:
+        elif k == FrameKind.SWAP:
             var tx = sx[fo.a].copy()
             var tz = sz[fo.a].copy()
             sx[fo.a] = sx[fo.b].copy()
             sz[fo.a] = sz[fo.b].copy()
             sx[fo.b] = tx^
             sz[fo.b] = tz^
-        elif k == FK.M:
+        elif k == FrameKind.M:
             if len(sz[fo.a]) > 0:
                 raise _gauge_error(sz[fo.a], D, "Z-basis measurement of qubit " + String(fo.a))
             sx[fo.a] = _xor_sorted(sx[fo.a], rec_sens[fo.b])
-        elif k == FK.R:
+        elif k == FrameKind.R:
             if len(sz[fo.a]) > 0:
                 raise _gauge_error(sz[fo.a], D, "reset of qubit " + String(fo.a))
             sx[fo.a] = empty.copy()
             sz[fo.a] = empty.copy()
-        elif k == FK.DET:
+        elif k == FrameKind.DET:
             for j in range(fo.b):
                 _toggle(rec_sens[prog.records[fo.a + j]], fo.c)
-        elif k == FK.OBS:
+        elif k == FrameKind.OBS:
             for j in range(fo.b):
                 _toggle(rec_sens[prog.records[fo.a + j]], D + fo.c)
-        elif k == FK.FEED:
+        elif k == FrameKind.FEED:
             if fo.c == 1 or fo.c == 2:
                 rec_sens[fo.a] = _xor_sorted(rec_sens[fo.a], sx[fo.b])
             if fo.c >= 2:
                 rec_sens[fo.a] = _xor_sorted(rec_sens[fo.a], sz[fo.b])
-        elif k == FK.XE:
+        elif k == FrameKind.XE:
             var one = List[List[Int]]()
             one.append(sx[fo.a].copy())
             acc.add(fo.p, one)
-        elif k == FK.ZE:
+        elif k == FrameKind.ZE:
             var one = List[List[Int]]()
             one.append(sz[fo.a].copy())
             acc.add(fo.p, one)
-        elif k == FK.YE:
+        elif k == FrameKind.YE:
             _add_1q(acc, sx[fo.a], sz[fo.a], 0.0, fo.p, 0.0, decompose)
-        elif k == FK.DEP1:
+        elif k == FrameKind.DEP1:
             var q = depolarize1_independent(fo.p)
             _add_1q(acc, sx[fo.a], sz[fo.a], q, q, q, decompose)
-        elif k == FK.PC1:
+        elif k == FrameKind.PC1:
             var pz = fo.p - fo.px - fo.py
             var qs = pauli_channel_independent(fo.px, fo.py, pz)
             _add_1q(acc, sx[fo.a], sz[fo.a], qs[0], qs[1], qs[2], decompose)
-        elif k == FK.PC2:
+        elif k == FrameKind.PC2:
             # disjoint probabilities taken as independent (Stim's approximate_disjoint_errors)
             var basis = List[List[Int]]()
             basis.append(sx[fo.a].copy())
@@ -538,7 +538,7 @@ def detector_error_model(circuit: Circuit, decompose: Bool = True) raises -> Det
                         total += by_mask[m1]
                         by_mask[m1] = 0.0
                 acc.add(total, ch.pieces(m0))
-        elif k == FK.CORR:
+        elif k == FrameKind.CORR:
             if fo.c != 0:
                 raise Error("QM-E733: ELSE_CORRELATED_ERROR has no detector error model: its chance depends on the errors before it. Hint: sample it with the Pauli-frame simulator.")
             var whole = List[Int]()
@@ -552,7 +552,7 @@ def detector_error_model(circuit: Circuit, decompose: Bool = True) raises -> Det
             var one = List[List[Int]]()
             one.append(whole^)
             acc.add(fo.p, one)
-        elif k == FK.DEP2:
+        elif k == FrameKind.DEP2:
             var q = depolarize2_independent(fo.p)
             var basis = List[List[Int]]()
             basis.append(sx[fo.a].copy())

@@ -28,7 +28,7 @@ from qumo.ft.code import helix_code, iceberg_code
 from qumo.ft.encode import encode
 from qumo.ft.emulate import run_encoded, reference_counts, total_variation
 from qumo.ft.gadgets import iceberg_exp_kind, iceberg_rotation
-from qumo.ft.logical import LOp
+from qumo.ft.logical import LogicalOpKind
 from qumo.ft.verify import valid_clifford_implementation
 from qumo.testing.checks import CheckLog
 
@@ -42,8 +42,8 @@ def main() raises:
     c.measure(0, 0)
     var steane = SteaneBuilder().with_qec_policy(QECPolicy("steane", 0.5)).build(2)
     var dense = SteaneBuilder().with_qec_policy(QECPolicy("reichardt", 0.5)).build(2)
-    steane.qec.costs[LOp.H] = 1.0
-    dense.qec.costs[LOp.H] = 1.0
+    steane.qec.costs[LogicalOpKind.H] = 1.0
+    dense.qec.costs[LogicalOpKind.H] = 1.0
     var a = encode(steane, c)
     var b = encode(dense, c)
     print("physical qubits: steane", a.circuit.num_qubits, "reichardt", b.circuit.num_qubits)

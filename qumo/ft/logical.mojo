@@ -24,7 +24,7 @@ lp.measure(q, 0)
 and `implement_ops(arch, lp)` links every logical op to its physical gadget.
 `compile(arch, circuit)` produces the same IR from a computational circuit.
 
-Ops (LOp): ALLOC, FREE, X, Y, Z, H, S, SDG, CX, CZ, SWAP (free relabel),
+Ops (LogicalOpKind): ALLOC, FREE, X, Y, Z, H, S, SDG, CX, CZ, SWAP (free relabel),
 T, TDG (composite: magic-state injection on Steane, a native rotation on
 Iceberg), RZ, RX, RZZ, RXX (native rotations, Iceberg), MEASURE (Z basis,
 destructive for the logical qubit, decoded), QEC (QEC cycle on the qubit's
@@ -39,10 +39,10 @@ Error codes: QM-E727 (malformed logical program).
 """
 
 from qumo.core.json import JsonWriter
-from qumo.ft.classical import CExpr
+from qumo.ft.classical import XorExpr
 
 
-struct LOp:
+struct LogicalOpKind:
     comptime ALLOC = 0
     comptime FREE = 1
     comptime X = 2
@@ -82,19 +82,19 @@ def lop_name(k: Int) -> String:
 
 
 def lop_arity(k: Int) -> Int:
-    if k == LOp.CX or k == LOp.CZ or k == LOp.SWAP or k == LOp.RZZ or k == LOp.RXX or k == LOp.INJECT_T or k == LOp.INJECT_TDG:
+    if k == LogicalOpKind.CX or k == LogicalOpKind.CZ or k == LogicalOpKind.SWAP or k == LogicalOpKind.RZZ or k == LogicalOpKind.RXX or k == LogicalOpKind.INJECT_T or k == LogicalOpKind.INJECT_TDG:
         return 2
-    if k == LOp.BARRIER or k == LOp.CSET or k == LOp.PAULI_EXP:
+    if k == LogicalOpKind.BARRIER or k == LogicalOpKind.CSET or k == LogicalOpKind.PAULI_EXP:
         return 0
     return 1
 
 
 def lop_is_pauli(k: Int) -> Bool:
-    return k == LOp.X or k == LOp.Y or k == LOp.Z
+    return k == LogicalOpKind.X or k == LogicalOpKind.Y or k == LogicalOpKind.Z
 
 
 def lop_is_clifford_gate(k: Int) -> Bool:
-    return k == LOp.X or k == LOp.Y or k == LOp.Z or k == LOp.H or k == LOp.S or k == LOp.SDG or k == LOp.CX or k == LOp.CZ or k == LOp.SWAP
+    return k == LogicalOpKind.X or k == LogicalOpKind.Y or k == LogicalOpKind.Z or k == LogicalOpKind.H or k == LogicalOpKind.S or k == LogicalOpKind.SDG or k == LogicalOpKind.CX or k == LogicalOpKind.CZ or k == LogicalOpKind.SWAP
 
 
 @fieldwise_init
@@ -118,14 +118,14 @@ struct LogicalInstr(ImplicitlyCopyable, Writable):
         elif self.cond >= 0:
             w.write("if(c", self.cond, "==", self.cond_val, ") ")
         w.write(lop_name(self.kind))
-        if self.kind == LOp.RZ or self.kind == LOp.RX or self.kind == LOp.RZZ or self.kind == LOp.RXX:
+        if self.kind == LogicalOpKind.RZ or self.kind == LogicalOpKind.RX or self.kind == LogicalOpKind.RZZ or self.kind == LogicalOpKind.RXX:
             w.write("(", self.angle, ")")
         var a = lop_arity(self.kind)
         if a >= 1:
             w.write(" L", self.q0)
         if a >= 2:
             w.write(", L", self.q1)
-        if self.kind == LOp.MEASURE or self.kind == LOp.CSET:
+        if self.kind == LogicalOpKind.MEASURE or self.kind == LogicalOpKind.CSET:
             w.write(" -> c", self.clbit)
 
 
@@ -136,7 +136,7 @@ struct LogicalProgram(Copyable, Writable, Sized):
     var ops: List[LogicalInstr]
     var cond_table: List[Int]  # [count, bit0, val0, ...] per register condition
     var notes: List[String]  # compile notes (decompositions, approximations)
-    var cexprs: List[CExpr]  # CSET payloads, over logical clbits
+    var cexprs: List[XorExpr]  # CSET payloads, over logical clbits
     var pauli_args: List[Int]  # PAULI_EXP: qubit, letter pairs
 
     def __init__(out self, name: String = "logical"):
@@ -146,7 +146,7 @@ struct LogicalProgram(Copyable, Writable, Sized):
         self.ops = List[LogicalInstr]()
         self.cond_table = List[Int]()
         self.notes = List[String]()
-        self.cexprs = List[CExpr]()
+        self.cexprs = List[XorExpr]()
         self.pauli_args = List[Int]()
 
     def __len__(self) -> Int:
@@ -157,32 +157,32 @@ struct LogicalProgram(Copyable, Writable, Sized):
         """Fresh logical qubit in |0>_L (Guppy FT `Qubit()`)."""
         var q = self.num_logical
         self.num_logical += 1
-        self.ops.append(LogicalInstr.make(LOp.ALLOC, q))
+        self.ops.append(LogicalInstr.make(LogicalOpKind.ALLOC, q))
         return q
 
     def free(mut self, q: Int):
-        self.ops.append(LogicalInstr.make(LOp.FREE, q))
+        self.ops.append(LogicalInstr.make(LogicalOpKind.FREE, q))
 
     def gate(mut self, kind: Int, q0: Int, q1: Int = -1, angle: Float64 = 0.0):
         self.ops.append(LogicalInstr.make(kind, q0, q1, angle))
 
-    def x(mut self, q: Int): self.gate(LOp.X, q)
-    def y(mut self, q: Int): self.gate(LOp.Y, q)
-    def z(mut self, q: Int): self.gate(LOp.Z, q)
-    def h(mut self, q: Int): self.gate(LOp.H, q)
-    def s(mut self, q: Int): self.gate(LOp.S, q)
-    def sdg(mut self, q: Int): self.gate(LOp.SDG, q)
-    def t(mut self, q: Int): self.gate(LOp.T, q)
-    def tdg(mut self, q: Int): self.gate(LOp.TDG, q)
-    def cx(mut self, c: Int, t: Int): self.gate(LOp.CX, c, t)
-    def cz(mut self, a: Int, b: Int): self.gate(LOp.CZ, a, b)
-    def swap(mut self, a: Int, b: Int): self.gate(LOp.SWAP, a, b)
-    def rz(mut self, theta: Float64, q: Int): self.gate(LOp.RZ, q, -1, theta)
-    def rx(mut self, theta: Float64, q: Int): self.gate(LOp.RX, q, -1, theta)
-    def rzz(mut self, theta: Float64, a: Int, b: Int): self.gate(LOp.RZZ, a, b, theta)
-    def rxx(mut self, theta: Float64, a: Int, b: Int): self.gate(LOp.RXX, a, b, theta)
-    def qec_cycle(mut self, q: Int): self.gate(LOp.QEC, q)
-    def barrier(mut self): self.gate(LOp.BARRIER, -1)
+    def x(mut self, q: Int): self.gate(LogicalOpKind.X, q)
+    def y(mut self, q: Int): self.gate(LogicalOpKind.Y, q)
+    def z(mut self, q: Int): self.gate(LogicalOpKind.Z, q)
+    def h(mut self, q: Int): self.gate(LogicalOpKind.H, q)
+    def s(mut self, q: Int): self.gate(LogicalOpKind.S, q)
+    def sdg(mut self, q: Int): self.gate(LogicalOpKind.SDG, q)
+    def t(mut self, q: Int): self.gate(LogicalOpKind.T, q)
+    def tdg(mut self, q: Int): self.gate(LogicalOpKind.TDG, q)
+    def cx(mut self, c: Int, t: Int): self.gate(LogicalOpKind.CX, c, t)
+    def cz(mut self, a: Int, b: Int): self.gate(LogicalOpKind.CZ, a, b)
+    def swap(mut self, a: Int, b: Int): self.gate(LogicalOpKind.SWAP, a, b)
+    def rz(mut self, theta: Float64, q: Int): self.gate(LogicalOpKind.RZ, q, -1, theta)
+    def rx(mut self, theta: Float64, q: Int): self.gate(LogicalOpKind.RX, q, -1, theta)
+    def rzz(mut self, theta: Float64, a: Int, b: Int): self.gate(LogicalOpKind.RZZ, a, b, theta)
+    def rxx(mut self, theta: Float64, a: Int, b: Int): self.gate(LogicalOpKind.RXX, a, b, theta)
+    def qec_cycle(mut self, q: Int): self.gate(LogicalOpKind.QEC, q)
+    def barrier(mut self): self.gate(LogicalOpKind.BARRIER, -1)
 
     def pauli_exp(mut self, theta: Float64, paulis: String, qubits: List[Int]) raises:
         """exp(-i theta/2 P) with P = paulis[i] on logical qubit qubits[i]. On Iceberg
@@ -197,20 +197,20 @@ struct LogicalProgram(Copyable, Writable, Sized):
                 raise Error("QM-E724: pauli_exp letter '" + chr(c) + "'. Hint: use I, X, Y or Z.")
             self.pauli_args.append(qubits[i])
             self.pauli_args.append(c)
-        self.ops.append(LogicalInstr.make(LOp.PAULI_EXP, offset, len(qubits), theta))
+        self.ops.append(LogicalInstr.make(LogicalOpKind.PAULI_EXP, offset, len(qubits), theta))
 
     def measure(mut self, q: Int, c: Int):
         """Destructive Z measurement; the decoded outcome goes to clbit c."""
-        var g = LogicalInstr.make(LOp.MEASURE, q)
+        var g = LogicalInstr.make(LogicalOpKind.MEASURE, q)
         g.clbit = c
         if c >= self.num_clbits:
             self.num_clbits = c + 1
         self.ops.append(g)
 
-    def set_bit(mut self, c: Int, e: CExpr):
+    def set_bit(mut self, c: Int, e: XorExpr):
         """Classical assignment c := e (e is an XOR of clbits / minterms / 1 over
         logical clbits). `compile` emits it for classical-only qubits."""
-        var g = LogicalInstr.make(LOp.CSET, len(self.cexprs))
+        var g = LogicalInstr.make(LogicalOpKind.CSET, len(self.cexprs))
         g.clbit = c
         self.cexprs.append(e.copy())
         if c >= self.num_clbits:
@@ -221,14 +221,14 @@ struct LogicalProgram(Copyable, Writable, Sized):
         """Fresh logical qubit in T|+>_L (magic state)."""
         var q = self.num_logical
         self.num_logical += 1
-        self.ops.append(LogicalInstr.make(LOp.PREP_T, q))
+        self.ops.append(LogicalInstr.make(LogicalOpKind.PREP_T, q))
         return q
 
     def inject_t(mut self, q: Int, magic: Int):
-        self.gate(LOp.INJECT_T, q, magic)
+        self.gate(LogicalOpKind.INJECT_T, q, magic)
 
     def inject_tdg(mut self, q: Int, magic: Int):
-        self.gate(LOp.INJECT_TDG, q, magic)
+        self.gate(LogicalOpKind.INJECT_TDG, q, magic)
 
     def c_if(mut self, clbit: Int, value: Int):
         """Condition the most recent instruction on a decoded classical bit."""
@@ -279,14 +279,14 @@ struct LogicalProgram(Copyable, Writable, Sized):
         return n
 
     def t_count(self) -> Int:
-        return self.count(LOp.T) + self.count(LOp.TDG) + self.count(LOp.INJECT_T) + self.count(LOp.INJECT_TDG)
+        return self.count(LogicalOpKind.T) + self.count(LogicalOpKind.TDG) + self.count(LogicalOpKind.INJECT_T) + self.count(LogicalOpKind.INJECT_TDG)
 
     def validate(self) raises:
         """Use-after-free / unknown handle / double alloc checks (QM-E727)."""
         var state = List[Int](length=self.num_logical, fill=0)  # 0 unborn, 1 live, 2 dead
         for i in range(len(self.ops)):
             var g = self.ops[i]
-            if g.kind == LOp.ALLOC or g.kind == LOp.PREP_T:
+            if g.kind == LogicalOpKind.ALLOC or g.kind == LogicalOpKind.PREP_T:
                 if g.q0 < 0 or g.q0 >= self.num_logical or state[g.q0] != 0:
                     raise Error("QM-E727: logical instruction #" + String(i) + " re-allocates handle L" + String(g.q0) + ". Hint: use alloc()/prep_t() to obtain fresh handles.")
                 state[g.q0] = 1
@@ -298,11 +298,11 @@ struct LogicalProgram(Copyable, Writable, Sized):
                     raise Error("QM-E727: logical instruction #" + String(i) + " '" + lop_name(g.kind) + "' uses handle L" + String(q) + " which is not live. Hint: allocate before use; MEASURE, FREE and INJECT_T (magic operand) consume a qubit.")
             if a == 2 and g.q0 == g.q1:
                 raise Error("QM-E727: logical instruction #" + String(i) + " repeats handle L" + String(g.q0) + ".")
-            if g.cond >= 0 and (g.kind == LOp.ALLOC or g.kind == LOp.PREP_T or g.kind == LOp.FREE or g.kind == LOp.MEASURE or g.kind == LOp.QEC):
+            if g.cond >= 0 and (g.kind == LogicalOpKind.ALLOC or g.kind == LogicalOpKind.PREP_T or g.kind == LogicalOpKind.FREE or g.kind == LogicalOpKind.MEASURE or g.kind == LogicalOpKind.QEC):
                 raise Error("QM-E727: logical instruction #" + String(i) + " '" + lop_name(g.kind) + "' cannot be classically conditioned. Hint: condition gates only.")
-            if g.kind == LOp.MEASURE or g.kind == LOp.FREE:
+            if g.kind == LogicalOpKind.MEASURE or g.kind == LogicalOpKind.FREE:
                 state[g.q0] = 2
-            if g.kind == LOp.INJECT_T or g.kind == LOp.INJECT_TDG:
+            if g.kind == LogicalOpKind.INJECT_T or g.kind == LogicalOpKind.INJECT_TDG:
                 state[g.q1] = 2
 
     def summary_json(self, mut w: JsonWriter):
@@ -313,7 +313,7 @@ struct LogicalProgram(Copyable, Writable, Sized):
         w.kv_int("clbits", self.num_clbits)
         w.key("op_counts")
         w.begin_object()
-        for k in range(LOp.NUM):
+        for k in range(LogicalOpKind.NUM):
             var c = self.count(k)
             if c > 0:
                 w.kv_int(lop_name(k), c)

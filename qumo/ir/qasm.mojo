@@ -42,7 +42,7 @@ The implementation is split by stage (this file re-exports every name, so caller
 """
 
 from qumo.ir.qasm_lexer import (
-    decimal_to_bits, bits_to_decimal, TK, P, Token, format_qasm_error, suggest_names, tokenize_qasm, G,
+    decimal_to_bits, bits_to_decimal, TokenKind, Punct, Token, format_qasm_error, suggest_names, tokenize_qasm, SpecialGate,
     builtin_gate_table)
 from qumo.ir.qasm_parser import (
     Register, GateDef, Scope, MAX_SOURCE_ITEMS, NK, QasmParser, parse_qasm_with_warnings, parse_qasm,

@@ -181,7 +181,7 @@ struct Fuser(Movable):
 # ---------------------------------------------------------------------------
 # Execution plan + cache blocking
 # ---------------------------------------------------------------------------
-struct K:
+struct KernelKind:
     comptime ONE = 0  # fused 1q matrix
     comptime CX = 1
     comptime CPHASE = 2  # f0 + i f1 on |11>
@@ -222,34 +222,34 @@ comptime SWAP_GAIN = 2  # later remaps: >= 2 global passes saved per swap pass
 def _to_kop(g: Instruction, params: List[Float64]) -> KOp:
     var k = g.kind
     if k == Op.CX:
-        return KOp.make(K.CX, g.q0, g.q1, g)
+        return KOp.make(KernelKind.CX, g.q0, g.q1, g)
     if k == Op.CZ:
-        var op = KOp.make(K.CPHASE, g.q0, g.q1, g)
+        var op = KOp.make(KernelKind.CPHASE, g.q0, g.q1, g)
         op.f0 = -1.0
         return op
     if k == Op.CP:
         var l = g.p0.resolve(params)
-        var op = KOp.make(K.CPHASE, g.q0, g.q1, g)
+        var op = KOp.make(KernelKind.CPHASE, g.q0, g.q1, g)
         op.f0 = cos(l)
         op.f1 = sin(l)
         return op
     if op_is_controlled_1q(k):
-        var op = KOp.make(K.C1, g.q0, g.q1, g)
+        var op = KOp.make(KernelKind.C1, g.q0, g.q1, g)
         op.m = matrix_1q(op_base_1q(k), g.p0.resolve(params))
         return op
     if k == Op.SWAP:
-        return KOp.make(K.SWAP, g.q0, g.q1, g)
+        return KOp.make(KernelKind.SWAP, g.q0, g.q1, g)
     if k == Op.RZZ:
         var t = g.p0.resolve(params)
-        var op = KOp.make(K.RZZ, g.q0, g.q1, g)
+        var op = KOp.make(KernelKind.RZZ, g.q0, g.q1, g)
         op.f0 = cos(t / 2)
         op.f1 = sin(t / 2)
         return op
     if op_arity(k) == 2:
-        var op = KOp.make(K.TWO, g.q0, g.q1, g)
+        var op = KOp.make(KernelKind.TWO, g.q0, g.q1, g)
         op.m4 = matrix_2q(k, g.p0.resolve(params))
         return op
-    return KOp.make(K.OTHER, max(g.q0, max(g.q1, g.q2)), -1, g)
+    return KOp.make(KernelKind.OTHER, max(g.q0, max(g.q1, g.q2)), -1, g)
 
 
 def build_plan(circuit: Circuit, params: List[Float64]) raises -> List[KOp]:
@@ -263,7 +263,7 @@ def build_plan(circuit: Circuit, params: List[Float64]) raises -> List[KOp]:
     @always_inline
     def flush(q: Int, mut plan: List[KOp], mut has: List[Bool], pending: List[M2]) {imm dummy}:
         if has[q]:
-            var op = KOp.make(K.ONE, q, -1, dummy)
+            var op = KOp.make(KernelKind.ONE, q, -1, dummy)
             op.m = pending[q]
             plan.append(op)
             has[q] = False
@@ -295,24 +295,24 @@ def build_plan(circuit: Circuit, params: List[Float64]) raises -> List[KOp]:
 def apply_kop(mut sv: StateVector, op: KOp):
     """Apply one kernel op to the whole state (parallel kernels)."""
     var k = op.kind
-    if k == K.ONE:
+    if k == KernelKind.ONE:
         var m = op.m
         if (abs(m.re[0]) + abs(m.im[0]) + abs(m.re[3]) + abs(m.im[3])) < 1e-15 and m.re[1] == 1.0 and m.re[2] == 1.0 and m.im[1] == 0.0 and m.im[2] == 0.0:
             sv.apply_x(op.a)
         else:
             sv.apply_1q(m, op.a)
-    elif k == K.CX:
+    elif k == KernelKind.CX:
         sv.apply_cx(op.a, op.b)
-    elif k == K.CPHASE:
+    elif k == KernelKind.CPHASE:
         sv.apply_cphase(op.f0, op.f1, op.a, op.b)
-    elif k == K.C1:
+    elif k == KernelKind.C1:
         sv.apply_controlled_1q(op.m, op.a, op.b)
-    elif k == K.RZZ:
+    elif k == KernelKind.RZZ:
         var theta = 2.0 * atan2(op.f1, op.f0)
         sv.apply_rzz(theta, op.a, op.b)
-    elif k == K.SWAP:
+    elif k == KernelKind.SWAP:
         sv.apply_swap(op.a, op.b)
-    elif k == K.TWO:
+    elif k == KernelKind.TWO:
         sv.apply_2q(op.m4, op.a, op.b)
     else:
         apply_instruction(sv, op.inst, List[Float64]())
@@ -429,7 +429,7 @@ def _bit(q: Int) -> Int:
 
 def _op_wires(op: KOp) -> Int:
     """Logical wires the op touches (its dependency footprint)."""
-    if op.kind == K.OTHER:
+    if op.kind == KernelKind.OTHER:
         return _bit(op.inst.q0) | _bit(op.inst.q1) | _bit(op.inst.q2)
     return _bit(op.a) | _bit(op.b)
 
@@ -438,15 +438,15 @@ def _op_need(op: KOp) -> Int:
     """Logical wires that must be local (non-diagonal action) for the op to
     run inside a cache block; controls and diagonal factors may be global."""
     var k = op.kind
-    if k == K.ONE:
+    if k == KernelKind.ONE:
         return 0 if op.m.is_diagonal() else _bit(op.a)
-    if k == K.CX:
+    if k == KernelKind.CX:
         return _bit(op.b)
-    if k == K.CPHASE or k == K.RZZ or k == K.SWAP:
+    if k == KernelKind.CPHASE or k == KernelKind.RZZ or k == KernelKind.SWAP:
         return 0
-    if k == K.C1:
+    if k == KernelKind.C1:
         return 0 if op.m.is_diagonal() else _bit(op.b)
-    if k == K.TWO:
+    if k == KernelKind.TWO:
         return _bit(op.a) | _bit(op.b)
     return _op_wires(op)
 
@@ -454,7 +454,7 @@ def _op_need(op: KOp) -> Int:
 def _phys(op: KOp, qm: QubitMap) -> KOp:
     """The op with logical qubits replaced by their physical bits."""
     var p = op
-    if op.kind == K.OTHER:
+    if op.kind == KernelKind.OTHER:
         p.inst.q0 = qm.l2p[op.inst.q0]
         if op.inst.q1 >= 0:
             p.inst.q1 = qm.l2p[op.inst.q1]
@@ -486,7 +486,7 @@ def apply_kop_block(rp: FPtr, ip: FPtr, nb: Int, base: Int, op: KOp):
     var full = 1 << nb
     var half = full >> 1
     var quarter = full >> 2  # 0 when nb < 2: no 2q op is then fully local
-    if k == K.ONE:
+    if k == KernelKind.ONE:
         var m = op.m
         if a >= nb:  # diagonal on a global bit: one scalar per block
             if (base >> a) & 1 == 1:
@@ -497,13 +497,13 @@ def apply_kop_block(rp: FPtr, ip: FPtr, nb: Int, base: Int, op: KOp):
             kdiag_range(rp, ip, a, m.re[0], m.im[0], m.re[3], m.im[3], 0, half)
         else:
             k1_range(rp, ip, a, m, 0, half)
-    elif k == K.CX:
+    elif k == KernelKind.CX:
         if a >= nb:  # global control: X on the target or nothing
             if (base >> a) & 1 == 1:
                 kx_range(rp, ip, b, 0, half)
         else:
             kcx_range(rp, ip, a, b, 0, quarter)
-    elif k == K.CPHASE:
+    elif k == KernelKind.CPHASE:
         var ga = a >= nb
         var gb = b >= nb
         if ga and gb:
@@ -517,7 +517,7 @@ def apply_kop_block(rp: FPtr, ip: FPtr, nb: Int, base: Int, op: KOp):
                 kdiag_range(rp, ip, b, 1.0, 0.0, op.f0, op.f1, 0, half)
         else:
             kcphase_range(rp, ip, a, b, op.f0, op.f1, 0, quarter)
-    elif k == K.C1:
+    elif k == KernelKind.C1:
         var m = op.m
         if a >= nb:  # global control
             if (base >> a) & 1 == 1:
@@ -537,7 +537,7 @@ def apply_kop_block(rp: FPtr, ip: FPtr, nb: Int, base: Int, op: KOp):
                 kdiag_range(rp, ip, a, 1.0, 0.0, m.re[0], m.im[0], 0, half)
         else:
             kc1_range(rp, ip, a, b, m, 0, quarter)
-    elif k == K.RZZ:
+    elif k == KernelKind.RZZ:
         var cr = op.f0
         var si = op.f1
         var ga = a >= nb
@@ -552,9 +552,9 @@ def apply_kop_block(rp: FPtr, ip: FPtr, nb: Int, base: Int, op: KOp):
             kdiag_range(rp, ip, l, cr, s0, cr, -s0, 0, half)
         else:
             krzz_range(rp, ip, a, b, cr, si, 0, full)
-    elif k == K.SWAP:
+    elif k == KernelKind.SWAP:
         kswap_range(rp, ip, a, b, 0, quarter)
-    elif k == K.TWO:
+    elif k == KernelKind.TWO:
         k2_range(rp, ip, a, b, op.m4, 0, quarter)
 
 
@@ -607,10 +607,10 @@ def _select_local(plan: List[KOp], wires: List[Int], need: List[Int], done: List
             blocked |= w
             continue
         var k = plan[j].kind
-        if k == K.OTHER:
+        if k == KernelKind.OTHER:
             blocked |= w
             continue
-        if k == K.SWAP:
+        if k == KernelKind.SWAP:
             var t = map[plan[j].a]
             map[plan[j].a] = map[plan[j].b]
             map[plan[j].b] = t
@@ -726,10 +726,10 @@ def _collect_run(plan: List[KOp], wires: List[Int], need: List[Int], mut done: L
             blocked |= w
             continue
         var op = plan[j]
-        if op.kind == K.OTHER:
+        if op.kind == KernelKind.OTHER:
             blocked |= w
             continue
-        if op.kind == K.SWAP:
+        if op.kind == KernelKind.SWAP:
             qm.relabel(op.a, op.b)
             done[j] = True
             continue
@@ -850,7 +850,7 @@ def execute_plan_reordered_stats(mut sv: StateVector, plan: List[KOp], nb: Int) 
     for op in plan:
         wires.append(_op_wires(op))
         need.append(_op_need(op))
-        if op.kind == K.SWAP:
+        if op.kind == KernelKind.SWAP:
             stats.relabels += 1  # every SWAP gate becomes a relabel
     var done = List[Bool](length=m, fill=False)
     var qm = QubitMap(n)
@@ -864,12 +864,12 @@ def execute_plan_reordered_stats(mut sv: StateVector, plan: List[KOp], nb: Int) 
         if head >= m:
             break
         var op = plan[head]
-        if op.kind == K.OTHER:
+        if op.kind == KernelKind.OTHER:
             apply_kop(sv, _phys(op, qm))
             done[head] = True
             stats.global_ops += 1
             continue
-        if op.kind == K.SWAP:
+        if op.kind == KernelKind.SWAP:
             qm.relabel(op.a, op.b)
             done[head] = True
             continue

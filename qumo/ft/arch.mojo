@@ -47,20 +47,20 @@ Error codes: QM-E727 (invalid architecture or policy option).
 """
 
 from qumo.ft.code import StabilizerCode, steane_code, iceberg_code
-from qumo.ft.logical import LOp, lop_name
+from qumo.ft.logical import LogicalOpKind, lop_name
 from qumo.core.json import JsonWriter
 
 
 struct QECPolicy(Copyable, Writable):
     var style: String
     var threshold: Float64
-    var costs: List[Float64]  # per LOp kind
+    var costs: List[Float64]  # per LogicalOpKind kind
     var before_non_clifford: Bool
 
     def __init__(out self, style: String = "steane", threshold: Float64 = 1.0, before_non_clifford: Bool = False):
         self.style = style
         self.threshold = threshold
-        self.costs = List[Float64](length=LOp.NUM, fill=0.0)
+        self.costs = List[Float64](length=LogicalOpKind.NUM, fill=0.0)
         self.before_non_clifford = before_non_clifford
 
     def with_cost(self, op: String, cost: Float64) raises -> QECPolicy:
@@ -71,7 +71,7 @@ struct QECPolicy(Copyable, Writable):
         if name == "prep_zero":
             name = "alloc"
         var out = self.copy()
-        for k in range(LOp.NUM):
+        for k in range(LogicalOpKind.NUM):
             if lop_name(k) == name:
                 out.costs[k] = cost
                 return out^
@@ -94,7 +94,7 @@ struct QECPolicy(Copyable, Writable):
         w.kv_bool("before_non_clifford", self.before_non_clifford)
         w.key("costs")
         w.begin_object()
-        for k in range(LOp.NUM):
+        for k in range(LogicalOpKind.NUM):
             if self.costs[k] > 0.0:
                 w.kv_float(lop_name(k), self.costs[k])
         w.end_object()

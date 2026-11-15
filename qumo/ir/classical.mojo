@@ -40,7 +40,7 @@ from std.ffi import external_call
 from std.math import sin, cos, tan, asin, acos, atan, exp, log, sqrt, floor, ceil, isnan, isinf, pi
 
 
-struct CT:
+struct CTypeKind:
     comptime BIT = 0
     comptime BOOL = 1
     comptime UINT = 2
@@ -51,7 +51,7 @@ struct CT:
 
 @fieldwise_init
 struct CType(ImplicitlyCopyable, Equatable):
-    var tag: Int  # CT.*
+    var tag: Int  # CTypeKind.*
     var width: Int  # 1..64; FLOAT is 64
     var bare: Bool  # declared without a width: 64-bit, emitted as written
 
@@ -60,49 +60,49 @@ struct CType(ImplicitlyCopyable, Equatable):
 
     def is_integer(self) -> Bool:
         """Held in the integer slots (everything but float)."""
-        return self.tag != CT.FLOAT
+        return self.tag != CTypeKind.FLOAT
 
     def is_signed(self) -> Bool:
-        return self.tag == CT.INT
+        return self.tag == CTypeKind.INT
 
 
 def bit_type(width: Int = 1) -> CType:
-    return CType(CT.BIT, width, False)
+    return CType(CTypeKind.BIT, width, False)
 
 
 def bool_type() -> CType:
-    return CType(CT.BOOL, 1, False)
+    return CType(CTypeKind.BOOL, 1, False)
 
 
 def uint_type(width: Int = 64, bare: Bool = False) -> CType:
-    return CType(CT.UINT, width, bare)
+    return CType(CTypeKind.UINT, width, bare)
 
 
 def int_type(width: Int = 64, bare: Bool = False) -> CType:
-    return CType(CT.INT, width, bare)
+    return CType(CTypeKind.INT, width, bare)
 
 
 def float_type(bare: Bool = True) -> CType:
-    return CType(CT.FLOAT, 64, bare)
+    return CType(CTypeKind.FLOAT, 64, bare)
 
 
 def angle_type(width: Int) -> CType:
-    return CType(CT.ANGLE, width, False)
+    return CType(CTypeKind.ANGLE, width, False)
 
 
 def type_name(t: CType) -> String:
     """OpenQASM spelling of a type."""
-    if t.tag == CT.BOOL:
+    if t.tag == CTypeKind.BOOL:
         return "bool"
-    if t.tag == CT.FLOAT:
+    if t.tag == CTypeKind.FLOAT:
         return "float" if t.bare else "float[64]"
-    var nm = String("bit" if t.tag == CT.BIT else ("uint" if t.tag == CT.UINT else ("int" if t.tag == CT.INT else "angle")))
-    if t.bare or (t.tag == CT.BIT and t.width == 1):
+    var nm = String("bit" if t.tag == CTypeKind.BIT else ("uint" if t.tag == CTypeKind.UINT else ("int" if t.tag == CTypeKind.INT else "angle")))
+    if t.bare or (t.tag == CTypeKind.BIT and t.width == 1):
         return nm^
     return nm + "[" + String(t.width) + "]"
 
 
-struct CN:
+struct CNodeOp:
     """Expression node operations (the operands of a node are `x` and `y`)."""
 
     comptime CONST = 0  # i, or f for float; y = 1 marks an untyped literal
@@ -130,14 +130,14 @@ struct CN:
     comptime GT = 22
     comptime GE = 23
     comptime CAST = 24  # x, to `ty`; the source type is that of node x
-    comptime FN = 25  # i = CF.*, x, y (second operand or -1)
+    comptime FN = 25  # i = CFunc.*, x, y (second operand or -1)
     comptime SC_AND = 26  # x = left operand; y = its SC_END
     comptime SC_OR = 27
     comptime SC_END = 28  # x = right operand
 
 
-struct CF:
-    """Functions of `CN.FN`."""
+struct CFunc:
+    """Functions of `CNodeOp.FN`."""
 
     comptime SIN = 0
     comptime COS = 1
@@ -219,7 +219,7 @@ def wrap_int(v: Int, ty: CType) -> Int:
     var w = ty.width
     if w >= 64:
         return v
-    if ty.tag == CT.INT:
+    if ty.tag == CTypeKind.INT:
         var s = 64 - w
         return (v << s) >> s
     return v & ((1 << w) - 1)
@@ -263,7 +263,7 @@ def _float_to_int(x: Float64, ty: CType, mut out: Int) -> Bool:
         return False
     var t = -floor(-x) if x < 0.0 else floor(x)
     var w = ty.width
-    if ty.tag == CT.INT:
+    if ty.tag == CTypeKind.INT:
         var top = _two_pow(w - 1)
         if t < -top or t >= top:
             return False
@@ -304,19 +304,19 @@ def float_mod(a: Float64, b: Float64) -> Float64:
 
 
 def _fn_real(f: Int, a: Float64, b: Float64) -> Float64:
-    if f == CF.SIN: return sin(a)
-    if f == CF.COS: return cos(a)
-    if f == CF.TAN: return tan(a)
-    if f == CF.ASIN: return asin(a)
-    if f == CF.ACOS: return acos(a)
-    if f == CF.ATAN: return atan(a)
-    if f == CF.EXP: return exp(a)
-    if f == CF.LOG: return log(a)
-    if f == CF.SQRT: return sqrt(a)
-    if f == CF.ABS: return abs(a)
-    if f == CF.FLOOR: return floor(a)
-    if f == CF.CEIL: return ceil(a)
-    return float_mod(a, b)  # CF.MOD
+    if f == CFunc.SIN: return sin(a)
+    if f == CFunc.COS: return cos(a)
+    if f == CFunc.TAN: return tan(a)
+    if f == CFunc.ASIN: return asin(a)
+    if f == CFunc.ACOS: return acos(a)
+    if f == CFunc.ATAN: return atan(a)
+    if f == CFunc.EXP: return exp(a)
+    if f == CFunc.LOG: return log(a)
+    if f == CFunc.SQRT: return sqrt(a)
+    if f == CFunc.ABS: return abs(a)
+    if f == CFunc.FLOOR: return floor(a)
+    if f == CFunc.CEIL: return ceil(a)
+    return float_mod(a, b)  # CFunc.MOD
 
 
 def eval_nodes[B: BitReader](nodes: List[CNode], lo: Int, root: Int, mut st: CStore, bits: B) -> Int:
@@ -327,33 +327,33 @@ def eval_nodes[B: BitReader](nodes: List[CNode], lo: Int, root: Int, mut st: CSt
         ref n = nodes[pc]
         var op = n.op
         var ty = n.ty
-        var fl = ty.tag == CT.FLOAT
-        if op == CN.CONST:
+        var fl = ty.tag == CTypeKind.FLOAT
+        if op == CNodeOp.CONST:
             if fl:
                 st.tf[pc] = n.f
             else:
                 st.ti[pc] = n.i
-        elif op == CN.VAR:
+        elif op == CNodeOp.VAR:
             if fl:
                 st.tf[pc] = st.reals[n.x]
             else:
                 st.ti[pc] = st.ints[n.x]
-        elif op == CN.BITS:
+        elif op == CNodeOp.BITS:
             var v = 0
             for j in range(n.y):
                 v |= bits.get_bit(n.x + j) << j
             st.ti[pc] = v
-        elif op == CN.INPUT:
+        elif op == CNodeOp.INPUT:
             st.tf[pc] = st.params[n.x]
-        elif op == CN.CAST:
+        elif op == CNodeOp.CAST:
             var src = nodes[n.x].ty
-            if src.tag == CT.FLOAT:
+            if src.tag == CTypeKind.FLOAT:
                 var x = st.tf[n.x]
-                if ty.tag == CT.FLOAT:
+                if ty.tag == CTypeKind.FLOAT:
                     st.tf[pc] = x
-                elif ty.tag == CT.BOOL:
+                elif ty.tag == CTypeKind.BOOL:
                     st.ti[pc] = 0 if x == 0.0 else 1
-                elif ty.tag == CT.ANGLE:
+                elif ty.tag == CTypeKind.ANGLE:
                     var v = 0
                     if not _float_to_angle(x, ty.width, v):
                         return CEval.FLOAT_RANGE
@@ -365,11 +365,11 @@ def eval_nodes[B: BitReader](nodes: List[CNode], lo: Int, root: Int, mut st: CSt
                     st.ti[pc] = v
             else:
                 var v = st.ti[n.x]
-                if ty.tag == CT.FLOAT:
+                if ty.tag == CTypeKind.FLOAT:
                     st.tf[pc] = Float64(v) if src.is_signed() else Float64(UInt64(v))
-                elif ty.tag == CT.BOOL:
+                elif ty.tag == CTypeKind.BOOL:
                     st.ti[pc] = 0 if v == 0 else 1
-                elif ty.tag == CT.ANGLE and src.tag == CT.ANGLE and src.width != ty.width:
+                elif ty.tag == CTypeKind.ANGLE and src.tag == CTypeKind.ANGLE and src.width != ty.width:
                     # keep the turn: pad low bits, or drop them
                     if ty.width > src.width:
                         st.ti[pc] = wrap_int(v << (ty.width - src.width), ty)
@@ -377,23 +377,23 @@ def eval_nodes[B: BitReader](nodes: List[CNode], lo: Int, root: Int, mut st: CSt
                         st.ti[pc] = Int(UInt64(v) >> UInt64(src.width - ty.width))
                 else:
                     st.ti[pc] = wrap_int(v, ty)
-        elif op == CN.ADD or op == CN.SUB or op == CN.MUL:
+        elif op == CNodeOp.ADD or op == CNodeOp.SUB or op == CNodeOp.MUL:
             if fl:
                 var a = st.tf[n.x]
                 var b = st.tf[n.y]
-                st.tf[pc] = a + b if op == CN.ADD else (a - b if op == CN.SUB else a * b)
+                st.tf[pc] = a + b if op == CNodeOp.ADD else (a - b if op == CNodeOp.SUB else a * b)
             else:
                 var a = st.ti[n.x]
                 var b = st.ti[n.y]
-                st.ti[pc] = wrap_int(a + b if op == CN.ADD else (a - b if op == CN.SUB else a * b), ty)
-        elif op == CN.DIV or op == CN.MOD:
+                st.ti[pc] = wrap_int(a + b if op == CNodeOp.ADD else (a - b if op == CNodeOp.SUB else a * b), ty)
+        elif op == CNodeOp.DIV or op == CNodeOp.MOD:
             var src = nodes[n.x].ty
             if fl:
                 var a = st.tf[n.x]
                 var b = st.tf[n.y]
                 if b == 0.0:
                     return CEval.DIV_ZERO
-                if op == CN.DIV:
+                if op == CNodeOp.DIV:
                     st.tf[pc] = a / b
                 else:
                     st.tf[pc] = float_rem(a, b)
@@ -404,95 +404,95 @@ def eval_nodes[B: BitReader](nodes: List[CNode], lo: Int, root: Int, mut st: CSt
                     return CEval.DIV_ZERO
                 var v: Int
                 if src.is_signed():
-                    v = _sdiv(a, b) if op == CN.DIV else _srem(a, b)
+                    v = _sdiv(a, b) if op == CNodeOp.DIV else _srem(a, b)
                 else:
                     var ua = UInt64(a)
                     var ub = UInt64(b)
-                    v = Int(ua / ub) if op == CN.DIV else Int(ua % ub)
+                    v = Int(ua / ub) if op == CNodeOp.DIV else Int(ua % ub)
                 st.ti[pc] = wrap_int(v, ty)
-        elif op == CN.POW:
+        elif op == CNodeOp.POW:
             if fl:
                 st.tf[pc] = st.tf[n.x] ** st.tf[n.y]
             else:
                 if nodes[n.y].ty.is_signed() and st.ti[n.y] < 0:
                     return CEval.NEG_POWER
                 st.ti[pc] = _ipow(st.ti[n.x], st.ti[n.y], ty)
-        elif op == CN.SHL or op == CN.SHR:
+        elif op == CNodeOp.SHL or op == CNodeOp.SHR:
             var a = st.ti[n.x]
             var s = UInt64(st.ti[n.y])
             if s >= UInt64(ty.width):
                 st.ti[pc] = 0
-            elif op == CN.SHL:
+            elif op == CNodeOp.SHL:
                 st.ti[pc] = wrap_int(a << Int(s), ty)
             else:
                 st.ti[pc] = wrap_int(Int(UInt64(a) >> s), ty)
-        elif op == CN.AND:
+        elif op == CNodeOp.AND:
             st.ti[pc] = st.ti[n.x] & st.ti[n.y]
-        elif op == CN.OR:
+        elif op == CNodeOp.OR:
             st.ti[pc] = st.ti[n.x] | st.ti[n.y]
-        elif op == CN.XOR:
+        elif op == CNodeOp.XOR:
             st.ti[pc] = st.ti[n.x] ^ st.ti[n.y]
-        elif op >= CN.EQ and op <= CN.GE:
+        elif op >= CNodeOp.EQ and op <= CNodeOp.GE:
             var src = nodes[n.x].ty
             var r: Bool
-            if src.tag == CT.FLOAT:
+            if src.tag == CTypeKind.FLOAT:
                 var a = st.tf[n.x]
                 var b = st.tf[n.y]
-                if op == CN.EQ: r = a == b
-                elif op == CN.NE: r = a != b
-                elif op == CN.LT: r = a < b
-                elif op == CN.LE: r = a <= b
-                elif op == CN.GT: r = a > b
+                if op == CNodeOp.EQ: r = a == b
+                elif op == CNodeOp.NE: r = a != b
+                elif op == CNodeOp.LT: r = a < b
+                elif op == CNodeOp.LE: r = a <= b
+                elif op == CNodeOp.GT: r = a > b
                 else: r = a >= b
             elif src.is_signed():
                 var a = st.ti[n.x]
                 var b = st.ti[n.y]
-                if op == CN.EQ: r = a == b
-                elif op == CN.NE: r = a != b
-                elif op == CN.LT: r = a < b
-                elif op == CN.LE: r = a <= b
-                elif op == CN.GT: r = a > b
+                if op == CNodeOp.EQ: r = a == b
+                elif op == CNodeOp.NE: r = a != b
+                elif op == CNodeOp.LT: r = a < b
+                elif op == CNodeOp.LE: r = a <= b
+                elif op == CNodeOp.GT: r = a > b
                 else: r = a >= b
             else:
                 var a = UInt64(st.ti[n.x])
                 var b = UInt64(st.ti[n.y])
-                if op == CN.EQ: r = a == b
-                elif op == CN.NE: r = a != b
-                elif op == CN.LT: r = a < b
-                elif op == CN.LE: r = a <= b
-                elif op == CN.GT: r = a > b
+                if op == CNodeOp.EQ: r = a == b
+                elif op == CNodeOp.NE: r = a != b
+                elif op == CNodeOp.LT: r = a < b
+                elif op == CNodeOp.LE: r = a <= b
+                elif op == CNodeOp.GT: r = a > b
                 else: r = a >= b
             st.ti[pc] = 1 if r else 0
-        elif op == CN.NEG:
+        elif op == CNodeOp.NEG:
             if fl:
                 st.tf[pc] = -st.tf[n.x]
             else:
                 st.ti[pc] = wrap_int(0 - st.ti[n.x], ty)
-        elif op == CN.LNOT:
+        elif op == CNodeOp.LNOT:
             st.ti[pc] = 1 - st.ti[n.x]
-        elif op == CN.BNOT:
+        elif op == CNodeOp.BNOT:
             st.ti[pc] = wrap_int(~st.ti[n.x], ty)
-        elif op == CN.SC_AND:
+        elif op == CNodeOp.SC_AND:
             if st.ti[n.x] == 0:
                 st.ti[n.y] = 0
                 pc = n.y + 1
                 continue
-        elif op == CN.SC_OR:
+        elif op == CNodeOp.SC_OR:
             if st.ti[n.x] != 0:
                 st.ti[n.y] = 1
                 pc = n.y + 1
                 continue
-        elif op == CN.SC_END:
+        elif op == CNodeOp.SC_END:
             st.ti[pc] = st.ti[n.x]
-        elif op == CN.FN:
-            if n.i == CF.POPCOUNT:
+        elif op == CNodeOp.FN:
+            if n.i == CFunc.POPCOUNT:
                 st.ti[pc] = Int(pop_count(UInt64(st.ti[n.x])))
-            elif n.i == CF.ABS and not fl:
+            elif n.i == CFunc.ABS and not fl:
                 var a = st.ti[n.x]
                 st.ti[pc] = wrap_int(0 - a if a < 0 else a, ty)
             else:
                 var d = st.tf[n.y] if n.y >= 0 else 0.0
-                if n.i == CF.MOD and d == 0.0:
+                if n.i == CFunc.MOD and d == 0.0:
                     return CEval.DIV_ZERO
                 st.tf[pc] = _fn_real(n.i, st.tf[n.x], d)
         pc += 1
@@ -518,7 +518,7 @@ struct CExpr(Copyable):
         return self.root().ty
 
     def is_const(self) -> Bool:
-        return len(self.nodes) == 1 and self.root().op == CN.CONST
+        return len(self.nodes) == 1 and self.root().op == CNodeOp.CONST
 
     def is_literal(self) -> Bool:
         return self.is_const() and self.root().y == 1
@@ -528,7 +528,7 @@ struct CExpr(Copyable):
 
     def const_float(self) -> Float64:
         var n = self.root()
-        return n.f if n.ty.tag == CT.FLOAT else (Float64(n.i) if n.ty.is_signed() else Float64(UInt64(n.i)))
+        return n.f if n.ty.tag == CTypeKind.FLOAT else (Float64(n.i) if n.ty.is_signed() else Float64(UInt64(n.i)))
 
     @staticmethod
     def _leaf(op: Int, ty: CType, x: Int = 0, y: Int = 0, i: Int = 0, f: Float64 = 0.0) -> CExpr:
@@ -538,36 +538,36 @@ struct CExpr(Copyable):
 
     @staticmethod
     def literal_int(v: Int) -> CExpr:
-        return CExpr._leaf(CN.CONST, int_type(64, True), 0, 1, v)
+        return CExpr._leaf(CNodeOp.CONST, int_type(64, True), 0, 1, v)
 
     @staticmethod
     def literal_uint(v: Int) -> CExpr:
         """A literal at or above 2^63, held by its bits."""
-        return CExpr._leaf(CN.CONST, uint_type(64, True), 0, 1, v)
+        return CExpr._leaf(CNodeOp.CONST, uint_type(64, True), 0, 1, v)
 
     @staticmethod
     def literal_float(v: Float64) -> CExpr:
-        return CExpr._leaf(CN.CONST, float_type(), 0, 1, 0, v)
+        return CExpr._leaf(CNodeOp.CONST, float_type(), 0, 1, 0, v)
 
     @staticmethod
     def literal_bool(v: Bool) -> CExpr:
-        return CExpr._leaf(CN.CONST, bool_type(), 0, 1, 1 if v else 0)
+        return CExpr._leaf(CNodeOp.CONST, bool_type(), 0, 1, 1 if v else 0)
 
     @staticmethod
     def typed_const(ty: CType, i: Int, f: Float64 = 0.0) -> CExpr:
-        return CExpr._leaf(CN.CONST, ty, 0, 0, i, f)
+        return CExpr._leaf(CNodeOp.CONST, ty, 0, 0, i, f)
 
     @staticmethod
     def variable(store: Int, ty: CType) -> CExpr:
-        return CExpr._leaf(CN.VAR, ty, store)
+        return CExpr._leaf(CNodeOp.VAR, ty, store)
 
     @staticmethod
     def input(index: Int) -> CExpr:
-        return CExpr._leaf(CN.INPUT, float_type(), index)
+        return CExpr._leaf(CNodeOp.INPUT, float_type(), index)
 
     @staticmethod
     def bits(first: Int, count: Int) -> CExpr:
-        return CExpr._leaf(CN.BITS, bit_type(count), first, count)
+        return CExpr._leaf(CNodeOp.BITS, bit_type(count), first, count)
 
 
 def _append(mut out: CExpr, e: CExpr) -> Int:
@@ -575,7 +575,7 @@ def _append(mut out: CExpr, e: CExpr) -> Int:
     var base = len(out.nodes)
     for n in e.nodes:
         var c = n
-        if c.op >= CN.NEG:
+        if c.op >= CNodeOp.NEG:
             c.x += base
             if c.y >= 0:
                 c.y += base
@@ -586,7 +586,7 @@ def _append(mut out: CExpr, e: CExpr) -> Int:
 def _fold(var e: CExpr) raises -> CExpr:
     """Replace an all-constant expression by one CONST node."""
     for n in e.nodes:
-        if n.op == CN.VAR or n.op == CN.INPUT or n.op == CN.BITS:
+        if n.op == CNodeOp.VAR or n.op == CNodeOp.INPUT or n.op == CNodeOp.BITS:
             return e^
     var st = CStore(0, len(e.nodes), List[Float64]())
     var root = len(e.nodes) - 1
@@ -599,12 +599,12 @@ def _fold(var e: CExpr) raises -> CExpr:
         raise Error("QM-E482: constant float is NaN, infinite or out of range for this integer type. Hint: check the value.")
     var literal = True
     for n in e.nodes:
-        if n.op == CN.CONST and n.y != 1:
+        if n.op == CNodeOp.CONST and n.y != 1:
             literal = False
     var ty = e.root().ty
-    if ty.tag == CT.FLOAT:
-        return CExpr._leaf(CN.CONST, ty, 0, 1 if literal else 0, 0, st.tf[root])
-    return CExpr._leaf(CN.CONST, ty, 0, 1 if literal else 0, st.ti[root])
+    if ty.tag == CTypeKind.FLOAT:
+        return CExpr._leaf(CNodeOp.CONST, ty, 0, 1 if literal else 0, 0, st.tf[root])
+    return CExpr._leaf(CNodeOp.CONST, ty, 0, 1 if literal else 0, st.ti[root])
 
 
 def _unary(op: Int, ty: CType, a: CExpr, i: Int = 0, y: Int = -1) raises -> CExpr:
@@ -627,14 +627,14 @@ def can_cast(src: CType, dst: CType) -> Bool:
     var d = dst.tag
     if s == d:
         return True
-    if s == CT.ANGLE:
-        return d == CT.BOOL or (d == CT.BIT and src.width == dst.width)
-    if d == CT.ANGLE:
-        return s == CT.FLOAT or (s == CT.BIT and src.width == dst.width)
-    if s == CT.FLOAT:
-        return d != CT.BIT
-    if s == CT.BIT:
-        return d != CT.FLOAT
+    if s == CTypeKind.ANGLE:
+        return d == CTypeKind.BOOL or (d == CTypeKind.BIT and src.width == dst.width)
+    if d == CTypeKind.ANGLE:
+        return s == CTypeKind.FLOAT or (s == CTypeKind.BIT and src.width == dst.width)
+    if s == CTypeKind.FLOAT:
+        return d != CTypeKind.BIT
+    if s == CTypeKind.BIT:
+        return d != CTypeKind.FLOAT
     return True
 
 
@@ -642,9 +642,9 @@ def ce_cast(a: CExpr, ty: CType) raises -> CExpr:
     """`a` as `ty`, by the cast table (QM-E580 when refused). A sized target wraps; an
     unsized value does not wrap into an unsized target (QM-E482 when out of range)."""
     var src = a.ty()
-    if _is_unsized(a) and ty.bare and (ty.tag == CT.INT or ty.tag == CT.UINT):
+    if _is_unsized(a) and ty.bare and (ty.tag == CTypeKind.INT or ty.tag == CTypeKind.UINT):
         var v = _exact_of(a)
-        if (ty.tag == CT.INT and v >= (Int128(1) << 63)) or (ty.tag == CT.UINT and v < 0):
+        if (ty.tag == CTypeKind.INT and v >= (Int128(1) << 63)) or (ty.tag == CTypeKind.UINT and v < 0):
             raise Error("QM-E482: the constant " + String(v) + " is out of range for " + type_name(ty) + ". Hint: use a type that holds it, or cast to a sized type to wrap.")
     if src == ty:
         if a.is_const():
@@ -655,7 +655,7 @@ def ce_cast(a: CExpr, ty: CType) raises -> CExpr:
         return a.copy()
     if not can_cast(src, ty):
         raise Error("QM-E580: cannot convert " + type_name(src) + " to " + type_name(ty) + ". Hint: the allowed casts are the table in docs/CONTROL_FLOW.md; angle converts to bool or to a bit register of its width only.")
-    var r = _unary(CN.CAST, ty, a)
+    var r = _unary(CNodeOp.CAST, ty, a)
     if r.is_const():
         r.nodes[0].y = 0
     return r^
@@ -664,10 +664,10 @@ def ce_cast(a: CExpr, ty: CType) raises -> CExpr:
 def ce_explicit_cast(a: CExpr, ty: CType) raises -> CExpr:
     """A cast written in the source: `bit[m](x)` also needs x to have m bits."""
     var src = a.ty()
-    if ty.tag == CT.BIT and src.tag != CT.FLOAT:
+    if ty.tag == CTypeKind.BIT and src.tag != CTypeKind.FLOAT:
         var fits = src.width == ty.width
         if a.is_literal():
-            fits = a.const_int() >= 0 and _fits(a.const_int(), src.tag == CT.UINT, uint_type(ty.width))
+            fits = a.const_int() >= 0 and _fits(a.const_int(), src.tag == CTypeKind.UINT, uint_type(ty.width))
         if not fits:
             raise Error("QM-E580: bit[" + String(ty.width) + "] takes a value of " + String(ty.width) + " bits, not " + type_name(src) + ". Hint: cast through uint[" + String(ty.width) + "] first.")
     return ce_cast(a, ty)
@@ -682,8 +682,8 @@ def _fits(v: Int, literal_unsigned: Bool, ty: CType) -> Bool:
     """The integer literal `v` is representable in `ty`. An unsigned literal is at
     or above 2^63 and held by its bits, so `v` is negative as an Int."""
     if literal_unsigned:
-        return ty.tag != CT.INT and ty.width >= 64
-    if ty.tag == CT.INT:
+        return ty.tag != CTypeKind.INT and ty.width >= 64
+    if ty.tag == CTypeKind.INT:
         return ty.width >= 64 or (v >= -(1 << (ty.width - 1)) and v < (1 << (ty.width - 1)))
     if v < 0:
         return False
@@ -707,7 +707,7 @@ def _is_unsized(e: CExpr) -> Bool:
     """An integer constant with no width. Its value is exact: it is not an int64."""
     if not e.is_const() or not e.ty().bare:
         return False
-    return e.ty().tag == CT.INT or e.ty().tag == CT.UINT
+    return e.ty().tag == CTypeKind.INT or e.ty().tag == CTypeKind.UINT
 
 
 def _exact_operand(e: CExpr) -> Bool:
@@ -720,7 +720,7 @@ def _exact_of(e: CExpr) -> Int128:
 
 
 def _real_const(v: Float64, literal: Bool) -> CExpr:
-    return CExpr._leaf(CN.CONST, float_type(), 0, 1 if literal else 0, 0, v)
+    return CExpr._leaf(CNodeOp.CONST, float_type(), 0, 1 if literal else 0, 0, v)
 
 
 def _exact_const(v: Int128, unsigned_: Bool, literal: Bool) -> CExpr:
@@ -729,8 +729,8 @@ def _exact_const(v: Int128, unsigned_: Bool, literal: Bool) -> CExpr:
         return _real_const(Float64(v), literal)
     var y = 1 if literal else 0
     if v >= (Int128(1) << 63):
-        return CExpr._leaf(CN.CONST, uint_type(64, True), 0, y, Int(UInt64(v)))
-    return CExpr._leaf(CN.CONST, uint_type(64, True) if unsigned_ and v >= 0 else int_type(64, True), 0, y, Int(v))
+        return CExpr._leaf(CNodeOp.CONST, uint_type(64, True), 0, y, Int(UInt64(v)))
+    return CExpr._leaf(CNodeOp.CONST, uint_type(64, True) if unsigned_ and v >= 0 else int_type(64, True), 0, y, Int(v))
 
 
 comptime _EXACT_LIMIT = 1.0e30  # below it a product of two 65-bit values fits Int128
@@ -756,7 +756,7 @@ def _exact_pow(x: Int128, e: Int128, unsigned_: Bool, literal: Bool) -> CExpr:
 def _exact_shift(op: Int, x: Int128, n: Int128, literal: Bool) -> CExpr:
     if x == 0:
         return _exact_const(Int128(0), True, literal)  # 0 * 2.0 ** n would be NaN at huge n
-    if op == CN.SHR:
+    if op == CNodeOp.SHR:
         return _exact_const(Int128(0) if n >= 64 else x >> n, True, literal)
     if n < 126 and x < (Int128(1) << (126 - n)):
         return _exact_const(x << n, True, literal)
@@ -768,49 +768,49 @@ def _exact_binary(op: Int, a: CExpr, b: CExpr) raises -> CExpr:
     one place where folding differs from run time, which would wrap or refuse."""
     var x = _exact_of(a)
     var y = _exact_of(b)
-    var unsigned_ = a.ty().tag == CT.UINT or b.ty().tag == CT.UINT
+    var unsigned_ = a.ty().tag == CTypeKind.UINT or b.ty().tag == CTypeKind.UINT
     var literal = a.is_literal() and b.is_literal()
-    if op == CN.ADD:
+    if op == CNodeOp.ADD:
         return _exact_const(x + y, unsigned_, literal)
-    if op == CN.SUB:
+    if op == CNodeOp.SUB:
         return _exact_const(x - y, unsigned_, literal)
-    if op == CN.MUL:
+    if op == CNodeOp.MUL:
         var f = Float64(x) * Float64(y)
         if abs(f) >= _EXACT_LIMIT:
             return _real_const(f, literal)
         return _exact_const(x * y, unsigned_, literal)
-    if op == CN.DIV or op == CN.MOD:
+    if op == CNodeOp.DIV or op == CNodeOp.MOD:
         if y == 0:
             raise Error("QM-E533: division by a constant zero. Hint: check the divisor.")
         var q = x / y  # truncates, as the table says
-        return _exact_const(q if op == CN.DIV else x - q * y, unsigned_, literal)
-    if op == CN.POW:
+        return _exact_const(q if op == CNodeOp.DIV else x - q * y, unsigned_, literal)
+    if op == CNodeOp.POW:
         return _exact_pow(x, y, unsigned_, literal)
-    if op == CN.SHL or op == CN.SHR:
+    if op == CNodeOp.SHL or op == CNodeOp.SHR:
         return _exact_shift(op, x, y, literal)
-    if op == CN.AND or op == CN.OR or op == CN.XOR:
+    if op == CNodeOp.AND or op == CNodeOp.OR or op == CNodeOp.XOR:
         var ux = UInt64(x)
         var uy = UInt64(y)
-        var bits = ux & uy if op == CN.AND else (ux | uy if op == CN.OR else ux ^ uy)
+        var bits = ux & uy if op == CNodeOp.AND else (ux | uy if op == CNodeOp.OR else ux ^ uy)
         if x < 0 or y < 0:
             return _exact_const(Int128(Int(bits)), False, literal)
         return _exact_const(Int128(bits), unsigned_, literal)
     var r: Bool
-    if op == CN.EQ: r = x == y
-    elif op == CN.NE: r = x != y
-    elif op == CN.LT: r = x < y
-    elif op == CN.LE: r = x <= y
-    elif op == CN.GT: r = x > y
+    if op == CNodeOp.EQ: r = x == y
+    elif op == CNodeOp.NE: r = x != y
+    elif op == CNodeOp.LT: r = x < y
+    elif op == CNodeOp.LE: r = x <= y
+    elif op == CNodeOp.GT: r = x > y
     else: r = x >= y
-    return CExpr._leaf(CN.CONST, bool_type(), 0, 1 if literal else 0, 1 if r else 0)
+    return CExpr._leaf(CNodeOp.CONST, bool_type(), 0, 1 if literal else 0, 1 if r else 0)
 
 
 def _exact_pair(op: Int, a: CExpr, b: CExpr) -> Bool:
     if not _exact_operand(a) or not _exact_operand(b) or not (_is_unsized(a) or _is_unsized(b)):
         return False
-    if op == CN.SHL or op == CN.SHR:
+    if op == CNodeOp.SHL or op == CNodeOp.SHR:
         # a shift keeps the width of what it shifts, and `int` does not shift
-        return _is_unsized(a) and (a.ty().tag == CT.UINT or a.is_literal()) and _exact_of(a) >= 0 and _exact_of(b) >= 0
+        return _is_unsized(a) and (a.ty().tag == CTypeKind.UINT or a.is_literal()) and _exact_of(a) >= 0 and _exact_of(b) >= 0
     return True
 
 
@@ -819,12 +819,12 @@ def never_negative(e: CExpr) -> Bool:
     var t = e.ty()
     if e.is_const() and t.is_signed():
         return e.const_int() >= 0
-    return t.tag == CT.UINT or t.tag == CT.BIT or t.tag == CT.BOOL
+    return t.tag == CTypeKind.UINT or t.tag == CTypeKind.BIT or t.tag == CTypeKind.BOOL
 
 
 def truncates(a: CExpr, b: CExpr) -> Bool:
     """Does `a / b` lose a remainder, on integer constants with no width?"""
-    if not _exact_pair(CN.DIV, a, b):
+    if not _exact_pair(CNodeOp.DIV, a, b):
         return False
     var y = _exact_of(b)
     if y == 0:
@@ -839,7 +839,7 @@ comptime _COMPARE = 2
 
 
 def _is_bitlike(t: CType) -> Bool:
-    return t.tag == CT.BOOL or t.tag == CT.BIT
+    return t.tag == CTypeKind.BOOL or t.tag == CTypeKind.BIT
 
 
 def _promoted(t: CType, mode: Int) -> CType:
@@ -860,44 +860,44 @@ def _common(a: CExpr, b: CExpr, mut ca: CExpr, mut cb: CExpr, mode: Int) raises 
     if mode == _ARITH and (_is_bitlike(oa) != _is_bitlike(ob)):
         # a 64-bit int holds any sum with a narrow operand; only a 64-bit uint does not
         var other = tb if _is_bitlike(oa) else ta
-        if other.tag == CT.INT or (other.tag == CT.UINT and other.width < 64):
+        if other.tag == CTypeKind.INT or (other.tag == CTypeKind.UINT and other.width < 64):
             ca = _to_common(a, int_type(64))
             cb = _to_common(b, int_type(64))
             return int_type(64)
     # bit and bool hold plain non-negative values, which either kind of integer takes
-    if _is_bitlike(oa) and not lb and (tb.tag == CT.UINT or (tb.tag == CT.INT and mode != _ARITH)):
-        ta = uint_type(max(tb.width, oa.width)) if tb.tag == CT.UINT else int_type(min(max(tb.width, oa.width + 1), 64))
-    elif _is_bitlike(ob) and not la and (ta.tag == CT.UINT or (ta.tag == CT.INT and mode != _ARITH)):
-        tb = uint_type(max(ta.width, ob.width)) if ta.tag == CT.UINT else int_type(min(max(ta.width, ob.width + 1), 64))
+    if _is_bitlike(oa) and not lb and (tb.tag == CTypeKind.UINT or (tb.tag == CTypeKind.INT and mode != _ARITH)):
+        ta = uint_type(max(tb.width, oa.width)) if tb.tag == CTypeKind.UINT else int_type(min(max(tb.width, oa.width + 1), 64))
+    elif _is_bitlike(ob) and not la and (ta.tag == CTypeKind.UINT or (ta.tag == CTypeKind.INT and mode != _ARITH)):
+        tb = uint_type(max(ta.width, ob.width)) if ta.tag == CTypeKind.UINT else int_type(min(max(ta.width, ob.width + 1), 64))
     var common: CType
-    if ta.tag == CT.FLOAT or tb.tag == CT.FLOAT:
-        if ta.tag == CT.ANGLE and lb:
+    if ta.tag == CTypeKind.FLOAT or tb.tag == CTypeKind.FLOAT:
+        if ta.tag == CTypeKind.ANGLE and lb:
             common = ta
-        elif tb.tag == CT.ANGLE and la:
+        elif tb.tag == CTypeKind.ANGLE and la:
             common = tb
-        elif ta.tag == CT.ANGLE or tb.tag == CT.ANGLE:
+        elif ta.tag == CTypeKind.ANGLE or tb.tag == CTypeKind.ANGLE:
             raise Error("QM-E580: float and angle do not mix. Hint: cast the float, angle[n](x).")
         else:
             common = float_type()
     elif la and lb:
-        common = uint_type(64, True) if ta.tag == CT.UINT or tb.tag == CT.UINT else int_type(64, True)
+        common = uint_type(64, True) if ta.tag == CTypeKind.UINT or tb.tag == CTypeKind.UINT else int_type(64, True)
     elif la or lb:
         var lit = a.root() if la else b.root()
         var t = tb if la else ta
-        var us = lit.ty.tag == CT.UINT
+        var us = lit.ty.tag == CTypeKind.UINT
         if not _fits(lit.i, us, t):
-            if t.tag == CT.UINT and lit.i < 0 and not us:
+            if t.tag == CTypeKind.UINT and lit.i < 0 and not us:
                 raise Error("QM-E580: the negative literal " + String(lit.i) + " does not mix with " + type_name(t) + ". Hint: cast one side.")
-            if t.tag == CT.INT and us:
+            if t.tag == CTypeKind.INT and us:
                 raise Error("QM-E580: an unsigned literal above the int range does not mix with " + type_name(t) + ". Hint: cast one side.")
             if mode != _COMPARE:
                 raise Error("QM-E580: the literal does not fit " + type_name(t) + ". Hint: cast the operand to a wider type.")
-            t.width = max(t.width, _width_for(lit.i, us, t.tag == CT.INT))
+            t.width = max(t.width, _width_for(lit.i, us, t.tag == CTypeKind.INT))
             t.bare = False
         common = t
     elif ta.tag != tb.tag:
         raise Error("QM-E580: " + type_name(a.ty()) + " and " + type_name(b.ty()) + " do not mix. Hint: cast one operand, e.g. int[32](x).")
-    elif ta.tag == CT.ANGLE:
+    elif ta.tag == CTypeKind.ANGLE:
         if ta.width != tb.width:
             raise Error("QM-E580: angles of different widths do not mix. Hint: cast one side.")
         common = ta
@@ -913,7 +913,7 @@ def _to_common(a: CExpr, ty: CType) raises -> CExpr:
     if t == ty:
         return a.copy()
     var out: CExpr
-    if t.tag == CT.BIT and ty.tag == CT.FLOAT:
+    if t.tag == CTypeKind.BIT and ty.tag == CTypeKind.FLOAT:
         out = ce_cast(ce_cast(a, uint_type(t.width)), ty)  # the table has no bit -> float
     else:
         out = ce_cast(a, ty)
@@ -930,42 +930,42 @@ def ce_binary(op: Int, a: CExpr, b: CExpr) raises -> CExpr:
     var tb = b.ty()
     var ca = CExpr()
     var cb = CExpr()
-    if op == CN.SHL or op == CN.SHR:
-        if a.is_literal() and ta.tag == CT.INT and a.const_int() >= 0:
+    if op == CNodeOp.SHL or op == CNodeOp.SHR:
+        if a.is_literal() and ta.tag == CTypeKind.INT and a.const_int() >= 0:
             return ce_binary(op, CExpr.literal_uint(a.const_int()), b)
-        if ta.tag == CT.INT or ta.tag == CT.FLOAT or ta.tag == CT.BOOL:
+        if ta.tag == CTypeKind.INT or ta.tag == CTypeKind.FLOAT or ta.tag == CTypeKind.BOOL:
             raise Error("QM-E580: shifts apply to bit, uint and angle, not " + type_name(ta) + ". Hint: cast to uint[n] first.")
-        if not (tb.tag == CT.UINT or tb.tag == CT.BIT or (b.is_literal() and tb.tag == CT.INT and b.const_int() >= 0)):
+        if not (tb.tag == CTypeKind.UINT or tb.tag == CTypeKind.BIT or (b.is_literal() and tb.tag == CTypeKind.INT and b.const_int() >= 0)):
             raise Error("QM-E580: a shift count is a uint or a non-negative literal, not " + type_name(tb) + ". Hint: cast it to uint.")
         return _pair(op, ta, a, _to_shift_count(b))
-    if op == CN.AND or op == CN.OR or op == CN.XOR:
-        if (ta.tag == CT.INT and not a.is_literal()) or ta.tag == CT.FLOAT or (tb.tag == CT.INT and not b.is_literal()) or tb.tag == CT.FLOAT:
+    if op == CNodeOp.AND or op == CNodeOp.OR or op == CNodeOp.XOR:
+        if (ta.tag == CTypeKind.INT and not a.is_literal()) or ta.tag == CTypeKind.FLOAT or (tb.tag == CTypeKind.INT and not b.is_literal()) or tb.tag == CTypeKind.FLOAT:
             raise Error("QM-E580: bitwise operators apply to bit, uint and angle. Hint: cast to uint[n] first.")
-        if ta.tag == CT.BIT and tb.tag == CT.BIT:
+        if ta.tag == CTypeKind.BIT and tb.tag == CTypeKind.BIT:
             if ta.width != tb.width:
                 raise Error("QM-E580: bit registers of different widths in a bitwise operator. Hint: cast one to the other's width.")
             return _pair(op, ta, a, b)
         var t = _common(a, b, ca, cb, _BITWISE)
         return _pair(op, t, ca, cb)
-    if op >= CN.EQ and op <= CN.GE:
-        if ta.tag == CT.BOOL and tb.tag == CT.BOOL:
-            if op != CN.EQ and op != CN.NE:
+    if op >= CNodeOp.EQ and op <= CNodeOp.GE:
+        if ta.tag == CTypeKind.BOOL and tb.tag == CTypeKind.BOOL:
+            if op != CNodeOp.EQ and op != CNodeOp.NE:
                 raise Error("QM-E580: bool values are compared with == and != only. Hint: cast to uint.")
             return _pair(op, bool_type(), a, b)
         _ = _common(a, b, ca, cb, _COMPARE)
         return _pair(op, bool_type(), ca, cb)
     # arithmetic
-    if ta.tag == CT.ANGLE or tb.tag == CT.ANGLE:
+    if ta.tag == CTypeKind.ANGLE or tb.tag == CTypeKind.ANGLE:
         return _angle_arith(op, a, b)
-    if op == CN.POW:
-        if ta.tag == CT.FLOAT or tb.tag == CT.FLOAT:
+    if op == CNodeOp.POW:
+        if ta.tag == CTypeKind.FLOAT or tb.tag == CTypeKind.FLOAT:
             var t = _common(a, b, ca, cb, _ARITH)
             return _pair(op, t, ca, cb)
         # the exponent keeps its own type: its sign is read at run time
         var base = _to_common(a, _promoted(ta, _ARITH))
         return _pair(op, base.ty(), base, _exponent(b))
     var t = _common(a, b, ca, cb, _ARITH)
-    if (op == CN.DIV or op == CN.MOD) and _is_zero(cb):
+    if (op == CNodeOp.DIV or op == CNodeOp.MOD) and _is_zero(cb):
         raise Error("QM-E533: division by a constant zero. Hint: check the divisor.")
     return _pair(op, t, ca, cb)
 
@@ -975,7 +975,7 @@ def _is_zero(e: CExpr) -> Bool:
 
 
 def _to_shift_count(b: CExpr) raises -> CExpr:
-    if b.ty().tag == CT.INT:
+    if b.ty().tag == CTypeKind.INT:
         return ce_cast(b, uint_type(64))
     return b.copy()
 
@@ -990,31 +990,31 @@ def _angle_arith(op: Int, a: CExpr, b: CExpr) raises -> CExpr:
     """angle +- angle; angle * uint; uint * angle; angle / uint; angle / angle -> uint."""
     var ta = a.ty()
     var tb = b.ty()
-    var angle = ta if ta.tag == CT.ANGLE else tb
-    if op == CN.ADD or op == CN.SUB:
-        if a.is_literal() and ta.tag == CT.FLOAT:
+    var angle = ta if ta.tag == CTypeKind.ANGLE else tb
+    if op == CNodeOp.ADD or op == CNodeOp.SUB:
+        if a.is_literal() and ta.tag == CTypeKind.FLOAT:
             return _pair(op, angle, ce_cast(a, angle), b)
-        if b.is_literal() and tb.tag == CT.FLOAT:
+        if b.is_literal() and tb.tag == CTypeKind.FLOAT:
             return _pair(op, angle, a, ce_cast(b, angle))
         if ta != tb:
             raise Error("QM-E580: + and - take two angles of one width, not " + type_name(ta) + " and " + type_name(tb) + ". Hint: cast one side.")
         return _pair(op, angle, a, b)
-    if op == CN.MUL:
-        var scale = b.copy() if ta.tag == CT.ANGLE else a.copy()
-        var ang = a.copy() if ta.tag == CT.ANGLE else b.copy()
+    if op == CNodeOp.MUL:
+        var scale = b.copy() if ta.tag == CTypeKind.ANGLE else a.copy()
+        var ang = a.copy() if ta.tag == CTypeKind.ANGLE else b.copy()
         var ts = scale.ty()
-        if ts.tag == CT.ANGLE or ts.tag == CT.FLOAT or ts.tag == CT.INT and not scale.is_literal():
+        if ts.tag == CTypeKind.ANGLE or ts.tag == CTypeKind.FLOAT or ts.tag == CTypeKind.INT and not scale.is_literal():
             raise Error("QM-E580: an angle multiplies by a uint, not " + type_name(ts) + ". Hint: cast it to uint[" + String(angle.width) + "].")
         return _pair(op, angle, ang, _angle_scale(scale, angle))
-    if op == CN.DIV and ta.tag == CT.ANGLE:
+    if op == CNodeOp.DIV and ta.tag == CTypeKind.ANGLE:
         if _is_zero(b):
             raise Error("QM-E533: division by a constant zero. Hint: check the divisor.")
-        if tb.tag == CT.ANGLE:
+        if tb.tag == CTypeKind.ANGLE:
             if ta != tb:
                 raise Error("QM-E580: angles of different widths do not divide. Hint: cast one side.")
             return _pair(op, uint_type(ta.width), a, b)
         # the divisor must keep its value: no truncation to the angle's width
-        if tb.tag == CT.FLOAT or (b.is_literal() and not _fits(b.const_int(), False, uint_type(ta.width))) or (not b.is_literal() and (tb.tag == CT.INT or tb.width != ta.width)):
+        if tb.tag == CTypeKind.FLOAT or (b.is_literal() and not _fits(b.const_int(), False, uint_type(ta.width))) or (not b.is_literal() and (tb.tag == CTypeKind.INT or tb.width != ta.width)):
             raise Error("QM-E580: an angle divides by a uint of its width or an angle, not " + type_name(tb) + ". Hint: cast it to uint[" + String(angle.width) + "].")
         return _pair(op, angle, a, _angle_scale(b, angle))
     raise Error("QM-E580: this operator does not apply to " + type_name(angle) + ". Hint: angles take + - * / and shifts.")
@@ -1034,21 +1034,21 @@ def ce_neg(a: CExpr) raises -> CExpr:
     var t = _promoted(a.ty(), _ARITH)
     if a.is_literal():
         var n = a.root()
-        if t.tag == CT.FLOAT:
+        if t.tag == CTypeKind.FLOAT:
             return CExpr.literal_float(-n.f)
         return CExpr.literal_int(0 - n.i)
-    return _unary(CN.NEG, t, _to_common(a, t))
+    return _unary(CNodeOp.NEG, t, _to_common(a, t))
 
 
 def ce_lnot(a: CExpr) raises -> CExpr:
-    return _unary(CN.LNOT, bool_type(), ce_bool(a))
+    return _unary(CNodeOp.LNOT, bool_type(), ce_bool(a))
 
 
 def ce_bnot(a: CExpr) raises -> CExpr:
     var t = a.ty()
-    if t.tag == CT.INT or t.tag == CT.FLOAT or t.tag == CT.BOOL:
+    if t.tag == CTypeKind.INT or t.tag == CTypeKind.FLOAT or t.tag == CTypeKind.BOOL:
         raise Error("QM-E580: ~ applies to bit, uint and angle, not " + type_name(t) + ". Hint: for a bool write !x.")
-    return _unary(CN.BNOT, t, a)
+    return _unary(CNodeOp.BNOT, t, a)
 
 
 def ce_logical(is_and: Bool, a: CExpr, b: CExpr) raises -> CExpr:
@@ -1063,36 +1063,36 @@ def ce_logical(is_and: Bool, a: CExpr, b: CExpr) raises -> CExpr:
     var e = CExpr()
     var ra = _append(e, la)
     var sc = len(e.nodes)
-    e.nodes.append(CNode(CN.SC_AND if is_and else CN.SC_OR, bool_type(), ra, -1, 0, 0.0))
+    e.nodes.append(CNode(CNodeOp.SC_AND if is_and else CNodeOp.SC_OR, bool_type(), ra, -1, 0, 0.0))
     var rb = _append(e, lb)
     var end = len(e.nodes)
     e.nodes[sc].y = end
-    e.nodes.append(CNode(CN.SC_END, bool_type(), rb, -1, 0, 0.0))
+    e.nodes.append(CNode(CNodeOp.SC_END, bool_type(), rb, -1, 0, 0.0))
     return e^
 
 
 def ce_function(f: Int, a: CExpr, b: Optional[CExpr] = None) raises -> CExpr:
     """sin cos ... of a float, abs of a number, popcount of bits, mod of two floats."""
     var t = a.ty()
-    if f == CF.POPCOUNT:
-        if t.tag != CT.BIT and t.tag != CT.UINT:
+    if f == CFunc.POPCOUNT:
+        if t.tag != CTypeKind.BIT and t.tag != CTypeKind.UINT:
             raise Error("QM-E580: popcount takes bit or uint, not " + type_name(t) + ". Hint: cast the operand.")
-        return _unary(CN.FN, uint_type(64), a, f)
-    if f == CF.ABS and t.tag != CT.FLOAT:
+        return _unary(CNodeOp.FN, uint_type(64), a, f)
+    if f == CFunc.ABS and t.tag != CTypeKind.FLOAT:
         if _is_unsized(a):
             var v = _exact_of(a)
-            return _exact_const(Int128(0) - v if v < 0 else v, t.tag == CT.UINT, a.is_literal())
-        if t.tag == CT.INT:
-            return _unary(CN.FN, t, a, f)
+            return _exact_const(Int128(0) - v if v < 0 else v, t.tag == CTypeKind.UINT, a.is_literal())
+        if t.tag == CTypeKind.INT:
+            return _unary(CNodeOp.FN, t, a, f)
         return a.copy()
     var fa = _to_common(a, float_type())
-    if f == CF.MOD:
+    if f == CFunc.MOD:
         var e = CExpr()
         var ra = _append(e, fa)
         var rb = _append(e, _to_common(b.value(), float_type()))
-        e.nodes.append(CNode(CN.FN, float_type(), ra, rb, f, 0.0))
+        e.nodes.append(CNode(CNodeOp.FN, float_type(), ra, rb, f, 0.0))
         return _fold(e^)
-    return _unary(CN.FN, float_type(), fa, f)
+    return _unary(CNodeOp.FN, float_type(), fa, f)
 
 
 def angle_radians(bits: Int, width: Int) -> Float64:

@@ -12,7 +12,7 @@ from qumo.compiler.program_compile import compile_program
 from qumo.compiler.target import parse_target
 from qumo.ir.classical import CExpr, float_type
 from qumo.ir.circuit import Circuit
-from qumo.ir.program import Program, ProgramBuilder, SK, stuck_loops
+from qumo.ir.program import Program, ProgramBuilder, StmtKind, stuck_loops
 from qumo.ir.qasm import draw_program, load_any, load_any_with_warnings, parse_qasm, parse_qasm_program, to_qasm
 from qumo.sim.program_runner import sample_program
 

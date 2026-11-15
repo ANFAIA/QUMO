@@ -50,7 +50,7 @@ from max.gpu.host import DeviceContext, DeviceBuffer
 from qumo.ir.circuit import Circuit
 from qumo.sim.rng import Rng
 from qumo.sim.frame import (
-    FrameProgram, FK, FW, DetectorSamples, MeasurementSamples, num_batches_for,
+    FrameProgram, FrameKind, FW, DetectorSamples, MeasurementSamples, num_batches_for,
 )
 from qumo.gpu.kernels import TPB
 from qumo.gpu.emulate import emu_launch, grid_blocks
@@ -74,7 +74,7 @@ def _ptr[dt: DType](lst: List[Scalar[dt]]) -> Pointer[Scalar[dt], MutAnyOrigin]:
 
 @always_inline
 def _is_noise(kind: Int) -> Bool:
-    return kind == FK.XE or kind == FK.YE or kind == FK.ZE or kind == FK.DEP1 or kind == FK.DEP2 or kind == FK.PC1
+    return kind == FrameKind.XE or kind == FrameKind.YE or kind == FrameKind.ZE or kind == FrameKind.DEP1 or kind == FrameKind.DEP2 or kind == FrameKind.PC1
 
 
 # ---------------------------------------------------------------------------
@@ -151,14 +151,14 @@ def th_frame_word(gid: Int, nw: Int, word0: Int, seed: UInt64,
         var c = Int(opi[unsafe_offset=OP_STRIDE * i + 3])
         var ia = a * nw + gid
         var ib = b * nw + gid
-        if kind == FK.CX:
+        if kind == FrameKind.CX:
             xs[unsafe_offset=ib] = xs[unsafe_offset=ib] ^ xs[unsafe_offset=ia]
             zs[unsafe_offset=ia] = zs[unsafe_offset=ia] ^ zs[unsafe_offset=ib]
-        elif kind == FK.H:
+        elif kind == FrameKind.H:
             var vx = xs[unsafe_offset=ia]
             xs[unsafe_offset=ia] = zs[unsafe_offset=ia]
             zs[unsafe_offset=ia] = vx
-        elif kind == FK.DEP2:
+        elif kind == FrameKind.DEP2:
             var mxa: UInt64 = 0
             var mza: UInt64 = 0
             var mxb: UInt64 = 0
@@ -178,7 +178,7 @@ def th_frame_word(gid: Int, nw: Int, word0: Int, seed: UInt64,
             zs[unsafe_offset=ia] = zs[unsafe_offset=ia] ^ mza
             xs[unsafe_offset=ib] = xs[unsafe_offset=ib] ^ mxb
             zs[unsafe_offset=ib] = zs[unsafe_offset=ib] ^ mzb
-        elif kind == FK.DEP1:
+        elif kind == FrameKind.DEP1:
             var mx: UInt64 = 0
             var mz: UInt64 = 0
             var pos = skip_lookup(_u32(rng), thr, c)
@@ -190,19 +190,19 @@ def th_frame_word(gid: Int, nw: Int, word0: Int, seed: UInt64,
                 pos += 1 + skip_lookup(_u32(rng), thr, c)
             xs[unsafe_offset=ia] = xs[unsafe_offset=ia] ^ mx
             zs[unsafe_offset=ia] = zs[unsafe_offset=ia] ^ mz
-        elif kind == FK.M:
+        elif kind == FrameKind.M:
             recs[unsafe_offset=b * nw + gid] = xs[unsafe_offset=ia]
             zs[unsafe_offset=ia] = zs[unsafe_offset=ia] ^ rng.next_u64()
-        elif kind == FK.R:
+        elif kind == FrameKind.R:
             xs[unsafe_offset=ia] = 0
             zs[unsafe_offset=ia] = rng.next_u64()
-        elif kind == FK.XE or kind == FK.YE or kind == FK.ZE:
+        elif kind == FrameKind.XE or kind == FrameKind.YE or kind == FrameKind.ZE:
             var m = noise_mask(rng, thr, c)
-            if kind != FK.ZE:
+            if kind != FrameKind.ZE:
                 xs[unsafe_offset=ia] = xs[unsafe_offset=ia] ^ m
-            if kind != FK.XE:
+            if kind != FrameKind.XE:
                 zs[unsafe_offset=ia] = zs[unsafe_offset=ia] ^ m
-        elif kind == FK.PC1:
+        elif kind == FrameKind.PC1:
             var mx: UInt64 = 0
             var mz: UInt64 = 0
             var tx = thr[unsafe_offset=c + 64]
@@ -221,33 +221,33 @@ def th_frame_word(gid: Int, nw: Int, word0: Int, seed: UInt64,
                 pos += 1 + skip_lookup(_u32(rng), thr, c)
             xs[unsafe_offset=ia] = xs[unsafe_offset=ia] ^ mx
             zs[unsafe_offset=ia] = zs[unsafe_offset=ia] ^ mz
-        elif kind == FK.DET:
+        elif kind == FrameKind.DET:
             var acc: UInt64 = 0
             for j in range(b):
                 acc ^= recs[unsafe_offset=Int(recl[unsafe_offset=a + j]) * nw + gid]
             dets[unsafe_offset=c * nw + gid] = acc
-        elif kind == FK.OBS:
+        elif kind == FrameKind.OBS:
             var acc = obs[unsafe_offset=c * nw + gid]
             for j in range(b):
                 acc ^= recs[unsafe_offset=Int(recl[unsafe_offset=a + j]) * nw + gid]
             obs[unsafe_offset=c * nw + gid] = acc
-        elif kind == FK.S:
+        elif kind == FrameKind.S:
             zs[unsafe_offset=ia] = zs[unsafe_offset=ia] ^ xs[unsafe_offset=ia]
-        elif kind == FK.SX:
+        elif kind == FrameKind.SX:
             xs[unsafe_offset=ia] = xs[unsafe_offset=ia] ^ zs[unsafe_offset=ia]
-        elif kind == FK.CZ:
+        elif kind == FrameKind.CZ:
             var xa = xs[unsafe_offset=ia]
             var xb = xs[unsafe_offset=ib]
             zs[unsafe_offset=ia] = zs[unsafe_offset=ia] ^ xb
             zs[unsafe_offset=ib] = zs[unsafe_offset=ib] ^ xa
-        elif kind == FK.SWAP:
+        elif kind == FrameKind.SWAP:
             var xa = xs[unsafe_offset=ia]
             var za = zs[unsafe_offset=ia]
             xs[unsafe_offset=ia] = xs[unsafe_offset=ib]
             zs[unsafe_offset=ia] = zs[unsafe_offset=ib]
             xs[unsafe_offset=ib] = xa
             zs[unsafe_offset=ib] = za
-        elif kind == FK.FEED:
+        elif kind == FrameKind.FEED:
             # a = controlling record, b = qubit, c = Pauli (1 = X, 2 = Y, 3 = Z)
             var flips = recs[unsafe_offset=a * nw + gid]
             if c == 1 or c == 2:
@@ -333,7 +333,7 @@ struct GpuFrameSampler(Movable):
             if _is_noise(fo.kind):
                 c = len(self.thr)
                 skip_thresholds(fo.p, self.thr)
-                if fo.kind == FK.PC1:
+                if fo.kind == FrameKind.PC1:
                     self.thr.append(_threshold(fo.px / fo.p))
                     self.thr.append(_threshold((fo.px + fo.py) / fo.p))
                 else:

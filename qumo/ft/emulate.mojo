@@ -38,8 +38,8 @@ from qumo.sim.runner import apply_instruction, sample
 from qumo.sim.rng import Rng
 from qumo.sim.branching import BranchingSimulator
 from qumo.qec.codes import NoiseParams
-from qumo.ft.classical import CExpr
-from qumo.ft.logical import LogicalProgram, LOp
+from qumo.ft.classical import XorExpr
+from qumo.ft.logical import LogicalProgram, LogicalOpKind
 from qumo.ft.implement import EncodedProgram
 from qumo.ft.arch import Architecture
 from qumo.ft.encode import encode
@@ -357,7 +357,7 @@ def logical_to_circuit(lp: LogicalProgram) raises -> Circuit:
     var lane = -1
     for g in lp.ops:
         var k = g.kind
-        if k == LOp.ALLOC or k == LOp.PREP_T:
+        if k == LogicalOpKind.ALLOC or k == LogicalOpKind.PREP_T:
             var q: Int
             if len(free) > 0:
                 q = free.pop()
@@ -367,14 +367,14 @@ def logical_to_circuit(lp: LogicalProgram) raises -> Circuit:
                 nq += 1
                 c.num_qubits = max(c.num_qubits, nq)
             qmap[g.q0] = q
-            if k == LOp.PREP_T:
+            if k == LogicalOpKind.PREP_T:
                 c.h(q)
                 c.t(q)
             continue
-        if k == LOp.FREE:
+        if k == LogicalOpKind.FREE:
             free.append(qmap[g.q0])
             continue
-        if k == LOp.PAULI_EXP:
+        if k == LogicalOpKind.PAULI_EXP:
             var ladder = List[Int]()
             var letters = List[Int]()
             for i in range(g.q1):
@@ -402,9 +402,9 @@ def logical_to_circuit(lp: LogicalProgram) raises -> Circuit:
                 elif letters[j] == ord("Y"):
                     c.rx(-pi / 2, ladder[j])
             continue
-        if k == LOp.QEC or k == LOp.BARRIER:
+        if k == LogicalOpKind.QEC or k == LogicalOpKind.BARRIER:
             continue
-        if k == LOp.CSET:
+        if k == LogicalOpKind.CSET:
             if lane < 0:
                 lane = nq
                 nq += 1
@@ -418,29 +418,29 @@ def logical_to_circuit(lp: LogicalProgram) raises -> Circuit:
                     c.c_if_register(t.bits(), t.vals())
             c.measure(lane, g.clbit)
             continue
-        if k == LOp.MEASURE:
+        if k == LogicalOpKind.MEASURE:
             c.measure(qmap[g.q0], g.clbit)
             free.append(qmap[g.q0])
             continue
         var a = qmap[g.q0]
         var b = qmap[g.q1] if g.q1 >= 0 else -1
-        if k == LOp.X: c.x(a)
-        elif k == LOp.Y: c.y(a)
-        elif k == LOp.Z: c.z(a)
-        elif k == LOp.H: c.h(a)
-        elif k == LOp.S: c.s(a)
-        elif k == LOp.SDG: c.sdg(a)
-        elif k == LOp.T: c.t(a)
-        elif k == LOp.TDG: c.tdg(a)
-        elif k == LOp.CX: c.cx(a, b)
-        elif k == LOp.CZ: c.cz(a, b)
-        elif k == LOp.SWAP: c.swap(a, b)
-        elif k == LOp.RZ: c.rz(g.angle, a)
-        elif k == LOp.RX: c.rx(g.angle, a)
-        elif k == LOp.RZZ: c.rzz(g.angle, a, b)
-        elif k == LOp.RXX: c.rxx(g.angle, a, b)
-        elif k == LOp.INJECT_T or k == LOp.INJECT_TDG:
-            if k == LOp.INJECT_T:
+        if k == LogicalOpKind.X: c.x(a)
+        elif k == LogicalOpKind.Y: c.y(a)
+        elif k == LogicalOpKind.Z: c.z(a)
+        elif k == LogicalOpKind.H: c.h(a)
+        elif k == LogicalOpKind.S: c.s(a)
+        elif k == LogicalOpKind.SDG: c.sdg(a)
+        elif k == LogicalOpKind.T: c.t(a)
+        elif k == LogicalOpKind.TDG: c.tdg(a)
+        elif k == LogicalOpKind.CX: c.cx(a, b)
+        elif k == LogicalOpKind.CZ: c.cz(a, b)
+        elif k == LogicalOpKind.SWAP: c.swap(a, b)
+        elif k == LogicalOpKind.RZ: c.rz(g.angle, a)
+        elif k == LogicalOpKind.RX: c.rx(g.angle, a)
+        elif k == LogicalOpKind.RZZ: c.rzz(g.angle, a, b)
+        elif k == LogicalOpKind.RXX: c.rxx(g.angle, a, b)
+        elif k == LogicalOpKind.INJECT_T or k == LogicalOpKind.INJECT_TDG:
+            if k == LogicalOpKind.INJECT_T:
                 c.t(a)
             else:
                 c.tdg(a)

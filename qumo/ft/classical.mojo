@@ -6,7 +6,7 @@ are static instruction lists whose only classical primitive is a condition
 "bit == v" (or an AND of such literals, `c_if_register`). `qumo.ft` therefore
 represents every classical value it needs as an exclusive-or of terms
 
-    CExpr = T_1 xor T_2 xor ...,  T = clbit | AND of literals (minterm) | 1
+    XorExpr = T_1 xor T_2 xor ...,  T = clbit | AND of literals (minterm) | 1
 
 (an ESOP form, which can express any Boolean function) and evaluates it
 *inside the circuit* only when a quantum operation must depend on it, with a
@@ -118,7 +118,7 @@ struct CTerm(Copyable, Writable):
             w.write(")")
 
 
-struct CExpr(Copyable, Writable):
+struct XorExpr(Copyable, Writable):
     """XOR of CTerms; the empty expression is the constant 0."""
 
     var terms: List[CTerm]
@@ -127,24 +127,24 @@ struct CExpr(Copyable, Writable):
         self.terms = List[CTerm]()
 
     @staticmethod
-    def zero() -> CExpr:
-        return CExpr()
+    def zero() -> XorExpr:
+        return XorExpr()
 
     @staticmethod
-    def one() -> CExpr:
-        var e = CExpr()
+    def one() -> XorExpr:
+        var e = XorExpr()
         e.terms.append(CTerm.one())
         return e^
 
     @staticmethod
-    def bit(c: Int) -> CExpr:
-        var e = CExpr()
+    def bit(c: Int) -> XorExpr:
+        var e = XorExpr()
         e.terms.append(CTerm.clbit(c))
         return e^
 
     @staticmethod
-    def of(t: CTerm) -> CExpr:
-        var e = CExpr()
+    def of(t: CTerm) -> XorExpr:
+        var e = XorExpr()
         e.terms.append(t.copy())
         return e^
 
@@ -158,11 +158,11 @@ struct CExpr(Copyable, Writable):
                 return
         self.terms.append(t.copy())
 
-    def xor(mut self, o: CExpr):
+    def xor(mut self, o: XorExpr):
         for t in o.terms:
             self.xor_term(t)
 
-    def xored(self, o: CExpr) -> CExpr:
+    def xored(self, o: XorExpr) -> XorExpr:
         var e = self.copy()
         e.xor(o)
         return e^

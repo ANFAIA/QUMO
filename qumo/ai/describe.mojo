@@ -25,8 +25,8 @@ from qumo.ir.gates import (
 from qumo.ir.circuit import UNUSED_WIRES, Circuit, Instruction
 from qumo.ir.param import Param
 from qumo.ir.kraus import KrausChannel
-from qumo.ir.classical import CF, CN, CNode, CT, CType, type_name
-from qumo.ir.program import CReg, CVar, FORR, MAX_NESTING, Program, SK, Stmt, TapeBuilder, check_program
+from qumo.ir.classical import CFunc, CNodeOp, CNode, CTypeKind, CType, type_name
+from qumo.ir.program import CReg, CVar, ForRangeField, MAX_NESTING, Program, StmtKind, Stmt, TapeBuilder, check_program
 from qumo.ir.qasm import builtin_gate_table, format_param
 from qumo.core.json import JsonWriter, JsonValue, JsonKind, parse_json
 from qumo.ai.diagnostics import error_catalog, error_ranges, range_index_of
@@ -891,14 +891,14 @@ comptime _MAX_ANALYSIS = 67108864  # blocks x stored values: the assignment anal
 
 
 def _node_names() -> List[String]:
-    """Index = CN code."""
+    """Index = CNodeOp code."""
     return ["const", "var", "input", "bits", "neg", "lnot", "bnot", "add", "sub", "mul", "div", "mod", "pow",
             "shl", "shr", "and", "or", "xor", "eq", "ne", "lt", "le", "gt", "ge", "cast", "fn",
             "sc_and", "sc_or", "sc_end"]
 
 
 def _stmt_names() -> List[String]:
-    """Index = SK code."""
+    """Index = StmtKind code."""
     return ["ops", "assign", "if", "else", "while", "for", "switch", "case", "break", "continue", "end"]
 
 
@@ -959,10 +959,10 @@ def write_program_json(p: Program, mut w: JsonWriter):
     for s in p.tape:
         w.begin_object()
         w.kv_string("kind", kinds[s.kind])
-        if s.kind == SK.OPS or s.kind == SK.ASSIGN or s.kind == SK.FOR or s.kind == SK.CASE:
+        if s.kind == StmtKind.OPS or s.kind == StmtKind.ASSIGN or s.kind == StmtKind.FOR or s.kind == StmtKind.CASE:
             w.kv_int("a", s.a)
             w.kv_int("b", s.b)
-        elif s.kind == SK.IF or s.kind == SK.WHILE or s.kind == SK.SWITCH:
+        elif s.kind == StmtKind.IF or s.kind == StmtKind.WHILE or s.kind == StmtKind.SWITCH:
             w.kv_int("a", s.a)
         if s.line != 0:
             w.kv_int("line", s.line)
@@ -1042,12 +1042,12 @@ def _json_float(v: JsonValue, what: String) raises -> Float64:
 
 def _type_from_name(s: String, what: String) raises -> CType:
     """Inverse of `type_name`."""
-    if s == "bool": return CType(CT.BOOL, 1, False)
-    if s == "float": return CType(CT.FLOAT, 64, True)
-    if s == "float[64]": return CType(CT.FLOAT, 64, False)
-    if s == "bit": return CType(CT.BIT, 1, False)
-    if s == "int": return CType(CT.INT, 64, True)
-    if s == "uint": return CType(CT.UINT, 64, True)
+    if s == "bool": return CType(CTypeKind.BOOL, 1, False)
+    if s == "float": return CType(CTypeKind.FLOAT, 64, True)
+    if s == "float[64]": return CType(CTypeKind.FLOAT, 64, False)
+    if s == "bit": return CType(CTypeKind.BIT, 1, False)
+    if s == "int": return CType(CTypeKind.INT, 64, True)
+    if s == "uint": return CType(CTypeKind.UINT, 64, True)
     var open = s.find("[")
     if open > 0 and s.endswith("]"):
         var nm = String(s[byte=0:open])
@@ -1056,14 +1056,14 @@ def _type_from_name(s: String, what: String) raises -> CType:
             width = Int(String(s[byte=open + 1:s.byte_length() - 1]))
         except:
             raise _bad_program(what + ": bad type '" + s + "'")
-        var tag = CT.BIT if nm == "bit" else (CT.INT if nm == "int" else (CT.UINT if nm == "uint" else (CT.ANGLE if nm == "angle" else -1)))
+        var tag = CTypeKind.BIT if nm == "bit" else (CTypeKind.INT if nm == "int" else (CTypeKind.UINT if nm == "uint" else (CTypeKind.ANGLE if nm == "angle" else -1)))
         if tag >= 0 and width >= 1 and width <= 64:
             return CType(tag, width, False)
     raise _bad_program(what + ": bad type '" + s + "'")
 
 
 def _is_float(t: CType) -> Bool:
-    return t.tag == CT.FLOAT
+    return t.tag == CTypeKind.FLOAT
 
 
 def _operand(last: List[Int], lo: Int, at: Int, pc: Int) raises:
@@ -1088,53 +1088,53 @@ def _check_expression(p: Program, lo: Int, root: Int) raises:
         ref n = p.nodes[pc]
         var op = n.op
         var fl = _is_float(n.ty)
-        if op == CN.SC_END:
+        if op == CNodeOp.SC_END:
             if len(open) == 0 or open[len(open) - 1] != pc:
                 raise _bad_program("nodes[" + String(pc) + "] ends a short-circuit that nothing started")
             _typed(p, last, lo, n.x, pc, False)
             _ = open.pop()
         last.append(open[len(open) - 1] if len(open) > 0 else root)
-        if op == CN.CONST or op == CN.SC_END:
+        if op == CNodeOp.CONST or op == CNodeOp.SC_END:
             pass
-        elif op == CN.VAR:
+        elif op == CNodeOp.VAR:
             if n.x < 0 or n.x >= p.num_store:
                 raise _bad_program("nodes[" + String(pc) + "] reads a variable outside the store")
-        elif op == CN.INPUT:
+        elif op == CNodeOp.INPUT:
             if n.x < 0 or n.x >= p.body.num_params() or not fl:
                 raise _bad_program("nodes[" + String(pc) + "] reads a parameter outside the circuit")
-        elif op == CN.BITS:
+        elif op == CNodeOp.BITS:
             if n.x < 0 or n.y < 1 or n.y > 64 or n.x > p.num_clbits() - n.y or fl:
                 raise _bad_program("nodes[" + String(pc) + "] reads bits outside the circuit")
-        elif op == CN.CAST:
+        elif op == CNodeOp.CAST:
             _operand(last, lo, n.x, pc)
-        elif op == CN.NEG:
+        elif op == CNodeOp.NEG:
             _typed(p, last, lo, n.x, pc, fl)
-        elif op == CN.LNOT or op == CN.BNOT:
+        elif op == CNodeOp.LNOT or op == CNodeOp.BNOT:
             _typed(p, last, lo, n.x, pc, False)
-        elif op == CN.ADD or op == CN.SUB or op == CN.MUL or op == CN.DIV or op == CN.MOD or op == CN.POW:
+        elif op == CNodeOp.ADD or op == CNodeOp.SUB or op == CNodeOp.MUL or op == CNodeOp.DIV or op == CNodeOp.MOD or op == CNodeOp.POW:
             _typed(p, last, lo, n.x, pc, fl)
             _typed(p, last, lo, n.y, pc, fl)
-        elif op == CN.SHL or op == CN.SHR or op == CN.AND or op == CN.OR or op == CN.XOR:
+        elif op == CNodeOp.SHL or op == CNodeOp.SHR or op == CNodeOp.AND or op == CNodeOp.OR or op == CNodeOp.XOR:
             _typed(p, last, lo, n.x, pc, False)
             _typed(p, last, lo, n.y, pc, False)
-        elif op >= CN.EQ and op <= CN.GE:
+        elif op >= CNodeOp.EQ and op <= CNodeOp.GE:
             _operand(last, lo, n.x, pc)
             _typed(p, last, lo, n.y, pc, _is_float(p.nodes[n.x].ty))
-        elif op == CN.SC_AND or op == CN.SC_OR:
+        elif op == CNodeOp.SC_AND or op == CNodeOp.SC_OR:
             _typed(p, last, lo, n.x, pc, False)
             var stop = open[len(open) - 1] if len(open) > 0 else root + 1
-            if n.y <= pc or n.y >= stop or p.nodes[n.y].op != CN.SC_END:
+            if n.y <= pc or n.y >= stop or p.nodes[n.y].op != CNodeOp.SC_END:
                 raise _bad_program("nodes[" + String(pc) + "] skips to a node that does not end it")
             last[pc - lo] = -1
             open.append(n.y)
-        elif op == CN.FN:
-            if n.i < 0 or n.i > CF.POPCOUNT:
+        elif op == CNodeOp.FN:
+            if n.i < 0 or n.i > CFunc.POPCOUNT:
                 raise _bad_program("nodes[" + String(pc) + "] calls an unknown function")
-            var on_ints = n.i == CF.POPCOUNT or (n.i == CF.ABS and not fl)
+            var on_ints = n.i == CFunc.POPCOUNT or (n.i == CFunc.ABS and not fl)
             _typed(p, last, lo, n.x, pc, not on_ints)
             if n.y != -1:
                 _typed(p, last, lo, n.y, pc, not on_ints)
-            elif n.i == CF.MOD:
+            elif n.i == CFunc.MOD:
                 raise _bad_program("nodes[" + String(pc) + "] calls mod with one operand")
 
 
@@ -1168,12 +1168,12 @@ def _check_tables(p: Program) raises:
         if r.first < 0 or r.width < 0 or r.first > p.num_clbits() - r.width:
             raise _bad_program("register '" + r.name + "' lies outside the circuit")
     for v in p.vars:
-        if v.ty.tag == CT.BIT:
+        if v.ty.tag == CTypeKind.BIT:
             if v.store < 0 or v.store > p.num_clbits() - v.ty.width:
                 raise _bad_program("variable '" + v.name + "' lies outside the circuit")
         elif v.store < 0 or v.store >= nv:
             raise _bad_program("variable '" + v.name + "' lies outside the store")
-        if v.slot < -1 or v.slot >= p.body.num_params() or (v.slot >= 0 and v.ty.tag == CT.BIT):
+        if v.slot < -1 or v.slot >= p.body.num_params() or (v.slot >= 0 and v.ty.tag == CTypeKind.BIT):
             raise _bad_program("variable '" + v.name + "' has a slot it cannot hold")
     if len(p.expr_lo) != len(p.expr_root):
         raise _bad_program("expressions must be [lo, root] pairs")
@@ -1192,41 +1192,41 @@ def _is_float_expr(p: Program, e: Int) -> Bool:
 def _check_statement(p: Program, s: Stmt, at: Int) raises:
     var ne = len(p.expr_lo)
     var what = "statements[" + String(at) + "]"
-    if s.kind == SK.OPS:
+    if s.kind == StmtKind.OPS:
         if s.a < 0 or s.b < s.a or s.b > len(p.body.ops):
             raise _bad_program(what + " lies outside the circuit")
-    elif s.kind == SK.ASSIGN:
+    elif s.kind == StmtKind.ASSIGN:
         if s.a < 0 or s.a >= len(p.vars) or s.b < 0 or s.b >= ne:
             raise _bad_program(what + " names a variable or expression that does not exist")
         if _is_float(p.vars[s.a].ty) != _is_float_expr(p, s.b):
             raise _bad_program(what + " assigns a value of the wrong kind")
-    elif s.kind == SK.IF or s.kind == SK.WHILE or s.kind == SK.SWITCH:
+    elif s.kind == StmtKind.IF or s.kind == StmtKind.WHILE or s.kind == StmtKind.SWITCH:
         if s.a < 0 or s.a >= ne:
             raise _bad_program(what + " names an expression that does not exist")
         if _is_float_expr(p, s.a):
             raise _bad_program(what + " tests a float")
-    elif s.kind == SK.CASE:
+    elif s.kind == StmtKind.CASE:
         if s.a != -1 and (s.a < 0 or s.b < s.a or s.b > len(p.case_vals)):
             raise _bad_program(what + " lies outside case_values")
-    elif s.kind == SK.FOR:
-        if s.a < 0 or s.a >= len(p.vars) or s.b < 0 or s.b > len(p.for_ranges) - FORR.SIZE:
+    elif s.kind == StmtKind.FOR:
+        if s.a < 0 or s.a >= len(p.vars) or s.b < 0 or s.b > len(p.for_ranges) - ForRangeField.SIZE:
             raise _bad_program(what + " names a variable or range that does not exist")
         var tag = p.vars[s.a].ty.tag
-        if tag != CT.INT and tag != CT.UINT:
+        if tag != CTypeKind.INT and tag != CTypeKind.UINT:
             raise _bad_program(what + " counts in a variable that is not int or uint")
-        var store = p.for_ranges[s.b + FORR.STORE]
+        var store = p.for_ranges[s.b + ForRangeField.STORE]
         if store < 0 or store > p.num_store - 3:
             raise _bad_program(what + " keeps its state outside the store")
-        var flags = p.for_ranges[s.b + FORR.UNSIGNED]
-        if flags < 0 or flags > FORR.ALL_FLAGS:
+        var flags = p.for_ranges[s.b + ForRangeField.UNSIGNED]
+        if flags < 0 or flags > ForRangeField.ALL_FLAGS:
             raise _bad_program(what + " has flags that do not exist")
-        var set_at = p.for_ranges[s.b + FORR.SET]
+        var set_at = p.for_ranges[s.b + ForRangeField.SET]
         if set_at < -1:
             raise _bad_program(what + " has a set outside case_values")
         if set_at >= 0:
             if set_at >= len(p.case_vals) or p.case_vals[set_at] < 0 or p.case_vals[set_at] > len(p.case_vals) - set_at - 1:
                 raise _bad_program(what + " has a set outside case_values")
-        for f in range(FORR.START, FORR.STOP + 1):
+        for f in range(ForRangeField.START, ForRangeField.STOP + 1):
             var e = p.for_ranges[s.b + f]
             if e == -1 and set_at >= 0:
                 continue  # a set has no range
@@ -1253,7 +1253,7 @@ def program_from_json(v: JsonValue) raises -> Program:
         raise _bad_program("a measure writes outside the circuit's clbits")
     var p = Program(arena^)
     # what the document can justify: one store per variable, three per FOR
-    var justified = len(_json_array(v, "variables")) + len(_json_ints(v, "for_ranges")) // FORR.SIZE * 3
+    var justified = len(_json_array(v, "variables")) + len(_json_ints(v, "for_ranges")) // ForRangeField.SIZE * 3
     p.num_store = _json_int_or(v, "num_store", 0, "program")
     if p.num_store < 0 or p.num_store > justified:
         raise _bad_program("num_store is more than its variables and loops use")
@@ -1312,26 +1312,26 @@ def program_from_json(v: JsonValue) raises -> Program:
             raise _bad_program(what + ": unknown kind '" + nm + "'")
         var s = Stmt(kind, _json_int_or(x, "a", -1, what), _json_int_or(x, "b", -1, what), -1, -1, _json_int_or(x, "line", 0, what))
         _check_statement(p, s, i)
-        if kind != SK.OPS and kind != SK.ASSIGN:
+        if kind != StmtKind.OPS and kind != StmtKind.ASSIGN:
             blocks += 1
-        if len(t.open) >= MAX_NESTING and (kind == SK.IF or kind == SK.WHILE or kind == SK.FOR or kind == SK.SWITCH):
+        if len(t.open) >= MAX_NESTING and (kind == StmtKind.IF or kind == StmtKind.WHILE or kind == StmtKind.FOR or kind == StmtKind.SWITCH):
             raise _bad_program(what + " nests past " + String(MAX_NESTING) + " levels")
-        if len(t.tape) > 0 and t.tape[len(t.tape) - 1].kind == SK.SWITCH and kind != SK.CASE and kind != SK.END:
+        if len(t.tape) > 0 and t.tape[len(t.tape) - 1].kind == StmtKind.SWITCH and kind != StmtKind.CASE and kind != StmtKind.END:
             raise Error("QM-E583: a statement between a switch and its first case. Hint: every statement of a switch sits in a case.")
-        if kind == SK.OPS:
-            if s.a != ops_end or (len(t.tape) > 0 and t.tape[len(t.tape) - 1].kind == SK.OPS):
+        if kind == StmtKind.OPS:
+            if s.a != ops_end or (len(t.tape) > 0 and t.tape[len(t.tape) - 1].kind == StmtKind.OPS):
                 raise _bad_program(what + " breaks the order of the blocks")
             ops_end = s.b
             t.tape.append(s)
-        elif kind == SK.ASSIGN:
+        elif kind == StmtKind.ASSIGN:
             t.tape.append(s)
-        elif kind == SK.IF or kind == SK.WHILE or kind == SK.FOR or kind == SK.SWITCH:
-            t.begin(kind, s.a, s.b if kind == SK.FOR else -1, 0, s.line)
-        elif kind == SK.ELSE:
+        elif kind == StmtKind.IF or kind == StmtKind.WHILE or kind == StmtKind.FOR or kind == StmtKind.SWITCH:
+            t.begin(kind, s.a, s.b if kind == StmtKind.FOR else -1, 0, s.line)
+        elif kind == StmtKind.ELSE:
             t.else_(0, s.line)
-        elif kind == SK.CASE:
+        elif kind == StmtKind.CASE:
             t.case_(s.a, s.b, 0, s.line)
-        elif kind == SK.BREAK or kind == SK.CONTINUE:
+        elif kind == StmtKind.BREAK or kind == StmtKind.CONTINUE:
             t.jump(kind, 0, s.line)
         else:
             t.end(0, s.line)

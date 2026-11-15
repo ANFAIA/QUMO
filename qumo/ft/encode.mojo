@@ -14,7 +14,7 @@
 * classical-only qubits (touched only by reset, X - possibly conditioned - and
   measure, e.g. a classical lane computing an OR of measured bits) are not
   encoded at all: their value is propagated as a classical expression and the
-  measurement becomes a classical assignment (LOp.CSET);
+  measurement becomes a classical assignment (LogicalOpKind.CSET);
 * gates are decomposed into the logical gate set: Steane = Clifford + T
   (SX = H S H, CY = Sdg CX S, CH, ISWAP, CCX (7 T), CCZ, CSWAP, RX/RY/U/CRZ/CP/
   RZZ/RXX/RYY through RZ); Iceberg = native rotations (H = RZ RX RZ,
@@ -44,8 +44,8 @@ from std.math import pi
 
 from qumo.ir.circuit import Circuit, Instruction
 from qumo.ir.gates import Op, op_name, op_arity, op_is_unitary, op_is_noise, op_is_annotation
-from qumo.ft.classical import CTerm, CExpr
-from qumo.ft.logical import LogicalProgram, LogicalInstr, LOp
+from qumo.ft.classical import CTerm, XorExpr
+from qumo.ft.logical import LogicalProgram, LogicalInstr, LogicalOpKind
 from qumo.ft.arch import Architecture
 from qumo.ft.rz import synthesize_rz, exact_rz_sequence, append_comparator_rz
 from qumo.ft.implement import implement_ops, EncodedProgram
@@ -57,7 +57,7 @@ struct _Compiler(Movable):
     var handle: List[Int]  # computational qubit -> live logical handle (-1)
     var measured: List[Int]  # qubit -> clbit of its last measurement when dead (-1)
     var classical: List[Bool]
-    var cval: List[CExpr]  # value of classical-only qubits
+    var cval: List[XorExpr]  # value of classical-only qubits
     var src: Circuit
     var cur_cond: Int
     var cur_val: Int
@@ -73,9 +73,9 @@ struct _Compiler(Movable):
         self.handle = List[Int](length=src.num_qubits, fill=-1)
         self.measured = List[Int](length=src.num_qubits, fill=-1)
         self.classical = List[Bool](length=src.num_qubits, fill=False)
-        self.cval = List[CExpr]()
+        self.cval = List[XorExpr]()
         for _ in range(src.num_qubits):
-            self.cval.append(CExpr())
+            self.cval.append(XorExpr())
         self.src = src.copy()
         self.cur_cond = -1
         self.cur_val = 0
@@ -120,7 +120,7 @@ struct _Compiler(Movable):
     # ------------------------------------------------------------- rotations
     def rz(mut self, theta: Float64, cq: Int) raises:
         if not self.is_steane():
-            self.g1(LOp.RZ, cq, theta)
+            self.g1(LogicalOpKind.RZ, cq, theta)
             return
         var seq = List[Int]()
         if exact_rz_sequence(theta, seq):
@@ -142,14 +142,14 @@ struct _Compiler(Movable):
         if k == Op.I:
             return
         if self.is_steane():
-            if k == Op.X: self.g1(LOp.X, cq)
-            elif k == Op.Y: self.g1(LOp.Y, cq)
-            elif k == Op.Z: self.g1(LOp.Z, cq)
-            elif k == Op.H: self.g1(LOp.H, cq)
-            elif k == Op.S: self.g1(LOp.S, cq)
-            elif k == Op.SDG: self.g1(LOp.SDG, cq)
-            elif k == Op.T: self.g1(LOp.T, cq)
-            elif k == Op.TDG: self.g1(LOp.TDG, cq)
+            if k == Op.X: self.g1(LogicalOpKind.X, cq)
+            elif k == Op.Y: self.g1(LogicalOpKind.Y, cq)
+            elif k == Op.Z: self.g1(LogicalOpKind.Z, cq)
+            elif k == Op.H: self.g1(LogicalOpKind.H, cq)
+            elif k == Op.S: self.g1(LogicalOpKind.S, cq)
+            elif k == Op.SDG: self.g1(LogicalOpKind.SDG, cq)
+            elif k == Op.T: self.g1(LogicalOpKind.T, cq)
+            elif k == Op.TDG: self.g1(LogicalOpKind.TDG, cq)
             elif k == Op.SX:
                 self.gate1(Op.H, cq)
                 self.gate1(Op.S, cq)
@@ -163,25 +163,25 @@ struct _Compiler(Movable):
             return
         # Iceberg: Paulis native, everything else through rotations
         var hp = pi / 2
-        if k == Op.X: self.g1(LOp.X, cq)
-        elif k == Op.Y: self.g1(LOp.Y, cq)
-        elif k == Op.Z: self.g1(LOp.Z, cq)
-        elif k == Op.S: self.g1(LOp.RZ, cq, hp)
-        elif k == Op.SDG: self.g1(LOp.RZ, cq, -hp)
-        elif k == Op.T: self.g1(LOp.RZ, cq, pi / 4)
-        elif k == Op.TDG: self.g1(LOp.RZ, cq, -pi / 4)
-        elif k == Op.SX: self.g1(LOp.RX, cq, hp)
-        elif k == Op.SXDG: self.g1(LOp.RX, cq, -hp)
+        if k == Op.X: self.g1(LogicalOpKind.X, cq)
+        elif k == Op.Y: self.g1(LogicalOpKind.Y, cq)
+        elif k == Op.Z: self.g1(LogicalOpKind.Z, cq)
+        elif k == Op.S: self.g1(LogicalOpKind.RZ, cq, hp)
+        elif k == Op.SDG: self.g1(LogicalOpKind.RZ, cq, -hp)
+        elif k == Op.T: self.g1(LogicalOpKind.RZ, cq, pi / 4)
+        elif k == Op.TDG: self.g1(LogicalOpKind.RZ, cq, -pi / 4)
+        elif k == Op.SX: self.g1(LogicalOpKind.RX, cq, hp)
+        elif k == Op.SXDG: self.g1(LogicalOpKind.RX, cq, -hp)
         elif k == Op.H:
-            self.g1(LOp.RZ, cq, hp)
-            self.g1(LOp.RX, cq, hp)
-            self.g1(LOp.RZ, cq, hp)
+            self.g1(LogicalOpKind.RZ, cq, hp)
+            self.g1(LogicalOpKind.RX, cq, hp)
+            self.g1(LogicalOpKind.RZ, cq, hp)
         else:
             raise Error("QM-E724: internal: gate1(" + op_name(k) + ").")
 
     def rx(mut self, theta: Float64, cq: Int) raises:
         if not self.is_steane():
-            self.g1(LOp.RX, cq, theta)
+            self.g1(LogicalOpKind.RX, cq, theta)
             return
         self.gate1(Op.H, cq)
         self.rz(theta, cq)
@@ -195,7 +195,7 @@ struct _Compiler(Movable):
 
     def cx(mut self, c: Int, t: Int) raises:
         if self.is_steane():
-            self.g2(LOp.CX, c, t)
+            self.g2(LogicalOpKind.CX, c, t)
             return
         self.gate1(Op.H, t)
         self.cz(c, t)
@@ -203,16 +203,16 @@ struct _Compiler(Movable):
 
     def cz(mut self, a: Int, b: Int) raises:
         if self.is_steane():
-            self.g2(LOp.CZ, a, b)
+            self.g2(LogicalOpKind.CZ, a, b)
             return
         var hp = pi / 2
-        self.g1(LOp.RZ, a, hp)
-        self.g1(LOp.RZ, b, hp)
-        self.g2(LOp.RZZ, a, b, -hp)
+        self.g1(LogicalOpKind.RZ, a, hp)
+        self.g1(LogicalOpKind.RZ, b, hp)
+        self.g2(LogicalOpKind.RZZ, a, b, -hp)
 
     def rzz(mut self, theta: Float64, a: Int, b: Int) raises:
         if not self.is_steane():
-            self.g2(LOp.RZZ, a, b, theta)
+            self.g2(LogicalOpKind.RZZ, a, b, theta)
             return
         self.cx(a, b)
         self.rz(theta, b)
@@ -220,7 +220,7 @@ struct _Compiler(Movable):
 
     def rxx(mut self, theta: Float64, a: Int, b: Int) raises:
         if not self.is_steane():
-            self.g2(LOp.RXX, a, b, theta)
+            self.g2(LogicalOpKind.RXX, a, b, theta)
             return
         self.gate1(Op.H, a)
         self.gate1(Op.H, b)
@@ -282,7 +282,7 @@ struct _Compiler(Movable):
             self.gate1(Op.H, g.q1)
             self.gate1(Op.S, g.q1)
         elif k == Op.SWAP:
-            self.g2(LOp.SWAP, g.q0, g.q1)
+            self.g2(LogicalOpKind.SWAP, g.q0, g.q1)
         elif k == Op.ISWAP:
             self.gate1(Op.S, g.q0)
             self.gate1(Op.S, g.q1)
@@ -434,7 +434,7 @@ def compile(arch: Architecture, circuit: Circuit) raises -> LogicalProgram:
             if k == Op.RESET:
                 if g.cond >= 0:
                     raise Error("QM-E726: conditioned reset of a classical qubit. Hint: reset unconditionally.")
-                cmp.cval[q] = CExpr()
+                cmp.cval[q] = XorExpr()
             elif k == Op.X:
                 var t: CTerm
                 if cmp.cur_kind == 0:

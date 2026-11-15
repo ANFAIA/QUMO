@@ -9,7 +9,7 @@ from qumo.compiler.program_compile import compile_program, compile_spec_program,
 from qumo.compiler.target import Target
 from qumo.ir.circuit import Circuit
 from qumo.ir.gates import Op, op_arity, op_is_unitary
-from qumo.ir.program import Program, SK
+from qumo.ir.program import Program, StmtKind
 from qumo.ir.qasm import parse_qasm_program, to_qasm, load_any
 from qumo.sim.program_runner import sample_program
 from qumo.sim.runner import SampleResult
@@ -138,9 +138,9 @@ def test_verifier_catches_a_wrong_program() raises:
     # a different structure
     var other = r.copy()
     var k = 0
-    while other.program.tape[k].kind != SK.WHILE:
+    while other.program.tape[k].kind != StmtKind.WHILE:
         k += 1
-    other.program.tape[k].kind = SK.IF
+    other.program.tape[k].kind = StmtKind.IF
     with assert_raises(contains="QM-E631"):
         _ = verify_program(p, other)
 

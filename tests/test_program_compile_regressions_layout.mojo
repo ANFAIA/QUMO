@@ -11,7 +11,7 @@ from qumo.compiler.pass_manager import conformance_error, transpile
 from qumo.compiler.program_compile import compact_qubits, compile_program, compile_spec_program, verify_program
 from qumo.compiler.target import Target
 from qumo.ir.gates import Op
-from qumo.ir.program import Program, SK
+from qumo.ir.program import Program, StmtKind
 from qumo.ir.qasm import parse_qasm, parse_qasm_program
 from qumo.sim.program_runner import sample_program
 
@@ -55,7 +55,7 @@ def test_b3_restore_on_a_disconnected_target() raises:
 def _swap_to_identity(mut p: Program) -> Bool:
     """Turn the last SWAP of the first block that measures into I."""
     for s in p.tape:
-        if s.kind != SK.OPS:
+        if s.kind != StmtKind.OPS:
             continue
         var has_measure = False
         for i in range(s.a, s.b):
