@@ -1,17 +1,17 @@
 # QUMO
 
-A hardware-neutral, AI-native quantum software stack written in [Mojo](https://mojolang.org). One language, one binary: circuits, compiler, simulators, GPU kernels, error correction, fault tolerance and an MCP server for LLM agents. It takes the best ideas of Qiskit, TKET, CUDA-Q, PennyLane, Cirq, Q#, Amazon Braket and Qibo ([analysis](docs/ANALYSIS.md)).
+A hardware-neutral, AI-native Quantum software stack written in [Mojo](https://mojolang.org) **Qu**antum+**Mo**jo. One language, one binary: circuits, compiler, simulators, GPU Compute kernels, Error-Correction/Fault-Tolerance and an MCP server for Agents as interface. It takes the best ideas of Qiskit, TKET, CUDA-Q, PennyLane, Cirq, Q#, Amazon Braket and Qibo ([analysis](docs/ANALYSIS.md)).
 
 No vendor is a default: targets are data, and presets are named by modality (superconducting, trapped ion, neutral atom, abstract).
 
 ## Who is it for
 
-QUMO is a research prototype for people who want to learn, teach, experiment and measure. Pick a route:
+QUMO is a research project for people who want to learn, teach, experiment and build with Quantum + AI. Pick a route:
 
 - **Learn** (students, hobby developers, teachers): the [tutorial](docs/TUTORIAL.md) goes from a Bell pair to Grover and VQE in about an hour, with every command and its expected output. Then try the five "Start here" [examples](examples/README.md).
+- **Research**: the module reference in [docs/README.md](docs/README.md), [how to extend QUMO](docs/EXTENDING.md) (gates, noise channels, passes, decoders, targets, orchestrate), the benchmark reports with their disclosure sections, and [how to cite](#citing-and-contributing).
 - **Work in Python**: `import qumo` gives a circuit builder, simulators, the compiler and the research drivers, with NumPy arrays out; the computation runs in the compiled Mojo core. [QUMO from Python](docs/PYTHON.md).
 - **Coming from another SDK**: [From Qiskit, Cirq or PennyLane](docs/FROM_QISKIT.md) maps the calls you know to QUMO and shows how to move circuits across with OpenQASM.
-- **Research**: the module reference in [docs/README.md](docs/README.md), [how to extend QUMO](docs/EXTENDING.md) (gates, noise channels, passes, decoders, targets), the benchmark reports with their disclosure sections, and [how to cite](#citing-and-contributing).
 
 ## Quick start
 
