@@ -1,6 +1,6 @@
 # QUMO
 
-A hardware-neutral, AI-native Quantum software stack written in [Mojo](https://mojolang.org) **Qu**antum+**Mo**jo. One language, one binary: circuits, compiler, simulators, GPU Compute kernels, Error-Correction/Fault-Tolerance and an MCP server for Agents as interface. It takes the best ideas of Qiskit, TKET, CUDA-Q, PennyLane, Cirq, Q#, Amazon Braket and Qibo ([analysis](docs/ANALYSIS.md)).
+A hardware-neutral, AI-native Quantum software stack written in [Mojo](https://mojolang.org) (**QU**ANTUM+**MO**JO). One language, one binary: circuits, compiler, simulators, GPU Compute kernels, Error-Correction/Fault-Tolerance and an MCP server for Agents as interface. It takes the best ideas of Qiskit, TKET, CUDA-Q, PennyLane, Cirq, Q#, Amazon Braket and Qibo ([analysis](docs/ANALYSIS.md)).
 
 No vendor is a default: targets are data, and presets are named by modality (superconducting, trapped ion, neutral atom, abstract).
 
