@@ -34,7 +34,7 @@ Run everything from the repository root.
 
 **Running the Python snippets.** They use the `qumo` package ([PYTHON.md](PYTHON.md)) with Python 3.12 and NumPy. After `make py` and `pip install -e .` a plain `import qumo` works from any directory and in Jupyter; type the snippets into `python`, a notebook, or a file. Without installing, `import qumo` still works in a `python` started at the repository root and in a script saved there.
 
-**Running the Mojo snippets with less typing.** The scripts on this page import each name from the module that defines it, so you can see where things live. `from qumo.prelude import *` brings the common ones (`Circuit`, `sample`, `sample_auto`, `statevector`, `expectation`, `parse_pauli_sum`, `parse_target`, `transpile`, ...) in one line; see [GETTING_STARTED.md](GETTING_STARTED.md#mojo).
+**About the imports.** The scripts on this page use `from qumo import ...` for the common names (`Circuit`, `sample`, `sample_auto`, `statevector`, `expectation`, `parse_pauli_sum`, `parse_target`, `transpile`, ...); `from qumo import *` brings them all. Algorithms, error correction and the other larger pieces stay one explicit import away (`qumo.algorithms`, `qumo.qec`, ...). The root only redirects: `Circuit` is defined in `qumo.ir.circuit` and `sample` in `qumo.sim.runner`, and those full paths work too. If you work on the circuit representation itself, see the [IR section](ARCHITECTURE.md#1-ir-qumoir) and [`examples/foundations/ir_only.mojo`](../examples/foundations/ir_only.mojo), which use the full paths. More in [GETTING_STARTED.md](GETTING_STARTED.md#mojo).
 
 **Conventions.** Qubit 0 is the least significant bit. In a result such as `01`, the leftmost character is the highest classical bit, as in Qiskit. Angles are in radians. Every random process takes a seed; when you give none, sampling uses 1234 and the compiler and VQE use 7.
 
@@ -73,8 +73,7 @@ The first line names the simulator that ran (`statevector:static`) and how long 
 **Mojo.**
 
 ```mojo
-from qumo.ir.circuit import Circuit
-from qumo.sim.runner import sample
+from qumo import Circuit, sample
 
 
 def main() raises:
@@ -182,8 +181,8 @@ build/qumo statevector examples/foundations/bell.qasm
 **Mojo.**
 
 ```mojo
-from qumo.ir.circuit import Circuit
-from qumo.sim.runner import evolve, bitstring
+from qumo import Circuit, evolve
+from qumo.sim.runner import bitstring
 
 
 def main() raises:
@@ -206,7 +205,7 @@ StateVector(2 qubits)
 |11> 0.7071067811865476 0.0
 ```
 
-`sv.re` and `sv.im` hold the real and imaginary parts. A state vector of n qubits takes 16 x 2^n bytes: 16 GB at 30 qubits. (`statevector(c)` from `qumo.prelude` is the same function as `evolve(c)`.)
+`sv.re` and `sv.im` hold the real and imaginary parts. A state vector of n qubits takes 16 x 2^n bytes: 16 GB at 30 qubits. (`statevector(c)` from `qumo` is the same function as `evolve(c)`.)
 
 **Python.**
 
@@ -257,9 +256,7 @@ ry.qasm: 1 qubits, 1000 shots, seed 7, statevector:static, 0.437 ms
 **Mojo.**
 
 ```mojo
-from qumo.ir.circuit import Circuit
-from qumo.ir.pauli import parse_pauli_sum
-from qumo.sim.runner import expectation, sample
+from qumo import Circuit, parse_pauli_sum, sample, expectation
 
 
 def main() raises:
@@ -338,9 +335,8 @@ examples/noise_and_mitigation/noisy_bell.qasm: 2 qubits, 1000 shots, seed 7, sta
 **Mojo.**
 
 ```mojo
-from qumo.ir.circuit import Circuit
+from qumo import Circuit, sample
 from qumo.ir.kraus import amplitude_damping
-from qumo.sim.runner import sample
 
 
 def main() raises:
@@ -411,10 +407,7 @@ The circuit below is a 3-qubit GHZ state. It has a CX between qubits 0 and 2, wh
 **Mojo.**
 
 ```mojo
-from qumo.ir.circuit import Circuit
-from qumo.ir.qasm import to_qasm
-from qumo.compiler.target import parse_target
-from qumo.compiler.pass_manager import transpile
+from qumo import Circuit, to_qasm, parse_target, transpile
 
 
 def main() raises:
@@ -506,9 +499,7 @@ True
 `emulate` takes a compiled circuit and a target with error rates, adds the matching noise, and samples. Nothing touches a real device.
 
 ```mojo
-from qumo.ir.circuit import Circuit
-from qumo.compiler.target import parse_target
-from qumo.compiler.pass_manager import transpile
+from qumo import Circuit, parse_target, transpile
 from qumo.exec.emulate import emulate
 
 
@@ -573,7 +564,7 @@ Grover's algorithm finds a marked item among N = 2^n with about sqrt(N) queries.
 
 ```mojo
 from qumo.algorithms.library import grover, grover_optimal_iterations
-from qumo.sim.runner import sample
+from qumo import sample
 
 
 def main() raises:
@@ -598,7 +589,7 @@ From the CLI, `build/qumo tool build_circuit '{"kind":"grover","args":{"marked":
 The variational quantum eigensolver looks for the lowest energy of a Hamiltonian: a classical optimiser tunes the angles of a circuit (the ansatz) to minimise an expectation value. Here the Hamiltonian is a two-qubit Ising model whose exact ground energy is -sqrt(2) = -1.41421356...
 
 ```mojo
-from qumo.ir.pauli import parse_pauli_sum
+from qumo import parse_pauli_sum
 from qumo.algorithms.library import hardware_efficient_ansatz
 from qumo.algorithms.variational import vqe
 

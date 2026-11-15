@@ -125,10 +125,10 @@ or `{"mcpServers":{"qumo":{"command":"/abs/path/to/QUMO/build/qumo","args":["mcp
 
 ### Mojo
 
-`qumo.prelude` re-exports the names a first program needs (`Circuit`, `parse_qasm`, `to_qasm`, `sample_auto`, `sample`, `statevector`, `expectation`, `parse_pauli_sum`, `Target`, `parse_target`, `transpile`), so one import is enough:
+The package root `qumo` re-exports the names a first program needs (`Circuit`, `parse_qasm`, `to_qasm`, `sample_auto`, `sample`, `statevector`, `expectation`, `parse_pauli_sum`, `Target`, `parse_target`, `transpile`), so one import is enough:
 
 ```mojo
-from qumo.prelude import *
+from qumo import *
 
 
 def main() raises:
@@ -166,7 +166,7 @@ StateVector(3 qubits)
 compiled 'circuit' for grid_2x2 [rz,sx,x,cz]: gates 3 -> 15, 2q 2 -> 2, depth 3 -> 9, T 0 -> 0, 11 passes in 0.123 ms
 ```
 
-The prelude is a list of re-exports and costs nothing at run time. Everything else (variational algorithms, QEC, noise models, GPU, hardware clients) stays one explicit import away, for example `from qumo.algorithms.variational import vqe`; the tutorial and the module references use those deep imports. Result types print readably and have `to_json()`: `SampleResult`, `VQEResult`, `CompileResult`.
+These names are re-exports and cost nothing at run time or at compile time (`from qumo.prelude import *`, the earlier spelling, still works). Everything else (variational algorithms, QEC, noise models, GPU, hardware clients) stays one explicit import away, for example `from qumo.algorithms.variational import vqe`; the tutorial and the module references use those deep imports. Result types print readably and have `to_json()`: `SampleResult`, `VQEResult`, `CompileResult`.
 
 `-I .` is how Mojo finds the `qumo` package, so run from the root or pass the root's path. `mojo run` compiles before it runs (see the timings above); `.venv/bin/mojo build -I . -o my my.mojo` builds a binary you can run instantly. The first output line, `Failed to initialize Crashpad. Crash reporting will not be available. ...`, is harmless: the crash reporter is not installed. The Mojo dialect QUMO uses is described in [MOJO_GUIDE.md](MOJO_GUIDE.md).
 

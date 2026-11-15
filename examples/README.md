@@ -6,16 +6,19 @@ Run everything from the repository root after `make setup` (Mojo toolchain in `.
 
 ## Start here
 
-Five examples in order of difficulty. Each runs in seconds; the Mojo ones spend 3 to 5 s compiling first.
+Six examples in order of difficulty. Each runs in seconds; the Mojo ones spend 3 to 5 s compiling first.
 New to QUMO? Do the [tutorial](../docs/TUTORIAL.md) first: it explains every line of the first one.
 
 | # | Example | What you learn | Run |
 |---|---|---|---|
 | 1 | [`foundations/bell.qasm`](foundations/bell.qasm) | A two-qubit circuit in OpenQASM and its histogram: about half `00`, half `11` | `build/qumo run examples/foundations/bell.qasm --shots 1000 --seed 7` |
-| 2 | [`foundations/teleport.qasm`](foundations/teleport.qasm) | Mid-circuit measurement and `if`: a state is teleported to the third qubit, which reads 1 in about 27% of the shots | `build/qumo run examples/foundations/teleport.qasm --shots 1000 --seed 7` |
-| 3 | [`algorithms/grover.mojo`](algorithms/grover.mojo) | A first Mojo program (40 lines): Grover search from 3 to 8 qubits, exact and sampled success probability | `.venv/bin/mojo run -I . examples/algorithms/grover.mojo` |
-| 4 | [`chemistry_and_physics/vqe_h2.mojo`](chemistry_and_physics/vqe_h2.mojo) | A variational algorithm: the ground energy of H2 with four optimisers, all within chemical accuracy | `.venv/bin/mojo run -I . examples/chemistry_and_physics/vqe_h2.mojo` |
-| 5 | [`error_correction/qec_memory_experiment.mojo`](error_correction/qec_memory_experiment.mojo) | Error correction end to end: surface-code circuits, noise, decoding, logical error rate against distance and noise | `.venv/bin/mojo run -I . examples/error_correction/qec_memory_experiment.mojo` |
+| 2 | [`foundations/hello_bell.mojo`](foundations/hello_bell.mojo) | The same Bell pair as a first Mojo program, in five commented steps: build, draw, state vector and expectation value, sample, compile for a device | `.venv/bin/mojo run -I . examples/foundations/hello_bell.mojo` |
+| 3 | [`foundations/teleport.qasm`](foundations/teleport.qasm) | Mid-circuit measurement and `if`: a state is teleported to the third qubit, which reads 1 in about 27% of the shots | `build/qumo run examples/foundations/teleport.qasm --shots 1000 --seed 7` |
+| 4 | [`algorithms/grover.mojo`](algorithms/grover.mojo) | A first Mojo program (40 lines): Grover search from 3 to 8 qubits, exact and sampled success probability | `.venv/bin/mojo run -I . examples/algorithms/grover.mojo` |
+| 5 | [`chemistry_and_physics/vqe_h2.mojo`](chemistry_and_physics/vqe_h2.mojo) | A variational algorithm: the ground energy of H2 with four optimisers, all within chemical accuracy | `.venv/bin/mojo run -I . examples/chemistry_and_physics/vqe_h2.mojo` |
+| 6 | [`error_correction/qec_memory_experiment.mojo`](error_correction/qec_memory_experiment.mojo) | Error correction end to end: surface-code circuits, noise, decoding, logical error rate against distance and noise | `.venv/bin/mojo run -I . examples/error_correction/qec_memory_experiment.mojo` |
+
+Working on the circuit representation only (a parser, an exporter, a transformation)? [`foundations/ir_only.mojo`](foundations/ir_only.mojo) builds, inspects and converts circuits with the full `qumo.ir` imports and nothing from the simulator or compiler.
 
 After these, browse the categories below or [`CATALOG.md`](CATALOG.md).
 
@@ -67,7 +70,7 @@ Every example below is run and verified by `bench/.venv/bin/python examples/run_
 
 | Folder | Examples | Origins | Fast / slow |
 |---|---|---|---|
-| [`foundations/`](foundations/) | 15 | Amazon Braket, Cirq (Google), Classiq, QUMO, Qiskit (IBM), TKET (Quantinuum) | 15 / 0 |
+| [`foundations/`](foundations/) | 17 | Amazon Braket, Cirq (Google), Classiq, QUMO, Qiskit (IBM), TKET (Quantinuum) | 17 / 0 |
 | [`algorithms/`](algorithms/) | 29 | Cirq (Google), Classiq, Q# / Azure Quantum, QUMO, Qibo, Qiskit (IBM), TKET (Quantinuum) | 29 / 0 |
 | [`optimization/`](optimization/) | 9 | CUDA-Q (NVIDIA), Classiq, QUMO, Qiskit (IBM) | 9 / 0 |
 | [`chemistry_and_physics/`](chemistry_and_physics/) | 17 | CUDA-Q (NVIDIA), Cirq (Google), Classiq, QUMO, Qibo, Qiskit (IBM), TKET (Quantinuum) | 16 / 1 |
