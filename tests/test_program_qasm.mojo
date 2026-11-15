@@ -5,7 +5,7 @@ from std.os import listdir
 from std.testing import assert_equal, assert_true, assert_raises
 
 from qumo.ir.qasm import parse_qasm, parse_qasm_program, load_any, to_qasm
-from qumo.ir.program import Program, SK
+from qumo.ir.program import Program, StmtKind
 from qumo.sim.runner import sample
 from qumo.sim.program_runner import sample_program, ProgramResult
 

@@ -31,7 +31,7 @@ from std.math import sqrt
 from qumo.ir.circuit import Circuit, check_finite_values
 from qumo.ir.gates import Op
 from qumo.ir.pauli import PauliSum, parse_pauli_sum
-from qumo.ir.program import Program, SK
+from qumo.ir.program import Program, StmtKind
 from qumo.ir.qasm import draw_program, load_any_with_warnings, to_qasm
 from qumo.ir.qasm2 import to_qasm2
 from qumo.sim.runner import sample, evolve, bitstring
@@ -567,11 +567,11 @@ def write_program_summary(p: Program, mut w: JsonWriter):
     var branches = 0
     var blocks = 0
     for s in p.tape:
-        if s.kind == SK.WHILE or s.kind == SK.FOR:
+        if s.kind == StmtKind.WHILE or s.kind == StmtKind.FOR:
             loops += 1
-        elif s.kind == SK.IF or s.kind == SK.SWITCH:
+        elif s.kind == StmtKind.IF or s.kind == StmtKind.SWITCH:
             branches += 1
-        elif s.kind == SK.OPS:
+        elif s.kind == StmtKind.OPS:
             blocks += 1
     w.begin_object()
     w.kv_string("name", p.name())

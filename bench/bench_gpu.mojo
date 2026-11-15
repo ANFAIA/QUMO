@@ -80,7 +80,7 @@ from qumo.gpu.device import (
 )
 from qumo.gpu.kernels import GPtr, tile_bits, DIAG_MAX_WIDTH, REG_BITS, tile_smem_typical
 from qumo.gpu.tiles import TileProgram, kop_targets
-from qumo.sim.runner import KOp, K
+from qumo.sim.runner import KOp, KernelKind
 from qumo.ir.gates import Op, M2, u3_matrix, matrix_2q, matrix_1q
 from qumo.ir.circuit import Instruction
 from std.bit import pop_count
@@ -424,25 +424,25 @@ def probe_kop(kind: String, i: Int, n: Int) -> KOp:
     var t = n - 1 - (i % 3)
     var u = n - 1 - ((i + 1) % 3)
     if kind == "XC":  # CX with its control on a low qubit (tile, not registers)
-        return KOp.make(K.CX, 1, t, Instruction.make(Op.CX, 1, t))
+        return KOp.make(KernelKind.CX, 1, t, Instruction.make(Op.CX, 1, t))
     if kind == "DG" or kind == "DGF":  # RZ anywhere (diagonal: no tile slot needed)
         var q = (7 * i) % n
-        var op = KOp.make(K.ONE, q, -1, Instruction.make(Op.RZ, q))
+        var op = KOp.make(KernelKind.ONE, q, -1, Instruction.make(Op.RZ, q))
         op.m = matrix_1q(Op.RZ, 0.1 + 0.01 * Float64(i))
         return op
     if kind == "SW":
-        return KOp.make(K.SWAP, t, u, Instruction.make(Op.SWAP, t, u))
+        return KOp.make(KernelKind.SWAP, t, u, Instruction.make(Op.SWAP, t, u))
     if kind == "G2":
-        var op = KOp.make(K.TWO, t, u, Instruction.make(Op.ECR, t, u))
+        var op = KOp.make(KernelKind.TWO, t, u, Instruction.make(Op.ECR, t, u))
         op.m4 = matrix_2q(Op.RXX, 0.3 + 0.01 * Float64(i))
         return op
     if kind == "G1R":  # real 2x2 (RY): the G1R path
-        var op = KOp.make(K.ONE, t, -1, Instruction.make(Op.RY, t))
+        var op = KOp.make(KernelKind.ONE, t, -1, Instruction.make(Op.RY, t))
         op.m = matrix_1q(Op.RY, 0.3 + 0.01 * Float64(i))
         return op
     if kind == "TR":  # dense 1q gates switching between {0,1,2} and the top 3 every 4 ops
         t = (i % 3) if (i // 4) % 2 == 0 else t
-    var op = KOp.make(K.ONE, t, -1, Instruction.make(Op.U, t))
+    var op = KOp.make(KernelKind.ONE, t, -1, Instruction.make(Op.U, t))
     op.m = u3_matrix(0.3 + 0.01 * Float64(i), 1.1, -0.7)
     return op
 

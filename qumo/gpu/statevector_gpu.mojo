@@ -62,7 +62,7 @@ from qumo.ir.circuit import Circuit, Instruction
 from qumo.ir.pauli import PauliSum
 from qumo.sim.rng import Rng
 from qumo.sim.statevector import StateVector
-from qumo.sim.runner import build_plan, KOp, K, SampleResult, check_statevector_size, terminal_measure_map
+from qumo.sim.runner import build_plan, KOp, KernelKind, SampleResult, check_statevector_size, terminal_measure_map
 from qumo.gpu.kernels import (
     TPB, RED_ITEMS, MAX_RED_BLOCKS, EXP_G, GPtr, I64Ptr, I32Ptr, tile_bits, tile_smem_bytes, tile_smem_typical,
     sample_seg, TILE_SMEM_DYNAMIC, TILE_SAFE_THREADS, TILE_LAUNCH_BOUND, REG_BITS,
@@ -514,7 +514,7 @@ struct GpuStateVector[dtype: DType = GPU_DEFAULT_DTYPE](Movable):
     # run_ops for sequences: they pack many gates into each launch.
     def apply_1q(mut self, m: M2, t: Int) raises:
         """Dense 2x2 on qubit t (diagonal / X matrices take cheaper tile ops)."""
-        var op = KOp.make(K.ONE, t, -1, Instruction.make(Op.U, t))
+        var op = KOp.make(KernelKind.ONE, t, -1, Instruction.make(Op.U, t))
         op.m = m
         self._one(op)
 
@@ -536,44 +536,44 @@ struct GpuStateVector[dtype: DType = GPU_DEFAULT_DTYPE](Movable):
         self.apply_1q(m, t)
 
     def apply_cx(mut self, c: Int, t: Int) raises:
-        self._one(KOp.make(K.CX, c, t, Instruction.make(Op.CX, c, t)))
+        self._one(KOp.make(KernelKind.CX, c, t, Instruction.make(Op.CX, c, t)))
 
     def apply_cphase(mut self, pr: Float64, pi_: Float64, a: Int, b: Int) raises:
         """Multiply amplitudes with bits a and b set by (pr + i pi_) (CZ, CP)."""
-        var op = KOp.make(K.CPHASE, a, b, Instruction.make(Op.CP, a, b))
+        var op = KOp.make(KernelKind.CPHASE, a, b, Instruction.make(Op.CP, a, b))
         op.f0 = pr
         op.f1 = pi_
         self._one(op)
 
     def apply_controlled_1q(mut self, m: M2, c: Int, t: Int) raises:
-        var op = KOp.make(K.C1, c, t, Instruction.make(Op.CRY, c, t))
+        var op = KOp.make(KernelKind.C1, c, t, Instruction.make(Op.CRY, c, t))
         op.m = m
         self._one(op)
 
     def apply_rzz(mut self, theta: Float64, a: Int, b: Int) raises:
         """exp(-i theta/2 Z_a Z_b)."""
-        var op = KOp.make(K.RZZ, a, b, Instruction.make(Op.RZZ, a, b))
+        var op = KOp.make(KernelKind.RZZ, a, b, Instruction.make(Op.RZZ, a, b))
         op.f0 = cos(theta / 2)
         op.f1 = sin(theta / 2)
         self._one(op)
 
     def apply_swap(mut self, a: Int, b: Int) raises:
-        self._one(KOp.make(K.SWAP, a, b, Instruction.make(Op.SWAP, a, b)))
+        self._one(KOp.make(KernelKind.SWAP, a, b, Instruction.make(Op.SWAP, a, b)))
 
     def apply_2q(mut self, m: M4, q0: Int, q1: Int) raises:
         """Dense 4x4 on (q0, q1); matrix index = b(q0) + 2 b(q1)."""
-        var op = KOp.make(K.TWO, q0, q1, Instruction.make(Op.ECR, q0, q1))
+        var op = KOp.make(KernelKind.TWO, q0, q1, Instruction.make(Op.ECR, q0, q1))
         op.m4 = m
         self._one(op)
 
     def apply_ccx(mut self, c0: Int, c1: Int, t: Int) raises:
-        self._one(KOp.make(K.OTHER, max(c0, max(c1, t)), -1, Instruction.make(Op.CCX, c0, c1, t)))
+        self._one(KOp.make(KernelKind.OTHER, max(c0, max(c1, t)), -1, Instruction.make(Op.CCX, c0, c1, t)))
 
     def apply_ccz(mut self, a: Int, b: Int, c: Int) raises:
-        self._one(KOp.make(K.OTHER, max(a, max(b, c)), -1, Instruction.make(Op.CCZ, a, b, c)))
+        self._one(KOp.make(KernelKind.OTHER, max(a, max(b, c)), -1, Instruction.make(Op.CCZ, a, b, c)))
 
     def apply_cswap(mut self, c: Int, a: Int, b: Int) raises:
-        self._one(KOp.make(K.OTHER, max(c, max(a, b)), -1, Instruction.make(Op.CSWAP, c, a, b)))
+        self._one(KOp.make(KernelKind.OTHER, max(c, max(a, b)), -1, Instruction.make(Op.CSWAP, c, a, b)))
 
     def apply_global_phase(mut self, phase: Float64) raises:
         if phase == 0.0:

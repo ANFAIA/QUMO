@@ -34,9 +34,9 @@ from std.runtime import parallelism_level
 from max.algorithm import parallelize
 
 from qumo.ir.circuit import Circuit, Instruction, check_finite_values, check_shots
-from qumo.ir.classical import BitReader, CT, CEval, CStore, angle_radians, eval_nodes, wrap_int
+from qumo.ir.classical import BitReader, CTypeKind, CEval, CStore, angle_radians, eval_nodes, wrap_int
 from qumo.ir.gates import Op, op_is_noise, op_is_pauli_noise, op_is_unitary
-from qumo.ir.program import Cfg, FORR, Program, SK, TERM, check_program, slot_prefix
+from qumo.ir.program import Cfg, ForRangeField, Program, StmtKind, TermKind, check_program, slot_prefix
 from qumo.sim.branching import BranchingSimulator
 from qumo.sim.rng import Rng
 from qumo.sim.runner import (
@@ -147,7 +147,7 @@ struct BlockPlan(Copyable):
         for i in range(c.num_params()):
             runtime[i] = c.param_names[i].startswith(slot_prefix())
         for s in p.tape:
-            if s.kind != SK.OPS:
+            if s.kind != StmtKind.OPS:
                 continue
             self.first[s.a] = len(self.spans)
             var i = s.a
@@ -385,22 +385,22 @@ def _store[B: ShotBackend](p: Program, var_id: Int, root: Int, mut st: CStore, m
     NaN: that is an error only for a gate that reads it, see `run_shot`."""
     ref v = p.vars[var_id]
     var tag = v.ty.tag
-    if tag == CT.BIT:
+    if tag == CTypeKind.BIT:
         var x = st.ti[root]
         for j in range(v.ty.width):
             b.set_bit(v.store + j, (x >> j) & 1)
         return
-    if tag == CT.FLOAT:
+    if tag == CTypeKind.FLOAT:
         st.reals[v.store] = st.tf[root]
     else:
         st.ints[v.store] = st.ti[root]
     if v.slot >= 0:
         var a: Float64
-        if tag == CT.FLOAT:
+        if tag == CTypeKind.FLOAT:
             a = st.tf[root]
-        elif tag == CT.ANGLE:
+        elif tag == CTypeKind.ANGLE:
             a = angle_radians(st.ti[root], v.ty.width)
-        elif tag == CT.INT:
+        elif tag == CTypeKind.INT:
             a = Float64(st.ti[root])
         else:
             a = Float64(UInt64(st.ti[root]))
@@ -410,22 +410,22 @@ def _store[B: ShotBackend](p: Program, var_id: Int, root: Int, mut st: CStore, m
 def _for_init[B: ShotBackend](p: Program, at: Int, mut st: CStore, b: B, shot: Int) raises:
     ref s = p.tape[at]
     var off = s.b
-    var store = p.for_ranges[off + FORR.STORE]
-    if p.for_ranges[off + FORR.SET] >= 0:
+    var store = p.for_ranges[off + ForRangeField.STORE]
+    if p.for_ranges[off + ForRangeField.SET] >= 0:
         st.ints[store] = 0
         return
-    var r0 = _eval(p, p.for_ranges[off + FORR.START], st, b, shot, s.line)
+    var r0 = _eval(p, p.for_ranges[off + ForRangeField.START], st, b, shot, s.line)
     var cur = st.ti[r0]
-    var r1 = _eval(p, p.for_ranges[off + FORR.STEP], st, b, shot, s.line)
+    var r1 = _eval(p, p.for_ranges[off + ForRangeField.STEP], st, b, shot, s.line)
     var step = st.ti[r1]
-    var r2 = _eval(p, p.for_ranges[off + FORR.STOP], st, b, shot, s.line)
+    var r2 = _eval(p, p.for_ranges[off + ForRangeField.STOP], st, b, shot, s.line)
     if step == 0:
         raise Error("QM-E570: for-loop step is 0 in shot " + String(shot) + " (line " + String(s.line) + "). Hint: use a non-zero step.")
     var stop = st.ti[r2]
-    var flags = p.for_ranges[off + FORR.UNSIGNED]
-    if flags > FORR.BOUNDS_UNSIGNED:  # a uint in a 64-bit signed slot: see FORR
-        var signed_ = (flags & FORR.BOUNDS_UNSIGNED) == 0
-        if ((flags & FORR.STEP_UINT) != 0 and step < 0) or (signed_ and (((flags & FORR.START_UINT) != 0 and cur < 0) or ((flags & FORR.STOP_UINT) != 0 and stop < 0))):
+    var flags = p.for_ranges[off + ForRangeField.UNSIGNED]
+    if flags > ForRangeField.BOUNDS_UNSIGNED:  # a uint in a 64-bit signed slot: see ForRangeField
+        var signed_ = (flags & ForRangeField.BOUNDS_UNSIGNED) == 0
+        if ((flags & ForRangeField.STEP_UINT) != 0 and step < 0) or (signed_ and (((flags & ForRangeField.START_UINT) != 0 and cur < 0) or ((flags & ForRangeField.STOP_UINT) != 0 and stop < 0))):
             raise Error("QM-E482: a for-loop range holds a uint at or above 2^63, which it cannot read, in shot " + String(shot) + " (line " + String(s.line) + "). Hint: keep the step below 2^63, and both bounds uint if one is above it.")
     st.ints[store] = cur
     st.ints[store + 1] = step
@@ -436,10 +436,10 @@ def _for_test[B: ShotBackend](p: Program, at: Int, mut st: CStore, mut b: B) rai
     """True while the loop has a next value, which goes to the loop variable."""
     ref s = p.tape[at]
     var off = s.b
-    var store = p.for_ranges[off + FORR.STORE]
+    var store = p.for_ranges[off + ForRangeField.STORE]
     var cur = st.ints[store]
     var value: Int
-    var set_off = p.for_ranges[off + FORR.SET]
+    var set_off = p.for_ranges[off + ForRangeField.SET]
     if set_off >= 0:
         if cur >= p.case_vals[set_off]:
             return False
@@ -447,7 +447,7 @@ def _for_test[B: ShotBackend](p: Program, at: Int, mut st: CStore, mut b: B) rai
     else:
         var step = st.ints[store + 1]
         var stop = st.ints[store + 2]
-        var unsigned_ = (p.for_ranges[off + FORR.UNSIGNED] & FORR.BOUNDS_UNSIGNED) != 0
+        var unsigned_ = (p.for_ranges[off + ForRangeField.UNSIGNED] & ForRangeField.BOUNDS_UNSIGNED) != 0
         var past: Bool
         if unsigned_:
             past = UInt64(cur) > UInt64(stop) if step > 0 else UInt64(cur) < UInt64(stop)
@@ -456,7 +456,7 @@ def _for_test[B: ShotBackend](p: Program, at: Int, mut st: CStore, mut b: B) rai
         if step == 0 or past:
             return False
         value = cur
-        if unsigned_ and value < 0 and p.vars[s.a].ty.tag == CT.INT and p.vars[s.a].ty.width >= 64:
+        if unsigned_ and value < 0 and p.vars[s.a].ty.tag == CTypeKind.INT and p.vars[s.a].ty.width >= 64:
             raise Error("QM-E482: an int loop variable reached 2^63 (line " + String(s.line) + "). Hint: count in a uint.")
     var ty = p.vars[s.a].ty
     # the loop variable goes through a node slot, like any assignment
@@ -471,8 +471,8 @@ def _for_step(p: Program, at: Int, mut st: CStore):
     the bound is compared first; step 0 then marks a finished loop (a zero step in
     the source is refused at the start of the loop)."""
     var off = p.tape[at].b
-    var store = p.for_ranges[off + FORR.STORE]
-    if p.for_ranges[off + FORR.SET] >= 0:
+    var store = p.for_ranges[off + ForRangeField.STORE]
+    if p.for_ranges[off + ForRangeField.SET] >= 0:
         st.ints[store] += 1
         return
     var cur = st.ints[store]
@@ -507,7 +507,7 @@ def run_shot[B: ShotBackend](p: Program, cfg: Cfg, mut b: B, mut st: CStore, sho
         ref bb = cfg.blocks[at]
         for i in range(bb.lo, bb.hi):
             ref s = p.tape[i]
-            if s.kind == SK.OPS:
+            if s.kind == StmtKind.OPS:
                 _check_angles(p, cfg.slot_ops[i], st, shot, s.line)
                 b.run_block(p, s.a, s.b, st.params)
             else:
@@ -518,13 +518,13 @@ def run_shot[B: ShotBackend](p: Program, cfg: Cfg, mut b: B, mut st: CStore, sho
         if bb.step >= 0:
             _for_step(p, bb.step, st)
         var term = bb.term
-        if term == TERM.JMP:
+        if term == TermKind.JMP:
             if bb.back:
                 iters += 1
                 if iters > max_iterations:
                     raise Error("QM-E480: shot " + String(shot) + " passed " + String(max_iterations) + " loop iterations (line " + String(bb.line) + "). Hint: the loop may never exit; raise max_iterations if it is only long.")
             at = bb.t0
-        elif term == TERM.BR:
+        elif term == TermKind.BR:
             var take: Bool
             if bb.cond >= 0:
                 var root = _eval(p, bb.cond, st, b, shot, bb.line)
@@ -532,7 +532,7 @@ def run_shot[B: ShotBackend](p: Program, cfg: Cfg, mut b: B, mut st: CStore, sho
             else:
                 take = _for_test(p, -1 - bb.cond, st, b)
             at = bb.t0 if take else bb.t1
-        elif term == TERM.SWITCH:
+        elif term == TermKind.SWITCH:
             var root = _eval(p, bb.cond, st, b, shot, bb.line)
             var v = st.ti[root]
             var next = cfg.sw_bb[bb.t1]
@@ -562,7 +562,7 @@ def shot_params(p: Program, params: List[Float64]) raises -> List[Float64]:
 def _output_vars(p: Program) -> List[Int]:
     var out = List[Int]()
     for i in range(len(p.vars)):
-        if p.vars[i].is_output and p.vars[i].ty.tag != CT.BIT:
+        if p.vars[i].is_output and p.vars[i].ty.tag != CTypeKind.BIT:
             out.append(i)
     return out^
 
@@ -605,7 +605,7 @@ def _run_shots[B: ShotBackend](p: Program, cfg: Cfg, shots: Int, seed: UInt64, f
                 cp[unsafe_offset=shot] = b.packed_bits(nc)
                 for j in range(nout):
                     ref cv = prog[].vars[outp[][j]]
-                    if cv.ty.tag == CT.FLOAT:
+                    if cv.ty.tag == CTypeKind.FLOAT:
                         vr[unsafe_offset=shot * nout + j] = st.reals[cv.store]
                     else:
                         vi[unsafe_offset=shot * nout + j] = st.ints[cv.store]
@@ -628,8 +628,8 @@ def _run_shots[B: ShotBackend](p: Program, cfg: Cfg, shots: Int, seed: UInt64, f
     var res = ProgramResult(SampleResult(nc, shots, B.method()))
     for v in outs:
         res.out_names.append(p.vars[v].name)
-        res.out_is_real.append(p.vars[v].ty.tag == CT.FLOAT)
-        res.out_is_unsigned.append(p.vars[v].ty.tag == CT.UINT or p.vars[v].ty.tag == CT.ANGLE)
+        res.out_is_real.append(p.vars[v].ty.tag == CTypeKind.FLOAT)
+        res.out_is_unsigned.append(p.vars[v].ty.tag == CTypeKind.UINT or p.vars[v].ty.tag == CTypeKind.ANGLE)
     for s in range(shots):
         res.sample.record(cregs[s])
     res.iterations = iters^
@@ -641,7 +641,7 @@ def _run_shots[B: ShotBackend](p: Program, cfg: Cfg, shots: Int, seed: UInt64, f
 def is_clifford_program(p: Program) -> Bool:
     """Every block holds Clifford gates with constant angles and Pauli noise."""
     for s in p.tape:
-        if s.kind != SK.OPS:
+        if s.kind != StmtKind.OPS:
             continue
         for i in range(s.a, s.b):
             ref g = p.body.ops[i]

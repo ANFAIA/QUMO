@@ -8,8 +8,8 @@ from std.math import pi, sin, cos, tan, sqrt, exp, log, floor, ceil, isnan, isin
 from qumo.ir.gates import Op, op_name, op_arity, op_num_params, op_is_noise
 from qumo.ir.circuit import Circuit, Instruction
 from qumo.ir.param import Param
-from qumo.ir.classical import CN, CF, CT, CType, CNode, type_name, bool_type, int_type, angle_radians
-from qumo.ir.program import FORR, Program, SK, Stmt
+from qumo.ir.classical import CNodeOp, CFunc, CTypeKind, CType, CNode, type_name, bool_type, int_type, angle_radians
+from qumo.ir.program import ForRangeField, Program, StmtKind, Stmt
 from qumo.ir.qasm_lexer import _is_digit, bits_to_decimal, builtin_gate_table
 
 
@@ -316,51 +316,51 @@ comptime _MAX_EXPR_TEXT_DEPTH = 16384  # 60000 overflows an 8 MB stack
 
 
 def _op_text(op: Int) -> String:
-    if op == CN.ADD: return "+"
-    if op == CN.SUB: return "-"
-    if op == CN.MUL: return "*"
-    if op == CN.DIV: return "/"
-    if op == CN.MOD: return "%"
-    if op == CN.POW: return "**"
-    if op == CN.SHL: return "<<"
-    if op == CN.SHR: return ">>"
-    if op == CN.AND: return "&"
-    if op == CN.OR: return "|"
-    if op == CN.XOR: return "^"
-    if op == CN.EQ: return "=="
-    if op == CN.NE: return "!="
-    if op == CN.LT: return "<"
-    if op == CN.LE: return "<="
-    if op == CN.GT: return ">"
+    if op == CNodeOp.ADD: return "+"
+    if op == CNodeOp.SUB: return "-"
+    if op == CNodeOp.MUL: return "*"
+    if op == CNodeOp.DIV: return "/"
+    if op == CNodeOp.MOD: return "%"
+    if op == CNodeOp.POW: return "**"
+    if op == CNodeOp.SHL: return "<<"
+    if op == CNodeOp.SHR: return ">>"
+    if op == CNodeOp.AND: return "&"
+    if op == CNodeOp.OR: return "|"
+    if op == CNodeOp.XOR: return "^"
+    if op == CNodeOp.EQ: return "=="
+    if op == CNodeOp.NE: return "!="
+    if op == CNodeOp.LT: return "<"
+    if op == CNodeOp.LE: return "<="
+    if op == CNodeOp.GT: return ">"
     return ">="
 
 
 def _op_prec(op: Int) -> Int:
-    if op == CN.ADD or op == CN.SUB: return _PR_ADD
-    if op == CN.MUL or op == CN.DIV or op == CN.MOD: return _PR_MUL
-    if op == CN.POW: return _PR_POW
-    if op == CN.SHL or op == CN.SHR: return _PR_SHIFT
-    if op == CN.AND: return _PR_BAND
-    if op == CN.OR: return _PR_BOR
-    if op == CN.XOR: return _PR_XOR
-    if op == CN.EQ or op == CN.NE: return _PR_EQ
+    if op == CNodeOp.ADD or op == CNodeOp.SUB: return _PR_ADD
+    if op == CNodeOp.MUL or op == CNodeOp.DIV or op == CNodeOp.MOD: return _PR_MUL
+    if op == CNodeOp.POW: return _PR_POW
+    if op == CNodeOp.SHL or op == CNodeOp.SHR: return _PR_SHIFT
+    if op == CNodeOp.AND: return _PR_BAND
+    if op == CNodeOp.OR: return _PR_BOR
+    if op == CNodeOp.XOR: return _PR_XOR
+    if op == CNodeOp.EQ or op == CNodeOp.NE: return _PR_EQ
     return _PR_REL
 
 
 def _fn_text(f: Int) -> String:
-    if f == CF.SIN: return "sin"
-    if f == CF.COS: return "cos"
-    if f == CF.TAN: return "tan"
-    if f == CF.ASIN: return "arcsin"
-    if f == CF.ACOS: return "arccos"
-    if f == CF.ATAN: return "arctan"
-    if f == CF.EXP: return "exp"
-    if f == CF.LOG: return "ln"
-    if f == CF.SQRT: return "sqrt"
-    if f == CF.ABS: return "abs"
-    if f == CF.FLOOR: return "floor"
-    if f == CF.CEIL: return "ceil"
-    if f == CF.MOD: return "mod"
+    if f == CFunc.SIN: return "sin"
+    if f == CFunc.COS: return "cos"
+    if f == CFunc.TAN: return "tan"
+    if f == CFunc.ASIN: return "arcsin"
+    if f == CFunc.ACOS: return "arccos"
+    if f == CFunc.ATAN: return "arctan"
+    if f == CFunc.EXP: return "exp"
+    if f == CFunc.LOG: return "ln"
+    if f == CFunc.SQRT: return "sqrt"
+    if f == CFunc.ABS: return "abs"
+    if f == CFunc.FLOOR: return "floor"
+    if f == CFunc.CEIL: return "ceil"
+    if f == CFunc.MOD: return "mod"
     return "popcount"
 
 
@@ -396,15 +396,15 @@ struct _PNames(Movable):
 def _const_text(n: CNode, plain: Bool, names: _PNames) raises -> String:
     """A constant; `plain` drops the type, for where the context restores it."""
     var t = n.ty
-    if t.tag == CT.BOOL:
+    if t.tag == CTypeKind.BOOL:
         return "true" if n.i != 0 else "false"
-    if t.tag == CT.FLOAT:
+    if t.tag == CTypeKind.FLOAT:
         _check_finite(n.f, names)
         return _float_text(n.f)
     var body: String
-    if t.tag == CT.ANGLE:
+    if t.tag == CTypeKind.ANGLE:
         body = _float_text(angle_radians(n.i, t.width))
-    elif t.tag == CT.INT:
+    elif t.tag == CTypeKind.INT:
         body = String(n.i)
     else:
         body = String(UInt64(n.i))
@@ -416,12 +416,12 @@ def _const_text(n: CNode, plain: Bool, names: _PNames) raises -> String:
 def _is_soft_cast(p: Program, n: Int) -> Bool:
     """A cast the parser puts back by itself: bit to bool, bit[n] to uint[n]."""
     ref g = p.nodes[n]
-    if g.op != CN.CAST:
+    if g.op != CNodeOp.CAST:
         return False
     var src = p.nodes[g.x].ty
-    if g.ty.tag == CT.BOOL:
-        return src.tag == CT.BOOL or (src.tag == CT.BIT and src.width == 1)
-    return g.ty.tag == CT.UINT and (src.tag == CT.BIT or src.tag == CT.BOOL) and src.width == g.ty.width
+    if g.ty.tag == CTypeKind.BOOL:
+        return src.tag == CTypeKind.BOOL or (src.tag == CTypeKind.BIT and src.width == 1)
+    return g.ty.tag == CTypeKind.UINT and (src.tag == CTypeKind.BIT or src.tag == CTypeKind.BOOL) and src.width == g.ty.width
 
 
 def _child(p: Program, n: Int, names: _PNames, want: Int, plain: Bool, depth: Int) raises -> String:
@@ -446,37 +446,37 @@ def _node_text(p: Program, n: Int, names: _PNames, plain: Bool = False, depth: I
         raise Error("QM-E552: an expression is nested more than " + String(_MAX_EXPR_TEXT_DEPTH) + " deep, too deep to write out. Hint: split it with a variable.")
     ref g = p.nodes[n]
     var op = g.op
-    if op == CN.CONST:
+    if op == CNodeOp.CONST:
         var text = _const_text(g, plain, names)
         # a negative constant is a sign and a number: it binds like a unary minus
         return (text, _PR_UNARY if text.startswith("-") else _PR_ATOM)
-    if op == CN.VAR:
+    if op == CNodeOp.VAR:
         return (names.stores[g.x], _PR_ATOM)
-    if op == CN.INPUT:
+    if op == CNodeOp.INPUT:
         return (names.params[g.x], _PR_ATOM)
-    if op == CN.BITS:
+    if op == CNodeOp.BITS:
         return (_bits_text(g.x, g.y, names), _PR_ATOM)
-    if op == CN.CAST:
+    if op == CNodeOp.CAST:
         if _is_soft_cast(p, n):
             return _node_text(p, g.x, names, plain, depth + 1)
         var inner = _node_text(p, g.x, names, True, depth + 1)[0]
         # the table has no bit -> float, so that step stays written
-        if g.ty.tag == CT.FLOAT and _is_soft_cast(p, g.x) and p.nodes[p.nodes[g.x].x].ty.tag == CT.BIT:
+        if g.ty.tag == CTypeKind.FLOAT and _is_soft_cast(p, g.x) and p.nodes[p.nodes[g.x].x].ty.tag == CTypeKind.BIT:
             inner = type_name(p.nodes[g.x].ty) + "(" + inner + ")"
         return (type_name(g.ty) + "(" + inner + ")", _PR_ATOM)
-    if op == CN.NEG or op == CN.LNOT or op == CN.BNOT:
-        var mark = String("-" if op == CN.NEG else ("!" if op == CN.LNOT else "~"))
+    if op == CNodeOp.NEG or op == CNodeOp.LNOT or op == CNodeOp.BNOT:
+        var mark = String("-" if op == CNodeOp.NEG else ("!" if op == CNodeOp.LNOT else "~"))
         return (mark + _child(p, g.x, names, _PR_UNARY, False, depth + 1), _PR_UNARY)
-    if op == CN.FN:
+    if op == CNodeOp.FN:
         var args = _node_text(p, g.x, names, True, depth + 1)[0]
         if g.y >= 0:
             args += ", " + _node_text(p, g.y, names, True, depth + 1)[0]
         return (_fn_text(g.i) + "(" + args + ")", _PR_ATOM)
-    if op == CN.SC_END:
+    if op == CNodeOp.SC_END:
         var m = n - 1
-        while not ((p.nodes[m].op == CN.SC_AND or p.nodes[m].op == CN.SC_OR) and p.nodes[m].y == n):
+        while not ((p.nodes[m].op == CNodeOp.SC_AND or p.nodes[m].op == CNodeOp.SC_OR) and p.nodes[m].y == n):
             m -= 1
-        var is_and = p.nodes[m].op == CN.SC_AND
+        var is_and = p.nodes[m].op == CNodeOp.SC_AND
         var pr = _PR_AND if is_and else _PR_OR
         var left = _child(p, p.nodes[m].x, names, pr, False, depth + 1)
         var right = _child(p, g.x, names, pr + 1, False, depth + 1)
@@ -485,11 +485,11 @@ def _node_text(p: Program, n: Int, names: _PNames, plain: Bool = False, depth: I
     var pr = _op_prec(op)
     var l = p.nodes[g.x]
     var r = p.nodes[g.y]
-    var same = l.ty == r.ty or op == CN.SHL or op == CN.SHR or op == CN.POW
-    var lp = same and l.op == CN.CONST and r.op != CN.CONST
-    var rp = same and r.op == CN.CONST and l.op != CN.CONST
-    var lwant = pr + 1 if op == CN.POW else pr
-    var rwant = pr if op == CN.POW else pr + 1
+    var same = l.ty == r.ty or op == CNodeOp.SHL or op == CNodeOp.SHR or op == CNodeOp.POW
+    var lp = same and l.op == CNodeOp.CONST and r.op != CNodeOp.CONST
+    var rp = same and r.op == CNodeOp.CONST and l.op != CNodeOp.CONST
+    var lwant = pr + 1 if op == CNodeOp.POW else pr
+    var rwant = pr if op == CNodeOp.POW else pr + 1
     return (_child(p, g.x, names, lwant, lp, depth + 1) + " " + _op_text(op) + " " + _child(p, g.y, names, rwant, rp, depth + 1), pr)
 
 
@@ -497,19 +497,19 @@ def _value_text(p: Program, e: Int, ty: CType, names: _PNames) raises -> String:
     """An expression where the context casts to `ty`: its outer cast is implied."""
     var root = p.expr_root[e]
     ref g = p.nodes[root]
-    if g.op == CN.CAST and g.ty == ty and can_imply(p.nodes[g.x].ty, ty):
+    if g.op == CNodeOp.CAST and g.ty == ty and can_imply(p.nodes[g.x].ty, ty):
         return _node_text(p, g.x, names, True)[0]
     return _node_text(p, root, names, True)[0]
 
 
 def can_imply(src: CType, dst: CType) -> Bool:
-    return src.tag != CT.ANGLE or dst.tag == CT.ANGLE or dst.tag == CT.BOOL or dst.tag == CT.BIT
+    return src.tag != CTypeKind.ANGLE or dst.tag == CTypeKind.ANGLE or dst.tag == CTypeKind.BOOL or dst.tag == CTypeKind.BIT
 
 
 def _for_vars(p: Program) -> List[Bool]:
     var out = List[Bool](length=len(p.vars), fill=False)
     for s in p.tape:
-        if s.kind == SK.FOR:
+        if s.kind == StmtKind.FOR:
             out[s.a] = True
     return out^
 
@@ -553,7 +553,7 @@ def to_qasm(p: Program) raises -> String:
     var vnames = List[String](length=len(p.vars), fill=String(""))
     for i in range(len(p.vars)):
         ref v = p.vars[i]
-        if v.ty.tag == CT.BIT:
+        if v.ty.tag == CTypeKind.BIT:
             continue
         var s = _sanitize_ident(v.name, reserved, used)
         used.append(s)
@@ -571,35 +571,35 @@ def to_qasm(p: Program) raises -> String:
     for i in range(len(p.tape)):
         var s = p.tape[i]
         var k = s.kind
-        if k == SK.OPS:
+        if k == StmtKind.OPS:
             var text = String()
             _ops_text(c, s.a, s.b, names.params, text)
             var pad = _pad(depth)
             for line in text.split("\n"):
                 if line.byte_length() > 0:
                     out += pad + line + "\n"
-        elif k == SK.ASSIGN:
+        elif k == StmtKind.ASSIGN:
             ref v = p.vars[s.a]
-            var target = vnames[s.a] if v.ty.tag != CT.BIT else _bits_text(v.store, v.ty.width, names)
+            var target = vnames[s.a] if v.ty.tag != CTypeKind.BIT else _bits_text(v.store, v.ty.width, names)
             out += _pad(depth) + target + " = " + _value_text(p, s.b, v.ty, names) + ";\n"
-        elif k == SK.IF:
+        elif k == StmtKind.IF:
             out += _pad(depth) + "if (" + _value_text(p, s.a, bool_type(), names) + ") {\n"
             depth += 1
-        elif k == SK.ELSE:
+        elif k == StmtKind.ELSE:
             out += _pad(depth - 1) + "} else {\n"
-        elif k == SK.WHILE:
+        elif k == StmtKind.WHILE:
             out += _pad(depth) + "while (" + _value_text(p, s.a, bool_type(), names) + ") {\n"
             depth += 1
-        elif k == SK.FOR:
+        elif k == StmtKind.FOR:
             out += _pad(depth) + _for_head(p, s, vnames[s.a], names) + " {\n"
             depth += 1
-        elif k == SK.SWITCH:
+        elif k == StmtKind.SWITCH:
             out += _pad(depth) + "switch (" + _value_text(p, s.a, int_type(64), names) + ") {\n"
             depth += 2
             first_case.append(True)
             ref root = p.nodes[p.expr_root[s.a]]
-            unsigned_case.append(root.op == CN.CAST and not p.nodes[root.x].ty.is_signed())
-        elif k == SK.CASE:
+            unsigned_case.append(root.op == CNodeOp.CAST and not p.nodes[root.x].ty.is_signed())
+        elif k == StmtKind.CASE:
             if first_case[len(first_case) - 1]:
                 first_case[len(first_case) - 1] = False
             else:
@@ -613,13 +613,13 @@ def to_qasm(p: Program) raises -> String:
                     var v = p.case_vals[j]
                     vals += (", " if j > s.a else "") + (String(UInt64(v)) if unsigned_target else String(v))
                 out += _pad(depth - 1) + "case " + vals + " {\n"
-        elif k == SK.BREAK:
+        elif k == StmtKind.BREAK:
             out += _pad(depth) + "break;\n"
-        elif k == SK.CONTINUE:
+        elif k == StmtKind.CONTINUE:
             out += _pad(depth) + "continue;\n"
         else:  # END
             var op = p.tape[s.end].kind
-            if op == SK.SWITCH:
+            if op == StmtKind.SWITCH:
                 _ = unsigned_case.pop()
                 if not first_case.pop():
                     out += _pad(depth - 1) + "}\n"
@@ -634,16 +634,16 @@ def to_qasm(p: Program) raises -> String:
 def _for_head(p: Program, s: Stmt, name: String, names: _PNames) raises -> String:
     """`for int i in [0:2]`, without the brace."""
     var head = "for " + type_name(p.vars[s.a].ty) + " " + name + " in "
-    var set_off = p.for_ranges[s.b + FORR.SET]
+    var set_off = p.for_ranges[s.b + ForRangeField.SET]
     if set_off >= 0:
         head += "{"
         for j in range(p.case_vals[set_off]):
             head += (", " if j > 0 else "") + String(p.case_vals[set_off + 1 + j])
         return head + "}"
     var i64 = int_type(64)
-    var a = _bound_text(p, s.b, FORR.START, names)
-    var st = _value_text(p, p.for_ranges[s.b + FORR.STEP], i64, names)
-    var b = _bound_text(p, s.b, FORR.STOP, names)
+    var a = _bound_text(p, s.b, ForRangeField.START, names)
+    var st = _value_text(p, p.for_ranges[s.b + ForRangeField.STEP], i64, names)
+    var b = _bound_text(p, s.b, ForRangeField.STOP, names)
     return head + "[" + a + ":" + ("" if st == "1" else st + ":") + b + "]"
 
 
@@ -651,7 +651,7 @@ def _bound_text(p: Program, off: Int, field: Int, names: _PNames) raises -> Stri
     """A range bound. On an unsigned range a constant past 2^63 is held by its bits."""
     var e = p.for_ranges[off + field]
     ref root = p.nodes[p.expr_root[e]]
-    if (p.for_ranges[off + FORR.UNSIGNED] & FORR.BOUNDS_UNSIGNED) != 0 and root.op == CN.CONST:
+    if (p.for_ranges[off + ForRangeField.UNSIGNED] & ForRangeField.BOUNDS_UNSIGNED) != 0 and root.op == CNodeOp.CONST:
         return String(UInt64(root.i))
     return _value_text(p, e, int_type(64), names)
 
@@ -671,7 +671,7 @@ def draw_program(p: Program, width: Int = 80, style: String = "ascii") raises ->
     names.params = shell.param_names.copy()
     var out = String()
     for ref v in p.vars:
-        if v.ty.tag == CT.BIT:
+        if v.ty.tag == CTypeKind.BIT:
             continue
         names.stores[v.store] = v.name
         if v.slot >= 0:
@@ -680,12 +680,12 @@ def draw_program(p: Program, width: Int = 80, style: String = "ascii") raises ->
     var is_loop = _for_vars(p)
     for i in range(len(p.vars)):
         ref v = p.vars[i]
-        if v.ty.tag != CT.BIT and not is_loop[i]:
+        if v.ty.tag != CTypeKind.BIT and not is_loop[i]:
             out += ("output " if v.is_output else "") + type_name(v.ty) + " " + v.name + ";\n"
     var depth = 0
     for s in p.tape:
         var k = s.kind
-        if k == SK.OPS:
+        if k == StmtKind.OPS:
             if s.b == s.a:
                 continue
             var block = shell.copy()
@@ -696,40 +696,40 @@ def draw_program(p: Program, width: Int = 80, style: String = "ascii") raises ->
             for line in block.draw(fold, style).split("\n"):
                 if line.byte_length() > 0:
                     out += pad + line + "\n"
-        elif k == SK.ASSIGN:
+        elif k == StmtKind.ASSIGN:
             ref v = p.vars[s.a]
-            var target = v.name if v.ty.tag != CT.BIT else _bits_text(v.store, v.ty.width, names)
+            var target = v.name if v.ty.tag != CTypeKind.BIT else _bits_text(v.store, v.ty.width, names)
             out += _pad(depth) + target + " = " + _value_text(p, s.b, v.ty, names) + ";\n"
-        elif k == SK.IF:
+        elif k == StmtKind.IF:
             out += _pad(depth) + "if (" + _value_text(p, s.a, bool_type(), names) + ") {\n"
             depth += 1
-        elif k == SK.ELSE:
+        elif k == StmtKind.ELSE:
             out += _pad(depth - 1) + "} else {\n"
-        elif k == SK.WHILE:
+        elif k == StmtKind.WHILE:
             out += _pad(depth) + "while (" + _value_text(p, s.a, bool_type(), names) + ") {\n"
             depth += 1
-        elif k == SK.FOR:
+        elif k == StmtKind.FOR:
             out += _pad(depth) + _for_head(p, s, p.vars[s.a].name, names) + " {\n"
             depth += 1
-        elif k == SK.SWITCH:
+        elif k == StmtKind.SWITCH:
             out += _pad(depth) + "switch (" + _value_text(p, s.a, int_type(64), names) + ") {\n"
             depth += 2
-        elif k == SK.CASE:
+        elif k == StmtKind.CASE:
             if s.a < 0:
                 out += _pad(depth - 1) + "default:\n"
             else:
                 ref root = p.nodes[p.expr_root[p.tape[p.tape[s.end].end].a]]
-                var unsigned_target = root.op == CN.CAST and not p.nodes[root.x].ty.is_signed()
+                var unsigned_target = root.op == CNodeOp.CAST and not p.nodes[root.x].ty.is_signed()
                 var vals = String()
                 for j in range(s.a, s.b):
                     var v = p.case_vals[j]
                     vals += (", " if j > s.a else "") + (String(UInt64(v)) if unsigned_target else String(v))
                 out += _pad(depth - 1) + "case " + vals + ":\n"
-        elif k == SK.BREAK:
+        elif k == StmtKind.BREAK:
             out += _pad(depth) + "break;\n"
-        elif k == SK.CONTINUE:
+        elif k == StmtKind.CONTINUE:
             out += _pad(depth) + "continue;\n"
         else:  # END
-            depth -= 2 if p.tape[s.end].kind == SK.SWITCH else 1
+            depth -= 2 if p.tape[s.end].kind == StmtKind.SWITCH else 1
             out += _pad(depth) + "}\n"
     return out^

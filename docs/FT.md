@@ -149,7 +149,7 @@ computation) rather than a runtime queue.
 ### Deferred reads, Pauli frame and the classical lane
 
 QUMO conditions test bits (`c_if`) or ANDs of bits (`c_if_register`); the IR
-has no classical arithmetic. `qumo.ft.classical.CExpr` represents any
+has no classical arithmetic. `qumo.ft.classical.XorExpr` represents any
 classical value as an XOR of terms (bit, AND of literals, constant 1). A
 decoded Steane outcome is `parity(raw) XOR [syndrome minterms]`; frame entries
 and outputs are XORs of decoded values. Values are materialised only when a

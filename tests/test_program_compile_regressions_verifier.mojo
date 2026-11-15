@@ -9,10 +9,10 @@ from qumo.compiler.common import reduce_angle
 from qumo.compiler.pass_manager import transpile
 from qumo.compiler.program_compile import ProgramCompileResult, compact_qubits, compile_program, verify_program
 from qumo.compiler.target import Target
-from qumo.ir.classical import CN
+from qumo.ir.classical import CNodeOp
 from qumo.ir.gates import Op
 from qumo.ir.param import Param
-from qumo.ir.program import Program, SK, Stmt
+from qumo.ir.program import Program, StmtKind, Stmt
 from qumo.ir.qasm import parse_qasm, parse_qasm_program
 from qumo.sim.program_runner import sample_program
 from qumo.sim.runner import SampleResult, sample
@@ -42,7 +42,7 @@ def _caught(p: Program, m: ProgramCompileResult, code: String = "QM-E631") raise
 def _measure(r: ProgramCompileResult, nth: Int) -> Int:
     var n = 0
     for s in r.program.tape:
-        if s.kind == SK.OPS:
+        if s.kind == StmtKind.OPS:
             for i in range(s.a, s.b):
                 if r.program.body.ops[i].kind == Op.MEASURE:
                     if n == nth:
@@ -112,9 +112,9 @@ def test_8_every_source_block_has_its_compiled_block() raises:
     var seen_if = False
     for i in range(len(m6.program.tape)):
         var s = m6.program.tape[i]
-        if s.kind == SK.IF:
+        if s.kind == StmtKind.IF:
             seen_if = True
-        if s.kind == SK.OPS:
+        if s.kind == StmtKind.OPS:
             if seen_if and at < 0:
                 at = i
                 blk = k
@@ -137,7 +137,7 @@ def test_8_every_source_block_has_its_compiled_block() raises:
     var j = 0
     for i in range(len(m7.program.tape)):
         ref s = m7.program.tape[i]
-        if s.kind == SK.OPS:
+        if s.kind == StmtKind.OPS:
             if j == 2:
                 m7.blocks[j].src_lo = -1
                 m7.blocks[j].src_hi = -1
@@ -158,7 +158,7 @@ def test_8_classical_tables_are_compared() raises:
     var pair = _base()
     var m = pair[1].copy()
     for ref n in m.program.nodes:
-        if n.op == CN.CONST and n.i == 2:
+        if n.op == CNodeOp.CONST and n.i == 2:
             n.i = 3
     _caught(pair[0], m)
 

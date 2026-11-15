@@ -532,7 +532,7 @@ def check_tiles() raises:
     var prog = build_tile_program[DType.float32](plan, 20, 0.0, tb, 5, 0)  # no diagonal fusion
     assert_equal(prog.num_ops(), len(plan))
     assert_true(len(prog.runs) <= 6, "qft(20): " + String(len(prog.runs)) + " runs")
-    # diagonal fusion: the QFT's controlled phases become phase tables (TK.DGT)
+    # diagonal fusion: the QFT's controlled phases become phase tables (TileKind.DGT)
     var pf = build_tile_program[DType.float32](plan, 20, 0.0, tb)
     assert_equal(len(pf.runs), len(prog.runs))
     var ndg = 0
@@ -1104,7 +1104,7 @@ def check_tile_bits[dt: DType](emulate: Bool, tol: Float64, big: Bool) raises:
 
 
 def check_diag_fusion[dt: DType](emulate: Bool, tol: Float64, big: Bool) raises:
-    """Fused diagonal phase tables (TK.DGT) of every width against the CPU:
+    """Fused diagonal phase tables (TileKind.DGT) of every width against the CPU:
     QFT (controlled phases), a random circuit (RZ / CP / CRZ / RZZ / CCZ /
     controlled diagonals mixed with everything else), at widths 0 (off) .. 6,
     with and without complex 1q gates split into diagonal . real 2x2 .

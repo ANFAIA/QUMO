@@ -8,7 +8,7 @@ from std.math import pi
 from std.testing import assert_equal, assert_true, assert_raises
 
 from qumo.exec.dispatch import choose_method_cpu
-from qumo.ir.classical import CExpr, CN, CStore, ce_binary, ce_cast, ce_lnot, int_type
+from qumo.ir.classical import CExpr, CNodeOp, CStore, ce_binary, ce_cast, ce_lnot, int_type
 from qumo.ir.gates import Op
 from qumo.ir.program import ProgramBuilder
 from qumo.ir.qasm import load_any, parse_qasm, parse_qasm_program, to_qasm
@@ -92,8 +92,8 @@ def test_a1_for_variable_is_set_on_the_true_edge() raises:
     var i = b.declare("i", int_type(64))
     var r = b.declare("r", int_type(64), True)
     var stop = b.declare("n", int_type(64))
-    b.assign(stop, ce_binary(CN.SUB, ce_cast(b.bit(0), int_type(64)), CExpr.literal_int(1)))
-    b.begin_for(i, CExpr.literal_int(5), CExpr.literal_int(1), ce_binary(CN.ADD, b.read(stop), CExpr.literal_int(5)))
+    b.assign(stop, ce_binary(CNodeOp.SUB, ce_cast(b.bit(0), int_type(64)), CExpr.literal_int(1)))
+    b.begin_for(i, CExpr.literal_int(5), CExpr.literal_int(1), ce_binary(CNodeOp.ADD, b.read(stop), CExpr.literal_int(5)))
     b.end()
     b.assign(r, b.read(i))
     with assert_raises(contains="QM-E581"):

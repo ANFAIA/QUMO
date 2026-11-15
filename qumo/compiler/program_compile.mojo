@@ -40,9 +40,9 @@ from std.math import sqrt
 
 from qumo.ir.circuit import Circuit, Instruction
 from qumo.ir.gates import Op, op_arity, op_is_unitary, op_name
-from qumo.ir.classical import CN
+from qumo.ir.classical import CNodeOp
 from qumo.ir.param import Param
-from qumo.ir.program import FORR, Program, SK, Stmt, TERM, TapeBuilder, cfg_of, check_program
+from qumo.ir.program import ForRangeField, Program, StmtKind, Stmt, TermKind, TapeBuilder, cfg_of, check_program
 from qumo.compiler.ai_route import AIRouteOptions
 from qumo.compiler.basis import unroll_3q
 from qumo.compiler.blockalg import Perm, SubGraph
@@ -382,7 +382,7 @@ struct _Compiler(Movable):
                 if len(self.arena.ops) == before:
                     # gates can cancel, and a source SWAP with a restore SWAP: the block
                     # stays, for what it does to the layout and to tie it to its source
-                    self.tb.tape.append(Stmt(SK.OPS, before, before, -1, -1, line))
+                    self.tb.tape.append(Stmt(StmtKind.OPS, before, before, -1, -1, line))
         self.tb.flush(len(self.arena.ops), line)
         self.pending = shell_like(self.src.body, self.N)
         self.has_pending = False
@@ -450,27 +450,27 @@ struct _Compiler(Movable):
         for i in range(len(self.src.tape)):
             var s = self.src.tape[i]
             var kind = s.kind
-            if kind == SK.OPS:
+            if kind == StmtKind.OPS:
                 self.add_leaf(pre[k].copy(), s.a, s.b)
                 k += 1
-            elif kind == SK.ASSIGN:
+            elif kind == StmtKind.ASSIGN:
                 self.flush(s.line)
                 self.tb.assign(s.a, s.b, len(self.arena.ops), s.line)
-            elif kind == SK.IF or kind == SK.WHILE or kind == SK.SWITCH:
+            elif kind == StmtKind.IF or kind == StmtKind.WHILE or kind == StmtKind.SWITCH:
                 self.flush(s.line)
                 self.tb.begin(kind, s.a, -1, len(self.arena.ops), s.line)
                 self.enter(i)
-            elif kind == SK.FOR:
+            elif kind == StmtKind.FOR:
                 self.flush(s.line)
                 self.tb.begin(kind, s.a, s.b, len(self.arena.ops), s.line)
                 self.enter(i)
-            elif kind == SK.ELSE:
+            elif kind == StmtKind.ELSE:
                 var r = self.regions[len(self.regions) - 1].copy()
                 self.restore(r.entry)
                 self.flush(s.line)
                 self.tb.else_(len(self.arena.ops), s.line)
                 self.rejoin(r)
-            elif kind == SK.CASE:
+            elif kind == StmtKind.CASE:
                 ref top = self.regions[len(self.regions) - 1]
                 var first = top.first_case
                 top.first_case = False
@@ -480,7 +480,7 @@ struct _Compiler(Movable):
                 self.flush(s.line)
                 self.tb.case_(s.a, s.b, len(self.arena.ops), s.line)
                 self.rejoin(r)
-            elif kind == SK.BREAK or kind == SK.CONTINUE:
+            elif kind == StmtKind.BREAK or kind == StmtKind.CONTINUE:
                 self.restore(self.loop_entry(s.end))
                 self.flush(s.line)
                 self.tb.jump(kind, len(self.arena.ops), s.line)
@@ -500,11 +500,11 @@ def _summary(p: Program, pre: List[Circuit], n: Int) -> Circuit:
     var depth = 0
     var k = 0
     for s in p.tape:
-        if s.kind == SK.WHILE or s.kind == SK.FOR:
+        if s.kind == StmtKind.WHILE or s.kind == StmtKind.FOR:
             depth += 1
-        elif s.kind == SK.END and (p.tape[s.end].kind == SK.WHILE or p.tape[s.end].kind == SK.FOR):
+        elif s.kind == StmtKind.END and (p.tape[s.end].kind == StmtKind.WHILE or p.tape[s.end].kind == StmtKind.FOR):
             depth -= 1
-        elif s.kind == SK.OPS:
+        elif s.kind == StmtKind.OPS:
             var w = 1
             for _ in range(depth):
                 w = min(w * _SUMMARY_LOOP_WEIGHT, _SUMMARY_MAX_WEIGHT)
@@ -527,12 +527,12 @@ def _skeleton(p: Program) -> List[Stmt]:
     var at = List[Int](length=len(p.tape), fill=-1)
     var n = 0
     for i in range(len(p.tape)):
-        if p.tape[i].kind != SK.OPS:
+        if p.tape[i].kind != StmtKind.OPS:
             at[i] = n
             n += 1
     var out = List[Stmt]()
     for s in p.tape:
-        if s.kind != SK.OPS:
+        if s.kind != StmtKind.OPS:
             out.append(Stmt(s.kind, s.a, s.b, -1, at[s.end] if s.end >= 0 else -1, 0))
     return out^
 
@@ -740,11 +740,11 @@ def _reachable_ops(p: Program) -> List[Bool]:
         for i in range(bb.lo, bb.hi):
             out[i] = True
         var succ = List[Int]()
-        if bb.term == TERM.JMP or bb.term == TERM.BR:
+        if bb.term == TermKind.JMP or bb.term == TermKind.BR:
             succ.append(bb.t0)
-        if bb.term == TERM.BR:
+        if bb.term == TermKind.BR:
             succ.append(bb.t1)
-        if bb.term == TERM.SWITCH:
+        if bb.term == TermKind.SWITCH:
             for j in range(bb.t0, bb.t1 + 1):
                 succ.append(cfg.sw_bb[j])
         for v in succ:
@@ -763,8 +763,8 @@ def _check_blocks_cover_source(src: Program, built: Program, blocks: List[Progra
     var k = 0
     for i in range(len(src.tape)):
         ref s = src.tape[i]
-        var here = j < len(built.tape) and built.tape[j].kind == SK.OPS
-        if s.kind == SK.OPS:
+        var here = j < len(built.tape) and built.tape[j].kind == StmtKind.OPS
+        if s.kind == StmtKind.OPS:
             if here:
                 if k >= len(blocks) or blocks[k].src_lo != s.a or blocks[k].src_hi != s.b:
                     raise Error("QM-E631: the compiled block at tape " + String(j) + " does not come from the source block at tape " + String(i) + ". Hint: report this program.")
@@ -780,7 +780,7 @@ def _check_blocks_cover_source(src: Program, built: Program, blocks: List[Progra
             k += 1
         j += 1
     if j < len(built.tape):
-        if built.tape[j].kind != SK.OPS or k >= len(blocks) or blocks[k].src_lo >= 0 or j + 1 != len(built.tape):
+        if built.tape[j].kind != StmtKind.OPS or k >= len(blocks) or blocks[k].src_lo >= 0 or j + 1 != len(built.tape):
             raise Error("QM-E631: the compiled program ends with statements its source does not have. Hint: report this program.")
 
 
@@ -821,7 +821,7 @@ def verify_program(src: Program, res: ProgramCompileResult) raises -> Tuple[Int,
     var k = 0
     var block_of = List[Int](length=len(out.tape), fill=-1)
     for i in range(len(out.tape)):
-        if out.tape[i].kind == SK.OPS:
+        if out.tape[i].kind == StmtKind.OPS:
             block_of[i] = k
             k += 1
     if k != len(blocks):
@@ -834,7 +834,7 @@ def verify_program(src: Program, res: ProgramCompileResult) raises -> Tuple[Int,
         var cur = enter[u].copy()
         ref bb = cfg.blocks[u]
         for i in range(bb.lo, bb.hi):
-            if out.tape[i].kind != SK.OPS:
+            if out.tape[i].kind != StmtKind.OPS:
                 continue
             ref blk = blocks[block_of[i]]
             for l in range(n):
@@ -842,11 +842,11 @@ def verify_program(src: Program, res: ProgramCompileResult) raises -> Tuple[Int,
                     raise Error("QM-E631: block at tape " + String(i) + " starts from a layout other than the one that reaches it. Hint: report this program.")
             cur = blk.l_out.copy()
         var succ = List[Int]()
-        if bb.term == TERM.JMP or bb.term == TERM.BR:
+        if bb.term == TermKind.JMP or bb.term == TermKind.BR:
             succ.append(bb.t0)
-        if bb.term == TERM.BR:
+        if bb.term == TermKind.BR:
             succ.append(bb.t1)
-        if bb.term == TERM.SWITCH:
+        if bb.term == TermKind.SWITCH:
             for j in range(bb.t0, bb.t1 + 1):
                 succ.append(cfg.sw_bb[j])
         for v in succ:
@@ -870,7 +870,7 @@ def verify_program(src: Program, res: ProgramCompileResult) raises -> Tuple[Int,
     var spent = 0
     k = 0
     for s in out.tape:
-        if s.kind != SK.OPS:
+        if s.kind != StmtKind.OPS:
             continue
         if _check_block(src, out, blocks[k], s.a, s.b, values, spent, UInt64(k + 1)):
             checked += 1
@@ -883,7 +883,7 @@ def verify_program(src: Program, res: ProgramCompileResult) raises -> Tuple[Int,
 def program_metrics(p: Program) -> ProgramMetrics:
     """Cost of the costlier path through each branch, per loop."""
     var m = ProgramMetrics()
-    var kinds: List[Int] = [SK.OPS]  # frame 0: the program
+    var kinds: List[Int] = [StmtKind.OPS]  # frame 0: the program
     var g: List[Int] = [0]
     var t: List[Int] = [0]
     var best_g: List[Int] = [0]
@@ -892,38 +892,38 @@ def program_metrics(p: Program) -> ProgramMetrics:
     for i in range(len(p.tape)):
         var s = p.tape[i]
         var top = len(g) - 1
-        if s.kind == SK.OPS:
+        if s.kind == StmtKind.OPS:
             for j in range(s.a, s.b):
                 ref op = p.body.ops[j]
                 if op_is_unitary(op.kind) and op.kind != Op.I:
                     g[top] += 1
                     if op_arity(op.kind) == 2:
                         t[top] += 1
-        elif s.kind == SK.IF or s.kind == SK.WHILE or s.kind == SK.FOR or s.kind == SK.SWITCH:
+        elif s.kind == StmtKind.IF or s.kind == StmtKind.WHILE or s.kind == StmtKind.FOR or s.kind == StmtKind.SWITCH:
             kinds.append(s.kind)
             g.append(0)
             t.append(0)
             best_g.append(0)
             best_t.append(0)
-            if s.kind == SK.WHILE or s.kind == SK.FOR:
+            if s.kind == StmtKind.WHILE or s.kind == StmtKind.FOR:
                 slot_of_loop[i] = len(m.loops)
                 var depth = 0
                 for k in kinds:
-                    if k == SK.WHILE or k == SK.FOR:
+                    if k == StmtKind.WHILE or k == StmtKind.FOR:
                         depth += 1
                 m.loops.append(LoopCost(s.line, depth, 0, 0, _static_iterations(p, s)))
-        elif s.kind == SK.ELSE or s.kind == SK.CASE:
+        elif s.kind == StmtKind.ELSE or s.kind == StmtKind.CASE:
             best_g[top] = max(best_g[top], g[top])
             best_t[top] = max(best_t[top], t[top])
             g[top] = 0
             t[top] = 0
-        elif s.kind == SK.END:
+        elif s.kind == StmtKind.END:
             var kind = kinds.pop()
             var cg = g.pop()
             var ct = t.pop()
             var bg = best_g.pop()
             var bt = best_t.pop()
-            if kind == SK.WHILE or kind == SK.FOR:
+            if kind == StmtKind.WHILE or kind == StmtKind.FOR:
                 ref l = m.loops[slot_of_loop[s.end]]
                 l.gates = cg
                 l.two_q = ct
@@ -939,25 +939,25 @@ def _const_expr(p: Program, e: Int, mut out: Int) -> Bool:
     if p.expr_lo[e] != p.expr_root[e]:
         return False
     ref n = p.nodes[p.expr_root[e]]
-    if n.op != CN.CONST:
+    if n.op != CNodeOp.CONST:
         return False
     out = n.i
     return True
 
 
 def _static_iterations(p: Program, s: Stmt) -> Int:
-    if s.kind != SK.FOR:
+    if s.kind != StmtKind.FOR:
         return -1
     var off = s.b
-    var set_off = p.for_ranges[off + FORR.SET]
+    var set_off = p.for_ranges[off + ForRangeField.SET]
     if set_off >= 0:
         return p.case_vals[set_off]
     var a = 0
     var st = 0
     var b = 0
-    if not (_const_expr(p, p.for_ranges[off + FORR.START], a) and _const_expr(p, p.for_ranges[off + FORR.STEP], st) and _const_expr(p, p.for_ranges[off + FORR.STOP], b)) or st == 0:
+    if not (_const_expr(p, p.for_ranges[off + ForRangeField.START], a) and _const_expr(p, p.for_ranges[off + ForRangeField.STEP], st) and _const_expr(p, p.for_ranges[off + ForRangeField.STOP], b)) or st == 0:
         return -1
-    if (p.for_ranges[off + FORR.UNSIGNED] & FORR.BOUNDS_UNSIGNED) != 0 and (a < 0 or b < 0):
+    if (p.for_ranges[off + ForRangeField.UNSIGNED] & ForRangeField.BOUNDS_UNSIGNED) != 0 and (a < 0 or b < 0):
         return -1  # past 2^63: held by its bits, and past what this count needs
     return max(0, (b - a) // st + 1)
 
@@ -985,7 +985,7 @@ def compile_spec_program(p: Program, target: Target, spec: String, seed: Int = 7
     var pm_pre = PassManager(pre_spec, seed) if pre_spec.byte_length() > 0 else PassManager("remove_identities", seed)
     pm_pre.exact = True
     for s in p.tape:
-        if s.kind != SK.OPS:
+        if s.kind != StmtKind.OPS:
             continue
         var c = _leaf(p, s.a, s.b, n)
         if pre_spec.byte_length() > 0:

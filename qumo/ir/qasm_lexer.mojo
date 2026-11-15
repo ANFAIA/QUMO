@@ -62,7 +62,7 @@ def bits_to_decimal(bits: List[Int]) -> String:
     return out
 
 
-struct TK:
+struct TokenKind:
     comptime EOF = 0
     comptime IDENT = 1
     comptime INT = 2
@@ -74,7 +74,7 @@ struct TK:
     comptime ANNOTATION = 8  # `@keyword payload` up to the end of the line
 
 
-struct P:
+struct Punct:
     comptime SEMI = 1
     comptime COMMA = 2
     comptime LPAREN = 3
@@ -115,7 +115,7 @@ struct P:
 @fieldwise_init
 struct Token(ImplicitlyCopyable):
     var kind: Int
-    var sub: Int  # punctuation code (P.*)
+    var sub: Int  # punctuation code (Punct.*)
     var start: Int  # byte offsets [start, end)
     var end: Int
     var line: Int
@@ -261,12 +261,12 @@ def _push(mut toks: List[Token], kind: Int, sub: Int, start: Int, end: Int, line
 
 def _close_pragma(mut toks: List[Token], at: Int, line: Int):
     var n = len(toks)
-    if n > 0 and toks[n - 1].kind == TK.PUNCT and toks[n - 1].sub == P.SEMI:
+    if n > 0 and toks[n - 1].kind == TokenKind.PUNCT and toks[n - 1].sub == Punct.SEMI:
         return
-    if n > 0 and toks[n - 1].kind == TK.PRAGMA:
-        _push(toks, TK.PUNCT, P.SEMI, at, at, line)
+    if n > 0 and toks[n - 1].kind == TokenKind.PRAGMA:
+        _push(toks, TokenKind.PUNCT, Punct.SEMI, at, at, line)
         return
-    _push(toks, TK.PUNCT, P.SEMI, at, at, line)
+    _push(toks, TokenKind.PUNCT, Punct.SEMI, at, at, line)
 
 
 def _at_statement_start(toks: List[Token]) -> Bool:
@@ -275,9 +275,9 @@ def _at_statement_start(toks: List[Token]) -> Bool:
     if len(toks) == 0:
         return True
     ref t = toks[len(toks) - 1]
-    if t.kind == TK.ANNOTATION:
+    if t.kind == TokenKind.ANNOTATION:
         return True
-    return t.kind == TK.PUNCT and (t.sub == P.SEMI or t.sub == P.LBRACE or t.sub == P.RBRACE)
+    return t.kind == TokenKind.PUNCT and (t.sub == Punct.SEMI or t.sub == Punct.LBRACE or t.sub == Punct.RBRACE)
 
 
 def _lex_error(src: String, code: String, msg: String, at: Int, line: Int, hint: String) -> Error:
@@ -336,7 +336,7 @@ def tokenize_qasm(src: String) raises -> List[Token]:
                 while j < n and (Int(bs[j]) == 0x20 or Int(bs[j]) == 0x09):
                     j += 1
                 if j + 4 <= n and _span_eq(bs, j, j + 4, "qumo") and (j + 4 == n or not _is_ident_char(Int(bs[j + 4]))):
-                    _push(toks, TK.PRAGMA, 0, i, j + 4, line)
+                    _push(toks, TokenKind.PRAGMA, 0, i, j + 4, line)
                     in_pragma = True
                     line_has_tok = True
                     i = j + 4
@@ -350,7 +350,7 @@ def tokenize_qasm(src: String) raises -> List[Token]:
             var j = i
             while j < n and Int(bs[j]) != 0x0A:
                 j += 1
-            _push(toks, TK.ANNOTATION, 0, i, j, line)
+            _push(toks, TokenKind.ANNOTATION, 0, i, j, line)
             i = j
             continue
         line_has_tok = True
@@ -363,14 +363,14 @@ def tokenize_qasm(src: String) raises -> List[Token]:
                 while k < n and (Int(bs[k]) == 0x20 or Int(bs[k]) == 0x09):
                     k += 1
                 if k + 4 <= n and _span_eq(bs, k, k + 4, "qumo") and (k + 4 == n or not _is_ident_char(Int(bs[k + 4]))):
-                    _push(toks, TK.PRAGMA, 0, i, k + 4, line)
+                    _push(toks, TokenKind.PRAGMA, 0, i, k + 4, line)
                     in_pragma = True
                     i = k + 4
                     continue
                 while i < n and Int(bs[i]) != 0x0A:
                     i += 1
                 continue
-            _push(toks, TK.IDENT, 0, i, j, line)
+            _push(toks, TokenKind.IDENT, 0, i, j, line)
             i = j
             continue
         if _is_digit(c) or (c == 0x2E and i + 1 < n and _is_digit(Int(bs[i + 1]))):
@@ -401,7 +401,7 @@ def tokenize_qasm(src: String) raises -> List[Token]:
                     v = Float64(StringSlice(unsafe_from_utf8=bs[i:j]))
                 except:
                     raise _lex_error(src, "QM-E501", "malformed number", i, line, "write numbers like 0.5, 1e-3 or 3")
-                _push(toks, TK.FLOAT, 0, i, j, line, v)
+                _push(toks, TokenKind.FLOAT, 0, i, j, line, v)
             elif j - i > 18:
                 # past 64 bits iv wrapped: the token's value comes from the digits
                 var digits = String(unsafe_from_utf8=bs[i:j]).replace("_", "")
@@ -410,9 +410,9 @@ def tokenize_qasm(src: String) raises -> List[Token]:
                     v = Float64(digits)
                 except:
                     raise _lex_error(src, "QM-E501", "malformed number", i, line, "write numbers like 0.5, 1e-3 or 3")
-                _push(toks, TK.INT, 0, i, j, line, v)
+                _push(toks, TokenKind.INT, 0, i, j, line, v)
             else:
-                _push(toks, TK.INT, 0, i, j, line, Float64(iv))
+                _push(toks, TokenKind.INT, 0, i, j, line, Float64(iv))
             i = j
             continue
         if c == 0x22 or c == 0x27:
@@ -421,7 +421,7 @@ def tokenize_qasm(src: String) raises -> List[Token]:
                 j += 1
             if j >= n or Int(bs[j]) != c:
                 raise _lex_error(src, "QM-E502", "unterminated string literal", i, line, "close the string on the same line")
-            _push(toks, TK.STRING, 0, i + 1, j, line)
+            _push(toks, TokenKind.STRING, 0, i + 1, j, line)
             i = j + 1
             continue
         if c == 0x24:  # $n hardware qubit
@@ -433,138 +433,138 @@ def tokenize_qasm(src: String) raises -> List[Token]:
                 j += 1
             if j == i + 1:
                 raise _lex_error(src, "QM-E501", "'$' must be followed by a physical qubit number", i, line, "write $0, $1, ...")
-            _push(toks, TK.HWQUBIT, 0, i, j, line, Float64(iv))
+            _push(toks, TokenKind.HWQUBIT, 0, i, j, line, Float64(iv))
             i = j
             continue
         # punctuation
         var d = Int(bs[i + 1]) if i + 1 < n else 0
         var sub: Int
         var w = 1
-        if c == 0x3B: sub = P.SEMI
-        elif c == 0x2C: sub = P.COMMA
-        elif c == 0x28: sub = P.LPAREN
-        elif c == 0x29: sub = P.RPAREN
-        elif c == 0x5B: sub = P.LBRACK
-        elif c == 0x5D: sub = P.RBRACK
-        elif c == 0x7B: sub = P.LBRACE
-        elif c == 0x7D: sub = P.RBRACE
-        elif c == 0x40: sub = P.AT
-        elif c == 0x3A: sub = P.COLON
-        elif c == 0x7E: sub = P.TILDE
-        elif c == 0x2E: sub = P.DOT
+        if c == 0x3B: sub = Punct.SEMI
+        elif c == 0x2C: sub = Punct.COMMA
+        elif c == 0x28: sub = Punct.LPAREN
+        elif c == 0x29: sub = Punct.RPAREN
+        elif c == 0x5B: sub = Punct.LBRACK
+        elif c == 0x5D: sub = Punct.RBRACK
+        elif c == 0x7B: sub = Punct.LBRACE
+        elif c == 0x7D: sub = Punct.RBRACE
+        elif c == 0x40: sub = Punct.AT
+        elif c == 0x3A: sub = Punct.COLON
+        elif c == 0x7E: sub = Punct.TILDE
+        elif c == 0x2E: sub = Punct.DOT
         elif c == 0x2D:
             if d == 0x3E:
-                sub = P.ARROW
+                sub = Punct.ARROW
                 w = 2
             elif d == 0x3D:
-                sub = P.OPASSIGN
+                sub = Punct.OPASSIGN
                 w = 2
             else:
-                sub = P.MINUS
+                sub = Punct.MINUS
         elif c == 0x3D:
             if d == 0x3D:
-                sub = P.EQEQ
+                sub = Punct.EQEQ
                 w = 2
             else:
-                sub = P.EQ
+                sub = Punct.EQ
         elif c == 0x21:
             if d == 0x3D:
-                sub = P.NEQ
+                sub = Punct.NEQ
                 w = 2
             else:
-                sub = P.BANG
+                sub = Punct.BANG
         elif c == 0x2B:
             if d == 0x3D:
-                sub = P.OPASSIGN
+                sub = Punct.OPASSIGN
                 w = 2
             else:
-                sub = P.PLUS
+                sub = Punct.PLUS
         elif c == 0x2A:
             if d == 0x2A:
-                sub = P.POW
+                sub = Punct.POW
                 w = 2
                 if i + 2 < n and Int(bs[i + 2]) == 0x3D:
-                    sub = P.OPASSIGN
+                    sub = Punct.OPASSIGN
                     w = 3
             elif d == 0x3D:
-                sub = P.OPASSIGN
+                sub = Punct.OPASSIGN
                 w = 2
             else:
-                sub = P.STAR
+                sub = Punct.STAR
         elif c == 0x2F:
             if d == 0x3D:
-                sub = P.OPASSIGN
+                sub = Punct.OPASSIGN
                 w = 2
             else:
-                sub = P.SLASH
+                sub = Punct.SLASH
         elif c == 0x25:
             if d == 0x3D:
-                sub = P.OPASSIGN
+                sub = Punct.OPASSIGN
                 w = 2
             else:
-                sub = P.PERCENT
+                sub = Punct.PERCENT
         elif c == 0x3C:
             if d == 0x3D:
-                sub = P.LE
+                sub = Punct.LE
                 w = 2
             elif d == 0x3C:
-                sub = P.SHL
+                sub = Punct.SHL
                 w = 2
                 if i + 2 < n and Int(bs[i + 2]) == 0x3D:
-                    sub = P.OPASSIGN
+                    sub = Punct.OPASSIGN
                     w = 3
             else:
-                sub = P.LT
+                sub = Punct.LT
         elif c == 0x3E:
             if d == 0x3D:
-                sub = P.GE
+                sub = Punct.GE
                 w = 2
             elif d == 0x3E:
-                sub = P.SHR
+                sub = Punct.SHR
                 w = 2
                 if i + 2 < n and Int(bs[i + 2]) == 0x3D:
-                    sub = P.OPASSIGN
+                    sub = Punct.OPASSIGN
                     w = 3
             else:
-                sub = P.GT
+                sub = Punct.GT
         elif c == 0x26:
             if d == 0x26:
-                sub = P.ANDAND
+                sub = Punct.ANDAND
                 w = 2
             elif d == 0x3D:
-                sub = P.OPASSIGN
+                sub = Punct.OPASSIGN
                 w = 2
             else:
-                sub = P.AMP
+                sub = Punct.AMP
         elif c == 0x7C:
             if d == 0x7C:
-                sub = P.OROR
+                sub = Punct.OROR
                 w = 2
             elif d == 0x3D:
-                sub = P.OPASSIGN
+                sub = Punct.OPASSIGN
                 w = 2
             else:
-                sub = P.PIPE
+                sub = Punct.PIPE
         elif c == 0x5E:
             if d == 0x3D:
-                sub = P.OPASSIGN
+                sub = Punct.OPASSIGN
                 w = 2
             else:
-                sub = P.CARET
+                sub = Punct.CARET
         else:
             raise _lex_error(src, "QM-E501", "unexpected character '" + String(unsafe_from_utf8=bs[i:i + 1]) + "'", i, line, "remove it or check for a missing quote/comment marker")
-        _push(toks, TK.PUNCT, sub, i, i + w, line)
+        _push(toks, TokenKind.PUNCT, sub, i, i + w, line)
         i += w
     if in_pragma:
         _close_pragma(toks, n, line)
-    _push(toks, TK.EOF, 0, n, n, line)
+    _push(toks, TokenKind.EOF, 0, n, n, line)
     return toks^
 
 
 # ===========================================================================
 # Gate table
 # ===========================================================================
-struct G:
+struct SpecialGate:
     """Special (non-opcode) gate codes; natives use their opcode (>= 0)."""
 
     comptime U2 = -2
@@ -576,17 +576,17 @@ struct G:
 
 
 def _special_nparams(code: Int) -> Int:
-    if code == G.U2: return 2
-    if code == G.U3: return 3
-    if code == G.CU: return 4
-    if code == G.CU3: return 3
-    if code == G.GPHASE: return 1
+    if code == SpecialGate.U2: return 2
+    if code == SpecialGate.U3: return 3
+    if code == SpecialGate.CU: return 4
+    if code == SpecialGate.CU3: return 3
+    if code == SpecialGate.GPHASE: return 1
     return 0
 
 
 def _special_arity(code: Int) -> Int:
-    if code == G.U2 or code == G.U3: return 1
-    if code == G.CU or code == G.CU3 or code == G.CSX: return 2
+    if code == SpecialGate.U2 or code == SpecialGate.U3: return 1
+    if code == SpecialGate.CU or code == SpecialGate.CU3 or code == SpecialGate.CSX: return 2
     return 0
 
 
@@ -607,10 +607,10 @@ def builtin_gate_table() -> Dict[String, Int]:
     t["u1"] = Op.P
     t["cphase"] = Op.CP
     t["cu1"] = Op.CP
-    t["u2"] = G.U2
-    t["u3"] = G.U3
-    t["cu"] = G.CU
-    t["cu3"] = G.CU3
-    t["csx"] = G.CSX
-    t["gphase"] = G.GPHASE
+    t["u2"] = SpecialGate.U2
+    t["u3"] = SpecialGate.U3
+    t["cu"] = SpecialGate.CU
+    t["cu3"] = SpecialGate.CU3
+    t["csx"] = SpecialGate.CSX
+    t["gphase"] = SpecialGate.GPHASE
     return t^

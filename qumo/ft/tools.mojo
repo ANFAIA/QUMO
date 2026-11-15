@@ -31,7 +31,7 @@ from qumo.exec.resources import estimate_resources
 from qumo.qec.codes import NoiseParams
 from qumo.ft.code import StabilizerCode, code_by_name, code_names
 from qumo.ft.arch import Architecture, SteaneBuilder, IcebergBuilder, QECPolicy, FactoryConf, architecture_by_name
-from qumo.ft.logical import LogicalProgram, LOp, lop_name
+from qumo.ft.logical import LogicalProgram, LogicalOpKind, lop_name
 from qumo.ft.encode import compile, encode, check_may_encode
 from qumo.ft.implement import implement_ops, EncodedProgram
 from qumo.ft.emulate import run_encoded, reference_counts, total_variation, LogicalCounts

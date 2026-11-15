@@ -42,7 +42,7 @@ tables plus a list of `TileRun`s, each one `gk_tile` launch (see
   * A run holds at most RUN_MAX_OPS ops / RUN_MAX_MATS matrix values (they
     are cached in shared memory by the kernel).
   * Consecutive diagonal gates of a run on at most diag_width qubits become
-    one phase-table op (TK.DGT): a QFT's controlled phases cost one complex
+    one phase-table op (TileKind.DGT): a QFT's controlled phases cost one complex
     multiply per amplitude per group instead of one per gate.
 
 Everything here is host-only and deterministic (unit-tested in emulation and
@@ -53,9 +53,9 @@ from std.bit import pop_count
 from std.math import cos, sin, atan2
 
 from qumo.ir.gates import Op, M2, M4
-from qumo.sim.runner import KOp, K
+from qumo.sim.runner import KOp, KernelKind
 from qumo.gpu.kernels import (
-    TK, TOP, DOP, CODE_CTRL, DIAG_MAX_WIDTH, LOW_BITS, LOW_MIN, REG_BITS, SEG_W, SEG_FLAG_SHIFT, SEG_TRANSPOSE, SEG_DIRECT, FIN_NATURAL,
+    TileKind, TOP, DOP, CODE_CTRL, DIAG_MAX_WIDTH, LOW_BITS, LOW_MIN, REG_BITS, SEG_W, SEG_FLAG_SHIFT, SEG_TRANSPOSE, SEG_DIRECT, FIN_NATURAL,
     FIN_TRANSPOSE, FIN_DIRECT, RUN_MAX_OPS, RUN_MAX_MATS,
 )
 
@@ -143,9 +143,9 @@ def kop_mats(op: KOp, split_1q: Bool = False) -> Int:
     which only shrinks a run's tables): an upper bound (8 for any 1q op), or
     with split_1q the exact count for uncontrolled 1q ops (what _emit /
     _one_q produce), so splitting never cuts runs early."""
-    if op.kind == K.TWO:
+    if op.kind == KernelKind.TWO:
         return 32
-    if split_1q and op.kind == K.ONE:
+    if split_1q and op.kind == KernelKind.ONE:
         if is_x_matrix(op.m):
             return 0
         if op.m.is_diagonal() or _is_real(op.m):
@@ -156,7 +156,7 @@ def kop_mats(op: KOp, split_1q: Bool = False) -> Int:
 
 def kop_ops(op: KOp, split_1q: Bool = False) -> Int:
     """Tile ops the plan op emits (before diagonal fusion; exact)."""
-    if split_1q and op.kind == K.ONE:
+    if split_1q and op.kind == KernelKind.ONE:
         var m = op.m
         if not is_x_matrix(m) and not m.is_diagonal() and not _is_real(m) and split_1q_ok(m):
             return 2  # G1R + trailing diagonal
@@ -166,9 +166,9 @@ def kop_ops(op: KOp, split_1q: Bool = False) -> Int:
 def kop_qubits(op: KOp) raises -> Int:
     """Mask of every qubit the op touches (QM-E475 for ops without a kernel)."""
     var k = op.kind
-    if k == K.ONE:
+    if k == KernelKind.ONE:
         return 1 << op.a
-    if k == K.OTHER:
+    if k == KernelKind.OTHER:
         var g = op.inst
         if g.kind != Op.CCX and g.kind != Op.CCZ and g.kind != Op.CSWAP:
             raise Error("QM-E475: the GPU executor has no kernel for opcode " + String(g.kind) + ". Hint: run this circuit on the CPU state vector (qumo.sim.runner).")
@@ -179,15 +179,15 @@ def kop_qubits(op: KOp) raises -> Int:
 def kop_targets(op: KOp) -> Int:
     """Mask of the qubits the op needs inside the tile (non-diagonal targets)."""
     var k = op.kind
-    if k == K.ONE:
+    if k == KernelKind.ONE:
         return 0 if (op.m.is_diagonal() and not is_x_matrix(op.m)) else 1 << op.a
-    if k == K.CX:
+    if k == KernelKind.CX:
         return 1 << op.b
-    if k == K.C1:
+    if k == KernelKind.C1:
         return 0 if op.m.is_diagonal() else 1 << op.b
-    if k == K.SWAP or k == K.TWO:
+    if k == KernelKind.SWAP or k == KernelKind.TWO:
         return (1 << op.a) | (1 << op.b)
-    if k == K.OTHER:
+    if k == KernelKind.OTHER:
         var g = op.inst
         if g.kind == Op.CCX:
             return 1 << g.q2
@@ -207,7 +207,7 @@ struct TileProgram[dt: DType](Movable):
     var dops: List[Int32]  # device records, DOP Int32 per op (kernels.DOP; built by finalize)
     var mats: List[Scalar[Self.dt]]
     var hp: List[Int32]  # per run: ascending high tile qubits
-    var diag_width: Int  # widest fused diagonal table (TK.DGT); <= 1: no fusion
+    var diag_width: Int  # widest fused diagonal table (TileKind.DGT); <= 1: no fusion
     var split_1q: Bool  # complex uncontrolled 1q gates of the form diagonal . real 2x2 as G1R + diagonal
     var dg_gates: List[Float64]  # fused diagonal gates: pm, am, c0r, c0i, c1r, c1i each
     var dg_groups: List[Int]  # per DGT op: first gate, gate count (pairs)
@@ -251,7 +251,7 @@ struct TileProgram[dt: DType](Movable):
         """Run r has SWAP / dense 4x4 ops (needs the HEAVY kernel)."""
         for i in range(self.runs[r].o0, self.runs[r].o1):
             var kind = Int(self.ops[TOP * i])
-            if kind == TK.SW or kind == TK.G2:
+            if kind == TileKind.SW or kind == TileKind.G2:
                 return True
         return False
 
@@ -315,14 +315,14 @@ struct TileProgram[dt: DType](Movable):
         split_1q, an uncontrolled complex U (global qubit q) of the form
         U = D . R (split_1q_ok: RZ . RY products) as G1R(R) then diag(D):
         4 instead of 8 multiply-adds per amplitude for the 2x2, and the
-        diagonals of many qubits join one phase table (TK.DGT, up to 6
+        diagonals of many qubits join one phase table (TileKind.DGT, up to 6
         qubits per complex multiply). For GPUs whose fp64 (or fp32)
         arithmetic, not memory, bounds the run (GpuProfile.split_1q)."""
         var real = _is_real(m)
         if not real and self.split_1q and cm == 0 and q >= 0 and split_1q_ok(m):
             var r0 = _row_phase(m, 0)
             var r1 = _row_phase(m, 1)
-            self._rec(TK.G1R, a, 0, cm)
+            self._rec(TileKind.G1R, a, 0, cm)
             self._m(r0[2])
             self._m(r0[3])
             self._m(r1[2])
@@ -330,16 +330,16 @@ struct TileProgram[dt: DType](Movable):
             self._diag(1 << q, 0, cos(r0[1]), sin(r0[1]), cos(r1[1]), sin(r1[1]))
             return
         if real:
-            self._rec(TK.G1R, a, 0, cm)
+            self._rec(TileKind.G1R, a, 0, cm)
             for j in range(4):
                 self._m(m.re[j])
         else:
-            self._rec(TK.G1, a, 0, cm)
+            self._rec(TileKind.G1, a, 0, cm)
             self._mat2(m)
 
     def _diag(mut self, pm: Int, am: Int, c0r: Float64, c0i: Float64, c1r: Float64, c1i: Float64):
         """Diagonal op: where all of `am` is set multiply by c[parity(g & pm)]."""
-        self._rec(TK.DG, _i32(pm), _i32(am))
+        self._rec(TileKind.DG, _i32(pm), _i32(am))
         self._m(c0r)
         self._m(c0i)
         self._m(c1r)
@@ -368,30 +368,30 @@ struct TileProgram[dt: DType](Movable):
     def _emit(mut self, op: KOp, loc: List[Int]) raises:
         """One plan op -> one tile op (targets local, controls/diagonals global)."""
         var k = op.kind
-        if k == K.ONE:
+        if k == KernelKind.ONE:
             var m = op.m
             if is_x_matrix(m):
-                self._rec(TK.XC, Int32(loc[op.a]), 0)
+                self._rec(TileKind.XC, Int32(loc[op.a]), 0)
             elif m.is_diagonal():
                 self._diag(1 << op.a, 0, m.re[0], m.im[0], m.re[3], m.im[3])
             else:
                 self._one_q(Int32(loc[op.a]), m, 0, op.a)
-        elif k == K.CX:
-            self._rec(TK.XC, Int32(loc[op.b]), 0, _i32(1 << op.a))
-        elif k == K.CPHASE:
+        elif k == KernelKind.CX:
+            self._rec(TileKind.XC, Int32(loc[op.b]), 0, _i32(1 << op.a))
+        elif k == KernelKind.CPHASE:
             self._diag(0, (1 << op.a) | (1 << op.b), op.f0, op.f1, op.f0, op.f1)
-        elif k == K.C1:
+        elif k == KernelKind.C1:
             if op.m.is_diagonal():
                 self._diag(1 << op.b, 1 << op.a, op.m.re[0], op.m.im[0], op.m.re[3], op.m.im[3])
             else:
                 self._one_q(Int32(loc[op.b]), op.m, _i32(1 << op.a))
-        elif k == K.RZZ:
+        elif k == KernelKind.RZZ:
             # exp(-i t/2 Z Z): e^{-i t/2} on even parity, e^{+i t/2} on odd
             self._diag((1 << op.a) | (1 << op.b), 0, op.f0, -op.f1, op.f0, op.f1)
-        elif k == K.SWAP:
-            self._rec(TK.SW, Int32(loc[op.a]), Int32(loc[op.b]))
-        elif k == K.TWO:
-            self._rec(TK.G2, Int32(loc[op.a]), Int32(loc[op.b]))
+        elif k == KernelKind.SWAP:
+            self._rec(TileKind.SW, Int32(loc[op.a]), Int32(loc[op.b]))
+        elif k == KernelKind.TWO:
+            self._rec(TileKind.G2, Int32(loc[op.a]), Int32(loc[op.b]))
             for j in range(16):
                 self._m(op.m4.re[j])
             for j in range(16):
@@ -399,11 +399,11 @@ struct TileProgram[dt: DType](Movable):
         else:
             var g = op.inst
             if g.kind == Op.CCX:
-                self._rec(TK.XC, Int32(loc[g.q2]), 0, _i32((1 << g.q0) | (1 << g.q1)))
+                self._rec(TileKind.XC, Int32(loc[g.q2]), 0, _i32((1 << g.q0) | (1 << g.q1)))
             elif g.kind == Op.CCZ:
                 self._diag(0, (1 << g.q0) | (1 << g.q1) | (1 << g.q2), -1.0, 0.0, -1.0, 0.0)
             else:
-                self._rec(TK.SW, Int32(loc[g.q1]), Int32(loc[g.q2]), _i32(1 << g.q0))
+                self._rec(TileKind.SW, Int32(loc[g.q1]), Int32(loc[g.q2]), _i32(1 << g.q0))
 
     def add_run(mut self, plan: List[KOp], sel: List[Int], smask: Int, nhigh: Int) raises:
         """Append one run made of plan[sel[0]], plan[sel[1]], ... (in order)."""
@@ -422,7 +422,7 @@ struct TileProgram[dt: DType](Movable):
     def _fuse_diagonals(mut self, o0: Int, m0: Int, hoff: Int):
         """Replace sequences of consecutive diagonal ops of the run being
         built (ops [o0, end), matrices [m0, end)) whose qubits span at most w
-        qubits by one TK.DGT op: a 2^w-entry phase table, products of the
+        qubits by one TileKind.DGT op: a 2^w-entry phase table, products of the
         gates' coefficients as stored in the run (rounded to dt by _diag)
         computed in fp64 and rounded once (filled by finalize, when the table's bit
         order -- qubits outside the register set first -- is known). One
@@ -472,7 +472,7 @@ struct TileProgram[dt: DType](Movable):
                         self.dg_gates.append(Float64(vals[mo + v]))
                 self.dg_groups.append(gfirst)
                 self.dg_groups.append(j - i)
-                self._rec(TK.DGT, _i32(gmask), Int32(len(self.dg_groups) // 2 - 1))
+                self._rec(TileKind.DGT, _i32(gmask), Int32(len(self.dg_groups) // 2 - 1))
                 for _ in range(_table_size(gmask)):
                     self._m(0.0)  # filled by _build_device_records
                 i = j
@@ -495,14 +495,14 @@ struct TileProgram[dt: DType](Movable):
         for i in range(nops):
             var b = TOP * (o0 + i)
             var kind = Int(self.ops[b])
-            if kind == TK.DG:
+            if kind == TileKind.DG:
                 pend.append(i)
                 pmask |= (Int(self.ops[b + 1]) & 0xFFFFFFFF) | (Int(self.ops[b + 2]) & 0xFFFFFFFF)
                 continue
             var tmask = 0
-            if kind == TK.G1 or kind == TK.G1R or kind == TK.XC or kind == TK.SW or kind == TK.G2:
+            if kind == TileKind.G1 or kind == TileKind.G1R or kind == TileKind.XC or kind == TileKind.SW or kind == TileKind.G2:
                 tmask = 1 << self._global_of_local(hoff, Int(self.ops[b + 1]))
-                if kind == TK.SW or kind == TK.G2:
+                if kind == TileKind.SW or kind == TileKind.G2:
                     tmask |= 1 << self._global_of_local(hoff, Int(self.ops[b + 2]))
             if tmask & pmask != 0:
                 for p in pend:
@@ -528,11 +528,11 @@ struct TileProgram[dt: DType](Movable):
         values (vals = the run's matrices from m0 on)."""
         var kind = Int(ops[TOP * i])
         var nm = 0
-        if kind == TK.G1:
+        if kind == TileKind.G1:
             nm = 8
-        elif kind == TK.G1R or kind == TK.DG:
+        elif kind == TileKind.G1R or kind == TileKind.DG:
             nm = 4
-        elif kind == TK.G2:
+        elif kind == TileKind.G2:
             nm = 32
         var mo = Int(ops[TOP * i + 4]) - m0
         for f in range(TOP):
@@ -558,9 +558,9 @@ struct TileProgram[dt: DType](Movable):
         """Local tile qubits op i needs in registers (targets of G1 / SW / G2)."""
         var t = List[Int]()
         var kind = Int(self.ops[TOP * i])
-        if kind == TK.G1 or kind == TK.G1R or kind == TK.XC:
+        if kind == TileKind.G1 or kind == TileKind.G1R or kind == TileKind.XC:
             t.append(Int(self.ops[TOP * i + 1]))
-        elif kind == TK.SW or kind == TK.G2:
+        elif kind == TileKind.SW or kind == TileKind.G2:
             t.append(Int(self.ops[TOP * i + 1]))
             t.append(Int(self.ops[TOP * i + 2]))
         return t^
@@ -662,11 +662,11 @@ struct TileProgram[dt: DType](Movable):
                     var d1: Int
                     var d2 = 0
                     var d3 = 0
-                    if kind == TK.DGT:
+                    if kind == TileKind.DGT:
                         var t = self._diag_table(run, o, regs, gmask, rmask)
                         d1 = t[0]
                         d2 = t[1]
-                    elif kind == TK.DG:
+                    elif kind == TileKind.DG:
                         var pm = Int(self.ops[TOP * o + 1]) & 0xFFFFFFFF
                         var am = Int(self.ops[TOP * o + 2]) & 0xFFFFFFFF
                         d1 = pm & ~rmask
@@ -776,14 +776,14 @@ struct TileProgram[dt: DType](Movable):
         self.segs.append(_i32((o0 - run_o0) | ((o1 - run_o0) << 16)))
         for i in range(o0, o1):
             var kind = Int(self.ops[TOP * i])
-            if kind == TK.G1 or kind == TK.G1R or kind == TK.XC or kind == TK.SW or kind == TK.G2:
+            if kind == TileKind.G1 or kind == TileKind.G1R or kind == TileKind.XC or kind == TileKind.SW or kind == TileKind.G2:
                 var a = Int(self.ops[TOP * i + 1])
                 var pa = _pos(cur, a)
                 var pb = -1
-                if kind == TK.SW or kind == TK.G2:
+                if kind == TileKind.SW or kind == TileKind.G2:
                     var b = Int(self.ops[TOP * i + 2])
                     pb = _pos(cur, b)
-                    if kind == TK.SW and pa > pb:  # symmetric: store pa < pb
+                    if kind == TileKind.SW and pa > pb:  # symmetric: store pa < pb
                         self.ops[TOP * i + 1] = Int32(b)
                         self.ops[TOP * i + 2] = Int32(a)
                         var t = pa
@@ -881,12 +881,12 @@ def _diag_groups(ops: List[Int32], nops: Int, width: Int) -> List[Int]:
     var out = List[Int]()
     var i = 0
     while i < nops:
-        if Int(ops[TOP * i]) != TK.DG:
+        if Int(ops[TOP * i]) != TileKind.DG:
             i += 1
             continue
         var gmask = 0
         var j = i
-        while j < nops and Int(ops[TOP * j]) == TK.DG:
+        while j < nops and Int(ops[TOP * j]) == TileKind.DG:
             var q = (Int(ops[TOP * j + 1]) & 0xFFFFFFFF) | (Int(ops[TOP * j + 2]) & 0xFFFFFFFF)
             if Int(pop_count(gmask | q)) > width:
                 break

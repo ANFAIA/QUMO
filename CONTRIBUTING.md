@@ -30,6 +30,19 @@ make help         # every documented target
 
 QUMO pins one Mojo version (see `MOJO_VERSION` in the `Makefile`) because the language changes between releases. Read [docs/MOJO_GUIDE.md](docs/MOJO_GUIDE.md) before writing Mojo for this repository: it lists the constructs that compile on the pinned toolchain and the common traps. One trap you will meet on day one: `Circuit` is not implicitly copyable, so write `var out = r.circuit.copy()`.
 
+### Naming
+
+QUMO follows the [Mojo standard library style](https://github.com/modular/modular/blob/main/mojo/docs/contributing/stdlib/stdlib-code-style.md), which is why `from qumo import Circuit, sample_auto` mixes a capitalised type with lowercase functions:
+
+| Kind | Style | Example |
+|---|---|---|
+| module, package | `snake_case` | `qumo.ir.qasm_lexer` |
+| `struct`, `trait`, `comptime` type | `PascalCase` | `Circuit`, `StmtKind` |
+| `def`, `var`, value parameter | `snake_case` | `sample_auto`, `num_qubits` |
+| `comptime` value | `SCREAMING_SNAKE_CASE` | `StmtKind.WHILE` |
+
+Two rules on top of that. Acronyms stay upper case inside a type name (`VQEResult`, `QECPolicy`, `GF2Mat`), as in the standard library's `SIMD`. A struct that only holds integer codes is named after what it enumerates and ends in `Kind`, `Op` or `Field` (`TokenKind`, `CNodeOp`, `ForRangeField`), never a one or two letter abbreviation, and two public types do not share a name across modules.
+
 ## Running the tests
 
 ```bash

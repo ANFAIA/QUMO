@@ -45,7 +45,7 @@ comptime WPtr = MutPointer[UInt64, MutAnyOrigin]
 comptime Words = SIMD[DType.uint64, FW]
 
 
-struct FK:
+struct FrameKind:
     """Frame-op kinds (signs are irrelevant for frames, so S == SDG etc.)."""
 
     comptime H = 0
@@ -98,35 +98,35 @@ def _lower_gate(mut ops: List[FrameOp], g: Instruction) raises:
     if k == Op.I or k == Op.X or k == Op.Y or k == Op.Z:
         return
     if k == Op.H:
-        ops.append(FrameOp.gate(FK.H, a))
+        ops.append(FrameOp.gate(FrameKind.H, a))
     elif k == Op.S or k == Op.SDG:
-        ops.append(FrameOp.gate(FK.S, a))
+        ops.append(FrameOp.gate(FrameKind.S, a))
     elif k == Op.SX or k == Op.SXDG:
-        ops.append(FrameOp.gate(FK.SX, a))
+        ops.append(FrameOp.gate(FrameKind.SX, a))
     elif k == Op.CX:
-        ops.append(FrameOp.gate(FK.CX, a, b))
+        ops.append(FrameOp.gate(FrameKind.CX, a, b))
     elif k == Op.CZ:
-        ops.append(FrameOp.gate(FK.CZ, a, b))
+        ops.append(FrameOp.gate(FrameKind.CZ, a, b))
     elif k == Op.CY:
-        ops.append(FrameOp.gate(FK.S, b))
-        ops.append(FrameOp.gate(FK.CX, a, b))
-        ops.append(FrameOp.gate(FK.S, b))
+        ops.append(FrameOp.gate(FrameKind.S, b))
+        ops.append(FrameOp.gate(FrameKind.CX, a, b))
+        ops.append(FrameOp.gate(FrameKind.S, b))
     elif k == Op.SWAP:
-        ops.append(FrameOp.gate(FK.SWAP, a, b))
+        ops.append(FrameOp.gate(FrameKind.SWAP, a, b))
     elif k == Op.ISWAP:
-        ops.append(FrameOp.gate(FK.CZ, a, b))
-        ops.append(FrameOp.gate(FK.SWAP, a, b))
-        ops.append(FrameOp.gate(FK.S, a))
-        ops.append(FrameOp.gate(FK.S, b))
+        ops.append(FrameOp.gate(FrameKind.CZ, a, b))
+        ops.append(FrameOp.gate(FrameKind.SWAP, a, b))
+        ops.append(FrameOp.gate(FrameKind.S, a))
+        ops.append(FrameOp.gate(FrameKind.S, b))
     elif k == Op.ISWAPDG:
-        ops.append(FrameOp.gate(FK.S, a))
-        ops.append(FrameOp.gate(FK.S, b))
-        ops.append(FrameOp.gate(FK.SWAP, a, b))
-        ops.append(FrameOp.gate(FK.CZ, a, b))
+        ops.append(FrameOp.gate(FrameKind.S, a))
+        ops.append(FrameOp.gate(FrameKind.S, b))
+        ops.append(FrameOp.gate(FrameKind.SWAP, a, b))
+        ops.append(FrameOp.gate(FrameKind.CZ, a, b))
     elif k == Op.ECR:
-        ops.append(FrameOp.gate(FK.S, a))
-        ops.append(FrameOp.gate(FK.CX, a, b))
-        ops.append(FrameOp.gate(FK.SX, b))
+        ops.append(FrameOp.gate(FrameKind.S, a))
+        ops.append(FrameOp.gate(FrameKind.CX, a, b))
+        ops.append(FrameOp.gate(FrameKind.SX, b))
     elif k == Op.RX or k == Op.RY or k == Op.RZ or k == Op.P or k == Op.RZZ or k == Op.RXX or k == Op.RYY:
         if g.p0.is_symbolic():
             raise Error("QM-E702: '" + op_name(k) + "' has an unbound parameter. Hint: call circuit.bind(values) first.")
@@ -134,23 +134,23 @@ def _lower_gate(mut ops: List[FrameOp], g: Instruction) raises:
         if (t & 1) == 0:
             return  # identity or a Pauli: no frame action
         if k == Op.RX:
-            ops.append(FrameOp.gate(FK.SX, a))
+            ops.append(FrameOp.gate(FrameKind.SX, a))
         elif k == Op.RY:
-            ops.append(FrameOp.gate(FK.H, a))
+            ops.append(FrameOp.gate(FrameKind.H, a))
         elif k == Op.RZ or k == Op.P:
-            ops.append(FrameOp.gate(FK.S, a))
+            ops.append(FrameOp.gate(FrameKind.S, a))
         else:
             var pre = -1
             if k == Op.RXX:
-                pre = FK.H
+                pre = FrameKind.H
             elif k == Op.RYY:
-                pre = FK.SX
+                pre = FrameKind.SX
             if pre >= 0:
                 ops.append(FrameOp.gate(pre, a))
                 ops.append(FrameOp.gate(pre, b))
-            ops.append(FrameOp.gate(FK.CZ, a, b))
-            ops.append(FrameOp.gate(FK.S, a))
-            ops.append(FrameOp.gate(FK.S, b))
+            ops.append(FrameOp.gate(FrameKind.CZ, a, b))
+            ops.append(FrameOp.gate(FrameKind.S, a))
+            ops.append(FrameOp.gate(FrameKind.S, b))
             if pre >= 0:
                 ops.append(FrameOp.gate(pre, a))
                 ops.append(FrameOp.gate(pre, b))
@@ -165,8 +165,8 @@ struct FrameProgram(Copyable):
     """A circuit lowered to frame primitives + its noiseless reference sample."""
 
     var ops: List[FrameOp]
-    var table: List[Float64]  # FK.PC2: 15 cumulative probabilities per channel
-    var product: List[Int]  # FK.CORR: qubit, letter pairs
+    var table: List[Float64]  # FrameKind.PC2: 15 cumulative probabilities per channel
+    var product: List[Int]  # FrameKind.CORR: qubit, letter pairs
     var records: List[Int]  # detector / observable record lists
     var num_qubits: Int
     var num_measurements: Int
@@ -194,7 +194,7 @@ struct FrameProgram(Copyable):
                     var r = clbit_rec[g.cond]
                     if r >= 0:
                         var pc = 1 if k == Op.X else (2 if k == Op.Y else 3)
-                        self.ops.append(FrameOp(FK.FEED, r, g.q0, pc, 0.0, 0.0, 0.0, 0.0))
+                        self.ops.append(FrameOp(FrameKind.FEED, r, g.q0, pc, 0.0, 0.0, 0.0, 0.0))
                     continue
                 if k == Op.I or k == Op.BARRIER or k == Op.TICK:
                     continue
@@ -206,29 +206,29 @@ struct FrameProgram(Copyable):
             if op_is_unitary(k):
                 _lower_gate(self.ops, g)
             elif k == Op.MEASURE:
-                self.ops.append(FrameOp.gate(FK.M, g.q0, g.q1))
+                self.ops.append(FrameOp.gate(FrameKind.M, g.q0, g.q1))
                 if g.clbit >= 0:
                     clbit_rec[g.clbit] = g.q1
             elif k == Op.RESET:
-                self.ops.append(FrameOp.gate(FK.R, g.q0))
+                self.ops.append(FrameOp.gate(FrameKind.R, g.q0))
             elif op_is_noise(k):
                 var p = g.p0.value()
                 if k == Op.X_ERROR:
-                    if p > 0: self.ops.append(FrameOp.noise(FK.XE, g.q0, -1, p))
+                    if p > 0: self.ops.append(FrameOp.noise(FrameKind.XE, g.q0, -1, p))
                 elif k == Op.Y_ERROR:
-                    if p > 0: self.ops.append(FrameOp.noise(FK.YE, g.q0, -1, p))
+                    if p > 0: self.ops.append(FrameOp.noise(FrameKind.YE, g.q0, -1, p))
                 elif k == Op.Z_ERROR:
-                    if p > 0: self.ops.append(FrameOp.noise(FK.ZE, g.q0, -1, p))
+                    if p > 0: self.ops.append(FrameOp.noise(FrameKind.ZE, g.q0, -1, p))
                 elif k == Op.DEPOLARIZE1:
-                    if p > 0: self.ops.append(FrameOp.noise(FK.DEP1, g.q0, -1, p))
+                    if p > 0: self.ops.append(FrameOp.noise(FrameKind.DEP1, g.q0, -1, p))
                 elif k == Op.DEPOLARIZE2:
-                    if p > 0: self.ops.append(FrameOp.noise(FK.DEP2, g.q0, g.q1, p))
+                    if p > 0: self.ops.append(FrameOp.noise(FrameKind.DEP2, g.q0, g.q1, p))
                 elif k == Op.PAULI_CHANNEL_1:
                     var px = g.p0.value()
                     var py = g.p1.value()
                     var pz = g.p2.value()
                     var tot = px + py + pz
-                    if tot > 0: self.ops.append(FrameOp.noise(FK.PC1, g.q0, -1, tot, px, py))
+                    if tot > 0: self.ops.append(FrameOp.noise(FrameKind.PC1, g.q0, -1, tot, px, py))
                 elif k == Op.PAULI_CHANNEL_2:
                     var off = Int(g.p0.value())
                     var tot = 0.0
@@ -237,22 +237,22 @@ struct FrameProgram(Copyable):
                         tot += circuit.noise_table[off + i]
                         self.table.append(tot)
                     if tot > 0:
-                        var fo = FrameOp.noise(FK.PC2, g.q0, g.q1, tot)
+                        var fo = FrameOp.noise(FrameKind.PC2, g.q0, g.q1, tot)
                         fo.c = at
                         self.ops.append(fo)
                 elif k == Op.CORRELATED_ERROR:
                     var at = len(self.product)
                     for i in range(2 * g.q1):
                         self.product.append(circuit.pauli_table[g.q0 + i])
-                    var fo = FrameOp.noise(FK.CORR, at, g.q1, g.p0.value())
+                    var fo = FrameOp.noise(FrameKind.CORR, at, g.q1, g.p0.value())
                     fo.c = g.q2
                     self.ops.append(fo)
                 else:
                     raise Error("QM-E414: the Pauli-frame simulator takes Pauli noise only, found '" + op_name(k) + "'. Hint: use density_evolve() or sample().")
             elif k == Op.DETECTOR:
-                self.ops.append(FrameOp(FK.DET, g.q0, g.q1, g.q2, 0.0, 0.0, 0.0, 0.0))
+                self.ops.append(FrameOp(FrameKind.DET, g.q0, g.q1, g.q2, 0.0, 0.0, 0.0, 0.0))
             elif k == Op.OBSERVABLE:
-                self.ops.append(FrameOp(FK.OBS, g.q0, g.q1, g.q2, 0.0, 0.0, 0.0, 0.0))
+                self.ops.append(FrameOp(FrameKind.OBS, g.q0, g.q1, g.q2, 0.0, 0.0, 0.0, 0.0))
         if with_reference:
             self.reference = reference_sample(circuit)
         else:
@@ -316,17 +316,17 @@ struct FrameBuffers(Movable):
             op_[unsafe_offset=i] = 0
         for ref fo in prog.ops:
             var k = fo.kind
-            if k == FK.CX:
+            if k == FrameKind.CX:
                 var c = fo.a * FW
                 var t = fo.b * FW
                 xp.unsafe_store(t, xp.unsafe_load[width=FW](t) ^ xp.unsafe_load[width=FW](c))
                 zp.unsafe_store(c, zp.unsafe_load[width=FW](c) ^ zp.unsafe_load[width=FW](t))
-            elif k == FK.H:
+            elif k == FrameKind.H:
                 var o = fo.a * FW
                 var vx = xp.unsafe_load[width=FW](o)
                 xp.unsafe_store(o, zp.unsafe_load[width=FW](o))
                 zp.unsafe_store(o, vx)
-            elif k == FK.DEP2:
+            elif k == FrameKind.DEP2:
                 var a = fo.a * FW
                 var b = fo.b * FW
                 var pos = _skip(rng, fo.lp)
@@ -339,7 +339,7 @@ struct FrameBuffers(Movable):
                     if pb == 1 or pb == 2: _flip(xp, b, pos)
                     if pb >= 2: _flip(zp, b, pos)
                     pos += 1 + _skip(rng, fo.lp)
-            elif k == FK.DEP1:
+            elif k == FrameKind.DEP1:
                 var a = fo.a * FW
                 var pos = _skip(rng, fo.lp)
                 while pos < BATCH:
@@ -347,22 +347,22 @@ struct FrameBuffers(Movable):
                     if r <= 1: _flip(xp, a, pos)
                     if r >= 1: _flip(zp, a, pos)
                     pos += 1 + _skip(rng, fo.lp)
-            elif k == FK.M:
+            elif k == FrameKind.M:
                 var o = fo.a * FW
                 rp.unsafe_store(fo.b * FW, xp.unsafe_load[width=FW](o))
                 zp.unsafe_store(o, zp.unsafe_load[width=FW](o) ^ _rand_words(rng))
-            elif k == FK.R:
+            elif k == FrameKind.R:
                 var o = fo.a * FW
                 xp.unsafe_store(o, Words(0))
                 zp.unsafe_store(o, _rand_words(rng))
-            elif k == FK.XE or k == FK.YE or k == FK.ZE:
+            elif k == FrameKind.XE or k == FrameKind.YE or k == FrameKind.ZE:
                 var a = fo.a * FW
                 var pos = _skip(rng, fo.lp)
                 while pos < BATCH:
-                    if k != FK.ZE: _flip(xp, a, pos)
-                    if k != FK.XE: _flip(zp, a, pos)
+                    if k != FrameKind.ZE: _flip(xp, a, pos)
+                    if k != FrameKind.XE: _flip(zp, a, pos)
                     pos += 1 + _skip(rng, fo.lp)
-            elif k == FK.PC2:
+            elif k == FrameKind.PC2:
                 var a = fo.a * FW
                 var b = fo.b * FW
                 var pos = _skip(rng, fo.lp)
@@ -379,7 +379,7 @@ struct FrameBuffers(Movable):
                     if pb == 1 or pb == 2: _flip(xp, b, pos)
                     if pb >= 2: _flip(zp, b, pos)
                     pos += 1 + _skip(rng, fo.lp)
-            elif k == FK.CORR:
+            elif k == FrameKind.CORR:
                 # chain[] marks the shots where this E / ELSE chain already fired
                 if fo.c == 0:
                     for w in range(FW):
@@ -396,7 +396,7 @@ struct FrameBuffers(Movable):
                             if l == 1 or l == 2: _flip(xp, q, pos)
                             if l >= 2: _flip(zp, q, pos)
                     pos += 1 + _skip(rng, fo.lp)
-            elif k == FK.PC1:
+            elif k == FrameKind.PC1:
                 var a = fo.a * FW
                 var pos = _skip(rng, fo.lp)
                 while pos < BATCH:
@@ -409,30 +409,30 @@ struct FrameBuffers(Movable):
                     else:
                         _flip(zp, a, pos)
                     pos += 1 + _skip(rng, fo.lp)
-            elif k == FK.DET:
+            elif k == FrameKind.DET:
                 var acc = Words(0)
                 for j in range(fo.b):
                     acc ^= rp.unsafe_load[width=FW](rec_list[unsafe_offset=fo.a + j] * FW)
                 dp.unsafe_store(fo.c * FW, acc)
-            elif k == FK.OBS:
+            elif k == FrameKind.OBS:
                 var acc = op_.unsafe_load[width=FW](fo.c * FW)
                 for j in range(fo.b):
                     acc ^= rp.unsafe_load[width=FW](rec_list[unsafe_offset=fo.a + j] * FW)
                 op_.unsafe_store(fo.c * FW, acc)
-            elif k == FK.S:
+            elif k == FrameKind.S:
                 var o = fo.a * FW
                 zp.unsafe_store(o, zp.unsafe_load[width=FW](o) ^ xp.unsafe_load[width=FW](o))
-            elif k == FK.SX:
+            elif k == FrameKind.SX:
                 var o = fo.a * FW
                 xp.unsafe_store(o, xp.unsafe_load[width=FW](o) ^ zp.unsafe_load[width=FW](o))
-            elif k == FK.CZ:
+            elif k == FrameKind.CZ:
                 var a = fo.a * FW
                 var b = fo.b * FW
                 var xa = xp.unsafe_load[width=FW](a)
                 var xb = xp.unsafe_load[width=FW](b)
                 zp.unsafe_store(a, zp.unsafe_load[width=FW](a) ^ xb)
                 zp.unsafe_store(b, zp.unsafe_load[width=FW](b) ^ xa)
-            elif k == FK.SWAP:
+            elif k == FrameKind.SWAP:
                 var a = fo.a * FW
                 var b = fo.b * FW
                 var xa = xp.unsafe_load[width=FW](a)
@@ -441,7 +441,7 @@ struct FrameBuffers(Movable):
                 zp.unsafe_store(a, zp.unsafe_load[width=FW](b))
                 xp.unsafe_store(b, xa)
                 zp.unsafe_store(b, za)
-            elif k == FK.FEED:
+            elif k == FrameKind.FEED:
                 var flips = rp.unsafe_load[width=FW](fo.a * FW)
                 var o = fo.b * FW
                 if fo.c == 1 or fo.c == 2:

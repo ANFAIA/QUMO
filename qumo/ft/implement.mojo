@@ -17,7 +17,7 @@ FT keeps in its global runtime `STATE` struct:
   repeat-until-success attempts unrolled under classical conditions;
 * QEC-cycle insertion from per-block cost counters (QECPolicy);
 * a compile-time Pauli frame per logical qubit whose entries are classical
-  expressions (`qumo.ft.classical.CExpr`) of measured bits: Pauli corrections
+  expressions (`qumo.ft.classical.XorExpr`) of measured bits: Pauli corrections
   (teleportation, EC, injection, user `if m: x(q)`) cost no gates; a frame is
   flushed into classically-conditioned physical Paulis only before an
   operation that does not commute with it (rotations, conditioned non-Pauli
@@ -27,7 +27,7 @@ FT keeps in its global runtime `STATE` struct:
 * decoding: a transversal Z measurement of a block is decoded with the code's
   Z-type checks (lookup table up to (d-1)//2 X errors; error-detecting codes
   turn a non-zero syndrome into a post-selection flag). The decoded value is a
-  CExpr: raw parity XOR syndrome minterms, materialised by the classical lane
+  XorExpr: raw parity XOR syndrome minterms, materialised by the classical lane
   only when a quantum operation depends on it.
 
 Static vs runtime: Guppy FT runs the allocator, factories and QEC counters in
@@ -54,8 +54,8 @@ from qumo.ir.circuit import Circuit, Instruction
 from qumo.ir.gates import Op, op_arity
 from qumo.ft.code import StabilizerCode
 from qumo.ft.pauli import SymPauli
-from qumo.ft.classical import CTerm, CExpr
-from qumo.ft.logical import LogicalProgram, LogicalInstr, LOp, lop_name, lop_arity, lop_is_pauli
+from qumo.ft.classical import CTerm, XorExpr
+from qumo.ft.logical import LogicalProgram, LogicalInstr, LogicalOpKind, lop_name, lop_arity, lop_is_pauli
 from qumo.ft.arch import Architecture
 from qumo.ft.gadgets import (
     steane_encoder_zero, steane_prep_zero_ft, steane_prep_t_nonft, steane_prep_t_ft,
@@ -203,10 +203,10 @@ struct Cond(Copyable):
         return Cond(1, bs^, vs^)
 
 
-struct Block(Copyable):
+struct SlotBlock(Copyable):
     var qubits: List[Int]
     var slots: List[Int]  # handle per slot, -1 = free
-    var residual: List[CExpr]  # X frame a freed slot leaves behind (Iceberg)
+    var residual: List[XorExpr]  # X frame a freed slot leaves behind (Iceberg)
     var live: Bool
     var counter: Float64
     var logical_block: Int  # Iceberg address block, -1 otherwise
@@ -214,9 +214,9 @@ struct Block(Copyable):
     def __init__(out self, var qubits: List[Int], k: Int):
         self.qubits = qubits^
         self.slots = List[Int](length=k, fill=-1)
-        self.residual = List[CExpr]()
+        self.residual = List[XorExpr]()
         for _ in range(k):
-            self.residual.append(CExpr())
+            self.residual.append(XorExpr())
         self.live = True
         self.counter = 0.0
         self.logical_block = -1
@@ -234,22 +234,22 @@ struct Engine(Movable):
     var lanes: List[Int]
     var nclb: Int
     var zero_bit: Int
-    var blocks: List[Block]
+    var blocks: List[SlotBlock]
     # handles
     var hblock: List[Int]
     var hslot: List[Int]
     var haddr: List[Bool]  # counts against the n_blocks capacity
     var hlive: List[Bool]
-    var fx: List[CExpr]
-    var fz: List[CExpr]
+    var fx: List[XorExpr]
+    var fz: List[XorExpr]
     var live_addressed: Int
     # Iceberg addresses
     var addr_stack: List[Int]  # b * k + s
     var ice_pblock: List[Int]  # logical block -> physical block (-1)
     # classical results
-    var out_expr: List[CExpr]
+    var out_expr: List[XorExpr]
     var out_written: List[Bool]
-    var post: List[CExpr]
+    var post: List[XorExpr]
     # factories
     var zero_pool: List[Int]
     var magic_pool: List[Int]
@@ -272,13 +272,13 @@ struct Engine(Movable):
         self.lanes = List[Int]()
         self.nclb = 0
         self.zero_bit = -1
-        self.blocks = List[Block]()
+        self.blocks = List[SlotBlock]()
         self.hblock = List[Int]()
         self.hslot = List[Int]()
         self.haddr = List[Bool]()
         self.hlive = List[Bool]()
-        self.fx = List[CExpr]()
-        self.fz = List[CExpr]()
+        self.fx = List[XorExpr]()
+        self.fz = List[XorExpr]()
         self.live_addressed = 0
         self.addr_stack = List[Int]()
         self.ice_pblock = List[Int](length=arch.n_blocks, fill=-1)
@@ -288,9 +288,9 @@ struct Engine(Movable):
         while a >= 0:
             self.addr_stack.append(a)
             a -= 1
-        self.out_expr = List[CExpr]()
+        self.out_expr = List[XorExpr]()
         self.out_written = List[Bool]()
-        self.post = List[CExpr]()
+        self.post = List[XorExpr]()
         self.zero_pool = List[Int]()
         self.magic_pool = List[Int]()
         self.remaining_zero = 0
@@ -378,8 +378,8 @@ struct Engine(Movable):
         self.hslot.append(-1)
         self.haddr.append(False)
         self.hlive.append(False)
-        self.fx.append(CExpr())
-        self.fz.append(CExpr())
+        self.fx.append(XorExpr())
+        self.fz.append(XorExpr())
         return h
 
     def ensure_handles(mut self, count: Int):
@@ -446,7 +446,7 @@ struct Engine(Movable):
                 self.circ.num_clbits = self.nclb
         return self.zero_bit
 
-    def materialize(mut self, e: CExpr) raises -> Int:
+    def materialize(mut self, e: XorExpr) raises -> Int:
         """Physical clbit holding the value of e (classical lane when needed)."""
         if len(e.terms) == 1 and e.terms[0].kind == 0:
             return e.terms[0].lits[0]
@@ -464,7 +464,7 @@ struct Engine(Movable):
         self.stats.lane_runs += 1
         return c
 
-    def cond_of(mut self, e: CExpr) raises -> Cond:
+    def cond_of(mut self, e: XorExpr) raises -> Cond:
         if e.is_zero():
             return Cond.never()
         if len(e.terms) == 1:
@@ -481,7 +481,7 @@ struct Engine(Movable):
         return self.blocks[self.hblock[h]].qubits.copy()
 
     def _new_block(mut self, var qubits: List[Int]) -> Int:
-        var b = Block(qubits^, self.k)
+        var b = SlotBlock(qubits^, self.k)
         self.blocks.append(b^)
         self.stats.blocks_prepared += 1
         return len(self.blocks) - 1
@@ -493,7 +493,7 @@ struct Engine(Movable):
         var qmap = qubits.copy()
         for a in anc:
             qmap.append(a)
-        var retry = CExpr()
+        var retry = XorExpr()
         for att in range(max_attempts):
             var c = Cond.none()
             if att > 0:
@@ -505,12 +505,12 @@ struct Engine(Movable):
             var flags = List[Int]()
             self.emit_template(template, qmap, c, flags)
             if len(flags) == 0:
-                retry = CExpr()
+                retry = XorExpr()
                 break
             var zeros = List[Int](length=len(flags), fill=0)
             var ok = CTerm.minterm(flags, zeros)
             if att == 0:
-                retry = CExpr.one()
+                retry = XorExpr.one()
                 retry.xor_term(ok)
             else:
                 # retry := retry AND NOT ok = retry XOR (retry AND ok)
@@ -519,7 +519,7 @@ struct Engine(Movable):
                 bits.append(r)
                 var vals = zeros.copy()
                 vals.append(1)
-                retry = CExpr.bit(r)
+                retry = XorExpr.bit(r)
                 retry.xor_term(CTerm.minterm(bits, vals))
         if not retry.is_zero():
             self.post.append(retry^)
@@ -598,8 +598,8 @@ struct Engine(Movable):
                 self.stats.peak_logical = self.live_addressed
         self.haddr[h] = addressed
         self.hlive[h] = True
-        self.fx[h] = CExpr()
-        self.fz[h] = CExpr()
+        self.fx[h] = XorExpr()
+        self.fz[h] = XorExpr()
         if self.arch.kind == "steane":
             var b = self.take_magic_block() if magic else self.take_zero_block(addressed)
             self.hblock[h] = b
@@ -621,7 +621,7 @@ struct Engine(Movable):
         self.hslot[h] = s
         self.blocks[pb].slots[s] = h
         self.fx[h] = self.blocks[pb].residual[s].copy()
-        self.blocks[pb].residual[s] = CExpr()
+        self.blocks[pb].residual[s] = XorExpr()
 
     def _retire(mut self, h: Int):
         if self.haddr[h]:
@@ -633,8 +633,8 @@ struct Engine(Movable):
             self.blocks[b].slots[s] = -1
         if self.arch.kind == "iceberg" and b >= 0 and self.blocks[b].logical_block >= 0:
             self.addr_stack.append(self.blocks[b].logical_block * self.k + s)
-        self.fx[h] = CExpr()
-        self.fz[h] = CExpr()
+        self.fx[h] = XorExpr()
+        self.fz[h] = XorExpr()
 
     def _other_live_slots(self, h: Int) -> Int:
         var b = self.hblock[h]
@@ -651,7 +651,7 @@ struct Engine(Movable):
             return
         var c = self.cond_of(self.fx[h].copy())
         self._phys_pauli(h, "X", c)
-        self.fx[h] = CExpr()
+        self.fx[h] = XorExpr()
         self.stats.frame_flushes += 1
 
     def _flush_z(mut self, h: Int) raises:
@@ -659,7 +659,7 @@ struct Engine(Movable):
             return
         var c = self.cond_of(self.fz[h].copy())
         self._phys_pauli(h, "Z", c)
-        self.fz[h] = CExpr()
+        self.fz[h] = XorExpr()
         self.stats.frame_flushes += 1
 
     def flush(mut self, h: Int) raises:
@@ -675,7 +675,7 @@ struct Engine(Movable):
         else:
             self.emit_template(iceberg_pauli(self.n, self.hslot[h], p), qs, c, dummy)
 
-    def apply_pauli(mut self, h: Int, p: String, e: CExpr) raises:
+    def apply_pauli(mut self, h: Int, p: String, e: XorExpr) raises:
         """Apply Pauli p to handle h when e evaluates to 1."""
         if e.is_zero():
             return
@@ -704,19 +704,19 @@ struct Engine(Movable):
             self.emit_template(transversal_2q(pk, 7), qs, c, dummy)
 
     def _propagate(mut self, kind: Int, h0: Int, h1: Int):
-        if kind == LOp.H:
+        if kind == LogicalOpKind.H:
             var t = self.fx[h0].copy()
             self.fx[h0] = self.fz[h0].copy()
             self.fz[h0] = t^
-        elif kind == LOp.S or kind == LOp.SDG:
+        elif kind == LogicalOpKind.S or kind == LogicalOpKind.SDG:
             var x0 = self.fx[h0].copy()
             self.fz[h0].xor(x0)
-        elif kind == LOp.CX:
+        elif kind == LogicalOpKind.CX:
             var x0 = self.fx[h0].copy()
             var z1 = self.fz[h1].copy()
             self.fx[h1].xor(x0)
             self.fz[h0].xor(z1)
-        elif kind == LOp.CZ:
+        elif kind == LogicalOpKind.CZ:
             var a = self.fx[h0].copy()
             var b = self.fx[h1].copy()
             self.fz[h0].xor(b)
@@ -743,16 +743,16 @@ struct Engine(Movable):
         self.fz[a] = self.fz[b].copy()
         self.fz[b] = tz^
 
-    def gate(mut self, kind: Int, h0: Int, h1: Int, angle: Float64, e: CExpr) raises:
-        """Apply a logical gate when the classical expression e is 1 (CExpr.one() = always)."""
+    def gate(mut self, kind: Int, h0: Int, h1: Int, angle: Float64, e: XorExpr) raises:
+        """Apply a logical gate when the classical expression e is 1 (XorExpr.one() = always)."""
         if e.is_zero():
             return
         var unconditional = len(e.terms) == 1 and e.terms[0].kind == 2
         if lop_is_pauli(kind):
-            var p = String("X") if kind == LOp.X else (String("Y") if kind == LOp.Y else String("Z"))
+            var p = String("X") if kind == LogicalOpKind.X else (String("Y") if kind == LogicalOpKind.Y else String("Z"))
             self.apply_pauli(h0, p, e)
             return
-        if kind == LOp.SWAP:
+        if kind == LogicalOpKind.SWAP:
             if unconditional:
                 self.swap_handles(h0, h1)
                 return
@@ -774,29 +774,29 @@ struct Engine(Movable):
             self._iceberg_gate(kind, h0, h1, angle, e)
             return
         # ---- Steane
-        if kind == LOp.T or kind == LOp.TDG:
+        if kind == LogicalOpKind.T or kind == LogicalOpKind.TDG:
             if not unconditional:
                 raise Error("QM-E726: a classically-conditioned T gate needs a conditioned magic-state injection, which the Steane architecture does not provide. Hint: restructure the program so that the T gate is unconditional (e.g. conditioned SWAP into a scratch qubit), or condition Clifford gates only.")
             if self.arch.qec.before_non_clifford and self.arch.qec.style != "none":
                 self.qec_cycle(h0)
             var m = self.new_handle()
             self.alloc(m, True, True)
-            self.inject(h0, m, kind == LOp.TDG)
+            self.inject(h0, m, kind == LogicalOpKind.TDG)
             return
-        if kind == LOp.RZ or kind == LOp.RX or kind == LOp.RZZ or kind == LOp.RXX:
+        if kind == LogicalOpKind.RZ or kind == LogicalOpKind.RX or kind == LogicalOpKind.RZZ or kind == LogicalOpKind.RXX:
             raise Error("QM-E724: logical '" + lop_name(kind) + "' with an arbitrary angle is not in the Steane gate set. Hint: run compile() (static Clifford+T synthesis or the comparator circuit) first.")
-        if kind == LOp.H or kind == LOp.S or kind == LOp.SDG or kind == LOp.CX or kind == LOp.CZ:
+        if kind == LogicalOpKind.H or kind == LogicalOpKind.S or kind == LogicalOpKind.SDG or kind == LogicalOpKind.CX or kind == LogicalOpKind.CZ:
             if unconditional:
                 self._steane_gate(kind, h0, h1, Cond.none())
                 self._propagate(kind, h0, h1)
                 return
-            if (kind == LOp.S or kind == LOp.SDG) and self.arch.feed_forward == "frame":
+            if (kind == LogicalOpKind.S or kind == LogicalOpKind.SDG) and self.arch.feed_forward == "frame":
                 var fxe = self.fx[h0].copy()
                 if fxe.is_zero():
                     pass
                 elif _same_expr(fxe, e):
                     self.fz[h0].xor(fxe)
-                elif _same_expr(fxe.xored(CExpr.one()), e):
+                elif _same_expr(fxe.xored(XorExpr.one()), e):
                     pass
                 else:
                     self._flush_x(h0)
@@ -813,18 +813,18 @@ struct Engine(Movable):
         """T (T^dag) on h by consuming the magic qubit m (Guppy FT inject_t):
         CX(m -> h); relabel; measure the old data block; X^r then S^r
         (T^dag: X^r then S^dag^(1-r))."""
-        var one = CExpr.one()
-        self.gate(LOp.CX, m, h, 0.0, one)
+        var one = XorExpr.one()
+        self.gate(LogicalOpKind.CX, m, h, 0.0, one)
         self.swap_handles(m, h)
         var r = self.measure(m)
         self.apply_pauli(h, "X", r)
         if dagger:
-            self.gate(LOp.SDG, h, -1, 0.0, r.xored(CExpr.one()))
+            self.gate(LogicalOpKind.SDG, h, -1, 0.0, r.xored(XorExpr.one()))
         else:
-            self.gate(LOp.S, h, -1, 0.0, r)
+            self.gate(LogicalOpKind.S, h, -1, 0.0, r)
         self.stats.injections += 1
 
-    def _iceberg_rot(mut self, kind: String, h0: Int, h1: Int, angle: Float64, e: CExpr) raises:
+    def _iceberg_rot(mut self, kind: String, h0: Int, h1: Int, angle: Float64, e: XorExpr) raises:
         var c = self.cond_of(e)
         var dummy = List[Int]()
         if kind == "rz" or kind == "rx":
@@ -873,55 +873,55 @@ struct Engine(Movable):
             if self.hlive[h] and self.hblock[h] == self.hblock[first]:
                 self.flush(h)
         var dummy = List[Int]()
-        self.emit_template(iceberg_rotation(self.n, kind[0], kind[1], -1, g.angle), self.block_qubits(first), self.cond_of(CExpr.one()), dummy)
+        self.emit_template(iceberg_rotation(self.n, kind[0], kind[1], -1, g.angle), self.block_qubits(first), self.cond_of(XorExpr.one()), dummy)
 
-    def _iceberg_gate(mut self, kind: Int, h0: Int, h1: Int, angle: Float64, e: CExpr) raises:
+    def _iceberg_gate(mut self, kind: Int, h0: Int, h1: Int, angle: Float64, e: XorExpr) raises:
         var hp = pi / 2
-        if kind == LOp.RZ:
+        if kind == LogicalOpKind.RZ:
             self._flush_x(h0)
             self._iceberg_rot("rz", h0, -1, angle, e)
-        elif kind == LOp.RX:
+        elif kind == LogicalOpKind.RX:
             self._flush_z(h0)
             self._iceberg_rot("rx", h0, -1, angle, e)
-        elif kind == LOp.RZZ:
+        elif kind == LogicalOpKind.RZZ:
             self._flush_x(h0)
             self._flush_x(h1)
             self._iceberg_rot("rzz", h0, h1, angle, e)
-        elif kind == LOp.RXX:
+        elif kind == LogicalOpKind.RXX:
             self._flush_z(h0)
             self._flush_z(h1)
             self._iceberg_rot("rxx", h0, h1, angle, e)
-        elif kind == LOp.S:
-            self.gate(LOp.RZ, h0, -1, hp, e)
-        elif kind == LOp.SDG:
-            self.gate(LOp.RZ, h0, -1, -hp, e)
-        elif kind == LOp.T:
-            self.gate(LOp.RZ, h0, -1, pi / 4, e)
-        elif kind == LOp.TDG:
-            self.gate(LOp.RZ, h0, -1, -pi / 4, e)
-        elif kind == LOp.H:
-            self.gate(LOp.RZ, h0, -1, hp, e)
-            self.gate(LOp.RX, h0, -1, hp, e)
-            self.gate(LOp.RZ, h0, -1, hp, e)
-        elif kind == LOp.CZ:
-            self.gate(LOp.RZ, h0, -1, hp, e)
-            self.gate(LOp.RZ, h1, -1, hp, e)
-            self.gate(LOp.RZZ, h0, h1, -hp, e)
-        elif kind == LOp.CX:
-            self.gate(LOp.H, h1, -1, 0.0, e)
-            self.gate(LOp.CZ, h0, h1, 0.0, e)
-            self.gate(LOp.H, h1, -1, 0.0, e)
+        elif kind == LogicalOpKind.S:
+            self.gate(LogicalOpKind.RZ, h0, -1, hp, e)
+        elif kind == LogicalOpKind.SDG:
+            self.gate(LogicalOpKind.RZ, h0, -1, -hp, e)
+        elif kind == LogicalOpKind.T:
+            self.gate(LogicalOpKind.RZ, h0, -1, pi / 4, e)
+        elif kind == LogicalOpKind.TDG:
+            self.gate(LogicalOpKind.RZ, h0, -1, -pi / 4, e)
+        elif kind == LogicalOpKind.H:
+            self.gate(LogicalOpKind.RZ, h0, -1, hp, e)
+            self.gate(LogicalOpKind.RX, h0, -1, hp, e)
+            self.gate(LogicalOpKind.RZ, h0, -1, hp, e)
+        elif kind == LogicalOpKind.CZ:
+            self.gate(LogicalOpKind.RZ, h0, -1, hp, e)
+            self.gate(LogicalOpKind.RZ, h1, -1, hp, e)
+            self.gate(LogicalOpKind.RZZ, h0, h1, -hp, e)
+        elif kind == LogicalOpKind.CX:
+            self.gate(LogicalOpKind.H, h1, -1, 0.0, e)
+            self.gate(LogicalOpKind.CZ, h0, h1, 0.0, e)
+            self.gate(LogicalOpKind.H, h1, -1, 0.0, e)
         else:
             raise Error("QM-E724: logical op '" + lop_name(kind) + "' is not supported by the Iceberg architecture.")
 
     # ------------------------------------------------------------ measurement
-    def _decode(mut self, raw: List[Int], slot: Int) raises -> CExpr:
+    def _decode(mut self, raw: List[Int], slot: Int) raises -> XorExpr:
         """Decoded Z_L(slot) of a destructively measured block; uncorrectable
         syndromes become post-selection flags."""
         var zl = self.code.z_logicals[slot].copy()
         if not zl.is_z_type():
             raise Error("QM-E724: decoding needs a Z-type logical Z operator (code '" + self.code.name + "'). Hint: transversal Z measurement decodes CSS codes only.")
-        var val = CExpr()
+        var val = XorExpr()
         for q in range(self.n):
             if zl.z(q) == 1:
                 val.xor_term(CTerm.clbit(raw[q]))
@@ -938,18 +938,18 @@ struct Engine(Movable):
                 any_flag = True
         if m == 1 and not any_correction:
             # single parity check: the flag is its XOR, no lane needed
-            var f = CExpr()
+            var f = XorExpr()
             for q in self.zchecks[0]:
                 f.xor_term(CTerm.clbit(raw[q]))
             self.post.append(f^)
             return val^
         var sbits = List[Int]()
         for ci in range(m):
-            var s = CExpr()
+            var s = XorExpr()
             for q in self.zchecks[ci]:
                 s.xor_term(CTerm.clbit(raw[q]))
             sbits.append(self.materialize(s))
-        var flag = CExpr()
+        var flag = XorExpr()
         for sig in range(1, 1 << m):
             var vals = List[Int]()
             for ci in range(m):
@@ -962,7 +962,7 @@ struct Engine(Movable):
             self.post.append(flag^)
         return val^
 
-    def measure(mut self, h: Int) raises -> CExpr:
+    def measure(mut self, h: Int) raises -> XorExpr:
         """Destructive logical Z measurement of handle h; returns its value."""
         var b = self.hblock[h]
         var s = self.hslot[h]
@@ -978,10 +978,10 @@ struct Engine(Movable):
             var al = List[Int]()
             al.append(anc)
             self.release_qubits(al)
-            var v = CExpr.bit(mb)
+            var v = XorExpr.bit(mb)
             v.xor(self.fx[h])
             self._retire(h)
-            self.blocks[b].residual[s] = CExpr.bit(mb)
+            self.blocks[b].residual[s] = XorExpr.bit(mb)
             self.stats.decoded_measurements += 1
             return v^
         self._sync_size()
@@ -997,7 +997,7 @@ struct Engine(Movable):
         self.release_block(b)
         return v^
 
-    def measure_block(mut self, hs: List[Int]) raises -> List[CExpr]:
+    def measure_block(mut self, hs: List[Int]) raises -> List[XorExpr]:
         """Destructive measurement of a whole block holding exactly the live
         handles `hs`: one transversal readout, every slot decoded, one shared
         error-detection flag (instead of k-1 non-destructive parities)."""
@@ -1009,10 +1009,10 @@ struct Engine(Movable):
             var c = self.new_clbit()
             self.circ.measure(q, c)
             raw.append(c)
-        var out = List[CExpr]()
+        var out = List[XorExpr]()
         var first = True
         for h in hs:
-            var v: CExpr
+            var v: XorExpr
             if first:
                 v = self._decode(raw, self.hslot[h])
                 first = False
@@ -1026,7 +1026,7 @@ struct Engine(Movable):
         self.release_block(b)
         return out^
 
-    def _decode_value_only(mut self, raw: List[Int], slot: Int) raises -> CExpr:
+    def _decode_value_only(mut self, raw: List[Int], slot: Int) raises -> XorExpr:
         """Decoded value without registering the (shared) detection flag again."""
         var saved = len(self.post)
         var v = self._decode(raw, slot)
@@ -1056,11 +1056,11 @@ struct Engine(Movable):
             var flags = List[Int]()
             self.emit_template(iceberg_syndrome_cycle(self.n), qs, Cond.none(), flags)
             for f in flags:
-                self.post.append(CExpr.bit(f))
+                self.post.append(XorExpr.bit(f))
             self.release_qubits(anc)
             self.blocks[self.hblock[h]].counter = 0.0
             return
-        var one = CExpr.one()
+        var one = XorExpr.one()
         if style == "reichardt":
             # dense extraction with 3 ancillas; each 3-bit syndrome names one data
             # qubit, which assumes no fault during the extraction (flags are not read)
@@ -1095,16 +1095,16 @@ struct Engine(Movable):
             var a = self.new_handle()
             self.alloc(a, False, False)
             self.swap_handles(h, a)
-            self.gate(LOp.CX, a, h, 0.0, one)
-            self.gate(LOp.H, a, -1, 0.0, one)
+            self.gate(LogicalOpKind.CX, a, h, 0.0, one)
+            self.gate(LogicalOpKind.H, a, -1, 0.0, one)
             var r = self.measure(a)
             self.apply_pauli(h, "Z", r)
             # Z-type syndrome by one-bit teleportation into a fresh |+>_L
             var a2 = self.new_handle()
             self.alloc(a2, False, False)
-            self.gate(LOp.H, a2, -1, 0.0, one)
+            self.gate(LogicalOpKind.H, a2, -1, 0.0, one)
             self.swap_handles(h, a2)
-            self.gate(LOp.CX, h, a2, 0.0, one)
+            self.gate(LogicalOpKind.CX, h, a2, 0.0, one)
             var r2 = self.measure(a2)
             self.apply_pauli(h, "X", r2)
         else:  # knill: Bell-pair teleportation
@@ -1112,11 +1112,11 @@ struct Engine(Movable):
             self.alloc(a0, False, False)
             var a1 = self.new_handle()
             self.alloc(a1, False, False)
-            self.gate(LOp.H, a0, -1, 0.0, one)
-            self.gate(LOp.CX, a0, a1, 0.0, one)
+            self.gate(LogicalOpKind.H, a0, -1, 0.0, one)
+            self.gate(LogicalOpKind.CX, a0, a1, 0.0, one)
             self.swap_handles(h, a1)
-            self.gate(LOp.CX, a1, a0, 0.0, one)
-            self.gate(LOp.H, a1, -1, 0.0, one)
+            self.gate(LogicalOpKind.CX, a1, a0, 0.0, one)
+            self.gate(LogicalOpKind.H, a1, -1, 0.0, one)
             var r0 = self.measure(a0)
             self.apply_pauli(h, "X", r0)
             var r1 = self.measure(a1)
@@ -1140,9 +1140,9 @@ struct Engine(Movable):
                 self.qec_cycle(h)
 
     # ------------------------------------------------------------ classical
-    def logical_cond(mut self, lp: LogicalProgram, g: LogicalInstr) raises -> CExpr:
+    def logical_cond(mut self, lp: LogicalProgram, g: LogicalInstr) raises -> XorExpr:
         if g.cond < 0:
-            return CExpr.one()
+            return XorExpr.one()
         var bits = lp.condition_bits(g)
         var vals = lp.condition_vals(g)
         if len(bits) == 1:
@@ -1153,23 +1153,23 @@ struct Engine(Movable):
         var pb = List[Int]()
         for b in bits:
             pb.append(self.materialize(self.out_value(b)))
-        return CExpr.of(CTerm.minterm(pb, vals))
+        return XorExpr.of(CTerm.minterm(pb, vals))
 
-    def out_value(self, c: Int) -> CExpr:
+    def out_value(self, c: Int) -> XorExpr:
         if c < len(self.out_expr):
             return self.out_expr[c].copy()
-        return CExpr()
+        return XorExpr()
 
-    def set_out(mut self, c: Int, var e: CExpr):
+    def set_out(mut self, c: Int, var e: XorExpr):
         while len(self.out_expr) <= c:
-            self.out_expr.append(CExpr())
+            self.out_expr.append(XorExpr())
             self.out_written.append(False)
         self.out_expr[c] = e^
         self.out_written[c] = True
 
-    def translate(mut self, e: CExpr) raises -> CExpr:
-        """CExpr over logical clbits -> CExpr over physical clbits."""
-        var out = CExpr()
+    def translate(mut self, e: XorExpr) raises -> XorExpr:
+        """XorExpr over logical clbits -> XorExpr over physical clbits."""
+        var out = XorExpr()
         for t in e.terms:
             if t.kind == 2:
                 out.xor_term(CTerm.one())
@@ -1183,7 +1183,7 @@ struct Engine(Movable):
         return out^
 
 
-def _same_expr(a: CExpr, b: CExpr) -> Bool:
+def _same_expr(a: XorExpr, b: XorExpr) -> Bool:
     var x = a.xored(b)
     return x.is_zero()
 
@@ -1195,32 +1195,32 @@ def implement_ops(arch: Architecture, lp: LogicalProgram) raises -> EncodedProgr
     lp.validate()
     var eng = Engine(arch)
     eng.ensure_handles(lp.num_logical)
-    eng.remaining_magic = lp.count(LOp.PREP_T) + lp.count(LOp.T) + lp.count(LOp.TDG)
-    eng.remaining_zero = lp.count(LOp.ALLOC)
+    eng.remaining_magic = lp.count(LogicalOpKind.PREP_T) + lp.count(LogicalOpKind.T) + lp.count(LogicalOpKind.TDG)
+    eng.remaining_zero = lp.count(LogicalOpKind.ALLOC)
     eng._refill()
     var skip_measured = List[Int]()
     for i in range(len(lp.ops)):
         var g = lp.ops[i]
         eng.stats.logical_ops += 1
         var k = g.kind
-        if k == LOp.ALLOC:
+        if k == LogicalOpKind.ALLOC:
             eng.alloc(g.q0, False, True)
             eng.after_op(k, g.q0, -1)
-        elif k == LOp.PREP_T:
+        elif k == LogicalOpKind.PREP_T:
             if arch.kind != "steane":
                 raise Error("QM-E724: prep_t (magic state) is a Steane-architecture op. Hint: Iceberg applies rz(pi/4) natively.")
             eng.alloc(g.q0, True, True)
             eng.after_op(k, g.q0, -1)
-        elif k == LOp.FREE:
+        elif k == LogicalOpKind.FREE:
             eng.free(g.q0)
-        elif k == LOp.MEASURE:
+        elif k == LogicalOpKind.MEASURE:
             if arch.kind == "iceberg" and eng._other_live_slots(g.q0) > 0:
                 # look ahead: consecutive measurements covering the whole block
                 var b = eng.hblock[g.q0]
                 var hs = List[Int]()
                 var cs = List[Int]()
                 var j = i
-                while j < len(lp.ops) and lp.ops[j].kind == LOp.MEASURE and lp.ops[j].cond < 0:
+                while j < len(lp.ops) and lp.ops[j].kind == LogicalOpKind.MEASURE and lp.ops[j].cond < 0:
                     if eng.hlive[lp.ops[j].q0] and eng.hblock[lp.ops[j].q0] == b:
                         hs.append(lp.ops[j].q0)
                         cs.append(lp.ops[j].clbit)
@@ -1239,23 +1239,23 @@ def implement_ops(arch: Architecture, lp: LogicalProgram) raises -> EncodedProgr
                 continue
             var v = eng.measure(g.q0)
             eng.set_out(g.clbit, v^)
-        elif k == LOp.QEC:
+        elif k == LogicalOpKind.QEC:
             eng.qec_cycle(g.q0)
-        elif k == LOp.INJECT_T or k == LOp.INJECT_TDG:
+        elif k == LogicalOpKind.INJECT_T or k == LogicalOpKind.INJECT_TDG:
             if arch.kind != "steane":
                 raise Error("QM-E724: inject_t is a Steane-architecture op.")
             if g.cond >= 0:
                 raise Error("QM-E726: conditioned magic-state injection is not supported. Hint: inject unconditionally.")
-            eng.inject(g.q0, g.q1, k == LOp.INJECT_TDG)
+            eng.inject(g.q0, g.q1, k == LogicalOpKind.INJECT_TDG)
             eng.after_op(k, g.q0, -1)
-        elif k == LOp.PAULI_EXP:
+        elif k == LogicalOpKind.PAULI_EXP:
             if arch.kind != "iceberg":
                 raise Error("QM-E724: pauli_exp is an Iceberg op. Hint: Steane takes Clifford + T; compile() synthesises rotations.")
             eng.pauli_exp(lp, g)
-        elif k == LOp.BARRIER:
+        elif k == LogicalOpKind.BARRIER:
             eng._sync_size()
             eng.circ.barrier()
-        elif k == LOp.CSET:
+        elif k == LogicalOpKind.CSET:
             if g.cond >= 0:
                 raise Error("QM-E727: CSET cannot be conditioned. Hint: fold the condition into the expression.")
             var e = eng.translate(lp.cexprs[g.q0])

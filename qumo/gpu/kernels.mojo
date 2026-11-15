@@ -15,7 +15,7 @@ Design (ideas from qsim, cuStateVec and Qiskit-Aer-GPU, re-derived for MAX):
     gates need to be tile qubits: controls and diagonal gates (RZ, P, CZ,
     CP, CRZ, RZZ, CCZ, global phase) test bits of the global amplitude
     index, so they join any run; consecutive diagonal gates are fused into
-    one phase table (TK.DGT). A layered 26-qubit circuit (377 plan ops) is
+    one phase table (TileKind.DGT). A layered 26-qubit circuit (377 plan ops) is
     14-17 state sweeps in fp32 at k = 11 (20 in fp64 at k = 10), a 26-qubit
     QFT 7 (364 plan ops -> 127 tile ops).
   * Register blocking inside a tile: each thread keeps 2^REG_BITS amplitudes
@@ -97,12 +97,12 @@ comptime GPtr[dt: DType] = Pointer[Scalar[dt], MutAnyOrigin]
 comptime I64Ptr = Pointer[Int64, MutAnyOrigin]
 comptime I32Ptr = Pointer[Int32, MutAnyOrigin]
 
-# Host op record: TOP Int32 per op (see TK), used by the scheduler; the
+# Host op record: TOP Int32 per op (see TileKind), used by the scheduler; the
 # kernels read the device record (DOP Int32, below), built from it once the
 # op's register set is known. Segment record: SEG_W Int32.
 comptime TOP = 8  # kind, a, b, x, moff, pa, pb, cm
 # Device op record: DOP x Int32 = 16 B, one vector load from shared memory:
-#   d0: code in bits [0, 8): kind (TK, bits 0-2), register position of
+#   d0: code in bits [0, 8): kind (TileKind, bits 0-2), register position of
 #       target a (bits 3-4) and of b (bits 5-6), CODE_CTRL (bit 7: the op has
 #       controls); matrix offset relative to the run's first matrix value in
 #       bits [8, 32) (a multiple of 4: matrices load as 16-byte vectors);
@@ -120,7 +120,7 @@ comptime TOP = 8  # kind, a, b, x, moff, pa, pb, cm
 # diagonal needs one pop_count per op instead of one per register.
 comptime DOP = 4
 comptime CODE_CTRL = 128
-comptime DIAG_MAX_WIDTH = 6  # widest diagonal phase table (TK.DGT): 2^6 complex values
+comptime DIAG_MAX_WIDTH = 6  # widest diagonal phase table (TileKind.DGT): 2^6 complex values
 # Amplitudes per thread = 2^REG_BITS. Per-target default: 4 on Apple GPUs
 # (measured on the M5 after the segment cache: -6 to -10% on layered / random
 # circuits at 26 qubits, 20-25% fewer transposes), 3 elsewhere until measured
@@ -169,7 +169,7 @@ comptime FIN_TRANSPOSE = 1
 comptime FIN_DIRECT = 2
 
 
-struct TK:
+struct TileKind:
     """Tile op kinds. Only the *targets* of non-diagonal gates must be tile
     qubits (a, b = local tile qubits; pa, pb = their register positions in
     the segment's register set). Controls and diagonal gates test bits of the
@@ -554,7 +554,7 @@ def th_reg_op[dt: DType, om: MutOrigin, am: AddressSpace, HEAVY: Bool = True](
     var mo = Int(d0 >> 8)
     var m1 = UInt32(rec[1])
     var bits = UInt32(rec[3])
-    if kind == UInt32(TK.DGT):
+    if kind == UInt32(TileKind.DGT):
         # fused diagonal gates: gather the table qubits outside the register
         # set from g0 once, add each register's own table bits, one complex
         # multiply per register for the whole group
@@ -581,7 +581,7 @@ def th_reg_op[dt: DType, om: MutOrigin, am: AddressSpace, HEAVY: Bool = True](
                 vr[j] = fr * xr - fi * xi
                 vi[j] = fr * xi + fi * xr
         return
-    if kind == UInt32(TK.DG):
+    if kind == UInt32(TileKind.DG):
         # diagonal: RZ / P / CZ / CP / CRZ / RZZ / CCZ / phase. Parity and
         # all-set tests: once on g0 outside the register set, per register
         # only a host-precomputed bit.
@@ -605,14 +605,14 @@ def th_reg_op[dt: DType, om: MutOrigin, am: AddressSpace, HEAVY: Bool = True](
         return
     var ok0 = (g0 & m1) == m1  # controls outside the register set
     var ctrl = (d0 & UInt32(CODE_CTRL)) != 0
-    if kind == UInt32(TK.XC):
+    if kind == UInt32(TileKind.XC):
         comptime for P in range(REG_BITS):
             if p == UInt32(P):
                 if ctrl:
                     _xc[dt, P, True](nreg, ok0, bits, vr, vi)
                 else:
                     _xc[dt, P, False](nreg, ok0, bits, vr, vi)
-    elif kind == UInt32(TK.G1):
+    elif kind == UInt32(TileKind.G1):
         var ma = m.unsafe_load[width=4, alignment=16](mo)
         var mb = m.unsafe_load[width=4, alignment=16](mo + 4)
         comptime for P in range(REG_BITS):
@@ -621,7 +621,7 @@ def th_reg_op[dt: DType, om: MutOrigin, am: AddressSpace, HEAVY: Bool = True](
                     _g1[dt, P, True](nreg, ok0, bits, ma, mb, vr, vi)
                 else:
                     _g1[dt, P, False](nreg, ok0, bits, ma, mb, vr, vi)
-    elif kind == UInt32(TK.G1R):
+    elif kind == UInt32(TileKind.G1R):
         var ma = m.unsafe_load[width=4, alignment=16](mo)
         comptime for P in range(REG_BITS):
             if p == UInt32(P):
@@ -629,7 +629,7 @@ def th_reg_op[dt: DType, om: MutOrigin, am: AddressSpace, HEAVY: Bool = True](
                     _g1r[dt, P, True](nreg, ok0, bits, ma, vr, vi)
                 else:
                     _g1r[dt, P, False](nreg, ok0, bits, ma, vr, vi)
-    elif HEAVY and kind == UInt32(TK.SW):
+    elif HEAVY and kind == UInt32(TileKind.SW):
         var q = (d0 >> 5) & 3
         comptime for P in range(REG_BITS):
             comptime for Q in range(P + 1, REG_BITS):
@@ -644,7 +644,7 @@ def th_reg_op[dt: DType, om: MutOrigin, am: AddressSpace, HEAVY: Bool = True](
                                 vi[j] = vi[j2]
                                 vr[j2] = tr
                                 vi[j2] = ti
-    elif HEAVY and kind == UInt32(TK.G2):
+    elif HEAVY and kind == UInt32(TileKind.G2):
         var q = (d0 >> 5) & 3
         comptime for P in range(REG_BITS):
             comptime for Q in range(REG_BITS):
