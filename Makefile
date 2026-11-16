@@ -27,17 +27,17 @@ MOJO_VERSION ?= 1.2.0
 MAX_VERSION ?= 26.7.0
 
 setup:  ## create .venv, or update an existing one, to the pinned Mojo toolchain + MAX runtime (parallelize)
-	[ -x .venv/bin/python ] || uv venv .venv --python 3.12
+	[ -x .venv/bin/python ] || uv venv .venv --clear --python 3.12
 	uv pip install --python .venv/bin/python "mojo==$(MOJO_VERSION)" "max-mojo-libs==$(MAX_VERSION)" "max-core==$(MAX_VERSION)"
 
 setup-py:  ## bench/.venv: Python 3.12 + latest Qiskit, Aer, TKET, Cirq, Stim, PyMatching (examples, benchmarks, plugin tests); setup-py-locked pins them
-	[ -x bench/.venv/bin/python ] || uv venv bench/.venv --python 3.12
+	[ -x bench/.venv/bin/python ] || uv venv bench/.venv --clear --python 3.12
 	uv pip install --python bench/.venv/bin/python -U qiskit qiskit-aer qiskit-ibm-runtime pytket pytket-qiskit \
 		cirq-core ply stim pymatching numpy scipy matplotlib altair vl-convert-python psutil pytest nbformat "openqasm3[parser]"
 	uv pip install --python bench/.venv/bin/python -U "./plugins/hardware[all]"
 
 setup-py-locked:  ## bench/.venv from bench/requirements.lock: the exact versions of the last measured run (reproducible; setup-py takes the latest)
-	[ -x bench/.venv/bin/python ] || uv venv bench/.venv --python 3.12
+	[ -x bench/.venv/bin/python ] || uv venv bench/.venv --clear --python 3.12
 	uv pip install --python bench/.venv/bin/python -r bench/requirements.lock
 	uv pip install --python bench/.venv/bin/python "./plugins/hardware[all]"
 
@@ -87,7 +87,7 @@ AGENTS_PY ?= agents/.venv/bin/python
 .PHONY: setup-agents test-agents agents-doctor
 
 setup-agents:  ## agents/.venv: deepagents, LangChain OpenAI + MCP adapters (the QUMO agent layer)
-	[ -x $(AGENTS_PY) ] || uv venv agents/.venv --python 3.12
+	[ -x $(AGENTS_PY) ] || uv venv agents/.venv --clear --python 3.12
 	uv pip install --python $(AGENTS_PY) -e "agents[test]"
 
 test-agents:  ## agent layer tests (offline; the MCP tests need build/qumo from `make cli`)
