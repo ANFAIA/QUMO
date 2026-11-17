@@ -65,10 +65,15 @@ def test_claude_code_command_keeps_the_safety_rules(monkeypatch):
     watch = backends.claude_code_command(registry.get("research-watch"), "t", s, None)
     allowed = watch[watch.index("--allowedTools") + 1]
     assert "Edit" not in allowed.split(",") and "WebSearch" in allowed
+    # the report folder is the only place a read-only agent may write, through an Edit rule
+    assert "Edit(agents/reports/**)" in allowed.split(",") and "Write(" not in allowed
+    note = watch[watch.index("--append-system-prompt") + 1]
+    assert "No QUMO MCP server is attached" in note and "alphaXiv's read tools are attached" in note
     assert "mcp__alphaxiv__discover_papers" in allowed and "save_papers_to_folder" not in allowed
     assert "git commit" in watch[watch.index("--disallowedTools") + 1]
     auto = backends.claude_code_command(registry.get("autoresearch"), "t", s, None)
     assert "Edit" in auto[auto.index("--allowedTools") + 1].split(",")
+    assert ".venv/bin/mojo run -I ." in auto[auto.index("--append-system-prompt") + 1]
     cfg = backends._mcp_config_file(registry.get("research-watch"))
     try:
         text = cfg.read_text()
