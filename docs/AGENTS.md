@@ -40,8 +40,8 @@ Options of `run`:
 | Option | Meaning |
 |---|---|
 | `--module NAME` | Focus on one QUMO module: `ir`, `sim`, `gpu`, `compiler`, `algorithms`, `qec`, `ft`, `exec`, `ai` |
-| `--backend NAME` | `openrouter` (default), `claude-code` or `codex` |
-| `--model ID` | Model for this run: an OpenRouter id (`anthropic/claude-sonnet-5.5`) or the CLI's own model name |
+| `--backend NAME` | The harness: `openrouter` (default), `local`, `claude-code` or `codex` |
+| `--model ID` | Model for this run: an OpenRouter id (`anthropic/claude-sonnet-5.5`), a local model name (`qwen3-coder`) or the CLI's own model name (`opus`) |
 | `--dry-run` | Show the model, tools and subagents (or the CLI command line) and call nothing |
 | `TASK` = `-` | Read the task from stdin: `cat task.md \| bin/qumo-agents run orchestrator -` |
 
@@ -107,13 +107,35 @@ git worktree remove .worktrees/agent-<topic>-<time>   # when you are done with i
 | Back end | How it runs | Needs |
 |---|---|---|
 | `openrouter` (default) | A deepagents graph; delegation nests (orchestrator, then autoresearch, then research-watch) | `OPENROUTER_API_KEY` |
+| `local` | The same deepagents graph on your own OpenAI-compatible server: Ollama, LM Studio, llama.cpp or vLLM | A running server and a model name. No key is sent unless `local.api_key_env` names one. Not run end to end yet |
 | `claude-code` | `claude -p` with the agent's prompt appended, QUMO's MCP server (and alphaXiv's) attached, and an allow-list of tools; `git commit`, `git push` and `gh` are blocked; a budget cap from `agents.json` | Claude Code installed and signed in |
 | `codex` | `codex exec`, read-only sandbox, workspace-write only for `autoresearch` inside its worktree | Codex CLI. Not tested yet: it was not installed when this layer was written |
 
-Models live in `agents/agents.json`, one OpenRouter id per agent. `code-review` uses a
-different vendor from the agents that write code, so the review is independent. Change a
-model there, per run with `--model`, or for every run with `QUMO_AGENTS_MODEL`. Set
-`QUMO_AGENTS_BACKEND` to change the default back end.
+### Choosing the harness and the model
+
+Both are chosen in three places. The first one that is set wins.
+
+| | Harness (back end) | Model |
+|---|---|---|
+| One run | `--backend NAME` | `--model ID` |
+| Your shell | `QUMO_AGENTS_BACKEND` | `QUMO_AGENTS_MODEL` (API back ends only: `openrouter`, `local`) |
+| One agent, in `agents/agents.json` | `"backends": {"code-review": "claude-code"}` | `"models"` inside the back end's section, for example `"claude_code": {"models": {"code-review": "opus"}}` |
+| Everything else | `"default_backend"` | The back end's `"model"`; for `openrouter`, the top-level `"models"` and `"default_model"` |
+
+```bash
+bin/qumo-agents list                         # the harness and model each agent would run on
+bin/qumo-agents list --backend claude-code   # the same table for another harness
+bin/qumo-agents run code-review "Review the parser" --module ir --backend claude-code --model opus
+bin/qumo-agents run execution "Sample a 5-qubit GHZ" --backend local --model qwen3-coder
+QUMO_AGENTS_LOCAL_URL=http://localhost:1234/v1 bin/qumo-agents run execution "..." --backend local --model my-model
+```
+
+A CLI back end with no model set uses the CLI's own default model. The `local` back end
+has no default: name a model, or the run stops with an error. `QUMO_AGENTS_MODEL` never
+reaches a CLI back end, because an OpenRouter id is not a name those CLIs know.
+`code-review` uses a different vendor from the agents that write code, so the review is
+independent; keep that when you change models. A small local model may not manage the
+tool calls these agents need, so check a local run's report before trusting it.
 
 ## 6. Keys and environment
 

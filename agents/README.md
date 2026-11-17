@@ -37,7 +37,8 @@ Environment (keys are read from the environment only, never written):
 | `OPENROUTER_API_KEY` | default back end (OpenRouter) |
 | `ALPHAXIV_API_KEY` | paper research through alphaXiv's MCP server (alphaxiv.org, Settings > API Keys). Without it, the agents fall back to the arXiv API |
 | `GITHUB_TOKEN` | optional, higher GitHub rate limit for release notes |
-| `QUMO_AGENTS_MODEL`, `QUMO_AGENTS_BACKEND` | optional overrides |
+| `QUMO_AGENTS_BACKEND`, `QUMO_AGENTS_MODEL` | optional: harness and model for every run in this shell |
+| `QUMO_AGENTS_LOCAL_URL` | optional: base URL of the `local` back end (default `http://localhost:11434/v1`) |
 
 ## Use
 
@@ -54,8 +55,14 @@ Reports land in `agents/reports/<date>-<name>.md`.
 
 ## Back ends
 
+Pick the harness with `--backend` and the model with `--model`, per run; or per agent in
+`agents.json` (`"backends"`, and `"models"` inside each back end). `bin/qumo-agents list`
+shows what each agent would run on. Details: [docs/AGENTS.md](../docs/AGENTS.md), section 5.
+
 * **openrouter** (default): a deepagents graph on an OpenRouter model. Per-agent models are in
   `agents.json`; `code-review` uses a different vendor than the others on purpose.
+* **local**: the same graph on your own OpenAI-compatible server (Ollama, LM Studio,
+  llama.cpp, vLLM): `--backend local --model <name>`. Not run end to end here.
 * **claude-code**: `claude -p` with the agent prompt appended, QUMO's MCP server (and
   alphaXiv's) attached, and an allow-list of tools. `git commit`, `git push` and `gh` are
   disallowed.

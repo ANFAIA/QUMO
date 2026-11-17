@@ -1,13 +1,22 @@
 {
   "schema": "qumo.agents.v1",
-  "comment": "Models and back ends for the QUMO agent layer. OpenRouter is the default back end; every model id is an OpenRouter id (checked against examples/heterogeneous/llm_profiles.json, 2026-10-13; see https://openrouter.ai/models). The API key is read only from the environment variable named in api_key_env and is never written anywhere. Override any model with --model or QUMO_AGENTS_MODEL.",
+  "comment": "Models and back ends for the QUMO agent layer. OpenRouter is the default back end; every model id is an OpenRouter id (checked against examples/heterogeneous/llm_profiles.json, 2026-10-13; see https://openrouter.ai/models). The API key is read only from the environment variable named in api_key_env and is never written anywhere. Override any model with --model or QUMO_AGENTS_MODEL. Choose the harness per agent in 'backends' (agent name to back end), and a model per agent inside each back end's 'models'; 'local' is any OpenAI-compatible server (Ollama, LM Studio, llama.cpp, vLLM).",
   "default_backend": "openrouter",
+  "backends": {},
   "openrouter": {
     "base_url": "https://openrouter.ai/api/v1",
     "api_key_env": "OPENROUTER_API_KEY",
     "headers": {"X-Title": "QUMO agents"},
     "timeout": 300,
     "max_retries": 2
+  },
+  "local": {
+    "base_url": "http://localhost:11434/v1",
+    "api_key_env": "",
+    "model": "",
+    "models": {},
+    "timeout": 600,
+    "max_retries": 1
   },
   "default_model": "anthropic/claude-opus-5.5",
   "models": {
@@ -24,12 +33,14 @@
   "claude_code": {
     "command": "claude",
     "model": "",
+    "models": {},
     "max_budget_usd": 5,
     "permission_mode": "default"
   },
   "codex": {
     "command": "codex",
     "model": "",
+    "models": {},
     "sandbox": "read-only"
   }
 }

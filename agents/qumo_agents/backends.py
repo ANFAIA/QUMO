@@ -90,8 +90,9 @@ def claude_code_command(spec: AgentSpec, task: str, settings: Settings, mcp_conf
            "--permission-mode", cc.get("permission_mode", "default")]
     if mcp_config:
         cmd += ["--mcp-config", str(mcp_config), "--strict-mcp-config"]
-    if model or cc.get("model"):
-        cmd += ["--model", model or cc["model"]]
+    chosen = settings.model_for(spec.name, model, "claude-code")
+    if chosen:
+        cmd += ["--model", chosen]
     if cc.get("max_budget_usd"):
         cmd += ["--max-budget-usd", str(cc["max_budget_usd"])]
     return cmd
@@ -108,8 +109,9 @@ def codex_command(spec: AgentSpec, task: str, settings: Settings, workdir: Path,
                 "-c", 'mcp_servers.qumo.args=["mcp"]']
     if _wants_alphaxiv(spec):
         cmd += alphaxiv.codex_overrides()
-    if model or cx.get("model"):
-        cmd += ["-m", model or cx["model"]]
+    chosen = settings.model_for(spec.name, model, "codex")
+    if chosen:
+        cmd += ["-m", chosen]
     return cmd + [prompt]
 
 

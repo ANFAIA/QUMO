@@ -8,7 +8,7 @@ import json
 import pytest
 
 from qumo_agents import modules, registry
-from qumo_agents.config import REPO_ROOT, Settings
+from qumo_agents.config import REPO_ROOT, ConfigError, Settings
 from qumo_agents.tools import alphaxiv, qumo_mcp, repo, research
 
 
@@ -36,10 +36,90 @@ def test_registry_is_consistent():
 
 def test_settings_models_cover_every_agent():
     s = Settings.load()
-    assert s.default_backend in ("openrouter", "claude-code", "codex")
+    assert s.default_backend in ("openrouter", "local", "claude-code", "codex")
     for name in registry.AGENTS:
         assert "/" in s.model_for(name), name  # OpenRouter ids are vendor/model
     assert s.model_for("code-review", "x/y") == "x/y"
+
+
+def _settings(**patch):
+    raw = json.loads(json.dumps(Settings.load().raw))
+    for key, value in patch.items():
+        if isinstance(value, dict) and isinstance(raw.get(key), dict):
+            raw[key].update(value)
+        else:
+            raw[key] = value
+    return Settings(raw)
+
+
+def test_backend_is_chosen_per_run_per_shell_and_per_agent(monkeypatch):
+    monkeypatch.delenv("QUMO_AGENTS_BACKEND", raising=False)
+    s = _settings(backends={"code-review": "claude-code"})
+    assert s.backend_for("code-review") == "claude-code"  # the agent's own entry
+    assert s.backend_for("execution") == s.default_backend
+    assert s.backend_for("code-review", "codex") == "codex"  # --backend wins
+    monkeypatch.setenv("QUMO_AGENTS_BACKEND", "local")
+    assert s.backend_for("code-review") == "local"  # the shell beats the file
+    assert s.backend_for("code-review", "codex") == "codex"
+    monkeypatch.setenv("QUMO_AGENTS_BACKEND", "nonsense")
+    with pytest.raises(ConfigError, match="unknown back end"):
+        s.backend_for("code-review")
+    monkeypatch.delenv("QUMO_AGENTS_BACKEND")
+    with pytest.raises(ConfigError, match="unknown back end"):
+        _settings(backends={"code-review": "gpt"}).backend_for("code-review")
+
+
+def test_model_is_chosen_per_backend(monkeypatch):
+    monkeypatch.delenv("QUMO_AGENTS_MODEL", raising=False)
+    s = _settings(claude_code={"model": "sonnet", "models": {"code-review": "opus"}},
+                  local={"model": "", "models": {"execution": "qwen3"}})
+    assert s.model_for("code-review", None, "claude-code") == "opus"
+    assert s.model_for("execution", None, "claude-code") == "sonnet"
+    assert s.model_for("execution", None, "codex") == ""  # the CLI's own default
+    assert s.model_for("execution", None, "local") == "qwen3"
+    with pytest.raises(ConfigError, match="local back end has no model"):
+        s.model_for("code-review", None, "local")
+    assert s.model_for("code-review", "m", "local") == "m"  # --model wins everywhere
+    # the shell variable holds an API model id: it reaches the API back ends, never a CLI
+    monkeypatch.setenv("QUMO_AGENTS_MODEL", "vendor/model")
+    assert s.model_for("code-review", None, "openrouter") == "vendor/model"
+    assert s.model_for("code-review", None, "local") == "vendor/model"
+    assert s.model_for("code-review", None, "claude-code") == "opus"
+    from qumo_agents import backends
+    cmd = backends.claude_code_command(registry.get("code-review"), "t", s, None)
+    assert cmd[cmd.index("--model") + 1] == "opus"
+    cmd = backends.codex_command(registry.get("code-review"), "t", s, REPO_ROOT)
+    assert "-m" not in cmd
+    cmd = backends.codex_command(registry.get("code-review"), "t", s, REPO_ROOT, "o5")
+    assert cmd[cmd.index("-m") + 1] == "o5"
+
+
+def test_local_backend_talks_to_the_configured_server(monkeypatch):
+    from qumo_agents import config
+    monkeypatch.delenv("QUMO_AGENTS_LOCAL_URL", raising=False)
+    monkeypatch.setenv("LOCAL_KEY_FOR_TEST", "secret-value-abc")
+    s = _settings(local={"base_url": "http://127.0.0.1:1234/v1", "api_key_env": ""})
+    m = config.chat_model(s, "local", "qwen3")
+    assert str(m.openai_api_base) == "http://127.0.0.1:1234/v1" and m.model_name == "qwen3"
+    assert m.openai_api_key.get_secret_value() == "not-needed"  # no key is sent unless asked for
+    monkeypatch.setenv("QUMO_AGENTS_LOCAL_URL", "http://10.0.0.5:8000/v1")
+    keyed = config.chat_model(_settings(local={"api_key_env": "LOCAL_KEY_FOR_TEST"}), "local", "x")
+    assert str(keyed.openai_api_base) == "http://10.0.0.5:8000/v1"
+    assert keyed.openai_api_key.get_secret_value() == "secret-value-abc"
+
+
+def test_cli_list_and_dry_run_show_the_choice(monkeypatch, capsys):
+    from qumo_agents import cli
+    monkeypatch.delenv("QUMO_AGENTS_BACKEND", raising=False)
+    monkeypatch.delenv("QUMO_AGENTS_MODEL", raising=False)
+    assert cli.main(["list", "--backend", "claude-code"]) == 0
+    out = capsys.readouterr().out
+    assert "claude-code" in out and "(the CLI's default)" in out
+    assert cli.main(["run", "execution", "t", "--backend", "local", "--model", "qwen3", "--dry-run"]) == 0
+    shown = json.loads(capsys.readouterr().out)
+    assert shown["backend"] == "local" and shown["model"] == "qwen3"
+    assert cli.main(["run", "execution", "t", "--backend", "local", "--dry-run"]) == 2  # no model: a clear error
+    assert "local back end has no model" in capsys.readouterr().err
 
 
 def test_read_tools_stay_inside_the_repository():
