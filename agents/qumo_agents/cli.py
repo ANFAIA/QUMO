@@ -14,7 +14,7 @@ import json
 import sys
 
 from qumo_agents import modules, registry
-from qumo_agents.config import BACKENDS, Settings
+from qumo_agents.config import API_BACKENDS, BACKENDS, ConfigError, Settings
 from qumo_agents.tools import alphaxiv
 
 
@@ -26,30 +26,46 @@ def _task(args) -> str:
     return task
 
 
-def cmd_list(_args, settings: Settings) -> int:
+def _resolved(settings: Settings, agent: str, backend: str | None = None, model: str | None = None) -> tuple[str, str]:
+    """(back end, model) an agent would run on; the model is a readable note when unset."""
+    b = settings.backend_for(agent, backend)
+    try:
+        m = settings.model_for(agent, model, b) or "(the CLI's default)"
+    except ConfigError:
+        m = "(not set: --model)"
+    return b, m
+
+
+def cmd_list(args, settings: Settings) -> int:
+    print(f"{'agent':20s} {'back end':12s} {'model':32s} does")
     for spec in registry.AGENTS.values():
         subs = f" -> {', '.join(spec.subagents)}" if spec.subagents else ""
-        print(f"{spec.name:20s} {settings.model_for(spec.name):32s} {spec.description}{subs}")
+        b, m = _resolved(settings, spec.name, args.backend, args.model)
+        print(f"{spec.name:20s} {b:12s} {m:32s} {spec.description}{subs}")
     print(f"\nmodules: {', '.join(modules.MODULES)}")
     print(f"backends: {', '.join(BACKENDS)} (default {settings.default_backend})")
+    print("choose per run with --backend / --model, per shell with QUMO_AGENTS_BACKEND / QUMO_AGENTS_MODEL,")
+    print('or per agent in agents/agents.json ("backends", and "models" inside each back end)')
     print(f"alphaXiv: {'on' if alphaxiv.available() else 'off (set ALPHAXIV_API_KEY; arXiv fallback)'}")
     return 0
 
 
 def cmd_run(args, settings: Settings) -> int:
     spec = registry.get(args.agent)
-    backend = args.backend or settings.default_backend
+    backend = settings.backend_for(spec.name, args.backend)
     task = _task(args)
-    if backend == "openrouter":
+    if backend in API_BACKENDS:
+        model = settings.model_for(spec.name, args.model, backend)
         if args.dry_run:
-            print(json.dumps({"agent": spec.name, "model": settings.model_for(spec.name, args.model),
+            print(json.dumps({"agent": spec.name, "backend": backend, "model": model,
                               "local_tools": [t.name for t in registry.local_tools(spec)],
                               "qumo_mcp": "all" if spec.mcp_tools is None else list(spec.mcp_tools),
                               "alphaxiv": "research" in spec.tool_groups and alphaxiv.available(),
-                              "subagents": list(spec.subagents)}, indent=1))
+                              "subagents": {s: settings.model_for(s, None, backend, model if backend == "local" else None)
+                                            for s in spec.subagents}}, indent=1))
             return 0
         from qumo_agents.graph import run_agent
-        print(asyncio.run(run_agent(spec, task, settings, args.model)))
+        print(asyncio.run(run_agent(spec, task, settings, args.model, backend=backend)))
         return 0
     from qumo_agents import backends
     if args.dry_run:
@@ -59,6 +75,21 @@ def cmd_run(args, settings: Settings) -> int:
         return 0
     print(backends.run_cli_backend(backend, spec, task, settings, args.model))
     return 0
+
+
+def _local_reachable(settings: Settings) -> bool:
+    """True if the local OpenAI-compatible server answers GET <base_url>/models within 2 s."""
+    import urllib.request
+
+    from qumo_agents.config import local_base_url
+    url = local_base_url(settings).rstrip("/") + "/models"
+    if not url.startswith(("http://", "https://")):
+        return False
+    try:
+        with urllib.request.urlopen(url, timeout=2) as r:  # noqa: S310 (scheme checked above)
+            return r.status == 200
+    except Exception:
+        return False
 
 
 def cmd_doctor(_args, settings: Settings) -> int:
@@ -72,6 +103,8 @@ def cmd_doctor(_args, settings: Settings) -> int:
     checks = [
         ("QUMO MCP server", qumo_mcp.QUMO_BIN.exists(), f"{qumo_mcp.QUMO_BIN} (build it with `make cli`)"),
         (f"openrouter back end ({or_env})", bool(os.environ.get(or_env)), "export the key to use the default back end"),
+        ("local back end (OpenAI-compatible server)", _local_reachable(settings),
+         "optional; start Ollama / LM Studio / llama.cpp / vLLM, set QUMO_AGENTS_LOCAL_URL if it is not localhost:11434"),
         ("claude-code back end", shutil.which(settings.section("claude_code").get("command", "claude")) is not None,
          "install Claude Code: https://claude.com/claude-code"),
         ("codex back end", shutil.which(settings.section("codex").get("command", "codex")) is not None,
@@ -81,7 +114,8 @@ def cmd_doctor(_args, settings: Settings) -> int:
     ]
     for name, ok, hint in checks:
         print(f"[{'ok' if ok else '--'}] {name}" + ("" if ok else f": {hint}"))
-    usable = [b for b, ok in (("openrouter", checks[1][1]), ("claude-code", checks[2][1]), ("codex", checks[3][1])) if ok]
+    usable = [b for b, ok in (("openrouter", checks[1][1]), ("local", checks[2][1]),
+                              ("claude-code", checks[3][1]), ("codex", checks[4][1])) if ok]
     print(f"\nusable back ends: {', '.join(usable) or 'none'}")
     return 0 if checks[0][1] and usable else 1
 
@@ -120,13 +154,16 @@ def registry_root():
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="qumo_agents", description="QUMO agent layer (deepagents + MCP)")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("list", help="list agents, models, modules and back ends")
+    ls = sub.add_parser("list", help="list agents with the back end and model each would run on")
+    ls.add_argument("--backend", choices=BACKENDS, help="show the models for this back end")
+    ls.add_argument("--model", help="show the list as if --model were given")
     r = sub.add_parser("run", help="run one agent on a task")
     r.add_argument("agent", choices=list(registry.AGENTS))
     r.add_argument("task", help="the task in plain words; use - to read it from stdin")
     r.add_argument("--module", choices=list(modules.MODULES))
-    r.add_argument("--backend", choices=BACKENDS)
-    r.add_argument("--model", help="model id (OpenRouter id, or the CLI's own model name)")
+    r.add_argument("--backend", choices=BACKENDS,
+                   help="harness: openrouter (API), local (your own OpenAI-compatible server), claude-code or codex (CLIs)")
+    r.add_argument("--model", help="model for this run: an OpenRouter id, a local model name, or the CLI's own model name")
     r.add_argument("--dry-run", action="store_true", help="show what would run, call nothing")
     sub.add_parser("doctor", help="check keys, the MCP server and the back-end CLIs")
     rp = sub.add_parser("reports", help="list saved reports, or print one")
@@ -138,7 +175,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return {"list": cmd_list, "run": cmd_run, "doctor": cmd_doctor, "reports": cmd_reports,
                 "export-prompts": cmd_export_prompts}[args.cmd](args, settings)
-    except (ValueError, RuntimeError) as e:
+    except (ValueError, RuntimeError, ConfigError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
 

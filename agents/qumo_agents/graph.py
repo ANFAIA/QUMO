@@ -15,7 +15,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from qumo_agents import registry
-from qumo_agents.config import Settings, openrouter_chat_model
+from qumo_agents.config import Settings, chat_model
 from qumo_agents.registry import AgentSpec
 from qumo_agents.tools import alphaxiv, qumo_mcp
 
@@ -54,7 +54,8 @@ def tree(spec: AgentSpec) -> list[AgentSpec]:
 
 def build_agent(spec: AgentSpec, settings: Settings, shared: dict[str, list],
                 model_factory: Callable[[str], Any], model_override: str | None = None,
-                _cache: dict[str, Any] | None = None, _path: tuple[str, ...] = ()):
+                _cache: dict[str, Any] | None = None, _path: tuple[str, ...] = (), backend: str = "openrouter",
+                _fallback: str | None = None):
     """Compile spec as a deep agent. model_factory maps a model id to a chat model,
     so tests can pass a fake model."""
     from deepagents import CompiledSubAgent, create_deep_agent
@@ -62,15 +63,17 @@ def build_agent(spec: AgentSpec, settings: Settings, shared: dict[str, list],
     cache = {} if _cache is None else _cache
     if spec.name in cache:
         return cache[spec.name]
+    chosen = settings.model_for(spec.name, model_override, backend, _fallback)
     subagents = []
     for sub_name in spec.subagents:
         if sub_name in _path or sub_name == spec.name:
             continue  # never delegate back up the chain
         sub = registry.get(sub_name)
-        runnable = build_agent(sub, settings, shared, model_factory, None, cache, _path + (spec.name,))
+        runnable = build_agent(sub, settings, shared, model_factory, None, cache, _path + (spec.name,), backend,
+                               _fallback=chosen if backend == "local" else None)
         subagents.append(CompiledSubAgent(name=sub.name, description=sub.description, runnable=runnable))
     agent = create_deep_agent(
-        model=model_factory(settings.model_for(spec.name, model_override)),
+        model=model_factory(chosen),
         tools=tools_for(spec, shared),
         system_prompt=spec.prompt,
         subagents=subagents or None,
@@ -81,11 +84,12 @@ def build_agent(spec: AgentSpec, settings: Settings, shared: dict[str, list],
 
 
 async def run_agent(spec: AgentSpec, task: str, settings: Settings, model_override: str | None = None,
-                    model_factory: Callable[[str], Any] | None = None, recursion_limit: int = 200) -> str:
-    factory = model_factory or (lambda model: openrouter_chat_model(settings, model))
+                    model_factory: Callable[[str], Any] | None = None, recursion_limit: int = 200,
+                    backend: str = "openrouter") -> str:
+    factory = model_factory or (lambda model: chat_model(settings, backend, model))
     need_ax = any("research" in s.tool_groups for s in tree(spec))
     shared = await load_shared_tools(need_ax)
-    agent = build_agent(spec, settings, shared, factory, model_override)
+    agent = build_agent(spec, settings, shared, factory, model_override, backend=backend)
     result = await agent.ainvoke({"messages": [{"role": "user", "content": task}]},
                                  config={"recursion_limit": recursion_limit})
     last = result["messages"][-1]
