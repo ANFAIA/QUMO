@@ -185,12 +185,41 @@ Mojo closures are statically typed, so objectives are structs implementing
 
 | API | Returns |
 |---|---|
-| `vqe(ansatz, h, method="bfgs", x0=[], maxiter=200, tol=1e-8, grad_method=Grad.ADJOINT, seed=7)` | `VQEResult(energy, params, param_names, history, nit, nfev, ngrad, circuit_evals, wall_time_s, converged, message, optimizer, grad_method)` |
+| `vqe(ansatz, h, method="bfgs", x0=[], maxiter=200, tol=1e-8, grad_method=Grad.ADJOINT, seed=7, alpha=1.0)` | `VQEResult(energy, params, param_names, history, nit, nfev, ngrad, circuit_evals, wall_time_s, converged, message, optimizer, grad_method)` |
 | `vqe_with[Opt: Optimizer](ansatz, h, optimizer, x0=[], grad_method)` | same, with an optimiser instance (`vqe_with(a, H, SPSA(maxiter=300, seed=11))`) |
 | `VQEObjective(ansatz, h, grad_method)` | `Objective` adapter owning an `ExpectationEngine` (buffers reused across the run) |
-| `qaoa_maxcut(graph, p=1, method="bfgs", restarts=4, shots=1024, seed=7, maxiter=200, grad_method)` | `QAOAResult(p, energy, expected_cut, max_cut, approx_ratio, gammas, betas, best_bitstring, best_cut, sampled_ratio, prob_optimal, most_frequent, shots, history, nfev, circuit_evals, wall_time_s, optimizer)` |
+| `qaoa_maxcut(graph, p=1, method="bfgs", restarts=4, shots=1024, seed=7, maxiter=200, grad_method, alpha=1.0)` | `QAOAResult(p, energy, expected_cut, max_cut, approx_ratio, gammas, betas, best_bitstring, best_cut, sampled_ratio, prob_optimal, most_frequent, shots, history, nfev, circuit_evals, wall_time_s, optimizer)` |
 | `parameter_sweep(circuit, h, index, values, base)`, `landscape_2d(circuit, h, i, j, values_i, values_j, base)`, `linspace(a, b, n)` | energies through `batch_expectation` |
 | `default_initial_point(num_params, seed=7, scale=0.1)` | seeded small random angles (default `x0`) |
+
+### CVaR objective (`alpha`)
+
+`vqe(..., alpha=a)` and `qaoa_maxcut(..., alpha=a)` minimise the conditional value
+at risk of the energy distribution (Barkoutsos et al., Quantum 4, 256, 2020; the
+`aggregation` option of Qiskit's `VQE`): the mean of the lowest `a` fraction of
+probability mass. `a` lies in (0, 1]. The default `a = 1.0` is the plain expectation
+value and takes the unchanged code path, so existing results are bit-identical.
+
+* `CVaRObjective(ansatz, h, alpha)` is the exact (infinite-shot) form. It needs a
+  diagonal `h` (Z / ZZ terms, as in QAOA, QUBO and Ising problems) and at most 24
+  qubits: the 2^n basis energies are tabulated and sorted once, each evaluation is
+  one state-vector run plus a linear scan.
+* `cvar_of_energies(energies, alpha)` is the sampled form: the mean of the lowest
+  `ceil(alpha * N)` shot energies (Qiskit's convention). It rounds the cut up to whole
+  shots, so for small N it differs from the exact form, which splits the last state's
+  probability: energies [-1, 0, 2, 3] with equal weight and `alpha = 0.3` give -0.5
+  sampled and -0.833 exact. The two agree as N grows.
+* A smaller `alpha` never gives a larger value; `alpha -> 0` tends to the lowest
+  energy in the support. CVaR is piecewise smooth, so gradients are central finite
+  differences and `grad_method` is ignored; prefer `"nelder-mead"` or `"spsa"`.
+* With `alpha < 1`, `QAOAResult.energy` is the CVaR value, `expected_cut` stays the
+  exact mean cut, and `circuit_evals` counts every finite-difference evaluation.
+* `alpha` outside (0, 1], or `alpha < 1` with a non-diagonal `h`, raises `QM-E804`.
+* CVaR is no guarantee of a better answer. When `alpha` is at most the probability
+  the starting state already puts on optimal strings, the objective is flat at its
+  minimum and the optimiser has nothing to follow. On the 5-node ring at p = 1 the
+  uniform state holds 10 optimal strings of 32, so `alpha = 0.2` ends with
+  P(optimal) = 0.28 against 0.88 for the plain mean (`tests/test_algorithms.mojo`).
 
 Measured (tests/examples):
 

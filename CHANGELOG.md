@@ -8,6 +8,9 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 
 ### Added
 
+- CVaR objective for VQE and QAOA: `vqe(..., alpha=)`, `qaoa_maxcut(..., alpha=)`, `CVaRObjective` and `cvar_of_energies` (`qumo/algorithms/variational.mojo`, `docs/ALGORITHMS.md`). `alpha = 1` is the old mean and stays the default; `alpha < 1` needs a diagonal Hamiltonian.
+- MCP tool annotations are per tool (`ToolHints`, `ToolRegistry.add_read_only`). The 24 shipped tools keep their read-only hints; a tool added without hints now gets the MCP default (not read-only, open world) instead of being announced as read-only.
+- `tests/test_qasm_qiskit26.mojo`: regression tests drawn from bugs fixed in Qiskit 2.6.x (power on controlled gates, expression domain errors, array parameters, constant names).
 - Beginner Mojo examples: `examples/foundations/hello_bell.mojo` (a Bell pair in five commented steps) and `examples/foundations/ir_only.mojo` (the circuit IR on its own, with full `qumo.ir` imports). The basic examples (`grover`, `qaoa_maxcut`, `vqe_h2`, `qec_memory_experiment`) have a header that says what to look for, comments per step and the short `from qumo import ...` where it applies; their numbers are unchanged. The tutorial and the basic doc snippets use the root import.
 - `qumo/ir/__init__.mojo` documents the IR package completely (module by module) and the root redirect.
 - The Python package `qumo` (`python/qumo`, `pyproject.toml`, `docs/PYTHON.md`): a circuit builder with the gate methods of the Mojo `Circuit`, `sample`, `statevector`, `probabilities`, `expectation`, `transpile` with the one-line target specs, `vqe`, `qaoa_maxcut`, Hamiltonian and ansatz builders, `memory_experiment`, `threshold_sweep`; keyword arguments, NumPy arrays, `QumoError` with `.code` and `.hint`, Jupyter display, pickling. Install with `make py && pip install -e .` (`make install-py`); tests in `python/tests` (`make test-python`). The extension `qumo_py` stays underneath as `qumo.native`; `qumo/__init__.py` makes `import qumo` work at the repository root without installing. (project review, 2026-11-10; not yet merged when this entry was written, as the next four entries)
@@ -55,3 +58,8 @@ Work committed directly to `main`, listed by commit title:
 - 2026-10-19: Four heterogeneous pipelines, GPU adjoint gradients, SQD solver, orchestrator pinning. Fixes to DEM text export and to `qumo_py` import side effects.
 - 2026-10-20: Benchmark of the AI transpiler against the AI passes of qiskit-ibm-transpiler.
 - 2026-11-01: Fix of the rotation T cost; adaptation to Qiskit, guppylang and Aer GPU updates.
+
+### Fixed
+
+- OpenQASM 2 expressions accept `^` as the power operator (`rz(2^3) q[0];` used to fail with QM-E500).
+- Declaring a variable, input, register, gate, gate parameter or loop variable named `pi`, `tau` or `euler` is now QM-E522. It used to be accepted and then ignored: expressions kept the built-in value.

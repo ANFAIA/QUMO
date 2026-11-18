@@ -501,73 +501,73 @@ comptime _PROG = "\"program\":{\"type\":\"object\",\"description\":\"qumo.progra
 
 
 def register_exec_tools(mut reg: ToolRegistry):
-    reg.add(
+    reg.add_read_only(
         "qumo_transpile", "Compile for a target",
         "Optimize, map and route a circuit for ANY target (vendor-neutral): either a one-line spec 'target' like 'grid:4x4/sc_cz', 'heavy_hex:5/rz,sx,x,ecr', 'trapped_ion:11', 'neutral_atom:4x4', 'line:20/u,cx', or explicit 'edges' [[a,b],...] + 'basis' 'rz,sx,x,cz'. 'level' 0-3 picks a preset; 'ai': true runs the hybrid heuristic + AI preset 'ai_level' 1-3 (learned-policy routing, verified Clifford / linear / permutation / Pauli-network block resynthesis, kept only when cheaper; level 3 is a portfolio with O3); 'pipeline' runs a text pass spec, e.g. 'cancel,merge,fuse1q,route(sabre),basis,cancel'. Returns compiled OpenQASM 3, per-pass report, layouts, swap count and estimated fidelity. A program with runtime control flow compiles block by block on one layout (preset 'level' or 'pipeline'; 'ai' is QM-E630) and is verified: it returns compiled OpenQASM 3, cost per loop, restored SWAPs and how many blocks were checked.",
         "{\"type\":\"object\",\"properties\":{" + _CIRC + "," + _PROG + ",\"include_program\":{\"type\":\"boolean\",\"default\":false,\"description\":\"Add the compiled program as qumo.program.v1 JSON\"},\"target\":{\"type\":\"string\"},\"edges\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"integer\"}}},\"num_qubits\":{\"type\":\"integer\"},\"basis\":{\"type\":\"string\",\"default\":\"any\"},\"calibration\":{\"type\":\"object\",\"description\":\"Device data: error_1q, readout, t1_us, t2_us (per qubit), edge_errors [[a, b, e], ...]. Non-uniform data adds post_layout.\"},\"angle_bounds\":{\"type\":\"object\",\"description\":\"Gate name to [min, max], e.g. {\\\"rzz\\\": [0, 1.5708]}. Adds wrap_angles.\"},\"level\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":3,\"default\":2},\"pipeline\":{\"type\":\"string\"},\"ai\":{\"type\":\"boolean\",\"default\":false},\"ai_level\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":3,\"default\":2},\"seed\":{\"type\":\"integer\",\"default\":7},\"include_qasm\":{\"type\":\"boolean\",\"default\":true}},\"additionalProperties\":false}",
         _transpile_tool,
     )
-    reg.add(
+    reg.add_read_only(
         "qumo_estimate_resources", "Estimate resources",
         "Plan before running: logical metrics (gates, depth, 2q, T-count, Clifford, memory, recommended simulator), NISQ estimate for a modality profile ('superconducting' | 'trapped_ion' | 'neutral_atom': duration, success probability) and a surface-code fault-tolerant estimate (code distance, physical qubits, T factories, runtime) for a physical error rate and error budget.",
         "{\"type\":\"object\",\"properties\":{" + _CIRC + ",\"profile\":{\"type\":\"string\",\"enum\":[\"superconducting\",\"trapped_ion\",\"neutral_atom\"],\"default\":\"superconducting\"},\"physical_error\":{\"type\":\"number\",\"default\":0.001},\"error_budget\":{\"type\":\"number\",\"default\":0.01}},\"additionalProperties\":false}",
         _resources_tool,
     )
-    reg.add(
+    reg.add_read_only(
         "qumo_vqe", "Variational eigensolver",
         "Find the ground-state energy of a Pauli-sum Hamiltonian (e.g. '-1.05*II + 0.39*ZI - 0.39*IZ - 0.01*ZZ + 0.18*XX') with a hardware-efficient ansatz, exact adjoint gradients and BFGS/Adam/SPSA/Nelder-Mead. Deterministic for a seed.",
         "{\"type\":\"object\",\"properties\":{\"hamiltonian\":{\"type\":\"string\"},\"num_qubits\":{\"type\":\"integer\"},\"layers\":{\"type\":\"integer\",\"default\":2},\"entanglement\":{\"type\":\"string\",\"enum\":[\"linear\",\"circular\",\"full\",\"none\"],\"default\":\"linear\"},\"optimizer\":{\"type\":\"string\",\"enum\":[\"bfgs\",\"adam\",\"gd\",\"spsa\",\"nelder-mead\"],\"default\":\"bfgs\"},\"gradient\":{\"type\":\"string\",\"enum\":[\"adjoint\",\"parameter-shift\",\"finite-diff\"],\"default\":\"adjoint\"},\"maxiter\":{\"type\":\"integer\",\"default\":200},\"seed\":{\"type\":\"integer\",\"default\":7}},\"required\":[\"hamiltonian\"],\"additionalProperties\":false}",
         _vqe_tool,
     )
-    reg.add(
+    reg.add_read_only(
         "qumo_qaoa_maxcut", "QAOA MaxCut",
         "Solve MaxCut with depth-p QAOA on a graph given as an edge list '0-1 1-2 2-3:0.5' (optional :weight). Returns expected cut, brute-force optimum, approximation ratio, best sampled bitstring and optimal angles.",
         "{\"type\":\"object\",\"properties\":{\"graph\":{\"type\":\"string\"},\"p\":{\"type\":\"integer\",\"default\":1},\"shots\":{\"type\":\"integer\",\"default\":1024},\"seed\":{\"type\":\"integer\",\"default\":7}},\"required\":[\"graph\"],\"additionalProperties\":false}",
         _qaoa_tool,
     )
-    reg.add(
+    reg.add_read_only(
         "qumo_qec_memory", "QEC memory experiment",
         "Sinter-style logical error rate of a memory experiment: code 'surface_z' | 'surface_x' | 'repetition', distance d, rounds (default d), uniform circuit-level noise p (Stim SI1000-like parameters), decoder 'mwpm' (default: exact minimum-weight perfect matching by sparse blossom, PyMatching 2's algorithm; aliases 'matching', 'pymatching') | 'sparse_blossom' (same decoder) | 'mwpm_correlated' (two-pass reweighting, opt-in: 1.3 to 2.2 times fewer logical errors at d >= 5, worse at d = 3, about 3 times slower) | 'mwpm_dense' (exact MWPM by all-pairs shortest paths + dense blossom; small codes, d <= 5) | 'uf' (union-find; fast, slightly lower threshold) | 'lookup' (lookup table; tiny codes, <= 64 detectors). Bit-packed Pauli-frame sampling; returns logical error rate, std error, Wilson interval, per-round rate, timing and the decoder that ran.",
         "{\"type\":\"object\",\"properties\":{\"code\":{\"type\":\"string\",\"enum\":[\"surface_z\",\"surface_x\",\"repetition\"],\"default\":\"surface_z\"},\"distance\":{\"type\":\"integer\",\"default\":3},\"rounds\":{\"type\":\"integer\",\"default\":-1},\"p\":{\"type\":\"number\",\"default\":0.001},\"shots\":{\"type\":\"integer\",\"default\":100000},\"decoder\":{\"type\":\"string\",\"enum\":[\"mwpm\",\"sparse_blossom\",\"mwpm_correlated\",\"mwpm_dense\",\"uf\",\"lookup\"],\"default\":\"mwpm\"},\"seed\":{\"type\":\"integer\",\"default\":1},\"max_errors\":{\"type\":\"integer\",\"default\":-1}},\"additionalProperties\":false}",
         _qec_memory_tool,
     )
-    reg.add(
+    reg.add_read_only(
         "qumo_emulate", "Emulate on a device model",
         "Sample a circuit under the noise of a target (per-qubit T1/T2, 1q and readout errors, per-edge 2q errors, gate durations) without any real device. The circuit must already fit the target (set compile=true to transpile first; QM-E615 otherwise). Takes 'target' or 'edges'+'basis' as qumo_transpile, plus 'calibration' {error_1q, readout, t1_us, t2_us, edge_errors: [[a, b, e], ...]}. Returns counts, the method that ran, shots, seed, whether it compiled first ('compiled') and the estimated fidelity.",
         "{\"type\":\"object\",\"properties\":{" + _CIRC + ",\"target\":{\"type\":\"string\"},\"edges\":{\"type\":\"array\"},\"basis\":{\"type\":\"string\"},\"num_qubits\":{\"type\":\"integer\"},\"calibration\":{\"type\":\"object\"},\"angle_bounds\":{\"type\":\"object\"},\"compile\":{\"type\":\"boolean\",\"default\":false},\"level\":{\"type\":\"integer\",\"default\":2},\"shots\":{\"type\":\"integer\",\"default\":1024},\"seed\":{\"type\":\"integer\",\"default\":1234}},\"additionalProperties\":false}",
         _emulate_tool,
     )
-    reg.add(
+    reg.add_read_only(
         "qumo_density", "Density matrix",
         "Exact density-matrix simulation up to 15 qubits: noise is exact, not sampled, and Kraus channels work. Returns outcome probabilities, trace, purity and optionally the expectation of a Pauli sum. Measurements are non-selective; classical conditions raise QM-E411.",
         "{\"type\":\"object\",\"properties\":{" + _CIRC + ",\"observable\":{\"type\":\"string\"}},\"additionalProperties\":false}",
         _density_tool,
     )
-    reg.add(
+    reg.add_read_only(
         "qumo_to_pbc", "Pauli-based form",
         "Litinski's Pauli-based form: commute every Clifford to the end, leaving time-ordered Pauli-product rotations and measurements in the input frame plus one final Clifford. Returns the operations with Pauli strings (highest qubit leftmost), angles in the exp(-i angle/2 P) convention (T = pi/4) and counts: rotations, pi8, arbitrary, measurements, max_weight, layers.",
         "{\"type\":\"object\",\"properties\":{" + _CIRC + ",\"fix_clifford\":{\"type\":\"boolean\",\"default\":true}},\"additionalProperties\":false}",
         _to_pbc_tool,
     )
-    reg.add(
+    reg.add_read_only(
         "qumo_stim_import", "Import Stim circuit",
         "Parse Stim circuit text (REPEAT, rec[-k], DETECTOR, OBSERVABLE_INCLUDE, MPP, MX, MR, PAULI_CHANNEL_2, E, ...). Reports sizes and missing_detectors: deterministic measurement parities the circuit does not declare. include_dem adds the detector error model, include_qasm canonical OpenQASM 3.",
         "{\"type\":\"object\",\"properties\":{\"stim\":{\"type\":\"string\"},\"include_dem\":{\"type\":\"boolean\",\"default\":false},\"include_qasm\":{\"type\":\"boolean\",\"default\":false}},\"required\":[\"stim\"],\"additionalProperties\":false}",
         _stim_import_tool,
     )
-    reg.add(
+    reg.add_read_only(
         "qumo_qec_dem", "Detector error model",
         "Generate a QEC memory circuit and return its detector error model in Stim DEM text ('error(p) D0 D1 L0', with '^' decompositions), optionally the Stim circuit text for cross-checking with Stim/PyMatching.",
         "{\"type\":\"object\",\"properties\":{\"code\":{\"type\":\"string\",\"enum\":[\"surface_z\",\"surface_x\",\"repetition\"],\"default\":\"surface_z\"},\"distance\":{\"type\":\"integer\",\"default\":3},\"rounds\":{\"type\":\"integer\",\"default\":-1},\"p\":{\"type\":\"number\",\"default\":0.001},\"include_stim\":{\"type\":\"boolean\",\"default\":false}},\"additionalProperties\":false}",
         _qec_dem_tool,
     )
-    reg.add(
+    reg.add_read_only(
         "qumo_gpu_info", "GPU status",
         "Report whether this QUMO build has GPU support (-D QUMO_GPU) and a usable device: name, API (cuda/hip/metal), vendor, GPU precision ('precision': what precision 'auto' runs, fp32 on every GPU by default like CUDA-Q; 'precision_build_default'; 'precision_env': the QUMO_GPU_PRECISION override; 'precisions': selectable at run time, fp64 only on NVIDIA/AMD; 'precision_note': why), fp64 support, the qubit threshold above which automatic dispatch uses the GPU and the device's tuning profile. Call it before qumo_run_device with device 'gpu'.",
         "{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}",
         _gpu_info_tool,
     )
-    reg.add(
+    reg.add_read_only(
         "qumo_run_device", "Run circuit on a device",
         "Like qumo_run_qasm but with an explicit simulator device (vendor-neutral: NVIDIA CUDA, AMD ROCm or Apple Metal through MAX). 'auto' (default) = qumo_run_qasm's dispatch: noisy Clifford circuits without feed-forward -> CPU Pauli frames, other wide/noisy/dynamic Clifford circuits -> stabilizer tableau, static non-Clifford circuits with >= " + String(GPU_MIN_QUBITS) + " qubits -> GPU state vector when this build has GPU support (-D QUMO_GPU) and a usable device (CPU on any GPU failure), everything else -> CPU state vector. 'cpu' = the same choice restricted to CPU simulators. 'gpu' = Clifford circuits without parameters or classical feed-forward (noise, mid-circuit measurement and reset allowed) -> GPU Pauli frames ('gpu:pauli_frame'); other static, noiseless circuits -> GPU state vector in 'precision' ('gpu:statevector:fp32' or 'gpu:statevector:fp64'); dynamic or noisy non-Clifford circuits, builds without -D QUMO_GPU, or no usable device -> run on the CPU as with 'cpu' plus warning QM-W020 giving the reason. 'precision' (GPU state vector only): 'auto' (default: QUMO_GPU_PRECISION when set, else the build default, fp32 on every GPU as in CUDA-Q), 'fp32', or 'fp64' (NVIDIA/AMD; error QM-E472 on Apple GPUs, which have no fp64); CPU simulators are fp64 (warning QM-W021 when a requested precision did not apply). Returns counts, 'method' (the simulator that ran), 'device_used', 'precision_used' and structured 'warnings'.",
         "{\"type\":\"object\",\"properties\":{" + _CIRC + "," + _PROG + ",\"max_iterations\":{\"type\":\"integer\",\"minimum\":1,\"default\":65536,\"description\":\"Loop back-edges allowed per shot; past it the run stops with QM-E480\"},\"shots\":{\"type\":\"integer\",\"minimum\":1,\"default\":1024},\"seed\":{\"type\":\"integer\",\"minimum\":0,\"default\":1234},\"params\":{\"description\":\"Values for 'input float' parameters: array in declaration order or object name->value\"},\"device\":{\"type\":\"string\",\"enum\":[\"auto\",\"cpu\",\"gpu\"],\"default\":\"auto\"},\"precision\":{\"type\":\"string\",\"enum\":[\"auto\",\"fp32\",\"fp64\"],\"default\":\"auto\",\"description\":\"GPU state-vector precision: auto = QUMO_GPU_PRECISION or the build default (fp32)\"},\"max_qubits\":{\"type\":\"integer\",\"default\":30}},\"additionalProperties\":false}",

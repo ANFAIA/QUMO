@@ -277,8 +277,27 @@ implements MCP **2025-06-18** (it also accepts 2025-03-26 and 2024-11-05).
 | `initialize` | Negotiates the protocol version and returns `serverInfo {name: "qumo"}`, `capabilities.tools`, and `instructions` (a short usage primer) |
 | `notifications/*` | No reply. Every message without an `id` is a notification and gets no reply. |
 | `ping` | `{}` |
-| `tools/list` | Each tool's `name`, `title`, `description`, `inputSchema` (JSON Schema) and `annotations` (read-only, idempotent, closed-world) |
+| `tools/list` | Each tool's `name`, `title`, `description`, `inputSchema` (JSON Schema) and `annotations` (the four MCP hints, per tool; see below) |
 | `tools/call` | `{content: [{type: "text", text}], structuredContent, isError}` |
+
+**Tool annotations.** Each tool carries its own `readOnlyHint`, `destructiveHint`,
+`idempotentHint` and `openWorldHint` (`ToolHints` in `qumo/ai/tools.mojo`). A tool
+registered with `reg.add` and no hints gets the MCP default: not read-only,
+destructive, not idempotent, open world, so a client must not auto-approve it.
+`reg.add_read_only` marks a tool as verified pure local computation: no file write,
+no network, no hardware submission, no state kept between calls (seeds are explicit
+arguments; the only reads are of `QUMO_MODEL_DIR` / `models/ai_transpiler` files).
+Audit of all 24 registered tools (`qumo/ai`, `qumo/exec`, `qumo/ft`): every one meets
+that bar, so every one is `readOnlyHint: true, destructiveHint: false,
+idempotentHint: true, openWorldHint: false`. This includes `qumo_run_device` and
+`qumo_gpu_info`, which select a local CPU/GPU *simulator* and never talk to a QPU.
+Hardware submission lives in the Python plugin layer (`plugins/hardware`) and in the
+native clients of `qumo/exec` (for example `ionq_api.mojo`, bound into `qumo_py`); neither
+is registered as an MCP tool. A tool that submits a job or writes a file must use `reg.add`
+with explicit hints, for example a submit tool: `readOnlyHint: false`,
+`destructiveHint: false`, `idempotentHint: false` (a retry submits a second job),
+`openWorldHint: true`. `tests/test_mcp.mojo` checks both the shipped tools and the
+default.
 
 When a tool fails, the reply is a normal *result* with `isError: true`,
 `structuredContent.error` set to the `Diagnostic`, and the text content

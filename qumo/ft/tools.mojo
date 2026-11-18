@@ -261,19 +261,19 @@ comptime _FT_CIRC = "\"qasm\":{\"type\":\"string\",\"description\":\"OpenQASM 2 
 
 
 def register_ft_tools(mut reg: ToolRegistry):
-    reg.add(
+    reg.add_read_only(
         "qumo_ft_codes", "Fault-tolerant code library",
         "List QUMO's stabilizer codes for fault-tolerant programming (Steane [[7,1,3]], Iceberg [[k+2,k,2]], [[4,2,2]] CSS and non-CSS, [[5,1,3]], surface and repetition adapters) with generators, logical operators, CSS flag and a brute-force distance check; with 'architecture' ('steane' | 'iceberg_<k>') also describe the architecture (logical gate set, QEC policy, factories) and verify every gadget of its library with the stabilizer tableau (and state vector for magic states).",
         "{\"type\":\"object\",\"properties\":{\"code\":{\"type\":\"string\",\"description\":\"steane, five_qubit, css_422, noncss_422, iceberg_<k>, surface_<d>, repetition_<d>\"},\"check_distance\":{\"type\":\"boolean\",\"default\":true},\"architecture\":{\"type\":\"string\"},\"verify_gadgets\":{\"type\":\"boolean\",\"default\":true}},\"additionalProperties\":false}",
         _ft_codes_tool,
     )
-    reg.add(
+    reg.add_read_only(
         "qumo_ft_encode", "Encode a circuit fault-tolerantly",
         "Encode a QEC-agnostic circuit (any gates, mid-circuit measurement, reset, c_if feed-forward) into a fault-tolerant physical program, Guppy FT style: compile (computational -> logical gate set of the architecture: Steane Clifford+T with magic-state injection and static Clifford+T or comparator RUS synthesis of Rz, or Iceberg native rotations) then implement_ops (logical -> physical gadgets, block allocation, state factories, QEC-cycle policy, Pauli-frame feed-forward, decoding). Returns the logical program summary, a resource report (physical qubits, depth, 2q gates, QEC cycles, magic states) and, with 'shots', the encoded program emulated next to the unencoded reference (optional circuit-level noise 'noise_p').",
         "{\"type\":\"object\",\"properties\":{" + _FT_CIRC + ",\"architecture\":{\"type\":\"string\",\"default\":\"steane\"},\"n_blocks\":{\"type\":\"integer\"},\"qec_style\":{\"type\":\"string\",\"enum\":[\"none\",\"steane\",\"knill\",\"syndrome\"]},\"qec_threshold\":{\"type\":\"number\",\"default\":1.0},\"qec_costs\":{\"type\":\"object\",\"description\":\"logical op name -> cost, e.g. {\\\"h\\\":1,\\\"cx\\\":1}\"},\"qec_before_non_clifford\":{\"type\":\"boolean\",\"default\":false},\"feed_forward\":{\"type\":\"string\",\"enum\":[\"frame\",\"eager\"],\"default\":\"frame\"},\"magic_prep\":{\"type\":\"string\",\"enum\":[\"ft\",\"nonft\"],\"default\":\"nonft\"},\"zero_prep\":{\"type\":\"string\",\"enum\":[\"ft\",\"nonft\"],\"default\":\"ft\"},\"zero_factory_size\":{\"type\":\"integer\",\"default\":0},\"zero_factory_attempts\":{\"type\":\"integer\",\"default\":1},\"magic_factory_size\":{\"type\":\"integer\",\"default\":0},\"magic_factory_attempts\":{\"type\":\"integer\",\"default\":1},\"rz_mode\":{\"type\":\"string\",\"enum\":[\"static\",\"comparator\",\"exact\"],\"default\":\"static\"},\"rz_epsilon\":{\"type\":\"number\",\"default\":0.01},\"rz_max_t\":{\"type\":\"integer\",\"default\":16},\"comparator_attempts\":{\"type\":\"integer\",\"default\":4},\"shots\":{\"type\":\"integer\",\"default\":0},\"seed\":{\"type\":\"integer\",\"default\":1234},\"noise_p\":{\"type\":\"number\",\"default\":0.0},\"include_logical\":{\"type\":\"boolean\",\"default\":false},\"include_qasm\":{\"type\":\"boolean\",\"default\":false}},\"additionalProperties\":false}",
         _ft_encode_tool,
     )
-    reg.add(
+    reg.add_read_only(
         "qumo_ft_verify", "Verify a logical gadget",
         "Check that a physical gadget implements a logical operation on a stabilizer code, exactly, with the stabilizer tableau: kind 'clifford' (semantic Clifford on num_blocks*k qubits vs unitary implementation on num_blocks*n (+ clean ancillas): stabilizers preserved and logical Paulis mapped with the right signs) or 'state' (stabilizer-state preparation, flags/measurements allowed, accept branch). Returns valid + the first failing operator.",
         "{\"type\":\"object\",\"properties\":{\"code\":{\"type\":\"string\",\"default\":\"steane\"},\"kind\":{\"type\":\"string\",\"enum\":[\"clifford\",\"state\"],\"default\":\"clifford\"},\"semantic_qasm\":{\"type\":\"string\"},\"impl_qasm\":{\"type\":\"string\"},\"num_blocks\":{\"type\":\"integer\",\"default\":1},\"num_ancillas\":{\"type\":\"integer\",\"default\":0}},\"required\":[\"semantic_qasm\",\"impl_qasm\"],\"additionalProperties\":false}",

@@ -8,7 +8,7 @@ from std.sys.defines import is_defined
 
 from qumo.core.json import JsonWriter, JsonValue, parse_json, json_quote
 from qumo.ai.mcp import McpServer, handle_request
-from qumo.ai.tools import default_registry
+from qumo.ai.tools import default_registry, ToolRegistry, ToolHints, ToolContext, ToolResult, tool_ok
 from qumo.ai.describe import (
     describe_gates_json, describe_errors_json, describe_errors_markdown, describe_error_json,
     describe_capabilities_json, circuit_to_json, circuit_from_json, circuit_summary_json,
@@ -81,7 +81,13 @@ def test_protocol() raises:
         var sch = t.get("inputSchema")
         assert_equal(sch.get("type").as_string(), "object")
         assert_true(sch.get("properties").is_object())
-        assert_true(t.get("annotations").get("readOnlyHint").as_bool())
+        # every shipped tool was audited as pure local computation (no file
+        # write, network or hardware submission): all four hints are explicit
+        var ann = t.get("annotations")
+        assert_true(ann.get("readOnlyHint").as_bool(), t.get("name").as_string())
+        assert_false(ann.get("destructiveHint").as_bool())
+        assert_true(ann.get("idempotentHint").as_bool())
+        assert_false(ann.get("openWorldHint").as_bool())
     var want: List[String] = [
         "qumo_run_qasm", "qumo_statevector", "qumo_expectation", "qumo_validate_qasm", "qumo_describe",
         "qumo_circuit_info", "qumo_draw", "qumo_convert", "qumo_transpile", "qumo_estimate_resources", "qumo_vqe",
@@ -583,7 +589,50 @@ def test_tier1_tools() raises:
     print("  tier 1 tools")
 
 
+def _noop_tool(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
+    return tool_ok("{}")
+
+
+def _annotations_of(reg: ToolRegistry, name: String) raises -> JsonValue:
+    var w = JsonWriter()
+    reg.write_list_json(w)
+    var tools = parse_json(w.finish())
+    for i in range(len(tools)):
+        if tools.at(i).get("name").as_string() == name:
+            return tools.at(i).get("annotations")
+    raise Error("tool not listed: " + name)
+
+
+def test_tool_hints() raises:
+    var reg = ToolRegistry()
+    var schema = "{\"type\":\"object\",\"properties\":{}}"
+    # no hints given: MCP default, a client must not auto-approve it
+    reg.add("x_unannotated", "Unannotated", "A tool that says nothing about itself.", schema, _noop_tool)
+    var a = _annotations_of(reg, "x_unannotated")
+    assert_false(a.get("readOnlyHint").as_bool())
+    assert_true(a.get("destructiveHint").as_bool())
+    assert_false(a.get("idempotentHint").as_bool())
+    assert_true(a.get("openWorldHint").as_bool())
+    # verified local computation
+    reg.add_read_only("x_local", "Local", "A pure local computation.", schema, _noop_tool)
+    var b = _annotations_of(reg, "x_local")
+    assert_true(b.get("readOnlyHint").as_bool())
+    assert_false(b.get("openWorldHint").as_bool())
+    # a hardware-submitting tool: not read-only, reaches outside, a retry submits a second job
+    reg.add("x_submit", "Submit", "Submit a job to a device.", schema, _noop_tool, ToolHints(False, False, False, True))
+    var c = _annotations_of(reg, "x_submit")
+    assert_false(c.get("readOnlyHint").as_bool())
+    assert_false(c.get("destructiveHint").as_bool())
+    assert_false(c.get("idempotentHint").as_bool())
+    assert_true(c.get("openWorldHint").as_bool())
+    # replacing a tool replaces its hints
+    reg.add("x_local", "Local", "Now it writes a file.", schema, _noop_tool, ToolHints(False, False, True, False))
+    assert_false(_annotations_of(reg, "x_local").get("readOnlyHint").as_bool())
+    print("  tool annotation hints")
+
+
 def main() raises:
+    test_tool_hints()
     test_protocol()
     test_run_tool()
     test_state_and_expectation_tools()
