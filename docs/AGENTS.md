@@ -7,7 +7,7 @@ through its MCP server, research algorithms, error correction and compilation, r
 circuits, and orchestrate hybrid workflows.
 
 No agent commits, pushes or submits to quantum hardware. A person starts each run, with one
-exception the owner set up: a weekly `research-watch` over the nine modules (section 9), which
+exception the owner set up: a weekly `research-watch` over the nine modules (section 12), which
 only writes reports under `agents/reports/`.
 
 ## 1. Quick start
@@ -239,7 +239,7 @@ make test-agents-mojo                    # offline tests
 Design, limits and the review gate: [agents/mojo/README.md](../agents/mojo/README.md) and
 [agents/mojo/DESIGN.md](../agents/mojo/DESIGN.md).
 
-## 9. The weekly watch
+## 12. The weekly watch
 
 One scheduled job keeps the watch current: every Monday morning it runs `research-watch` for the
 nine modules (papers of the last week and new releases of each module's SDKs) and writes a summary,
