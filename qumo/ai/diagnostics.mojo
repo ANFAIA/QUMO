@@ -363,7 +363,7 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E514", "qasm", "Broadcast over registers of different sizes.", "Broadcast operands must have equal size, or index single qubits.")
     _e(c, "QM-E520", "qasm", "Undeclared or wrong-kind identifier (register, parameter, gate argument).", "Declare it before use; check qubit vs bit registers.")
     _e(c, "QM-E521", "qasm", "Register index out of range.", "Valid indices are 0..size-1; slices [a:b] are inclusive.")
-    _e(c, "QM-E522", "qasm", "Name declared twice.", "Use unique names for registers, inputs, constants and gates.")
+    _e(c, "QM-E522", "qasm", "Name declared twice, or a built-in constant (pi, tau, euler) declared as a name.", "Use unique names for registers, inputs, constants and gates, and none of pi, tau, euler.")
     _e(c, "QM-E523", "qasm", "Invalid register size.", "Register sizes must be positive integer constants.")
     _e(c, "QM-E530", "qasm", "A constant was required (index, size, exponent, gphase) but the expression is not constant/integer.", "Use numeric literals, const values or loop variables.")
     _e(c, "QM-E531", "qasm", "Parameter expression is not affine (product/quotient of inputs).", "QUMO parameters are coeff*input + offset; bind values or restructure.")

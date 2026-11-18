@@ -221,6 +221,10 @@ value and takes the unchanged code path, so existing results are bit-identical.
   uniform state holds 10 optimal strings of 32, so `alpha = 0.2` ends with
   P(optimal) = 0.28 against 0.88 for the plain mean (`tests/test_algorithms.mojo`).
 
+Runnable example with its checks: `examples/optimization/qaoa_cvar.mojo` (14 checks: the sampled and
+exact forms against hand-computed and reference values, the monotonicity in alpha, and the ring limit).
+Run: `.venv/bin/mojo run -I . examples/optimization/qaoa_cvar.mojo`.
+
 Measured (tests/examples):
 
 * H2 4-qubit UCCSD, BFGS + adjoint: |E - FCI| = 2e-14 in 11 iterations / 22 circuit

@@ -29,6 +29,7 @@ Versions: Qiskit 2.6.1, qiskit-ibm-runtime 0.51, Aer 0.18.2, pytket 2.18.5, tket
 | Multi-qubit Pauli operators beyond 64 qubits | Qiskit `SparseObservable` | deferred, needed for Pauli propagation |
 | `defcal`, QPY, C API, Rust internals, HUGR internals | Qiskit, Quantinuum | skipped: no neutral value, or vendor formats |
 | `FreeParameterExpression` math functions | Braket 1.119 | skipped: affine `Param` is deliberate, adjoint gradients rely on it |
+| OpenQASM 2 `^` as the power operator; `pi`, `tau`, `euler` rejected as declared names (QM-E522) | Qiskit 2.6.x fixes (expression domain errors, constant-name collisions); research-watch 2026-11-17 | done, `qumo/ir/qasm_parser.mojo`, regression tests in `tests/test_qasm_qiskit26.mojo`. Both were QUMO bugs the tests exposed |
 | QIR export | QDK, Qibo | deferred |
 
 ## Compiler
@@ -101,6 +102,7 @@ Versions: Qiskit 2.6.1, qiskit-ibm-runtime 0.51, Aer 0.18.2, pytket 2.18.5, tket
 |---|---|---|
 | Trim SQD, configuration recovery, `partition_subsample` | qiskit-addon-sqd 0.14 | done in `sqd.mojo`; not compared with the addon |
 | IQP template, `iqp_expval` | PennyLane 0.44 | done, `qumo.algorithms.iqp` |
+| CVaR objective for VQE and QAOA (`alpha`) | Barkoutsos et al., arXiv:1907.04769; Qiskit `VQE(aggregation=)`; research-watch 2026-11-17 | done, `vqe(alpha=)`, `qaoa_maxcut(alpha=)`, `CVaRObjective`, [ALGORITHMS](ALGORITHMS.md); example `examples/optimization/qaoa_cvar.mojo`. Not a guaranteed gain: the example shows where it is flat |
 | Fermi-Hubbard, lattices | Qibo 0.3.6, QDK 1.33 | done, `fermi_hubbard`, `Graph.square_lattice`, `Graph.triangular_lattice` |
 | `lie_closure` | Qibo 0.3.6 | done, Pauli strings only |
 | PUB `split` | Braket 1.120 | done, `split_pub`, seeds follow the original index |
@@ -117,6 +119,7 @@ Versions: Qiskit 2.6.1, qiskit-ibm-runtime 0.51, Aer 0.18.2, pytket 2.18.5, tket
 
 | Change | Status |
 |---|---|
+| MCP tool annotations per tool (`ToolHints`); a tool without hints is no longer announced as read-only | done, `qumo/ai/tools.mojo`, [AI_NATIVE](AI_NATIVE.md); research-watch 2026-11-17 |
 | Mojo 1.1 to 1.2, MAX 26.6 to 26.7 | done: [MOJO_GUIDE](MOJO_GUIDE.md) lists what moved; pins in the Makefile |
 | Qiskit 2.6 baselines | deferred: README and benchmark reports still compare with 2.5.2 |
 | `qiskit-aer-gpu` wheels are back | docs updated earlier; the harness fallback is still there |

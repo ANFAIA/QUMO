@@ -113,6 +113,7 @@ Do not copy text or code from another project's tutorial beyond what its licence
 
 - Keep QUMO vendor-neutral. No vendor is a default; presets are named by modality or topology. Vendor-specific code belongs in `plugins/hardware`.
 - Compiler passes must keep the unitary exact (global phase tracked) and are tested by state vector. Where the extension points are, and which need core edits: [docs/EXTENDING.md](docs/EXTENDING.md).
+- Every change shows up where a user looks. A new capability comes with a runnable example under `examples/` (with `CHECK` lines, see "Adding an example") and a section in the module's doc. An improvement to something that exists is recorded in that module's doc and in `CHANGELOG.md`. A capability taken from a paper or another SDK also gets its row in [docs/FRAMEWORK_UPDATES.md](docs/FRAMEWORK_UPDATES.md), with the source. This holds for changes written by the agents too.
 - Errors carry a stable `QM-Exxx` code and a hint that says how to fix the input. Add new codes to the catalogue in `qumo/ai/diagnostics.mojo`.
 - Performance claims need a measurement (next section). If a change makes something slower, say so in the pull request.
 - Update the docs your change makes wrong. Code snippets in docs must be runnable; say so if you could not run one.
