@@ -2,8 +2,9 @@
 
 Nine agents, built on [deepagents](https://www.langchain.com/deep-agents), keep QUMO
 moving: they watch new papers and SDK releases, review the code, improve modules in a
-sandbox, use QUMO through its MCP server, and orchestrate hybrid workflows. Each run is
-started by a person; nothing runs on a schedule, commits or pushes.
+sandbox, use QUMO through its MCP server, and orchestrate hybrid workflows. No agent
+commits or pushes. A person starts each run, or a schedule the owner set up does: the weekly
+`research-watch` over the nine modules, which only writes reports.
 
 | Agent | Does | Delegates to |
 |---|---|---|

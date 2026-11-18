@@ -6,8 +6,9 @@ and SDK releases, review the code, improve a module in a sandbox branch, drive Q
 through its MCP server, research algorithms, error correction and compilation, run
 circuits, and orchestrate hybrid workflows.
 
-A person starts every run. No agent runs on a schedule, commits, pushes or submits
-to quantum hardware.
+No agent commits, pushes or submits to quantum hardware. A person starts each run, with one
+exception the owner set up: a weekly `research-watch` over the nine modules (section 9), which
+only writes reports under `agents/reports/`.
 
 ## 1. Quick start
 
@@ -237,3 +238,23 @@ make test-agents-mojo                    # offline tests
 
 Design, limits and the review gate: [agents/mojo/README.md](../agents/mojo/README.md) and
 [agents/mojo/DESIGN.md](../agents/mojo/DESIGN.md).
+
+## 9. The weekly watch
+
+One scheduled job keeps the watch current: every Monday morning it runs `research-watch` for the
+nine modules (papers of the last week and new releases of each module's SDKs) and writes a summary,
+`agents/reports/<date>-weekly-watch.md`, with the top proposal per module and which ones are new
+since the earlier reports.
+
+* It is a scheduled task of the Claude desktop app on the owner's machine
+  (`qumo-agents-weekly-watch`), not a CI job: it needs the local checkout, `bin/qumo-agents` and the
+  back end's credentials. It runs when the app is open; a missed run starts at the next launch.
+* It reads and reports only. It does not implement, commit, push or open pull requests.
+  Implementing a proposal stays a decision of a person, through `autoresearch` or by hand, and
+  follows the rule in [CONTRIBUTING](../CONTRIBUTING.md): a new capability ships with an example,
+  an improvement is recorded in the docs.
+* Cost: each module run is capped by `claude_code.max_budget_usd` in `agents/agents.json` (5 USD),
+  so at most 45 USD a week. Run it by hand with the same command for one module:
+  `bin/qumo-agents run research-watch "What changed in the last 7 days?" --module compiler`.
+* Rankings are not stable between runs: two passes on the same day agreed on the top proposal
+  for three of nine modules. Read a report as a list of candidates.
