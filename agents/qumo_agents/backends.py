@@ -128,6 +128,35 @@ def codex_command(spec: AgentSpec, task: str, settings: Settings, workdir: Path,
     return cmd + [prompt]
 
 
+def mojo_command(spec: AgentSpec, task: str, settings: Settings, model: str | None = None,
+                 module: str | None = None) -> list[str]:
+    """The native Mojo harness (`build/qumo-agent`): the same agent on QUMO's own harness, with
+    its LLM on the OpenAI-compatible endpoint of agents.json (OpenRouter by default).
+
+    `task` is the plain task: the harness adds the module context itself from --module."""
+    exe = settings.section("mojo").get("command", "build/qumo-agent")
+    path = Path(exe) if Path(exe).is_absolute() else REPO_ROOT / exe
+    cmd = [str(path), "run", spec.name, task]
+    if module:
+        cmd += ["--module", module]
+    chosen = settings.model_for(spec.name, model, "mojo")
+    if chosen:
+        cmd += ["--model", chosen]
+    return cmd
+
+
+def run_mojo_backend(spec: AgentSpec, task: str, settings: Settings, model: str | None = None,
+                     module: str | None = None, timeout_s: int = 3600) -> str:
+    cmd = mojo_command(spec, task, settings, model, module)
+    if not Path(cmd[0]).exists():
+        raise RuntimeError(f"{cmd[0]} not found: build the native harness with `make agents-mojo`, "
+                           "or choose another --backend")
+    r = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, text=True, timeout=timeout_s)
+    if r.returncode != 0:
+        raise RuntimeError(f"qumo-agent exited {r.returncode}: {r.stderr.strip()[-2000:]}")
+    return r.stdout
+
+
 def _workdir(spec: AgentSpec, task: str) -> Path:
     if not spec.writes_code:
         return REPO_ROOT

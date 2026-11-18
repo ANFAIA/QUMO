@@ -139,6 +139,32 @@ def test_local_subagents_inherit_the_run_model(monkeypatch):
     assert seen and set(seen) == {"qwen3", "small"}, seen
 
 
+def test_mojo_harness_runs_on_the_openrouter_models(monkeypatch, capsys):
+    from qumo_agents import backends, cli
+    monkeypatch.delenv("QUMO_AGENTS_BACKEND", raising=False)
+    monkeypatch.delenv("QUMO_AGENTS_MODEL", raising=False)
+    s = _settings()
+    spec = registry.get("code-review")
+    cmd = backends.mojo_command(spec, "Review the parser", s, None, "ir")
+    # the harness's own module option, not a prefix glued to the task
+    assert cmd[1:5] == ["run", "code-review", "Review the parser", "--module"] and cmd[5] == "ir"
+    assert cmd[cmd.index("--model") + 1] == s.model_for("code-review")  # the same OpenRouter id as the Python graph
+    assert backends.mojo_command(spec, "t", s, "vendor/x")[-1] == "vendor/x"  # --model wins
+    # one agent on the native harness, in the file; the rest stay where they were
+    own = _settings(backends={"code-review": "mojo"}, mojo={"models": {"code-review": "vendor/own"}})
+    assert own.backend_for("code-review") == "mojo" and own.backend_for("execution") == s.default_backend
+    assert backends.mojo_command(spec, "t", own)[-1] == "vendor/own"
+    monkeypatch.setenv("QUMO_AGENTS_MODEL", "vendor/shell")
+    assert own.model_for("code-review", None, "mojo") == "vendor/shell"  # an OpenRouter id, as for openrouter
+    # a missing binary is a one-line pointer to the build, not a traceback
+    missing = _settings(mojo={"command": "/nonexistent/qumo-agent"})
+    with pytest.raises(RuntimeError, match="make agents-mojo"):
+        backends.run_mojo_backend(spec, "t", missing)
+    assert cli.main(["run", "code-review", "Review the parser", "--module", "ir", "--backend", "mojo", "--dry-run"]) == 0
+    shown = json.loads(capsys.readouterr().out)
+    assert shown[1:3] == ["run", "code-review"] and "--module" in shown
+
+
 def test_cli_list_and_dry_run_show_the_choice(monkeypatch, capsys):
     from qumo_agents import cli
     monkeypatch.delenv("QUMO_AGENTS_BACKEND", raising=False)

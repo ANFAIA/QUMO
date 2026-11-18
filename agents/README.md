@@ -62,6 +62,8 @@ shows what each agent would run on. Details: [docs/AGENTS.md](../docs/AGENTS.md)
 
 * **openrouter** (default): a deepagents graph on an OpenRouter model. Per-agent models are in
   `agents.json`; `code-review` uses a different vendor than the others on purpose.
+* **mojo**: QUMO's own harness (`build/qumo-agent`, `make agents-mojo`) on an OpenRouter model:
+  `--backend mojo`, or per agent in `agents.json`. No Python at run time. Same model ids as `openrouter`.
 * **local**: the same graph on your own OpenAI-compatible server (Ollama, LM Studio,
   llama.cpp, vLLM): `--backend local --model <name>`. Not run end to end here.
 * **claude-code**: `claude -p` with the agent prompt appended, QUMO's MCP server (and

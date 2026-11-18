@@ -40,7 +40,7 @@ Options of `run`:
 | Option | Meaning |
 |---|---|
 | `--module NAME` | Focus on one QUMO module: `ir`, `sim`, `gpu`, `compiler`, `algorithms`, `qec`, `ft`, `exec`, `ai` |
-| `--backend NAME` | The harness: `openrouter` (default), `local`, `claude-code` or `codex` |
+| `--backend NAME` | The harness: `openrouter` (default), `local`, `mojo`, `claude-code` or `codex` |
 | `--model ID` | Model for this run: an OpenRouter id (`anthropic/claude-sonnet-5.5`), a local model name (`qwen3-coder`) or the CLI's own model name (`opus`) |
 | `--dry-run` | Show the model, tools and subagents (or the CLI command line) and call nothing |
 | `TASK` = `-` | Read the task from stdin: `cat task.md \| bin/qumo-agents run orchestrator -` |
@@ -108,6 +108,7 @@ git worktree remove .worktrees/agent-<topic>-<time>   # when you are done with i
 |---|---|---|
 | `openrouter` (default) | A deepagents graph; delegation nests (orchestrator, then autoresearch, then research-watch) | `OPENROUTER_API_KEY` |
 | `local` | The same deepagents graph on your own OpenAI-compatible server: Ollama, LM Studio, llama.cpp or vLLM | A running server and a model name. A key is sent only if you set `QUMO_AGENTS_LOCAL_API_KEY`. Not run end to end yet |
+| `mojo` | QUMO's own harness, `build/qumo-agent` ([agents/mojo](../agents/mojo/README.md)): no Python at run time. Its LLM is the OpenAI-compatible endpoint of `agents.json`, OpenRouter by default, with the same model ids as the `openrouter` back end | `make agents-mojo`, `make cli`, `OPENROUTER_API_KEY` |
 | `claude-code` | `claude -p` with the agent's prompt appended, QUMO's MCP server (and alphaXiv's) attached, and an allow-list of tools; `git commit`, `git push` and `gh` are blocked; a budget cap from `agents.json` | Claude Code installed and signed in |
 | `codex` | `codex exec`, read-only sandbox, workspace-write only for `autoresearch` inside its worktree | Codex CLI. Not tested yet: it was not installed when this layer was written |
 
@@ -129,6 +130,12 @@ bin/qumo-agents run code-review "Review the parser" --module ir --backend claude
 bin/qumo-agents run execution "Sample a 5-qubit GHZ" --backend local --model qwen3-coder
 QUMO_AGENTS_LOCAL_URL=http://localhost:1234/v1 bin/qumo-agents run execution "..." --backend local --model my-model
 ```
+
+The native harness is chosen like any other: `--backend mojo`, or one agent on it with
+`"backends": {"code-review": "mojo"}` in `agents.json`. Its model comes from the `mojo` section
+(`"models"`, `"model"`), then the `openrouter` ones, so by default both harnesses run an agent
+on the same OpenRouter id. To point the native harness at another OpenAI-compatible server,
+change `openrouter.base_url` in `agents.json`; it has no separate `local` mode yet.
 
 A CLI back end with no model set uses the CLI's own default model. The `local` back end
 has no default: name a model, or the run stops with an error. Subagents with no local

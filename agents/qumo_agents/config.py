@@ -16,10 +16,10 @@ AGENTS_DIR = Path(__file__).resolve().parent.parent
 REPO_ROOT = AGENTS_DIR.parent
 CONFIG_PATH = AGENTS_DIR / "agents.json"
 REPORTS_DIR = AGENTS_DIR / "reports"
-BACKENDS = ("openrouter", "local", "claude-code", "codex")
+BACKENDS = ("openrouter", "local", "mojo", "claude-code", "codex")
 LOCAL_KEY_ENV = "QUMO_AGENTS_LOCAL_API_KEY"
 API_BACKENDS = ("openrouter", "local")  # a deepagents graph on an OpenAI-compatible endpoint
-_SECTION = {"openrouter": "openrouter", "local": "local", "claude-code": "claude_code", "codex": "codex"}
+_SECTION = {"openrouter": "openrouter", "local": "local", "mojo": "mojo", "claude-code": "claude_code", "codex": "codex"}
 
 
 class ConfigError(Exception):
@@ -67,7 +67,7 @@ class Settings:
         """The model an agent runs on with one back end.
 
         --model wins everywhere. QUMO_AGENTS_MODEL comes next for the API back ends
-        (openrouter, local); the CLI back ends ignore it, because their model names are
+        (openrouter, local, mojo); the CLI back ends ignore it, because their model names are
         not OpenRouter ids. Then the back end's own "models" entry for the agent, then
         its "model". openrouter ends at the top-level "models" and "default_model". A CLI
         back end may return "": the CLI then uses its own default model. `fallback` is
@@ -77,12 +77,14 @@ class Settings:
         if override:
             return override
         sec = self.section(_SECTION[backend])
-        if backend in API_BACKENDS and os.environ.get("QUMO_AGENTS_MODEL"):
+        # the native Mojo harness talks to the same OpenAI-compatible endpoint as `openrouter`,
+        # so its model names are OpenRouter ids: the shell variable applies to it too
+        if backend in API_BACKENDS + ("mojo",) and os.environ.get("QUMO_AGENTS_MODEL"):
             return os.environ["QUMO_AGENTS_MODEL"]
         found = sec.get("models", {}).get(agent) or sec.get("model")
         if found:
             return found
-        if backend == "openrouter":
+        if backend in ("openrouter", "mojo"):  # mojo: its own entries first, then the OpenRouter ones
             return self.raw.get("models", {}).get(agent) or self.raw["default_model"]
         if backend == "local" and fallback:
             return fallback
