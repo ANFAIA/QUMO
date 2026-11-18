@@ -39,6 +39,7 @@ Environment (keys are read from the environment only, never written):
 | `GITHUB_TOKEN` | optional, higher GitHub rate limit for release notes |
 | `QUMO_AGENTS_BACKEND`, `QUMO_AGENTS_MODEL` | optional: harness and model for every run in this shell |
 | `QUMO_AGENTS_LOCAL_URL` | optional: base URL of the `local` back end (default `http://localhost:11434/v1`) |
+| `QUMO_AGENTS_LOCAL_API_KEY` | optional: key for a local server that asks for one; never read from `agents.json` |
 
 ## Use
 

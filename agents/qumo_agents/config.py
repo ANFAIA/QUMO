@@ -17,6 +17,7 @@ REPO_ROOT = AGENTS_DIR.parent
 CONFIG_PATH = AGENTS_DIR / "agents.json"
 REPORTS_DIR = AGENTS_DIR / "reports"
 BACKENDS = ("openrouter", "local", "claude-code", "codex")
+LOCAL_KEY_ENV = "QUMO_AGENTS_LOCAL_API_KEY"
 API_BACKENDS = ("openrouter", "local")  # a deepagents graph on an OpenAI-compatible endpoint
 _SECTION = {"openrouter": "openrouter", "local": "local", "claude-code": "claude_code", "codex": "codex"}
 
@@ -61,14 +62,17 @@ class Settings:
             return self._checked(per_agent, f'agents.json "backends" for {agent}')
         return self.default_backend
 
-    def model_for(self, agent: str, override: str | None = None, backend: str = "openrouter") -> str:
+    def model_for(self, agent: str, override: str | None = None, backend: str = "openrouter",
+                  fallback: str | None = None) -> str:
         """The model an agent runs on with one back end.
 
         --model wins everywhere. QUMO_AGENTS_MODEL comes next for the API back ends
         (openrouter, local); the CLI back ends ignore it, because their model names are
         not OpenRouter ids. Then the back end's own "models" entry for the agent, then
         its "model". openrouter ends at the top-level "models" and "default_model". A CLI
-        back end may return "": the CLI then uses its own default model.
+        back end may return "": the CLI then uses its own default model. `fallback` is
+        the model of the run that delegates to this agent: a subagent with no local model
+        of its own takes it, so `--backend local --model X` covers the whole tree.
         """
         if override:
             return override
@@ -80,6 +84,8 @@ class Settings:
             return found
         if backend == "openrouter":
             return self.raw.get("models", {}).get(agent) or self.raw["default_model"]
+        if backend == "local" and fallback:
+            return fallback
         if backend == "local":
             raise ConfigError('the local back end has no model: pass --model, set QUMO_AGENTS_MODEL, '
                               'or fill "local": {"model": ...} in agents.json')
@@ -110,16 +116,20 @@ def openrouter_chat_model(settings: Settings, model: str):
 
 def local_chat_model(settings: Settings, model: str):
     """A LangChain chat model on a local OpenAI-compatible server (Ollama, LM Studio,
-    llama.cpp, vLLM). QUMO_AGENTS_LOCAL_URL overrides the base URL of agents.json. A key
-    is sent only if the section names an environment variable and it is set."""
+    llama.cpp, vLLM). QUMO_AGENTS_LOCAL_URL overrides the base URL of agents.json.
+
+    The key, if the server wants one, comes only from QUMO_AGENTS_LOCAL_API_KEY. The file
+    cannot name the variable: base_url is in the same file, so a changed agents.json could
+    otherwise send another service's key to a host of its choosing. An explicit placeholder
+    also keeps the client from reading OPENAI_API_KEY on its own.
+    """
     from langchain_openai import ChatOpenAI
 
     cfg = settings.section("local")
-    env = cfg.get("api_key_env") or ""
     return ChatOpenAI(
         model=model,
         base_url=local_base_url(settings),
-        api_key=(os.environ.get(env) if env else None) or "not-needed",
+        api_key=os.environ.get(LOCAL_KEY_ENV) or "not-needed",
         timeout=cfg.get("timeout", 600),
         max_retries=cfg.get("max_retries", 1),
     )

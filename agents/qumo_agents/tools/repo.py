@@ -190,7 +190,10 @@ def open_sandbox(topic: str) -> str:
     # implement a proposal cannot read the report it comes from.
     for src in sorted((REPO_ROOT / "agents" / "reports").glob("*.md")):
         dst = path / "agents" / "reports" / src.name
-        if not dst.exists():
+        # regular files of report size only: a symlink would copy whatever it points to
+        if src.is_symlink() or not src.is_file() or src.stat().st_size > 1_000_000:
+            continue
+        if not dst.exists() and not dst.is_symlink():
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(src, dst)
     _state["sandbox"] = path

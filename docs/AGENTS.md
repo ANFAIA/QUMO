@@ -107,7 +107,7 @@ git worktree remove .worktrees/agent-<topic>-<time>   # when you are done with i
 | Back end | How it runs | Needs |
 |---|---|---|
 | `openrouter` (default) | A deepagents graph; delegation nests (orchestrator, then autoresearch, then research-watch) | `OPENROUTER_API_KEY` |
-| `local` | The same deepagents graph on your own OpenAI-compatible server: Ollama, LM Studio, llama.cpp or vLLM | A running server and a model name. No key is sent unless `local.api_key_env` names one. Not run end to end yet |
+| `local` | The same deepagents graph on your own OpenAI-compatible server: Ollama, LM Studio, llama.cpp or vLLM | A running server and a model name. A key is sent only if you set `QUMO_AGENTS_LOCAL_API_KEY`. Not run end to end yet |
 | `claude-code` | `claude -p` with the agent's prompt appended, QUMO's MCP server (and alphaXiv's) attached, and an allow-list of tools; `git commit`, `git push` and `gh` are blocked; a budget cap from `agents.json` | Claude Code installed and signed in |
 | `codex` | `codex exec`, read-only sandbox, workspace-write only for `autoresearch` inside its worktree | Codex CLI. Not tested yet: it was not installed when this layer was written |
 
@@ -131,7 +131,8 @@ QUMO_AGENTS_LOCAL_URL=http://localhost:1234/v1 bin/qumo-agents run execution "..
 ```
 
 A CLI back end with no model set uses the CLI's own default model. The `local` back end
-has no default: name a model, or the run stops with an error. `QUMO_AGENTS_MODEL` never
+has no default: name a model, or the run stops with an error. Subagents with no local
+model of their own run on the model of the run that delegates to them. `QUMO_AGENTS_MODEL` never
 reaches a CLI back end, because an OpenRouter id is not a name those CLIs know.
 `code-review` uses a different vendor from the agents that write code, so the review is
 independent; keep that when you change models. A small local model may not manage the

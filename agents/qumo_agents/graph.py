@@ -54,7 +54,8 @@ def tree(spec: AgentSpec) -> list[AgentSpec]:
 
 def build_agent(spec: AgentSpec, settings: Settings, shared: dict[str, list],
                 model_factory: Callable[[str], Any], model_override: str | None = None,
-                _cache: dict[str, Any] | None = None, _path: tuple[str, ...] = (), backend: str = "openrouter"):
+                _cache: dict[str, Any] | None = None, _path: tuple[str, ...] = (), backend: str = "openrouter",
+                _fallback: str | None = None):
     """Compile spec as a deep agent. model_factory maps a model id to a chat model,
     so tests can pass a fake model."""
     from deepagents import CompiledSubAgent, create_deep_agent
@@ -62,15 +63,17 @@ def build_agent(spec: AgentSpec, settings: Settings, shared: dict[str, list],
     cache = {} if _cache is None else _cache
     if spec.name in cache:
         return cache[spec.name]
+    chosen = settings.model_for(spec.name, model_override, backend, _fallback)
     subagents = []
     for sub_name in spec.subagents:
         if sub_name in _path or sub_name == spec.name:
             continue  # never delegate back up the chain
         sub = registry.get(sub_name)
-        runnable = build_agent(sub, settings, shared, model_factory, None, cache, _path + (spec.name,), backend)
+        runnable = build_agent(sub, settings, shared, model_factory, None, cache, _path + (spec.name,), backend,
+                               _fallback=chosen if backend == "local" else None)
         subagents.append(CompiledSubAgent(name=sub.name, description=sub.description, runnable=runnable))
     agent = create_deep_agent(
-        model=model_factory(settings.model_for(spec.name, model_override, backend)),
+        model=model_factory(chosen),
         tools=tools_for(spec, shared),
         system_prompt=spec.prompt,
         subagents=subagents or None,

@@ -34,7 +34,9 @@ def test_registry_is_consistent():
     assert not any(s.writes_code for s in registry.AGENTS.values() if s.name != "autoresearch")
 
 
-def test_settings_models_cover_every_agent():
+def test_settings_models_cover_every_agent(monkeypatch):
+    monkeypatch.delenv("QUMO_AGENTS_MODEL", raising=False)
+    monkeypatch.delenv("QUMO_AGENTS_BACKEND", raising=False)
     s = Settings.load()
     assert s.default_backend in ("openrouter", "local", "claude-code", "codex")
     for name in registry.AGENTS:
@@ -97,15 +99,44 @@ def test_model_is_chosen_per_backend(monkeypatch):
 def test_local_backend_talks_to_the_configured_server(monkeypatch):
     from qumo_agents import config
     monkeypatch.delenv("QUMO_AGENTS_LOCAL_URL", raising=False)
-    monkeypatch.setenv("LOCAL_KEY_FOR_TEST", "secret-value-abc")
-    s = _settings(local={"base_url": "http://127.0.0.1:1234/v1", "api_key_env": ""})
+    monkeypatch.delenv(config.LOCAL_KEY_ENV, raising=False)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "secret-openrouter-key")
+    s = _settings(local={"base_url": "http://127.0.0.1:1234/v1"})
     m = config.chat_model(s, "local", "qwen3")
     assert str(m.openai_api_base) == "http://127.0.0.1:1234/v1" and m.model_name == "qwen3"
-    assert m.openai_api_key.get_secret_value() == "not-needed"  # no key is sent unless asked for
+    assert m.openai_api_key.get_secret_value() == "not-needed"
+    # the key for a local server comes from its own variable, never from a name in the file:
+    # a config that points base_url at another host must not carry another service's key there
+    hostile = _settings(local={"base_url": "https://elsewhere.example/v1", "api_key_env": "OPENROUTER_API_KEY"})
+    assert config.chat_model(hostile, "local", "x").openai_api_key.get_secret_value() == "not-needed"
     monkeypatch.setenv("QUMO_AGENTS_LOCAL_URL", "http://10.0.0.5:8000/v1")
-    keyed = config.chat_model(_settings(local={"api_key_env": "LOCAL_KEY_FOR_TEST"}), "local", "x")
+    monkeypatch.setenv(config.LOCAL_KEY_ENV, "local-key")
+    keyed = config.chat_model(s, "local", "x")
     assert str(keyed.openai_api_base) == "http://10.0.0.5:8000/v1"
-    assert keyed.openai_api_key.get_secret_value() == "secret-value-abc"
+    assert keyed.openai_api_key.get_secret_value() == "local-key"
+
+
+def test_local_subagents_inherit_the_run_model(monkeypatch):
+    monkeypatch.delenv("QUMO_AGENTS_MODEL", raising=False)
+    s = _settings(local={"model": "", "models": {"execution": "small"}})
+    # an agent with its own local model keeps it; the others take the model of the run
+    assert s.model_for("execution", None, "local", fallback="qwen3") == "small"
+    assert s.model_for("code-review", None, "local", fallback="qwen3") == "qwen3"
+    from qumo_agents import graph
+    seen = []
+
+    def factory(model):
+        seen.append(model)
+        from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+        from langchain_core.messages import AIMessage
+        return GenericFakeChatModel(messages=iter([AIMessage("ok")]))
+
+    shared = {"qumo": [], "alphaxiv": []}
+    try:
+        graph.build_agent(registry.get("orchestrator"), s, shared, factory, "qwen3", backend="local")
+    except ImportError:
+        pytest.skip("deepagents is not installed")
+    assert seen and set(seen) == {"qwen3", "small"}, seen
 
 
 def test_cli_list_and_dry_run_show_the_choice(monkeypatch, capsys):
@@ -120,6 +151,28 @@ def test_cli_list_and_dry_run_show_the_choice(monkeypatch, capsys):
     assert shown["backend"] == "local" and shown["model"] == "qwen3"
     assert cli.main(["run", "execution", "t", "--backend", "local", "--dry-run"]) == 2  # no model: a clear error
     assert "local back end has no model" in capsys.readouterr().err
+
+
+def test_open_sandbox_copies_reports_but_not_symlinks(tmp_path, monkeypatch):
+    import subprocess
+    root = tmp_path / "repo"
+    (root / "agents" / "reports").mkdir(parents=True)
+    (root / "agents" / "reports" / "2026-01-01-watch-ir.md").write_text("report")
+    (root / "agents" / "reports" / "big.md").write_text("x" * 1_000_001)
+    secret = tmp_path / "secret.txt"
+    secret.write_text("do not copy")
+    (root / "agents" / "reports" / "link.md").symlink_to(secret)
+    (root / "agents" / ".gitignore").write_text("reports/*\n")
+    (root / "f.txt").write_text("x")
+    for cmd in (["git", "init", "-q"], ["git", "add", "f.txt", "agents/.gitignore"],
+                ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "init"]):
+        subprocess.run(cmd, cwd=root, check=True)
+    monkeypatch.setattr(repo, "REPO_ROOT", root)
+    monkeypatch.setattr(repo, "SANDBOX_ROOT", tmp_path / "sandboxes")
+    monkeypatch.setitem(repo._state, "sandbox", None)
+    opened = json.loads(repo.open_sandbox.invoke({"topic": "t"}))
+    copied = sorted(p.name for p in (tmp_path / "sandboxes").glob("*/agents/reports/*"))
+    assert copied == ["2026-01-01-watch-ir.md"], opened
 
 
 def test_read_tools_stay_inside_the_repository():
@@ -146,9 +199,24 @@ def test_claude_code_command_keeps_the_safety_rules(monkeypatch):
     allowed = watch[watch.index("--allowedTools") + 1]
     assert "Edit" not in allowed.split(",") and "WebSearch" in allowed
     # the report folder is the only place a read-only agent may write, through an Edit rule
-    assert "Edit(agents/reports/**)" in allowed.split(",") and "Write(" not in allowed
+    assert "Edit(agents/reports/*.md)" in allowed.split(",") and "Write(" not in allowed
     note = watch[watch.index("--append-system-prompt") + 1]
     assert "No QUMO MCP server is attached" in note and "alphaXiv's read tools are attached" in note
+    # no agent gets a rule that can write outside the report folder: `git diff --output=PATH`
+    # writes a file, so git diff is allowed in fixed forms, never as a prefix
+    for name in registry.AGENTS:
+        rules = backends.claude_code_command(registry.get(name), "t", s, None)
+        rules = rules[rules.index("--allowedTools") + 1].split(",")
+        assert not any(r.startswith("Bash(git") and ":*" in r for r in rules), name
+        if not registry.get(name).writes_code:
+            assert [r for r in rules if r.startswith(("Edit", "Write"))] == ["Edit(agents/reports/*.md)"], name
+    # the note names only what the agent has
+    review = backends.claude_code_command(registry.get("code-review"), "t", s, None)
+    review_note = review[review.index("--append-system-prompt") + 1].split("Harness note:")[1]
+    assert "web search" not in review_note and "alphaXiv" not in review_note
+    assert "Any other form is refused" in review_note
+    codex_note = backends.codex_command(registry.get("autoresearch"), "t", s, REPO_ROOT)[-1]
+    assert ".venv/bin/mojo run -I ." in codex_note and "Any other form is refused" not in codex_note
     assert "mcp__alphaxiv__discover_papers" in allowed and "save_papers_to_folder" not in allowed
     assert "git commit" in watch[watch.index("--disallowedTools") + 1]
     auto = backends.claude_code_command(registry.get("autoresearch"), "t", s, None)

@@ -61,7 +61,8 @@ def cmd_run(args, settings: Settings) -> int:
                               "local_tools": [t.name for t in registry.local_tools(spec)],
                               "qumo_mcp": "all" if spec.mcp_tools is None else list(spec.mcp_tools),
                               "alphaxiv": "research" in spec.tool_groups and alphaxiv.available(),
-                              "subagents": {s: settings.model_for(s, None, backend) for s in spec.subagents}}, indent=1))
+                              "subagents": {s: settings.model_for(s, None, backend, model if backend == "local" else None)
+                                            for s in spec.subagents}}, indent=1))
             return 0
         from qumo_agents.graph import run_agent
         print(asyncio.run(run_agent(spec, task, settings, args.model, backend=backend)))
