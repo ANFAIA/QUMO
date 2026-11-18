@@ -384,10 +384,16 @@ struct QasmParser(Movable):
             out.append(k)
         return out^
 
-    def check_new_name(self, t: Token) raises:
+    def check_not_constant(self, t: Token) raises:
+        """A declared name may not be a built-in constant: lookup_value resolves those
+        first, so the declaration would be accepted and then never read."""
         var nm = self.text(t)
         if nm == "pi" or nm == "tau" or nm == "euler" or nm == "π" or nm == "τ" or nm == "ℇ":
             raise self.err("QM-E522", "'" + nm + "' is a built-in constant and cannot be declared", t, "pick another name: inside an expression '" + nm + "' always means the constant")
+
+    def check_new_name(self, t: Token) raises:
+        var nm = self.text(t)
+        self.check_not_constant(t)
         for l in self.loop_names:
             if l.name == nm and l.depth == self.block_depth:
                 raise self.err("QM-E522", "'" + nm + "' is the loop variable, declared first in this body", t, "pick another name, or declare it in an inner block")
@@ -1245,16 +1251,22 @@ struct QasmParser(Movable):
     def parse_gate_def(mut self) raises:
         var gt = self.next()
         var nt = self.expect_ident("gate name")
+        self.check_not_constant(nt)
         var nm = self.text(nt)
         var pnames = List[String]()
         var qnames = List[String]()
         if self.is_punct(self.peek(), Punct.LPAREN):
             _ = self.next()
             if not self.is_punct(self.peek(), Punct.RPAREN):
-                pnames.append(self.text(self.expect_ident("parameter name")))
+                # a parameter named pi would be shadowed by the constant inside the body
+                var pt = self.expect_ident("parameter name")
+                self.check_not_constant(pt)
+                pnames.append(self.text(pt))
                 while self.is_punct(self.peek(), Punct.COMMA):
                     _ = self.next()
-                    pnames.append(self.text(self.expect_ident("parameter name")))
+                    pt = self.expect_ident("parameter name")
+                    self.check_not_constant(pt)
+                    pnames.append(self.text(pt))
             _ = self.expect_punct(Punct.RPAREN, "')'")
         qnames.append(self.text(self.expect_ident("qubit argument name")))
         while self.is_punct(self.peek(), Punct.COMMA):
@@ -1787,6 +1799,7 @@ struct QasmParser(Movable):
             self.skip_statement()
             return
         var nm = self.text(vt)
+        self.check_not_constant(vt)
         var named = self.depth == 0
         if named:
             self.loop_names.append(_LoopName(nm, self.block_depth + (1 if self.is_punct(self.peek(), Punct.LBRACE) else 0)))
@@ -2540,7 +2553,8 @@ struct QasmParser(Movable):
 
     def parse_c_xor(mut self) raises -> CExpr:
         var a = self.parse_c_band()
-        while self.is_punct(self.peek(), Punct.CARET):
+        # in an OpenQASM 2 file `^` is the power operator, taken by parse_c_power
+        while self.version != 2 and self.is_punct(self.peek(), Punct.CARET):
             var t = self.next()
             a = self.rel(CNodeOp.XOR, a, self.parse_c_band(), t)
         return a^
@@ -2640,7 +2654,7 @@ struct QasmParser(Movable):
                 raise self.relocate(String(e), t)
         var a = self.parse_c_atom()
         var p = self.peek()
-        if self.is_punct(p, Punct.POW):
+        if self.is_punct(p, Punct.POW) or (self.version == 2 and self.is_punct(p, Punct.CARET)):
             _ = self.next()
             self.enter(p)
             var b = self.parse_c_unary()
@@ -3115,6 +3129,7 @@ struct QasmParser(Movable):
         self.prog.for_ranges.append(set_off)
         self.prog.for_ranges.append(unsigned_)
         self.push_scope()
+        self.check_not_constant(vt)
         var v = self.declare_var(self.text(vt), ty, False)
         self.tb.begin(StmtKind.FOR, v, off, self.ops_end(), vt.line)
         self.loop_names.append(_LoopName(self.text(vt), self.block_depth + (1 if self.is_punct(self.peek(), Punct.LBRACE) else 0)))

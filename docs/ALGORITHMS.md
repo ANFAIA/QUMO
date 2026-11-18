@@ -205,7 +205,10 @@ value and takes the unchanged code path, so existing results are bit-identical.
   qubits: the 2^n basis energies are tabulated and sorted once, each evaluation is
   one state-vector run plus a linear scan.
 * `cvar_of_energies(energies, alpha)` is the sampled form: the mean of the lowest
-  `ceil(alpha * N)` shot energies (Qiskit's convention).
+  `ceil(alpha * N)` shot energies (Qiskit's convention). It rounds the cut up to whole
+  shots, so for small N it differs from the exact form, which splits the last state's
+  probability: energies [-1, 0, 2, 3] with equal weight and `alpha = 0.3` give -0.5
+  sampled and -0.833 exact. The two agree as N grows.
 * A smaller `alpha` never gives a larger value; `alpha -> 0` tends to the lowest
   energy in the support. CVaR is piecewise smooth, so gradients are central finite
   differences and `grad_method` is ignored; prefer `"nelder-mead"` or `"spsa"`.

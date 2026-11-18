@@ -28,7 +28,7 @@ from qumo.sim.statevector import StateVector
 from qumo.sim.rng import Rng
 from qumo.algorithms.gradients import ExpectationEngine, Grad, grad_method_name, batch_expectation
 from qumo.algorithms.optimizers import Objective, Optimizer, OptimizeResult, minimize
-from qumo.algorithms.hamiltonians import Graph, maxcut
+from qumo.algorithms.hamiltonians import Graph, maxcut, check_fits
 from qumo.algorithms.library import qaoa_maxcut_ansatz, bitstring_to_int
 
 
@@ -95,6 +95,7 @@ struct CVaRObjective(Objective, Movable):
         ansatz.validate()
         if not h.is_diagonal():
             raise Error("QM-E804: CVaR needs a diagonal Hamiltonian (Z / ZZ terms only). Hint: use alpha = 1 (plain VQE) for Hamiltonians with X or Y terms.")
+        check_fits(h, ansatz.num_qubits)  # QM-E803, as the mean objective raises
         if ansatz.num_qubits > 24:
             raise Error("QM-E804: CVaRObjective tabulates 2^n energies; " + String(ansatz.num_qubits) + " qubits is too many.")
         self.ansatz = ansatz.copy()

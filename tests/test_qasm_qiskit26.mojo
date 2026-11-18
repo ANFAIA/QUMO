@@ -91,6 +91,11 @@ def test_qasm2_domain_errors() raises:
     assert_almost_equal(cp.ops[0].p0.offset, 8.0)
     assert_almost_equal(cp.ops[1].p0.offset, 512.0)
     assert_almost_equal(cp.ops[2].p0.offset, -4.0)
+    # also where the expression takes the typed path (a `const` in an OpenQASM 2 file)
+    var ct = parse_qasm(pre + "const int n = 3;\nrz(2^n) q[0];")
+    assert_almost_equal(ct.ops[0].p0.offset, 8.0)
+    # in OpenQASM 3 `^` stays XOR in typed expressions and is not a power in gate arguments
+    expect_error("OPENQASM 3.0;\ninclude \"stdgates.inc\";\nqubit[1] q;\nrz(2^3) q[0];", "QM-E500")
     print("  qasm2 expression domain errors")
 
 
@@ -126,21 +131,20 @@ def test_constant_names() raises:
         for d in decls:
             var src = "OPENQASM 3.0;\ninclude \"stdgates.inc\";\n" + d + "\nqubit[1] q;\nrx(" + nm + ") q[0];\n"
             var ok = True
-            var c = Circuit(1)
             try:
-                c = parse_qasm(src)
+                _ = parse_qasm(src)
             except e:
                 ok = False
                 assert_true(String(e).startswith("QM-E522"), "QM-E522 for '" + d + "': " + String(e))
-            # a variable, input or register with a constant's name used to be accepted and ignored
-            if not d.startswith("gate "):
-                assert_true(not ok, "'" + d + "' must be rejected")
-            if ok:
-                # accepted: rx must use the builtin value, not 1.0
-                var want = 3.141592653589793 if nm == "pi" else (6.283185307179586 if nm == "tau" else 2.718281828459045)
-                var got = c.ops[len(c.ops) - 1].p0.offset
-                if abs(got - want) > 1e-12:
-                    raise Error("'" + d + "' silently changed " + nm + " to " + String(got))
+            # a name equal to a constant used to be accepted and then ignored
+            assert_true(not ok, "'" + d + "' must be rejected")
+        # the same holds where the name is a gate parameter or a loop variable
+        expect_error("OPENQASM 3.0;\ninclude \"stdgates.inc\";\nqubit[1] q;\ngate g(" + nm + ") a { rz(" + nm + ") a; }\ng(0.5) q[0];\n", "QM-E522")
+        expect_error("OPENQASM 2.0;\ninclude \"qelib1.inc\";\nqreg q[1];\ngate g(" + nm + ") a { rz(" + nm + ") a; }\ng(0.5) q[0];\n", "QM-E522")
+        expect_error("OPENQASM 3.0;\ninclude \"stdgates.inc\";\nqubit[1] q;\nfor int " + nm + " in [0:1] { rz(" + nm + ") q[0]; }\n", "QM-E522")
+    # a qubit argument may carry such a name: it is never read as a value
+    var cq = parse_qasm("OPENQASM 3.0;\ninclude \"stdgates.inc\";\nqubit[1] q;\ngate g pi { rz(0.25) pi; }\ng q[0];\n")
+    assert_equal(len(cq.ops), 1, "qubit argument named pi")
     # a register named like a constant must survive to_qasm export of its own circuit
     var c2 = Circuit(2)
     c2.rx(Param(3.141592653589793), 0)

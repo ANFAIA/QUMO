@@ -62,4 +62,4 @@ Work committed directly to `main`, listed by commit title:
 ### Fixed
 
 - OpenQASM 2 expressions accept `^` as the power operator (`rz(2^3) q[0];` used to fail with QM-E500).
-- Declaring a variable, input or register named `pi`, `tau` or `euler` is now QM-E522. It used to be accepted and then ignored: expressions kept the built-in value.
+- Declaring a variable, input, register, gate, gate parameter or loop variable named `pi`, `tau` or `euler` is now QM-E522. It used to be accepted and then ignored: expressions kept the built-in value.

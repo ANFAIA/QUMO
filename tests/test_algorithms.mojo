@@ -485,6 +485,19 @@ def test_cvar() raises:
     # CVaR driver: value is at most the exact mean at the same angles
     var qc = qaoa_maxcut(g, 1, method="nelder-mead", seed=3, alpha=0.2)
     assert_true(qc.energy <= -qc.expected_cut + 1e-9, String(qc))
+    # the driver really optimises CVaR: with alpha = 0.6 the value lies strictly below the
+    # mean at the same angles (it would equal it if alpha were ignored)
+    var qd = qaoa_maxcut(g, 1, method="nelder-mead", seed=3, alpha=0.6)
+    assert_true(qd.energy < -qd.expected_cut - 1e-6, String(qd))
+    # a Hamiltonian wider than the ansatz is QM-E803 for CVaR too, not a silent value
+    var wide = PauliSum()
+    wide.add(1.0, 0, UInt64(1) << 7)
+    var e803 = False
+    try:
+        _ = CVaRObjective(ans, wide, 0.5)
+    except err:
+        e803 = _err_code(String(err)) == "QM-E803"
+    assert_true(e803, "CVaRObjective accepts a Hamiltonian outside the ansatz qubits")
     # No claim on prob_optimal: ring5 has 10 optimal strings of 32, so the uniform
     # state already saturates CVaR for alpha <= 0.3125 and the optimiser may stay there.
     # invalid alpha and non-diagonal H are rejected with QM-E804
