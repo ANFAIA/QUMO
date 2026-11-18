@@ -14,6 +14,7 @@ import fnmatch
 import json
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -185,6 +186,16 @@ def open_sandbox(topic: str) -> str:
         src = REPO_ROOT / link
         if src.exists() and not (path / link).exists():
             (path / link).symlink_to(src)
+    # Reports are git-ignored, so the new worktree has none: copy them, or an agent told to
+    # implement a proposal cannot read the report it comes from.
+    for src in sorted((REPO_ROOT / "agents" / "reports").glob("*.md")):
+        dst = path / "agents" / "reports" / src.name
+        # regular files of report size only: a symlink would copy whatever it points to
+        if src.is_symlink() or not src.is_file() or src.stat().st_size > 1_000_000:
+            continue
+        if not dst.exists() and not dst.is_symlink():
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, dst)
     _state["sandbox"] = path
     return json.dumps({"sandbox": str(path), "branch": branch})
 

@@ -42,6 +42,28 @@ def test_settings_models_cover_every_agent():
     assert s.model_for("code-review", "x/y") == "x/y"
 
 
+def test_open_sandbox_copies_reports_but_not_symlinks(tmp_path, monkeypatch):
+    import subprocess
+    root = tmp_path / "repo"
+    (root / "agents" / "reports").mkdir(parents=True)
+    (root / "agents" / "reports" / "2026-01-01-watch-ir.md").write_text("report")
+    (root / "agents" / "reports" / "big.md").write_text("x" * 1_000_001)
+    secret = tmp_path / "secret.txt"
+    secret.write_text("do not copy")
+    (root / "agents" / "reports" / "link.md").symlink_to(secret)
+    (root / "agents" / ".gitignore").write_text("reports/*\n")
+    (root / "f.txt").write_text("x")
+    for cmd in (["git", "init", "-q"], ["git", "add", "f.txt", "agents/.gitignore"],
+                ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "init"]):
+        subprocess.run(cmd, cwd=root, check=True)
+    monkeypatch.setattr(repo, "REPO_ROOT", root)
+    monkeypatch.setattr(repo, "SANDBOX_ROOT", tmp_path / "sandboxes")
+    monkeypatch.setitem(repo._state, "sandbox", None)
+    opened = json.loads(repo.open_sandbox.invoke({"topic": "t"}))
+    copied = sorted(p.name for p in (tmp_path / "sandboxes").glob("*/agents/reports/*"))
+    assert copied == ["2026-01-01-watch-ir.md"], opened
+
+
 def test_read_tools_stay_inside_the_repository():
     assert "error" in repo.read_file.invoke({"path": "../../etc/passwd"})
     assert "not readable" in repo.read_file.invoke({"path": ".venv/bin/python"})
@@ -65,10 +87,30 @@ def test_claude_code_command_keeps_the_safety_rules(monkeypatch):
     watch = backends.claude_code_command(registry.get("research-watch"), "t", s, None)
     allowed = watch[watch.index("--allowedTools") + 1]
     assert "Edit" not in allowed.split(",") and "WebSearch" in allowed
+    # the report folder is the only place a read-only agent may write, through an Edit rule
+    assert "Edit(agents/reports/*.md)" in allowed.split(",") and "Write(" not in allowed
+    note = watch[watch.index("--append-system-prompt") + 1]
+    assert "No QUMO MCP server is attached" in note and "alphaXiv's read tools are attached" in note
+    # no agent gets a rule that can write outside the report folder: `git diff --output=PATH`
+    # writes a file, so git diff is allowed in fixed forms, never as a prefix
+    for name in registry.AGENTS:
+        rules = backends.claude_code_command(registry.get(name), "t", s, None)
+        rules = rules[rules.index("--allowedTools") + 1].split(",")
+        assert not any(r.startswith("Bash(git") and ":*" in r for r in rules), name
+        if not registry.get(name).writes_code:
+            assert [r for r in rules if r.startswith(("Edit", "Write"))] == ["Edit(agents/reports/*.md)"], name
+    # the note names only what the agent has
+    review = backends.claude_code_command(registry.get("code-review"), "t", s, None)
+    review_note = review[review.index("--append-system-prompt") + 1].split("Harness note:")[1]
+    assert "web search" not in review_note and "alphaXiv" not in review_note
+    assert "Any other form is refused" in review_note
+    codex_note = backends.codex_command(registry.get("autoresearch"), "t", s, REPO_ROOT)[-1]
+    assert ".venv/bin/mojo run -I ." in codex_note and "Any other form is refused" not in codex_note
     assert "mcp__alphaxiv__discover_papers" in allowed and "save_papers_to_folder" not in allowed
     assert "git commit" in watch[watch.index("--disallowedTools") + 1]
     auto = backends.claude_code_command(registry.get("autoresearch"), "t", s, None)
     assert "Edit" in auto[auto.index("--allowedTools") + 1].split(",")
+    assert ".venv/bin/mojo run -I ." in auto[auto.index("--append-system-prompt") + 1]
     cfg = backends._mcp_config_file(registry.get("research-watch"))
     try:
         text = cfg.read_text()
