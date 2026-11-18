@@ -8,6 +8,7 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 
 ### Added
 
+- `qumo-agents --backend mojo`: run any agent on QUMO's own native harness (`build/qumo-agent`) with its LLM on OpenRouter, chosen per run or per agent in `agents/agents.json` like the other back ends. `doctor` reports whether the harness is built.
 - `examples/optimization/qaoa_cvar.mojo`: QAOA with the CVaR objective, 14 checks, including the case where CVaR does not help.
 - CVaR objective for VQE and QAOA: `vqe(..., alpha=)`, `qaoa_maxcut(..., alpha=)`, `CVaRObjective` and `cvar_of_energies` (`qumo/algorithms/variational.mojo`, `docs/ALGORITHMS.md`). `alpha = 1` is the old mean and stays the default; `alpha < 1` needs a diagonal Hamiltonian.
 - MCP tool annotations are per tool (`ToolHints`, `ToolRegistry.add_read_only`). The 24 shipped tools keep their read-only hints; a tool added without hints now gets the MCP default (not read-only, open world) instead of being announced as read-only.

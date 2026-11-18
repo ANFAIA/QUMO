@@ -6,8 +6,9 @@ and SDK releases, review the code, improve a module in a sandbox branch, drive Q
 through its MCP server, research algorithms, error correction and compilation, run
 circuits, and orchestrate hybrid workflows.
 
-A person starts every run. No agent runs on a schedule, commits, pushes or submits
-to quantum hardware.
+No agent commits, pushes or submits to quantum hardware. A person starts each run, with one
+exception the owner set up: a weekly `research-watch` over the nine modules (section 12), which
+only writes reports under `agents/reports/`.
 
 ## 1. Quick start
 
@@ -40,7 +41,7 @@ Options of `run`:
 | Option | Meaning |
 |---|---|
 | `--module NAME` | Focus on one QUMO module: `ir`, `sim`, `gpu`, `compiler`, `algorithms`, `qec`, `ft`, `exec`, `ai` |
-| `--backend NAME` | The harness: `openrouter` (default), `local`, `claude-code` or `codex` |
+| `--backend NAME` | The harness: `openrouter` (default), `local`, `mojo`, `claude-code` or `codex` |
 | `--model ID` | Model for this run: an OpenRouter id (`anthropic/claude-sonnet-5.5`), a local model name (`qwen3-coder`) or the CLI's own model name (`opus`) |
 | `--dry-run` | Show the model, tools and subagents (or the CLI command line) and call nothing |
 | `TASK` = `-` | Read the task from stdin: `cat task.md \| bin/qumo-agents run orchestrator -` |
@@ -108,6 +109,7 @@ git worktree remove .worktrees/agent-<topic>-<time>   # when you are done with i
 |---|---|---|
 | `openrouter` (default) | A deepagents graph; delegation nests (orchestrator, then autoresearch, then research-watch) | `OPENROUTER_API_KEY` |
 | `local` | The same deepagents graph on your own OpenAI-compatible server: Ollama, LM Studio, llama.cpp or vLLM | A running server and a model name. A key is sent only if you set `QUMO_AGENTS_LOCAL_API_KEY`. Not run end to end yet |
+| `mojo` | QUMO's own harness, `build/qumo-agent` ([agents/mojo](../agents/mojo/README.md)): no Python at run time. Its LLM is the OpenAI-compatible endpoint of `agents.json`, OpenRouter by default, with the same model ids as the `openrouter` back end | `make agents-mojo`, `make cli`, `OPENROUTER_API_KEY` |
 | `claude-code` | `claude -p` with the agent's prompt appended, QUMO's MCP server (and alphaXiv's) attached, and an allow-list of tools; `git commit`, `git push` and `gh` are blocked; a budget cap from `agents.json` | Claude Code installed and signed in |
 | `codex` | `codex exec`, read-only sandbox, workspace-write only for `autoresearch` inside its worktree | Codex CLI. Not tested yet: it was not installed when this layer was written |
 
@@ -129,6 +131,12 @@ bin/qumo-agents run code-review "Review the parser" --module ir --backend claude
 bin/qumo-agents run execution "Sample a 5-qubit GHZ" --backend local --model qwen3-coder
 QUMO_AGENTS_LOCAL_URL=http://localhost:1234/v1 bin/qumo-agents run execution "..." --backend local --model my-model
 ```
+
+The native harness is chosen like any other: `--backend mojo`, or one agent on it with
+`"backends": {"code-review": "mojo"}` in `agents.json`. Its model comes from the `mojo` section
+(`"models"`, `"model"`), then the `openrouter` ones, so by default both harnesses run an agent
+on the same OpenRouter id. To point the native harness at another OpenAI-compatible server,
+change `openrouter.base_url` in `agents.json`; it has no separate `local` mode yet.
 
 A CLI back end with no model set uses the CLI's own default model. The `local` back end
 has no default: name a model, or the run stops with an error. Subagents with no local
@@ -230,3 +238,23 @@ make test-agents-mojo                    # offline tests
 
 Design, limits and the review gate: [agents/mojo/README.md](../agents/mojo/README.md) and
 [agents/mojo/DESIGN.md](../agents/mojo/DESIGN.md).
+
+## 12. The weekly watch
+
+One scheduled job keeps the watch current: every Monday morning it runs `research-watch` for the
+nine modules (papers of the last week and new releases of each module's SDKs) and writes a summary,
+`agents/reports/<date>-weekly-watch.md`, with the top proposal per module and which ones are new
+since the earlier reports.
+
+* It is a scheduled task of the Claude desktop app on the owner's machine
+  (`qumo-agents-weekly-watch`), not a CI job: it needs the local checkout, `bin/qumo-agents` and the
+  back end's credentials. It runs when the app is open; a missed run starts at the next launch.
+* It reads and reports only. It does not implement, commit, push or open pull requests.
+  Implementing a proposal stays a decision of a person, through `autoresearch` or by hand, and
+  follows the rule in [CONTRIBUTING](../CONTRIBUTING.md): a new capability ships with an example,
+  an improvement is recorded in the docs.
+* Cost: each module run is capped by `claude_code.max_budget_usd` in `agents/agents.json` (5 USD),
+  so at most 45 USD a week. Run it by hand with the same command for one module:
+  `bin/qumo-agents run research-watch "What changed in the last 7 days?" --module compiler`.
+* Rankings are not stable between runs: two passes on the same day agreed on the top proposal
+  for three of nine modules. Read a report as a list of candidates.

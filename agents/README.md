@@ -2,8 +2,9 @@
 
 Nine agents, built on [deepagents](https://www.langchain.com/deep-agents), keep QUMO
 moving: they watch new papers and SDK releases, review the code, improve modules in a
-sandbox, use QUMO through its MCP server, and orchestrate hybrid workflows. Each run is
-started by a person; nothing runs on a schedule, commits or pushes.
+sandbox, use QUMO through its MCP server, and orchestrate hybrid workflows. No agent
+commits or pushes. A person starts each run, or a schedule the owner set up does: the weekly
+`research-watch` over the nine modules, which only writes reports.
 
 | Agent | Does | Delegates to |
 |---|---|---|
@@ -62,6 +63,8 @@ shows what each agent would run on. Details: [docs/AGENTS.md](../docs/AGENTS.md)
 
 * **openrouter** (default): a deepagents graph on an OpenRouter model. Per-agent models are in
   `agents.json`; `code-review` uses a different vendor than the others on purpose.
+* **mojo**: QUMO's own harness (`build/qumo-agent`, `make agents-mojo`) on an OpenRouter model:
+  `--backend mojo`, or per agent in `agents.json`. No Python at run time. Same model ids as `openrouter`.
 * **local**: the same graph on your own OpenAI-compatible server (Ollama, LM Studio,
   llama.cpp, vLLM): `--backend local --model <name>`. Not run end to end here.
 * **claude-code**: `claude -p` with the agent prompt appended, QUMO's MCP server (and

@@ -18,8 +18,12 @@ from qumo_agents.config import API_BACKENDS, BACKENDS, ConfigError, Settings
 from qumo_agents.tools import alphaxiv
 
 
+def _raw_task(args) -> str:
+    return sys.stdin.read() if args.task == "-" else args.task
+
+
 def _task(args) -> str:
-    task = sys.stdin.read() if args.task == "-" else args.task
+    task = _raw_task(args)
     if args.module:
         m = modules.get(args.module)
         task = f"Module: {m.name} ({m.summary}) Code: {', '.join(m.paths)}.\n\n{task}"
@@ -53,6 +57,14 @@ def cmd_list(args, settings: Settings) -> int:
 def cmd_run(args, settings: Settings) -> int:
     spec = registry.get(args.agent)
     backend = settings.backend_for(spec.name, args.backend)
+    if backend == "mojo":
+        from qumo_agents import backends
+        plain = _raw_task(args)  # the harness adds the module context itself
+        if args.dry_run:
+            print(json.dumps(backends.mojo_command(spec, plain, settings, args.model, args.module), indent=1))
+            return 0
+        print(backends.run_mojo_backend(spec, plain, settings, args.model, args.module))
+        return 0
     task = _task(args)
     if backend in API_BACKENDS:
         model = settings.model_for(spec.name, args.model, backend)
@@ -75,6 +87,12 @@ def cmd_run(args, settings: Settings) -> int:
         return 0
     print(backends.run_cli_backend(backend, spec, task, settings, args.model))
     return 0
+
+
+def _mojo_built(settings: Settings) -> bool:
+    from pathlib import Path
+    exe = settings.section("mojo").get("command", "build/qumo-agent")
+    return (Path(exe) if Path(exe).is_absolute() else registry_root() / exe).exists()
 
 
 def _local_reachable(settings: Settings) -> bool:
@@ -105,6 +123,8 @@ def cmd_doctor(_args, settings: Settings) -> int:
         (f"openrouter back end ({or_env})", bool(os.environ.get(or_env)), "export the key to use the default back end"),
         ("local back end (OpenAI-compatible server)", _local_reachable(settings),
          "optional; start Ollama / LM Studio / llama.cpp / vLLM, set QUMO_AGENTS_LOCAL_URL if it is not localhost:11434"),
+        ("mojo back end (native harness)", _mojo_built(settings),
+         "optional; build it with `make agents-mojo` (it talks to OpenRouter, like the default back end)"),
         ("claude-code back end", shutil.which(settings.section("claude_code").get("command", "claude")) is not None,
          "install Claude Code: https://claude.com/claude-code"),
         ("codex back end", shutil.which(settings.section("codex").get("command", "codex")) is not None,
@@ -114,8 +134,8 @@ def cmd_doctor(_args, settings: Settings) -> int:
     ]
     for name, ok, hint in checks:
         print(f"[{'ok' if ok else '--'}] {name}" + ("" if ok else f": {hint}"))
-    usable = [b for b, ok in (("openrouter", checks[1][1]), ("local", checks[2][1]),
-                              ("claude-code", checks[3][1]), ("codex", checks[4][1])) if ok]
+    usable = [b for b, ok in (("openrouter", checks[1][1]), ("local", checks[2][1]), ("mojo", checks[3][1]),
+                              ("claude-code", checks[4][1]), ("codex", checks[5][1])) if ok]
     print(f"\nusable back ends: {', '.join(usable) or 'none'}")
     return 0 if checks[0][1] and usable else 1
 
@@ -162,7 +182,7 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("task", help="the task in plain words; use - to read it from stdin")
     r.add_argument("--module", choices=list(modules.MODULES))
     r.add_argument("--backend", choices=BACKENDS,
-                   help="harness: openrouter (API), local (your own OpenAI-compatible server), claude-code or codex (CLIs)")
+                   help="harness: openrouter (deepagents on the API), local (deepagents on your own OpenAI-compatible server), mojo (QUMO's native harness, build/qumo-agent), claude-code or codex (CLIs)")
     r.add_argument("--model", help="model for this run: an OpenRouter id, a local model name, or the CLI's own model name")
     r.add_argument("--dry-run", action="store_true", help="show what would run, call nothing")
     sub.add_parser("doctor", help="check keys, the MCP server and the back-end CLIs")
