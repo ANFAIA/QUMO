@@ -386,6 +386,8 @@ struct QasmParser(Movable):
 
     def check_new_name(self, t: Token) raises:
         var nm = self.text(t)
+        if nm == "pi" or nm == "tau" or nm == "euler" or nm == "π" or nm == "τ" or nm == "ℇ":
+            raise self.err("QM-E522", "'" + nm + "' is a built-in constant and cannot be declared", t, "pick another name: inside an expression '" + nm + "' always means the constant")
         for l in self.loop_names:
             if l.name == nm and l.depth == self.block_depth:
                 raise self.err("QM-E522", "'" + nm + "' is the loop variable, declared first in this body", t, "pick another name, or declare it in an inner block")
@@ -540,13 +542,14 @@ struct QasmParser(Movable):
     def parse_power(mut self) raises -> Param:
         var a = self.parse_primary()
         var t = self.peek()
-        if self.is_punct(t, Punct.POW):
+        # OpenQASM 2 writes the power as `^`; in OpenQASM 3 `^` is XOR and the power is `**`
+        if self.is_punct(t, Punct.POW) or (self.version == 2 and self.is_punct(t, Punct.CARET)):
             _ = self.next()
             self.enter(t)
             var b = self.parse_unary()
             self.nest -= 1
-            var x = self.need_const(a, t, "base of **")
-            var y = self.need_const(b, t, "exponent of **")
+            var x = self.need_const(a, t, "base of the power")
+            var y = self.need_const(b, t, "exponent of the power")
             return Param(x ** y)
         return a
 

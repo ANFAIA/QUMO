@@ -392,7 +392,7 @@ comptime BUILD_CIRCUIT_SCHEMA = "{\"type\":\"object\",\"properties\":{\"kind\":{
 
 
 def register_algorithm_tools(mut reg: ToolRegistry):
-    reg.add(
+    reg.add_read_only(
         "qumo_build_circuit", "Build an algorithm circuit",
         "Build a circuit from QUMO's algorithm library by name instead of writing gates: ghz, qft, iqft, grover (marked bitstrings), bernstein_vazirani, deutsch_jozsa, qaoa_maxcut (edge-list graph, depth p), hea (hardware-efficient ansatz), uccsd, h2_ansatz, trotter (Pauli-sum Hamiltonian), reuploading_classifier (data re-uploading QML classifier), angle_kernel (compute-uncompute quantum kernel). Returns OpenQASM 3 with symbolic parameters as 'input float' (or OpenQASM 2 for parameter-free circuits), parameter names in order, gate counts, two-qubit gates, depth, the observable to measure (MaxCut cost, molecular or given Hamiltonian) and notes. Sizes are capped; unknown arguments are rejected (QM-E801/QM-E802).",
         BUILD_CIRCUIT_SCHEMA,

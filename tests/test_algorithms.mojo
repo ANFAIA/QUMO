@@ -31,6 +31,7 @@ from qumo.algorithms.optimizers import (
 )
 from qumo.algorithms.variational import (
     vqe, vqe_with, qaoa_maxcut, parameter_sweep, landscape_2d, linspace, VQEObjective,
+    CVaRObjective, cvar_of_energies,
 )
 
 
@@ -448,6 +449,60 @@ def test_qaoa() raises:
     print("  qaoa weighted: ratio=", rw.approx_ratio, " best cut=", rw.best_cut, "/", rw.max_cut)
 
 
+def test_cvar() raises:
+    var g = Graph.ring(5)
+    var h = maxcut(g)
+    var ans = qaoa_maxcut_ansatz(g, 2)
+    var mean_obj = VQEObjective(ans, h)
+    var pts: List[List[Float64]] = [[0.3, 0.7, 0.2, 0.4], [1.1, 0.5, 0.9, 0.1], [0.0, 0.0, 0.0, 0.0]]
+    for pi in range(len(pts)):
+        var x = pts[pi].copy()
+        var mean = mean_obj.value(x)
+        # alpha = 1 reproduces the expectation value
+        var c1 = CVaRObjective(ans, h, 1.0)
+        assert_almost_equal(c1.value(x), mean, atol=1e-10)
+        # a smaller alpha never raises the value
+        var prev = mean
+        for a in [0.75, 0.5, 0.25, 0.1, 0.01]:
+            var co = CVaRObjective(ans, h, a)
+            var v = co.value(x)
+            assert_true(v <= prev + 1e-12, "CVaR rose at alpha=" + String(a))
+            prev = v
+    # alpha -> 0 tends to the lowest energy (-max cut)
+    var tiny = CVaRObjective(ans, h, 1e-9)
+    assert_almost_equal(tiny.value(pts[0]), -g.max_cut()[0], atol=1e-9)
+    # sample version: alpha = 1 is the mean, monotone, ceil(alpha N) values
+    var e: List[Float64] = [3.0, -1.0, 2.0, 0.0]
+    assert_almost_equal(cvar_of_energies(e, 1.0), 1.0)
+    assert_almost_equal(cvar_of_energies(e, 0.5), -0.5)
+    assert_almost_equal(cvar_of_energies(e, 0.25), -1.0)
+    # drivers: default alpha unchanged, explicit 1.0 identical
+    var q0 = qaoa_maxcut(g, 1, seed=3)
+    var q1 = qaoa_maxcut(g, 1, seed=3, alpha=1.0)
+    assert_equal(q0.energy, q1.energy)
+    var h4 = h2_sto3g(4)
+    assert_equal(vqe(h2_ansatz(), h4).energy, vqe(h2_ansatz(), h4, alpha=1.0).energy)
+    # CVaR driver: value is at most the exact mean at the same angles
+    var qc = qaoa_maxcut(g, 1, method="nelder-mead", seed=3, alpha=0.2)
+    assert_true(qc.energy <= -qc.expected_cut + 1e-9, String(qc))
+    # No claim on prob_optimal: ring5 has 10 optimal strings of 32, so the uniform
+    # state already saturates CVaR for alpha <= 0.3125 and the optimiser may stay there.
+    # invalid alpha and non-diagonal H are rejected with QM-E804
+    var codes = 0
+    try:
+        _ = CVaRObjective(ans, h, 0.0)
+    except err:
+        if _err_code(String(err)) == "QM-E804":
+            codes += 1
+    try:
+        _ = vqe(h2_ansatz(), h4, alpha=0.5)
+    except err:
+        if _err_code(String(err)) == "QM-E804":
+            codes += 1
+    assert_equal(codes, 2)
+    print("  cvar: ring5 p=1 P(opt) mean=", q0.prob_optimal, " alpha=0.2 ->", qc.prob_optimal)
+
+
 def test_errors() raises:
     var codes = List[String]()
     try:
@@ -518,6 +573,7 @@ def main() raises:
     test_gradients()
     test_optimizers()
     test_vqe()
+    test_cvar()
     test_qaoa()
     test_errors()
     print("test_algorithms OK")

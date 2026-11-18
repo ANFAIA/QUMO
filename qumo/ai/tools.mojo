@@ -17,8 +17,9 @@ from qumo.ai.tools import ToolRegistry, ToolResult, ToolContext, tool_ok, arg_ci
 from qumo.core.json import JsonValue
 def _transpile(args: JsonValue, ctx: ToolContext) raises -> ToolResult: ...
 def register_compiler_tools(mut reg: ToolRegistry):
-    reg.add("qumo_transpile", "Transpile", "Optimize/route a circuit ...",
-            "{\\"type\\":\\"object\\", ...}", _transpile)
+    reg.add_read_only("qumo_transpile", "Transpile", "Optimize/route a circuit ...",
+                      "{\\"type\\":\\"object\\", ...}", _transpile)
+    # a tool that writes a file or submits a job: reg.add(..., ToolHints(False, False, False, True))
 ```
 then add one line to `default_registry()` below. Every registered tool
 appears automatically in MCP `tools/list`, `qumo tool <name> '<json>'`,
@@ -81,19 +82,48 @@ struct ToolContext(Copyable):
 comptime ToolHandler = def(JsonValue, ToolContext) raises thin -> ToolResult
 
 
+struct ToolHints(Copyable):
+    """MCP tool annotation hints (spec 2025-06-18, `ToolAnnotations`).
+
+    The default is the MCP spec's own default for a tool that says nothing: it
+    may change its environment, destructively, repeatably wrong, and reach
+    outside. A tool earns `read_only` only by being verified: no file write, no
+    network, no hardware submission, no state kept between calls.
+    """
+
+    var read_only: Bool
+    var destructive: Bool  # meaningful only when not read_only
+    var idempotent: Bool  # meaningful only when not read_only
+    var open_world: Bool  # talks to systems outside this process (cloud, hardware)
+
+    def __init__(out self, read_only: Bool = False, destructive: Bool = True, idempotent: Bool = False, open_world: Bool = True):
+        self.read_only = read_only
+        self.destructive = destructive
+        self.idempotent = idempotent
+        self.open_world = open_world
+
+    @staticmethod
+    def local_read_only() -> Self:
+        """Pure local computation: results depend only on the arguments (seeds
+        are explicit) and on read-only files shipped with QUMO."""
+        return Self(True, False, True, False)
+
+
 struct ToolSpec(Copyable):
     var name: String
     var title: String
     var description: String
     var input_schema: String  # JSON Schema (object) as text
     var handler: ToolHandler
+    var hints: ToolHints
 
-    def __init__(out self, name: String, title: String, description: String, input_schema: String, handler: ToolHandler):
+    def __init__(out self, name: String, title: String, description: String, input_schema: String, handler: ToolHandler, hints: ToolHints = ToolHints()):
         self.name = name
         self.title = title
         self.description = description
         self.input_schema = input_schema
         self.handler = handler
+        self.hints = hints.copy()
 
 
 def tool_ok(var structured: String) -> ToolResult:
@@ -117,13 +147,21 @@ struct ToolRegistry(Movable):
     def __init__(out self):
         self.tools = List[ToolSpec]()
 
-    def add(mut self, name: String, title: String, description: String, input_schema: String, handler: ToolHandler):
-        """Register (or replace) a tool."""
+    def add(mut self, name: String, title: String, description: String, input_schema: String, handler: ToolHandler, hints: ToolHints = ToolHints()):
+        """Register (or replace) a tool. Without `hints` the tool is annotated
+        with the MCP default (not read-only, destructive, not idempotent, open
+        world): a client must not auto-approve it."""
         var i = self.find(name)
         if i >= 0:
-            self.tools[i] = ToolSpec(name, title, description, input_schema, handler)
+            self.tools[i] = ToolSpec(name, title, description, input_schema, handler, hints.copy())
         else:
-            self.tools.append(ToolSpec(name, title, description, input_schema, handler))
+            self.tools.append(ToolSpec(name, title, description, input_schema, handler, hints.copy()))
+
+    def add_read_only(mut self, name: String, title: String, description: String, input_schema: String, handler: ToolHandler):
+        """Register a tool verified as pure local computation (see
+        `ToolHints.local_read_only`). Use `add` with explicit hints for a tool
+        that writes a file, calls a network service or submits a hardware job."""
+        self.add(name, title, description, input_schema, handler, ToolHints.local_read_only())
 
     def find(self, name: String) -> Int:
         for i in range(len(self.tools)):
@@ -161,10 +199,10 @@ struct ToolRegistry(Movable):
             w.key("annotations")
             w.begin_object()
             w.kv_string("title", t.title)
-            w.kv_bool("readOnlyHint", True)
-            w.kv_bool("destructiveHint", False)
-            w.kv_bool("idempotentHint", True)
-            w.kv_bool("openWorldHint", False)
+            w.kv_bool("readOnlyHint", t.hints.read_only)
+            w.kv_bool("destructiveHint", t.hints.destructive)
+            w.kv_bool("idempotentHint", t.hints.idempotent)
+            w.kv_bool("openWorldHint", t.hints.open_world)
             w.end_object()
             w.end_object()
         w.end_array()
@@ -922,49 +960,49 @@ def _convert(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
 
 
 def register_core_tools(mut reg: ToolRegistry):
-    reg.add(
+    reg.add_read_only(
         "qumo_run_qasm", "Run circuit (sample)",
         "Simulate an OpenQASM 2/3 circuit or program and return measurement counts (Qiskit-style bitstrings, leftmost = highest bit). Deterministic for a given seed. Circuits without measurements are measured on all qubits. Supports mid-circuit measurement, reset, feed-forward and '#pragma qumo' noise (per-shot trajectories), and while, break, continue and classical variables, shot by shot: those results add 'iterations' (back-edges per shot) and 'outputs' (declared output variables).",
         "{\"type\":\"object\",\"properties\":{" + _QASM_PROP + "," + _CIRCUIT_PROP + "," + _PROGRAM_PROP + ",\"shots\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":10000000,\"default\":1024},\"seed\":{\"type\":\"integer\",\"minimum\":0,\"default\":1234}," + _PARAMS_PROP + ",\"max_qubits\":{\"type\":\"integer\",\"default\":28,\"description\":\"Safety limit for dense simulation (16*2^n bytes)\"},\"max_iterations\":{\"type\":\"integer\",\"minimum\":1,\"default\":65536,\"description\":\"Loop back-edges allowed per shot; past it the run stops with QM-E480\"}},\"additionalProperties\":false}",
         _run_qasm,
     )
-    reg.add(
+    reg.add_read_only(
         "qumo_statevector", "Final state vector",
         "Return the exact final state vector (amplitudes with probability > threshold, sorted by basis index) of a unitary circuit. Measurements and resets are ignored; classically-conditioned gates are rejected (QM-E401), and so is a program with runtime control flow (QM-E585).",
         "{\"type\":\"object\",\"properties\":{" + _QASM_PROP + "," + _CIRCUIT_PROP + "," + _PARAMS_PROP + ",\"max_amplitudes\":{\"type\":\"integer\",\"default\":64,\"minimum\":1},\"threshold\":{\"type\":\"number\",\"default\":1e-12},\"max_qubits\":{\"type\":\"integer\",\"default\":24}},\"additionalProperties\":false}",
         _statevector,
     )
-    reg.add(
+    reg.add_read_only(
         "qumo_expectation", "Pauli expectation value",
         "Exact expectation value <psi|H|psi> of a Pauli-sum observable (e.g. '0.5*Z0 Z1 - 1.2*X0 + 0.3' or dense 'ZZI') on the circuit's final state. Pass an array of observables to evaluate several at once. A program with runtime control flow has no single final state: QM-E585.",
         "{\"type\":\"object\",\"properties\":{" + _QASM_PROP + "," + _CIRCUIT_PROP + ",\"observable\":{\"description\":\"Pauli sum string, or array of strings\",\"oneOf\":[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"type\":\"string\"}}]}," + _PARAMS_PROP + ",\"max_qubits\":{\"type\":\"integer\",\"default\":28}},\"required\":[\"observable\"],\"additionalProperties\":false}",
         _expectation,
     )
-    reg.add(
+    reg.add_read_only(
         "qumo_validate_qasm", "Validate OpenQASM",
         "Parse and lint OpenQASM 2/3 without simulating, including programs with while and classical variables. Returns valid=true/false, structured errors (stable QM-Exxx code, message, line, col, snippet, hint) and lint warnings (QM-Wxxx), plus a summary when valid. Every independent parse error is listed, not only the first: a failing gate call, measurement or assignment is skipped and parsing goes on; 'errors_complete' is false when collection had to stop (an error in a declaration or a block header, which later lines depend on), so more errors may follow the last one.",
         "{\"type\":\"object\",\"properties\":{" + _QASM_PROP + "},\"required\":[\"qasm\"],\"additionalProperties\":false}",
         _validate,
     )
-    reg.add(
+    reg.add_read_only(
         "qumo_describe", "Describe QUMO",
         "Machine-readable self-description: topic 'gates' (every gate: arity, params, Clifford/diagonal flags, QASM syntax, matrix), 'gate' + name, 'errors' (error-code catalog with fix hints; format 'markdown' returns docs/ERRORS.md), 'error' + name (one code), 'capabilities' (simulators, QASM subset, conventions, tools), 'passes' (compiler pass catalog incl. the AI synthesis passes, route AI keys and presets) or 'models' (installed AI-transpiler models from the INDEX.json registries; 'name' = optional model directory).",
         "{\"type\":\"object\",\"properties\":{\"topic\":{\"type\":\"string\",\"enum\":[\"gates\",\"gate\",\"errors\",\"error\",\"capabilities\",\"passes\",\"models\"],\"default\":\"capabilities\"},\"name\":{\"type\":\"string\",\"description\":\"Gate name/alias or error code for topic gate/error; model directory for topic models\"},\"format\":{\"type\":\"string\",\"enum\":[\"json\",\"markdown\"],\"default\":\"json\",\"description\":\"'markdown' (topic 'errors' only): the generated docs/ERRORS.md text\"}},\"additionalProperties\":false}",
         _describe,
     )
-    reg.add(
+    reg.add_read_only(
         "qumo_circuit_info", "Circuit summary",
         "Analyze a circuit without simulating: qubits, clbits, op counts, depth, two-qubit gate count, T-count, Clifford/dynamic/noisy flags, parameters, memory estimate, recommended simulator and lint findings. Optionally include the instruction list (JSON) and canonical OpenQASM 3. A program with runtime control flow gets blocks, loops, variables and cost per loop instead of a depth.",
         "{\"type\":\"object\",\"properties\":{" + _QASM_PROP + "," + _CIRCUIT_PROP + "," + _PROGRAM_PROP + ",\"include_instructions\":{\"type\":\"boolean\",\"default\":false},\"include_qasm\":{\"type\":\"boolean\",\"default\":false},\"include_lint\":{\"type\":\"boolean\",\"default\":true}},\"additionalProperties\":false}",
         _circuit_info,
     )
-    reg.add(
+    reg.add_read_only(
         "qumo_draw", "Draw circuit",
         "Text drawing of a circuit: one line per qubit, columns of gates, @ control, + CX target, x SWAP end, M>c3 measurement into bit 3, ?c0=1 classical condition; detectors, observables and barriers take a whole column. A program draws by blocks, under indented headers. 'style' ascii or unicode; 'width' folds long circuits (0: never).",
         "{\"type\":\"object\",\"properties\":{" + _QASM_PROP + "," + _CIRCUIT_PROP + "," + _PROGRAM_PROP + ",\"width\":{\"type\":\"integer\",\"default\":80},\"style\":{\"type\":\"string\",\"enum\":[\"ascii\",\"unicode\"],\"default\":\"ascii\"}},\"additionalProperties\":false}",
         _draw,
     )
-    reg.add(
+    reg.add_read_only(
         "qumo_convert", "Convert circuit",
         "Convert OpenQASM 2/3 (or circuit JSON) to canonical OpenQASM 3 (to='qasm3', round-trip exact, readable pi fractions), to portable OpenQASM 2 (to='qasm2': qelib1.inc plus exact gate definitions, loads in qiskit.qasm2 strict and legacy modes, pytket and Cirq; needs bound parameters, pass 'params' to bind) or to QUMO circuit JSON (to='json'). A program with runtime control flow goes to OpenQASM 3 or to program JSON (qumo.program.v1); OpenQASM 2 cannot hold it (QM-E585). 'params' binds 'input float' parameters of a circuit before converting.",
         "{\"type\":\"object\",\"properties\":{" + _QASM_PROP + "," + _CIRCUIT_PROP + "," + _PROGRAM_PROP + ",\"to\":{\"type\":\"string\",\"enum\":[\"qasm3\",\"qasm2\",\"json\"],\"default\":\"qasm3\"}," + _PARAMS_PROP + "},\"additionalProperties\":false}",
