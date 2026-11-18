@@ -9,7 +9,7 @@ SHARDS ?= 1
 SHARD ?= 1
 FILES ?= $(TESTS)
 
-.PHONY: all help setup setup-py setup-py-locked test test-shard test-gpu-fallback cli py bench-sv bench-neutral bench-charts clean examples examples-all examples-gpu test-py test-python install-py
+.PHONY: all help setup setup-py setup-py-locked test test-shard test-gpu-fallback cli py bench-sv bench-neutral bench-charts clean examples examples-all examples-gpu test-py test-python install-py docker-test
 
 all: cli py
 
@@ -186,6 +186,10 @@ test-rl:  ## fast RL tests: rl/ independence check, core tests (-I rl only) and 
 
 test-rl-slow:  ## statistical and end-to-end RL tests (core *_slow, smoke; bridge e2e) and test_rl_tensor with -D ASSERT=all
 	@$(MAKE) $(RL_ARGS) test-slow test-bridge-slow
+
+docker-test:  ## the Mojo suite and the fast RL tests on Linux, in a minimal Ubuntu 24.04 container (docker/linux-test.Dockerfile); needs Docker running
+	docker build -f docker/linux-test.Dockerfile -t qumo-linux-test .
+	docker run --rm qumo-linux-test sh -c 'make cli && make test'
 
 check-independence:  ## fails if anything under rl/qrl, rl/drivers or rl/tests imports qumo.* (rl/check_independence.sh)
 	@$(MAKE) $(RL_ARGS) check-independence
