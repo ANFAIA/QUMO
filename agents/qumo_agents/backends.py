@@ -26,24 +26,33 @@ from qumo_agents.tools import alphaxiv, qumo_mcp, repo
 
 CLI_NOTE = """
 Harness note: you run inside {harness}, not the deepagents runtime. Tool names differ from the
-ones above: search papers and SDK releases with web search / fetch (arxiv.org, pypi.org,
-github.com releases) and read code with the file tools. {mcp} {papers}{checks}
+ones above: read code with the file tools. {research}{mcp}{checks}
 Save the report as agents/reports/<YYYY-MM-DD>-<name>.md {where}.
 """
 
 CHECK_NOTE = """
-Run a Mojo file exactly as `.venv/bin/mojo run -I . <path>.mojo` from the working directory:
-one command, no `cd`, no pipe, no `make`. Any other form is refused. Compile and run every file
-you change before you report; code you could not run must be reported as not run."""
+Run a Mojo file as `.venv/bin/mojo run -I . <path>.mojo` from the working directory: one
+command, no `cd`, no pipe, no `make`.{refused} Look at changes with `git diff`, `git diff --stat`
+or `git status --short`. Compile and run every file you change before you report; code you
+could not run must be reported as not run."""
 
 
 def _cli_note(spec: AgentSpec, harness: str, where: str) -> str:
+    """What this agent really has in this harness: an agent told about a tool it lacks
+    wastes its run asking for it."""
+    research = ""
+    if "research" in spec.tool_groups:
+        papers = ("alphaXiv's read tools are attached." if _wants_alphaxiv(spec) else
+                  "alphaXiv is not attached: say in the report that paper claims come from abstracts.")
+        research = ("Search papers and SDK releases with web search / fetch (arxiv.org, pypi.org, "
+                    f"github.com releases). {papers} ")
     mcp = ("Call QUMO through the MCP server named 'qumo'." if spec.uses_mcp else
            "No QUMO MCP server is attached to this agent: read the code and docs instead.")
-    papers = ("alphaXiv's read tools are attached." if _wants_alphaxiv(spec) else
-              "alphaXiv is not attached: say in the report that paper claims come from abstracts.")
-    checks = CHECK_NOTE if "check" in spec.tool_groups or spec.writes_code else ""
-    return CLI_NOTE.format(harness=harness, where=where, mcp=mcp, papers=papers, checks=checks)
+    checks = ""
+    if "check" in spec.tool_groups or spec.writes_code:
+        # only Claude Code enforces an allow-list of commands; Codex relies on its sandbox
+        checks = CHECK_NOTE.format(refused=" Any other form is refused." if harness == "Claude Code" else "")
+    return CLI_NOTE.format(harness=harness, where=where, research=research, mcp=mcp, checks=checks)
 
 
 def _wants_alphaxiv(spec: AgentSpec) -> bool:
@@ -70,11 +79,15 @@ def claude_code_command(spec: AgentSpec, task: str, settings: Settings, mcp_conf
     if "research" in spec.tool_groups:
         allowed += ["WebSearch", "WebFetch"]
     if "check" in spec.tool_groups or spec.writes_code:
+        # git diff is allowed in fixed forms only: `git diff --output=<path>` writes a file
+        # anywhere, so a prefix rule would hand a read-only agent a write.
         allowed += ["Bash(.venv/bin/mojo run:*)", "Bash(bench/.venv/bin/python examples/run_examples.py:*)",
-                    "Bash(git diff:*)", "Bash(git status:*)", "Bash(build/qumo:*)"]
+                    "Bash(git diff)", "Bash(git diff --stat)", "Bash(git diff HEAD)", "Bash(git diff --stat HEAD)",
+                    "Bash(git status)", "Bash(git status --short)", "Bash(build/qumo:*)"]
     # Claude Code grants file writes through Edit rules; a Write(path) rule is not honoured
-    # in print mode, and the report write is then denied.
-    allowed += ["Edit(agents/reports/**)"]
+    # in print mode, and the report write is then denied. Markdown only: an agent that may
+    # also run `mojo run` must not be able to write a program into the report folder.
+    allowed += ["Edit(agents/reports/*.md)"]
     if spec.writes_code:
         allowed += ["Edit", "Write"]
     if spec.uses_mcp:
