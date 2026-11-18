@@ -57,7 +57,10 @@ The IR is self-contained: `qumo/ir` imports nothing from the simulators, the com
 * **Text formats**: OpenQASM 3 is canonical (`qasm.mojo` re-exports the lexer `qasm_lexer.mojo`,
   the parser `qasm_parser.mojo` and the emitter `qasm_emit.mojo`; round-trip exact,
   `#pragma qumo` for noise/detectors); OpenQASM 2 export (`qasm2.mojo`) for
-  interoperability with every other SDK.
+  interoperability with every other SDK. Two rules of the parser worth knowing: in an OpenQASM 2
+  file `^` is the power operator (`rz(2^3) q[0];`), while in OpenQASM 3 it is XOR and the power is
+  `**`; and `pi`, `tau` and `euler` are built-in constants that cannot be declared as a variable,
+  input, register, gate, gate parameter or loop variable (QM-E522).
 * **Shared utilities**: `qumo/core` (JSON writer and parser) imports nothing from QUMO and is
   used by every layer above the IR. `GateSet` and the multi-qubit rewrite rules (`expand_rule`)
   live in `qumo/ir/gateset.mojo`, so the simulator does not depend on the compiler.

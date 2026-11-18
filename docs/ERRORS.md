@@ -397,8 +397,8 @@ Fix: Valid indices are 0..size-1; slices [a:b] are inclusive.
 
 ### QM-E522
 
-**Name declared twice.**  
-Fix: Use unique names for registers, inputs, constants and gates.
+**Name declared twice, or a built-in constant (pi, tau, euler) declared as a name.**  
+Fix: Use unique names for registers, inputs, constants and gates, and none of pi, tau, euler.
 
 ### QM-E523
 
