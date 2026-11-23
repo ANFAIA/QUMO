@@ -8,6 +8,7 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 
 ### Added
 
+- `qumo.qec.dem_compare`: `gather_dem` and `compare_dem`, exact comparison of two detector error models by symptom class, the DEMVal oracle of Luo and Suzuki ([arXiv:2611.20501](https://arxiv.org/abs/2611.20501)): one-sided classes above 1e-15, the largest relative rate difference, and the worst classes listed. `tests/test_dem_compare.mojo` seeds five of the paper's six defect classes; `examples/error_correction/dem_exact_comparison.mojo` checks QUMO's extractor against a DEM derived by hand ([QEC](docs/QEC.md)). (weekly job, 2026-11-22)
 - `agents/agents.local.json` (git-ignored, example in `agents/agents.local.example.json`): per-machine harness and models for the agents, laid over the shared `agents.json`. `"claude_code": {"auth": "subscription"}` keeps an exported `ANTHROPIC_API_KEY` from turning a Claude Code subscription run into a metered one.
 - `qumo-agents --backend mojo`: run any agent on QUMO's own native harness (`build/qumo-agent`) with its LLM on OpenRouter, chosen per run or per agent in `agents/agents.json` like the other back ends. `doctor` reports whether the harness is built.
 - `examples/optimization/qaoa_cvar.mojo`: QAOA with the CVaR objective, 14 checks, including the case where CVaR does not help.
