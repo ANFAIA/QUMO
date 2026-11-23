@@ -510,7 +510,7 @@ def register_exec_tools(mut reg: ToolRegistry):
     reg.add_read_only(
         "qumo_estimate_resources", "Estimate resources",
         "Plan before running: logical metrics (gates, depth, 2q, T-count, Clifford, memory, recommended simulator), NISQ estimate for a modality profile ('superconducting' | 'trapped_ion' | 'neutral_atom': duration, success probability) and a surface-code fault-tolerant estimate (code distance, physical qubits, T factories, runtime) for a physical error rate and error budget.",
-        "{\"type\":\"object\",\"properties\":{" + _CIRC + ",\"profile\":{\"type\":\"string\",\"enum\":[\"superconducting\",\"trapped_ion\",\"neutral_atom\"],\"default\":\"superconducting\"},\"physical_error\":{\"type\":\"number\",\"default\":0.001},\"error_budget\":{\"type\":\"number\",\"default\":0.01}},\"additionalProperties\":false}",
+        "{\"type\":\"object\",\"properties\":{" + _CIRC + "," + _PROG + ",\"profile\":{\"type\":\"string\",\"enum\":[\"superconducting\",\"trapped_ion\",\"neutral_atom\"],\"default\":\"superconducting\"},\"physical_error\":{\"type\":\"number\",\"default\":0.001},\"error_budget\":{\"type\":\"number\",\"default\":0.01}},\"additionalProperties\":false}",
         _resources_tool,
     )
     reg.add_read_only(
@@ -534,19 +534,19 @@ def register_exec_tools(mut reg: ToolRegistry):
     reg.add_read_only(
         "qumo_emulate", "Emulate on a device model",
         "Sample a circuit under the noise of a target (per-qubit T1/T2, 1q and readout errors, per-edge 2q errors, gate durations) without any real device. The circuit must already fit the target (set compile=true to transpile first; QM-E615 otherwise). Takes 'target' or 'edges'+'basis' as qumo_transpile, plus 'calibration' {error_1q, readout, t1_us, t2_us, edge_errors: [[a, b, e], ...]}. Returns counts, the method that ran, shots, seed, whether it compiled first ('compiled') and the estimated fidelity.",
-        "{\"type\":\"object\",\"properties\":{" + _CIRC + ",\"target\":{\"type\":\"string\"},\"edges\":{\"type\":\"array\"},\"basis\":{\"type\":\"string\"},\"num_qubits\":{\"type\":\"integer\"},\"calibration\":{\"type\":\"object\"},\"angle_bounds\":{\"type\":\"object\"},\"compile\":{\"type\":\"boolean\",\"default\":false},\"level\":{\"type\":\"integer\",\"default\":2},\"shots\":{\"type\":\"integer\",\"default\":1024},\"seed\":{\"type\":\"integer\",\"default\":1234}},\"additionalProperties\":false}",
+        "{\"type\":\"object\",\"properties\":{" + _CIRC + "," + _PROG + ",\"target\":{\"type\":\"string\"},\"edges\":{\"type\":\"array\"},\"basis\":{\"type\":\"string\"},\"num_qubits\":{\"type\":\"integer\"},\"calibration\":{\"type\":\"object\"},\"angle_bounds\":{\"type\":\"object\"},\"compile\":{\"type\":\"boolean\",\"default\":false},\"level\":{\"type\":\"integer\",\"default\":2},\"shots\":{\"type\":\"integer\",\"default\":1024},\"seed\":{\"type\":\"integer\",\"default\":1234}},\"additionalProperties\":false}",
         _emulate_tool,
     )
     reg.add_read_only(
         "qumo_density", "Density matrix",
         "Exact density-matrix simulation up to 15 qubits: noise is exact, not sampled, and Kraus channels work. Returns outcome probabilities, trace, purity and optionally the expectation of a Pauli sum. Measurements are non-selective; classical conditions raise QM-E411.",
-        "{\"type\":\"object\",\"properties\":{" + _CIRC + ",\"observable\":{\"type\":\"string\"}},\"additionalProperties\":false}",
+        "{\"type\":\"object\",\"properties\":{" + _CIRC + "," + _PROG + ",\"observable\":{\"type\":\"string\"}},\"additionalProperties\":false}",
         _density_tool,
     )
     reg.add_read_only(
         "qumo_to_pbc", "Pauli-based form",
         "Litinski's Pauli-based form: commute every Clifford to the end, leaving time-ordered Pauli-product rotations and measurements in the input frame plus one final Clifford. Returns the operations with Pauli strings (highest qubit leftmost), angles in the exp(-i angle/2 P) convention (T = pi/4) and counts: rotations, pi8, arbitrary, measurements, max_weight, layers.",
-        "{\"type\":\"object\",\"properties\":{" + _CIRC + ",\"fix_clifford\":{\"type\":\"boolean\",\"default\":true}},\"additionalProperties\":false}",
+        "{\"type\":\"object\",\"properties\":{" + _CIRC + "," + _PROG + ",\"fix_clifford\":{\"type\":\"boolean\",\"default\":true}},\"additionalProperties\":false}",
         _to_pbc_tool,
     )
     reg.add_read_only(

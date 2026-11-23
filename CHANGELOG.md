@@ -31,6 +31,10 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 - Four features taken from qilisdk under QUMO names: QUBO models and conversion to Ising (`qumo/algorithms/qubo.mojo`), analog schedules (`qumo/algorithms/schedule.mojo`), angle perturbations (`qumo/sim/perturbation.mojo`), flow-style YAML for Pauli sums; and a SpeQtrum hardware provider. ([#2](https://github.com/ANFAIA/QUMO/pull/2), 2026-11-03)
 - `Program`: `while`, `break`, `continue`, classical variables and a derived control-flow graph above `Circuit` (`docs/CONTROL_FLOW.md`). ([#1](https://github.com/ANFAIA/QUMO/pull/1), 2026-11-03)
 
+### Fixed
+
+- MCP and CLI tool calls refuse an argument name their input schema does not declare, with QM-E801 that names it and lists the allowed names, before the tool runs. Before, a misspelt key (`shot` for `shots`) was silently ignored and the default was used, which gave a wrong answer without an error. Found by an audit of every shipped tool: `qumo_statevector`, `qumo_expectation`, `qumo_estimate_resources`, `qumo_emulate`, `qumo_density`, `qumo_to_pbc` and `qumo_ft_encode` read a `program` argument that their schemas did not list; the schemas now declare it.
+
 ### Changed
 
 - CLI options are strict: an option a command does not declare is a usage error (QM-E921, exit code 2) with a "did you mean" hint. Unknown options were ignored before, so a misspelt `--shot 10` ran with the default. `--quiet`, which was accepted and did nothing, is gone. `qumo help <unknown command>` exits with code 2 (QM-E912). The CLI moved to `cli/app.mojo` (`run_cli`, testable in process); `cli/main.mojo` is the entry file. (project review, 2026-11-10; not yet merged, as the next two entries)
