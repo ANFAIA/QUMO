@@ -3,8 +3,9 @@
 Nine agents, built on [deepagents](https://www.langchain.com/deep-agents), keep QUMO
 moving: they watch new papers and SDK releases, review the code, improve modules in a
 sandbox, use QUMO through its MCP server, and orchestrate hybrid workflows. No agent
-commits or pushes. A person starts each run, or a schedule the owner set up does: the weekly
-`research-watch` over the nine modules, which only writes reports.
+merges or pushes to `main`. A person starts each run, or a schedule the owner set up does: the
+weekly job that researches the nine modules and opens pull requests for at most two small changes
+([docs/AGENTS.md](../docs/AGENTS.md), section 12).
 
 | Agent | Does | Delegates to |
 |---|---|---|
