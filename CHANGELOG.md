@@ -44,6 +44,10 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 
 - The Python training stack of the AI transpiler (17 files and its `requirements.txt`). It stays recoverable at the git tag `legacy-python-training`. ([#6](https://github.com/ANFAIA/QUMO/pull/6), 2026-11-09)
 
+### Fixed
+
+- `apply_noise_model` silently inserted no gate error after a 3-qubit gate (CCX, CSWAP, CCZ), so a noisy circuit looked better than its model said. It now raises QM-E738 when the model has any gate error (1q, 2q or per-edge) and the circuit has a 3-qubit gate; the hint names the decomposition (`qumo.compiler.basis.unroll_3q`). A model with zero gate error still accepts them, with idle noise only.
+
 ### Security
 
 - OpenQASM source is capped in what it can expand to (gate calls, unrolled loops, broadcasts, `pow`): a few bytes of source could previously ask for any amount of memory, including through the MCP server. ([#1](https://github.com/ANFAIA/QUMO/pull/1), 2026-11-03)

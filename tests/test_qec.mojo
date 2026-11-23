@@ -239,7 +239,92 @@ def main() raises:
     assert_true(abs(expectation_z(mit, zz) - 1.0) < 0.02)
 
     test_uf_buffer_reuse()
+    test_noise_model_arity3()
     print("test_qec OK")
+
+
+def _count_op(c: Circuit, k: Int) -> Int:
+    var n = 0
+    for g in c.ops:
+        if g.kind == k:
+            n += 1
+    return n
+
+
+def test_noise_model_arity3() raises:
+    """Noise model and 3-qubit gates. apply_noise_model has no gate-error rule
+    for them, so it must reject them (QM-E738) whenever the model has gate
+    error, and keep them (idle channels only) when it has none."""
+    var ccx = Circuit(3, 0, "ccx")
+    ccx.ccx(0, 1, 2)
+    var cswap = Circuit(3, 0, "cswap")
+    cswap.cswap(0, 1, 2)
+    var ccz = Circuit(3, 0, "ccz")
+    ccz.ccz(0, 1, 2)
+
+    # 2q gate error set: every 3-qubit gate is rejected with a hint.
+    var nm2 = NoiseModel.uniform(3, 100.0, 80.0, 0.0, 1e-2, 0.0, 0.0, 0.3, 0.0)
+    var circuits: List[Circuit] = [ccx.copy(), cswap.copy(), ccz.copy()]
+    for c in circuits:
+        var raised = False
+        try:
+            _ = apply_noise_model(c, nm2)
+        except e:
+            raised = True
+            var m = String(e)
+            assert_true(m.startswith("QM-E738"), "error code QM-E738: " + m)
+            assert_true(m.find("Hint:") >= 0, "error has hint: " + m)
+        assert_true(raised, "3-qubit gate with 2q gate error must raise QM-E738")
+
+    # 1q gate error alone also counts as gate error.
+    var nm1 = NoiseModel.uniform(3, 100.0, 80.0, 1e-3, 0.0, 0.0, 0.0, 0.3, 0.0)
+    var raised1 = False
+    try:
+        _ = apply_noise_model(ccx, nm1)
+    except e:
+        raised1 = True
+        assert_true(String(e).startswith("QM-E738"))
+    assert_true(raised1, "3-qubit gate with 1q gate error must raise QM-E738")
+
+    # A per-edge 2q error on any edge also counts.
+    var nme = NoiseModel(3)
+    nme.edge_error_2q[0 * 3 + 2] = 1e-2
+    var raisede = False
+    try:
+        _ = apply_noise_model(ccx, nme)
+    except e:
+        raisede = True
+    assert_true(raisede, "per-edge gate error must raise QM-E738 for a 3-qubit gate")
+
+    # Zero gate error everywhere: accepted, gate kept, no gate error inserted.
+    var zero = NoiseModel.uniform(3, 100.0, 80.0, 0.0, 0.0, 0.0, 0.0, 0.3, 0.0)
+    var out = apply_noise_model(ccx, zero)
+    assert_equal(_count_op(out, Op.CCX), 1)
+    assert_equal(_count_op(out, Op.DEPOLARIZE1) + _count_op(out, Op.DEPOLARIZE2), 0)
+    var out0 = apply_noise_model(ccx, NoiseModel(3))
+    assert_equal(_count_op(out0, Op.CCX), 1)
+
+    # A virtual 3-qubit gate (duration 0 through op_time) gets no gate error,
+    # so it is accepted even with gate error on.
+    var virt = NoiseModel.uniform(3, 100.0, 80.0, 0.0, 1e-2, 0.0, 0.0, 0.3, 0.0)
+    virt.op_time = List[Float64](length=100, fill=1.0)
+    virt.op_time[Op.CCX] = 0.0
+    var outv = apply_noise_model(ccx, virt)
+    assert_equal(_count_op(outv, Op.CCX), 1)
+
+    # 1q and 2q gates are unchanged: a cx gets DEPOLARIZE2 after it, an h gets
+    # DEPOLARIZE1 when the 1q error is set.
+    var cx = Circuit(2, 0, "cx")
+    cx.cx(0, 1)
+    var outcx = apply_noise_model(cx, nm2)
+    assert_equal(_count_op(outcx, Op.DEPOLARIZE2), 1)
+    var h = Circuit(1, 0, "h")
+    h.h(0)
+    var nm_h = NoiseModel.uniform(1, 100.0, 80.0, 1e-2, 0.0, 0.0, 0.0, 0.3, 0.0)
+    var outh = apply_noise_model(h, nm_h)
+    assert_equal(_count_op(outh, Op.DEPOLARIZE1), 1)
+    var outcx0 = apply_noise_model(cx, zero)
+    assert_equal(_count_op(outcx0, Op.DEPOLARIZE2), 0)
 
 
 # ---------------------------------------------------------------------------

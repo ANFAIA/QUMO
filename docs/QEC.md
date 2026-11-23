@@ -274,6 +274,11 @@ stops after the first wave reaching `max_errors` (deterministic). Results:
     (thermal part subtracted, like Aer's `from_backend`);
   * readout as X_ERROR((p01+p10)/2) before measurement (the asymmetric part
     is handled by mitigation).
+  * gates of arity 3 (CCX, CSWAP, CCZ) have no gate-error rule: when the model
+    has any gate error (1q, 2q or per-edge), `apply_noise_model` rejects them
+    with QM-E738; decompose them into 1q and 2q gates first
+    (`qumo.compiler.basis.unroll_3q`). With zero gate error they pass, with idle
+    noise only.
 * `randomized_benchmarking_1q(lengths, num_sequences, shots, seed,
   depolarizing_per_clifford, model)` — 24-element Clifford group from H/S
   BFS, inverting Clifford, frame-simulated survival, `fit_decay` →
