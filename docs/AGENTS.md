@@ -6,9 +6,9 @@ and SDK releases, review the code, improve a module in a sandbox branch, drive Q
 through its MCP server, research algorithms, error correction and compilation, run
 circuits, and orchestrate hybrid workflows.
 
-No agent commits, pushes or submits to quantum hardware. A person starts each run, with one
-exception the owner set up: a weekly `research-watch` over the nine modules (section 12), which
-only writes reports under `agents/reports/`.
+No agent merges, pushes to `main` or submits to quantum hardware. A person starts each run, with
+one exception the owner set up: a weekly job (section 12) that researches the nine modules and
+opens pull requests for at most two small changes. A person reviews and merges them.
 
 ## 1. Quick start
 
@@ -239,22 +239,36 @@ make test-agents-mojo                    # offline tests
 Design, limits and the review gate: [agents/mojo/README.md](../agents/mojo/README.md) and
 [agents/mojo/DESIGN.md](../agents/mojo/DESIGN.md).
 
-## 12. The weekly watch
+## 12. The weekly job: research, then implement
 
-One scheduled job keeps the watch current: every Monday morning it runs `research-watch` for the
-nine modules (papers of the last week and new releases of each module's SDKs) and writes a summary,
-`agents/reports/<date>-weekly-watch.md`, with the top proposal per module and which ones are new
-since the earlier reports.
+One scheduled job keeps QUMO current. Every Monday morning it:
+
+1. updates the local checkout and runs `research-watch` for the nine modules: new quantum
+   algorithms, papers of the last week, and new releases of the SDKs each module tracks;
+2. picks at most two proposals that are small (size S), new, vendor-neutral, and checkable on the
+   machine against an independent reference, and that need no design decision from a person;
+3. implements each in its own worktree and branch (`weekly/<date>-<slug>`), with the rule of
+   [CONTRIBUTING](../CONTRIBUTING.md): a new capability ships with a runnable example, an
+   improvement is recorded in the docs, both get a changelog entry and a row in
+   [FRAMEWORK_UPDATES](FRAMEWORK_UPDATES.md); runs the affected tests and `make test`; has the diff
+   reviewed by an independent agent and fixes what is confirmed;
+4. opens a pull request for each change that passed, and writes
+   `agents/reports/<date>-weekly-watch.md` with what it found, what it built and what it left.
+
+What it never does: merge, push to `main`, force-push, submit to hardware, or turn off signing,
+tests or CI. A person reviews and merges every pull request. Zero pull requests is a normal week.
 
 * It is a scheduled task of the Claude desktop app on the owner's machine
-  (`qumo-agents-weekly-watch`), not a CI job: it needs the local checkout, `bin/qumo-agents` and the
-  back end's credentials. It runs when the app is open; a missed run starts at the next launch.
-* It reads and reports only. It does not implement, commit, push or open pull requests.
-  Implementing a proposal stays a decision of a person, through `autoresearch` or by hand, and
-  follows the rule in [CONTRIBUTING](../CONTRIBUTING.md): a new capability ships with an example,
-  an improvement is recorded in the docs.
-* Cost: each module run is capped by `claude_code.max_budget_usd` in `agents/agents.json` (5 USD),
-  so at most 45 USD a week. Run it by hand with the same command for one module:
-  `bin/qumo-agents run research-watch "What changed in the last 7 days?" --module compiler`.
+  (`qumo-agents-weekly-watch`), not a CI job: it needs the local checkout, the Mojo toolchain,
+  `bin/qumo-agents` and the back end's credentials. It runs when the app is open; a missed run
+  starts at the next launch.
+* Commits are signed with the owner's key, so the key must be loaded in the SSH agent
+  (`ssh-add --apple-use-keychain`). If a commit cannot be signed the job stops and says so; it
+  does not commit unsigned.
+* Cost: each `research-watch` run is capped by `claude_code.max_budget_usd` in `agents/agents.json`
+  (5 USD), so at most 45 USD a week for the research, plus the session that implements.
 * Rankings are not stable between runs: two passes on the same day agreed on the top proposal
-  for three of nine modules. Read a report as a list of candidates.
+  for three of nine modules. The job reads a report as a list of candidates and goes back to the
+  primary source before building anything; the reports work from abstracts.
+* To run only the research for one module by hand:
+  `bin/qumo-agents run research-watch "What changed in the last 7 days?" --module compiler`.
