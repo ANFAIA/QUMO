@@ -255,6 +255,22 @@ One scheduled job keeps QUMO current. Every Monday morning it:
 4. opens a pull request for each change that passed, and writes
    `agents/reports/<date>-weekly-watch.md` with what it found, what it built and what it left.
 
+Each stage runs on the model the owner assigned to it, all through Claude Code on the
+subscription of that machine:
+
+| Stage | Model | Output |
+|---|---|---|
+| Screening of papers and SDK releases | Sonnet | a report per module, each item rated high, medium or low |
+| Deep review of the relevant ones (at most five) | Fable | the implementation points, from the primary source |
+| Plan | Opus | a plan a smaller model can follow without design decisions |
+| Implementation | Haiku | the change, in its own worktree and branch |
+| Final review | Sonnet, or Opus for a complex change | findings, each confirmed by running code |
+
+The coordinating session reruns every test itself, whatever a stage reports. A change that still
+fails after two fix rounds gets no pull request. "Complex" means more than about 300 changed
+lines, the parser, the compiler, a simulator kernel, network or agent code, a changed public
+behaviour, or a change that needed a fix round.
+
 What it never does: merge, push to `main`, force-push, submit to hardware, or turn off signing,
 tests or CI. A person reviews and merges every pull request. Zero pull requests is a normal week.
 
