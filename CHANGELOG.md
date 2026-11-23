@@ -31,6 +31,10 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 - Four features taken from qilisdk under QUMO names: QUBO models and conversion to Ising (`qumo/algorithms/qubo.mojo`), analog schedules (`qumo/algorithms/schedule.mojo`), angle perturbations (`qumo/sim/perturbation.mojo`), flow-style YAML for Pauli sums; and a SpeQtrum hardware provider. ([#2](https://github.com/ANFAIA/QUMO/pull/2), 2026-11-03)
 - `Program`: `while`, `break`, `continue`, classical variables and a derived control-flow graph above `Circuit` (`docs/CONTROL_FLOW.md`). ([#1](https://github.com/ANFAIA/QUMO/pull/1), 2026-11-03)
 
+### Fixed
+
+- Stim text import (`from_stim`, `parse_dem`, the MCP `qumo_stim_import` tool) no longer crashes or exhausts memory on untrusted input: `REPEAT` blocks nest at most 256 levels (QM-E734 / QM-E735 beyond), the detector error model parser now has the instruction budget the circuit parser has (2,000,000 lines, QM-E735; `repeat 1000000000 { error(0.1) D0 }` appended a mechanism per pass until memory ran out), and empty `REPEAT` bodies are charged per pass. At 3000 nested `REPEAT` lines the circuit parser overflowed the stack (exit 139). Same bug class as Qiskit GHSA-9g9r-qpqr-c8fr. (SDK sweep, 2026-11-23)
+
 ### Changed
 
 - CLI options are strict: an option a command does not declare is a usage error (QM-E921, exit code 2) with a "did you mean" hint. Unknown options were ignored before, so a misspelt `--shot 10` ran with the default. `--quiet`, which was accepted and did nothing, is gone. `qumo help <unknown command>` exits with code 2 (QM-E912). The CLI moved to `cli/app.mojo` (`run_cli`, testable in process); `cli/main.mojo` is the entry file. (project review, 2026-11-10; not yet merged, as the next two entries)

@@ -822,12 +822,12 @@ Fix: Sample it with the Pauli-frame simulator.
 
 ### QM-E734
 
-**Stim circuit text could not be imported: unknown or unsupported instruction, bad target, or too many instructions after unrolling.**  
-Fix: See the message; docs/QEC.md lists what from_stim takes.
+**Stim circuit text could not be imported: unknown or unsupported instruction, bad target, REPEAT nested too deeply, or too many instructions after unrolling.**  
+Fix: See the message; docs/QEC.md lists what from_stim takes and its limits.
 
 ### QM-E735
 
-**Stim detector error model text could not be parsed.**  
+**Stim detector error model text could not be parsed, a repeat nests too deeply, or it unrolls to too many instructions.**  
 Fix: Use Stim's format: error(p) D0 D1 ^ D2 L0, detector, logical_observable, shift_detectors, repeat.
 
 ### QM-E736
