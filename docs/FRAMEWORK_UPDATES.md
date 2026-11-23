@@ -103,6 +103,7 @@ Versions: Qiskit 2.6.1, qiskit-ibm-runtime 0.51, Aer 0.18.2, pytket 2.18.5, tket
 | Trim SQD, configuration recovery, `partition_subsample` | qiskit-addon-sqd 0.14 | done in `sqd.mojo`; not compared with the addon |
 | IQP template, `iqp_expval` | PennyLane 0.44 | done, `qumo.algorithms.iqp` |
 | CVaR objective for VQE and QAOA (`alpha`) | Barkoutsos et al., arXiv:1907.04769; Qiskit `VQE(aggregation=)`; research-watch 2026-11-17 | done, `vqe(alpha=)`, `qaoa_maxcut(alpha=)`, `CVaRObjective`, [ALGORITHMS](ALGORITHMS.md); example `examples/optimization/qaoa_cvar.mojo`. Not a guaranteed gain: the example shows where it is flat |
+| Dicke-state preparation | Bärtschi and Eidenbenz, arXiv:1904.07358; prompted by arXiv:2611.27640; research-watch 2026-11-22 | done, `dicke_state`, `append_dicke_state`, `dicke_amplitudes`, [ALGORITHMS](ALGORITHMS.md); example `examples/algorithms/dicke_state.mojo`. The ancilla-free O(n)-gate, O(log n)-depth construction of 2611.27640 is deferred: no gate constants; for n <= 31, and for the 31-qubit blocks used when n >= 32, the paper relies on generic exact synthesis, so no explicit circuit is given |
 | Fermi-Hubbard, lattices | Qibo 0.3.6, QDK 1.33 | done, `fermi_hubbard`, `Graph.square_lattice`, `Graph.triangular_lattice` |
 | `lie_closure` | Qibo 0.3.6 | done, Pauli strings only |
 | PUB `split` | Braket 1.120 | done, `split_pub`, seeds follow the original index |

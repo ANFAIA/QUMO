@@ -8,6 +8,7 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 
 ### Added
 
+- `dicke_state(n, k)`, `append_dicke_state` and `dicke_amplitudes` in `qumo/algorithms/library.mojo`: deterministic Dicke-state preparation without ancillas (Bärtschi and Eidenbenz, arXiv:1904.07358), checked against the closed form for every k and 2 <= n <= 10. Example `examples/algorithms/dicke_state.mojo` (21 checks). The O(n)-gate construction of arXiv:2611.27640 that prompted it is not implemented (research-watch 2026-11-22).
 - `agents/agents.local.json` (git-ignored, example in `agents/agents.local.example.json`): per-machine harness and models for the agents, laid over the shared `agents.json`. `"claude_code": {"auth": "subscription"}` keeps an exported `ANTHROPIC_API_KEY` from turning a Claude Code subscription run into a metered one.
 - `qumo-agents --backend mojo`: run any agent on QUMO's own native harness (`build/qumo-agent`) with its LLM on OpenRouter, chosen per run or per agent in `agents/agents.json` like the other back ends. `doctor` reports whether the harness is built.
 - `examples/optimization/qaoa_cvar.mojo`: QAOA with the CVaR objective, 14 checks, including the case where CVaR does not help.
