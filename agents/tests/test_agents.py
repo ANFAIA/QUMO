@@ -165,6 +165,43 @@ def test_mojo_harness_runs_on_the_openrouter_models(monkeypatch, capsys):
     assert shown[1:3] == ["run", "code-review"] and "--module" in shown
 
 
+def test_local_overlay_changes_only_what_it_names(tmp_path, monkeypatch):
+    monkeypatch.delenv("QUMO_AGENTS_BACKEND", raising=False)
+    monkeypatch.delenv("QUMO_AGENTS_MODEL", raising=False)
+    shared = Settings.load()
+    assert shared.local_config is None  # conftest turns the overlay off
+    local = tmp_path / "agents.local.json"
+    local.write_text(json.dumps({"default_backend": "claude-code",
+                                 "claude_code": {"auth": "subscription", "models": {"research-watch": "fast"}}}))
+    monkeypatch.setenv("QUMO_AGENTS_LOCAL_CONFIG", str(local))
+    s = Settings.load()
+    assert s.local_config == str(local) and s.default_backend == "claude-code"
+    assert s.model_for("research-watch", None, "claude-code") == "fast"
+    # everything the overlay does not name is the shared file's
+    assert s.section("claude_code")["max_budget_usd"] == shared.section("claude_code")["max_budget_usd"]
+    assert s.model_for("code-review") == shared.model_for("code-review")
+    assert s.backend_for("code-review", "openrouter") == "openrouter"  # --backend still wins
+    local.write_text(json.dumps({"schema": "something.else"}))
+    with pytest.raises(ConfigError, match="expected schema"):
+        Settings.load()
+    # the shipped example is a valid overlay
+    monkeypatch.setenv("QUMO_AGENTS_LOCAL_CONFIG", str(REPO_ROOT / "agents" / "agents.local.example.json"))
+    example = Settings.load()
+    assert example.default_backend == "claude-code"
+    for name in registry.AGENTS:
+        assert example.model_for(name, None, "claude-code"), name
+
+
+def test_subscription_auth_keeps_the_api_key_from_claude_code():
+    from qumo_agents import backends
+    environ = {"ANTHROPIC_API_KEY": "secret-key", "ANTHROPIC_AUTH_TOKEN": "secret-token", "PATH": "/bin", "HOME": "/h"}
+    assert backends.claude_code_env(_settings(), environ) == environ  # default: unchanged
+    sub = backends.claude_code_env(_settings(claude_code={"auth": "subscription"}), environ)
+    assert sub == {"PATH": "/bin", "HOME": "/h"}
+    with pytest.raises(RuntimeError, match="subscription"):
+        backends.claude_code_env(_settings(claude_code={"auth": "api"}), environ)
+
+
 def test_cli_list_and_dry_run_show_the_choice(monkeypatch, capsys):
     from qumo_agents import cli
     monkeypatch.delenv("QUMO_AGENTS_BACKEND", raising=False)

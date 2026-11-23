@@ -48,6 +48,8 @@ def cmd_list(args, settings: Settings) -> int:
         print(f"{spec.name:20s} {b:12s} {m:32s} {spec.description}{subs}")
     print(f"\nmodules: {', '.join(modules.MODULES)}")
     print(f"backends: {', '.join(BACKENDS)} (default {settings.default_backend})")
+    if settings.local_config:
+        print(f"local settings: {settings.local_config}")
     print("choose per run with --backend / --model, per shell with QUMO_AGENTS_BACKEND / QUMO_AGENTS_MODEL,")
     print('or per agent in agents/agents.json ("backends", and "models" inside each back end)')
     print(f"alphaXiv: {'on' if alphaxiv.available() else 'off (set ALPHAXIV_API_KEY; arXiv fallback)'}")
