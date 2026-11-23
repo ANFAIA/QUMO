@@ -3,6 +3,7 @@
     qumo.ft.pauli      symplectic Pauli operators, stabilizer groups with phases
     qumo.ft.code       StabilizerCode + library (Steane, Iceberg, [[4,2,2]], [[5,1,3]], surface/repetition adapters)
     qumo.ft.verify     valid_clifford_implementation / valid_stabilizer_state_preparation (tableau)
+    qumo.ft.faults     fault_tolerant_state_preparation: exact t-fault-tolerance check (arXiv:2611.25107, Def. 1)
     qumo.ft.gadgets    physical primitives of the Steane and Iceberg architectures (+ magic-state check)
     qumo.ft.arch       Architecture, QECPolicy, FactoryConf, SteaneBuilder, IcebergBuilder
     qumo.ft.logical    LogicalProgram: the logical-level IR and API

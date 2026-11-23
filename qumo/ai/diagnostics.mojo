@@ -456,6 +456,7 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E737", "qec", "missing_detectors needs a Clifford circuit with at most 20000 measurements.", "Bind parameters and remove non-Clifford gates.")
     _e(c, "QM-E731", "qec", "Correlated matching needs error probabilities up to 0.5.", "Use plain 'mwpm' for this detector error model.")
     _e(c, "QM-E730", "ft", "A computational circuit given to encode() contains noise channels, QEC annotations or unbound symbolic parameters.", "Encode noiseless, QEC-agnostic, bound circuits; add noise with qumo.ft.emulate.add_noise; use the comparator circuit for run-time angles.")
+    _e(c, "QM-E738", "ft", "Input outside the scope of the exact fault-tolerance check (qumo.ft.faults): non-CSS code or state, more than 64 qubits or measurements, a conditioned or unsupported operation, a random verification measurement, a state group too large, or more fault sets than max_fault_sets.", "Use a CSS code and a one-block preparation of reset, measure, H, S, SDG, X, Y, Z, CX, CZ whose verification measurements are deterministic; lower t or raise max_fault_sets.")
     # algorithms
     _e(c, "QM-E801", "algorithms", "Invalid algorithm option.", "Check the option names/values in the function docstring.")
     _e(c, "QM-E802", "algorithms", "Invalid size or index for an algorithm builder.", "Check qubit counts and indices.")

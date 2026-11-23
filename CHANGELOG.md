@@ -8,6 +8,7 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 
 ### Added
 
+- `qumo.ft.faults`: `fault_tolerant_state_preparation`, the exact t-fault-tolerance check of post-selected state preparations (Definition 1 of Schmid and Wille, [arXiv:2611.25107](https://arxiv.org/abs/2611.25107)), with `FaultModel.circuit_level()` and `FaultModel.xz_only()`, `reduced_weight`, `count_undetected` and `single_faults`; error code QM-E738. `steane_prep_zero_ft` passes at t = 1 and the encoder alone does not. `examples/ft/ft_state_prep_check.mojo` and its Stim-only reference `examples/ft/ft_state_prep_check_stim.py` agree on every count ([FT](docs/FT.md)). (weekly job, 2026-11-23)
 - `agents/agents.local.json` (git-ignored, example in `agents/agents.local.example.json`): per-machine harness and models for the agents, laid over the shared `agents.json`. `"claude_code": {"auth": "subscription"}` keeps an exported `ANTHROPIC_API_KEY` from turning a Claude Code subscription run into a metered one.
 - `qumo-agents --backend mojo`: run any agent on QUMO's own native harness (`build/qumo-agent`) with its LLM on OpenRouter, chosen per run or per agent in `agents/agents.json` like the other back ends. `doctor` reports whether the harness is built.
 - `examples/optimization/qaoa_cvar.mojo`: QAOA with the CVaR objective, 14 checks, including the case where CVaR does not help.
