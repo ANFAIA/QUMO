@@ -1,0 +1,18 @@
+{
+  "schema": "qumo.agents.v1",
+  "comment": "Copy to agents/agents.local.json (git-ignored) to choose this machine's harness and models without touching agents.json. Only the keys you write are changed. This example runs every agent on Claude Code with the signed-in subscription and gives each stage a model that fits it: a fast one screens papers (research-watch), the strongest reads the relevant ones in depth (the three research agents), one plans (orchestrator), a cheap one implements (autoresearch), and another reviews (code-review; pass --model for a harder review).",
+  "default_backend": "claude-code",
+  "claude_code": {
+    "auth": "subscription",
+    "model": "claude-sonnet-5-5",
+    "models": {
+      "research-watch": "claude-sonnet-5-5",
+      "algorithm-research": "claude-fable-5-2",
+      "qec-research": "claude-fable-5-2",
+      "compiler-research": "claude-fable-5-2",
+      "orchestrator": "claude-opus-5-5",
+      "autoresearch": "claude-haiku-5-5",
+      "code-review": "claude-sonnet-5-5"
+    }
+  }
+}

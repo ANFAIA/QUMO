@@ -8,6 +8,7 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 
 ### Added
 
+- `agents/agents.local.json` (git-ignored, example in `agents/agents.local.example.json`): per-machine harness and models for the agents, laid over the shared `agents.json`. `"claude_code": {"auth": "subscription"}` keeps an exported `ANTHROPIC_API_KEY` from turning a Claude Code subscription run into a metered one.
 - `qumo-agents --backend mojo`: run any agent on QUMO's own native harness (`build/qumo-agent`) with its LLM on OpenRouter, chosen per run or per agent in `agents/agents.json` like the other back ends. `doctor` reports whether the harness is built.
 - `examples/optimization/qaoa_cvar.mojo`: QAOA with the CVaR objective, 14 checks, including the case where CVaR does not help.
 - CVaR objective for VQE and QAOA: `vqe(..., alpha=)`, `qaoa_maxcut(..., alpha=)`, `CVaRObjective` and `cvar_of_energies` (`qumo/algorithms/variational.mojo`, `docs/ALGORITHMS.md`). `alpha = 1` is the old mean and stays the default; `alpha < 1` needs a diagonal Hamiltonian.

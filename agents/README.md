@@ -57,6 +57,10 @@ Reports land in `agents/reports/<date>-<name>.md`.
 
 ## Back ends
 
+The shared `agents.json` defaults to OpenRouter. For your own machine, copy
+`agents.local.example.json` to `agents.local.json` (git-ignored) and set what you want there,
+for example Claude Code on your subscription.
+
 Pick the harness with `--backend` and the model with `--model`, per run; or per agent in
 `agents.json` (`"backends"`, and `"models"` inside each back end). `bin/qumo-agents list`
 shows what each agent would run on. Details: [docs/AGENTS.md](../docs/AGENTS.md), section 5.

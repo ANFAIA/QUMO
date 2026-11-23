@@ -138,6 +138,34 @@ The native harness is chosen like any other: `--backend mojo`, or one agent on i
 on the same OpenRouter id. To point the native harness at another OpenAI-compatible server,
 change `openrouter.base_url` in `agents.json`; it has no separate `local` mode yet.
 
+### Your machine, your choices: `agents/agents.local.json`
+
+`agents/agents.json` is shared and keeps defaults that work for anyone: OpenRouter, one model id
+per agent. To use another harness or other models on your own machine, do not edit it. Copy
+`agents/agents.local.example.json` to `agents/agents.local.json` and keep only the keys you want
+to change. Git ignores that file, it is laid over the shared one key by key, and `--backend`,
+`--model` and the environment variables still win over it. `bin/qumo-agents list` prints the
+file when one is in use. `QUMO_AGENTS_LOCAL_CONFIG` names another file; set it to an empty
+string to use none.
+
+The example runs everything on Claude Code with the signed-in subscription:
+
+```json
+{
+  "default_backend": "claude-code",
+  "claude_code": {
+    "auth": "subscription",
+    "model": "claude-sonnet-5-5",
+    "models": {"autoresearch": "claude-fable-5-2"}
+  }
+}
+```
+
+`"auth": "subscription"` matters if your shell exports `ANTHROPIC_API_KEY`: Claude Code bills
+that key when it is set, and the signed-in subscription when it is not. With this setting the
+key is removed from the environment of the `claude` child process only. The default,
+`"inherit"`, changes nothing. The native Mojo harness does not read the local file.
+
 A CLI back end with no model set uses the CLI's own default model. The `local` back end
 has no default: name a model, or the run stops with an error. Subagents with no local
 model of their own run on the model of the run that delegates to them. `QUMO_AGENTS_MODEL` never

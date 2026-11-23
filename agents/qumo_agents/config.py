@@ -15,6 +15,7 @@ from typing import Any
 AGENTS_DIR = Path(__file__).resolve().parent.parent
 REPO_ROOT = AGENTS_DIR.parent
 CONFIG_PATH = AGENTS_DIR / "agents.json"
+LOCAL_CONFIG_PATH = AGENTS_DIR / "agents.local.json"  # git-ignored: this machine's choices
 REPORTS_DIR = AGENTS_DIR / "reports"
 BACKENDS = ("openrouter", "local", "mojo", "claude-code", "codex")
 LOCAL_KEY_ENV = "QUMO_AGENTS_LOCAL_API_KEY"
@@ -26,18 +27,52 @@ class ConfigError(Exception):
     pass
 
 
+def _merged(base: dict, over: dict) -> dict:
+    """`over` laid on `base`: objects merge key by key, anything else is replaced."""
+    out = dict(base)
+    for key, value in over.items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = _merged(out[key], value)
+        else:
+            out[key] = value
+    return out
+
+
 @dataclass
 class Settings:
     raw: dict[str, Any]
 
     @classmethod
     def load(cls, path: Path | None = None) -> "Settings":
+        """agents.json, with this machine's agents.local.json laid over it.
+
+        The shared file keeps defaults that work for anyone (OpenRouter). A person who wants
+        another harness or other models on their own machine writes them in agents.local.json,
+        which git ignores, instead of editing the shared file. QUMO_AGENTS_LOCAL_CONFIG names
+        another overlay file; set it to an empty string to use none.
+        """
         p = path or Path(os.environ.get("QUMO_AGENTS_CONFIG", CONFIG_PATH))
         with open(p) as fh:
             raw = json.load(fh)
         if raw.get("schema") != "qumo.agents.v1":
             raise ConfigError(f"{p}: expected schema qumo.agents.v1")
+        local = os.environ.get("QUMO_AGENTS_LOCAL_CONFIG")
+        overlay = LOCAL_CONFIG_PATH if local is None else (Path(local) if local else None)
+        if path is None and overlay is not None and overlay.exists():
+            with open(overlay) as fh:
+                over = json.load(fh)
+            if not isinstance(over, dict):
+                raise ConfigError(f"{overlay}: expected a JSON object")
+            if over.get("schema", "qumo.agents.v1") != "qumo.agents.v1":
+                raise ConfigError(f"{overlay}: expected schema qumo.agents.v1")
+            raw = _merged(raw, over)
+            raw["_local_config"] = str(overlay)
         return cls(raw)
+
+    @property
+    def local_config(self) -> str | None:
+        """The overlay file that was applied, if any."""
+        return self.raw.get("_local_config")
 
     @property
     def default_backend(self) -> str:

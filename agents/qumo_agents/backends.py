@@ -15,6 +15,7 @@ running the CLI.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -157,6 +158,27 @@ def run_mojo_backend(spec: AgentSpec, task: str, settings: Settings, model: str 
     return r.stdout
 
 
+API_KEY_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+
+
+def claude_code_env(settings: Settings, environ: dict[str, str] | None = None) -> dict[str, str]:
+    """The environment of the `claude` child process.
+
+    Claude Code bills an API key when ANTHROPIC_API_KEY is set, and the signed-in subscription
+    when it is not. `"claude_code": {"auth": "subscription"}` removes the key from the child's
+    environment, so a key exported in the shell for other tools does not turn a subscription
+    run into a metered one. "inherit" (the default) passes the environment through unchanged.
+    """
+    env = dict(os.environ if environ is None else environ)
+    auth = settings.section("claude_code").get("auth", "inherit")
+    if auth == "subscription":
+        for name in API_KEY_VARS:
+            env.pop(name, None)
+    elif auth != "inherit":
+        raise RuntimeError(f'claude_code.auth must be "subscription" or "inherit", got {auth!r}')
+    return env
+
+
 def _workdir(spec: AgentSpec, task: str) -> Path:
     if not spec.writes_code:
         return REPO_ROOT
@@ -175,7 +197,8 @@ def run_cli_backend(backend: str, spec: AgentSpec, task: str, settings: Settings
         mcp = _mcp_config_file(spec) if spec.uses_mcp or _wants_alphaxiv(spec) else None
         try:
             cmd = claude_code_command(spec, task, settings, mcp, model)
-            r = subprocess.run(cmd, cwd=workdir, capture_output=True, text=True, timeout=timeout_s)
+            r = subprocess.run(cmd, cwd=workdir, capture_output=True, text=True, timeout=timeout_s,
+                               env=claude_code_env(settings))
         finally:
             if mcp:
                 mcp.unlink(missing_ok=True)
