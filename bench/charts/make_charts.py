@@ -32,7 +32,7 @@ SDK_ORDER = ["qumo", "qiskit", "tket", "cirq"]
 SDK_LABEL = {"qumo": "QUMO", "qiskit": "Qiskit", "tket": "TKET", "cirq": "Cirq"}
 LABELS = [SDK_LABEL[s] for s in SDK_ORDER]
 # Okabe-Ito palette: distinguishable for common colour-vision deficiencies.
-COLORS = {"QUMO": "#0072B2", "Qiskit": "#E69F00", "TKET": "#009E73", "Cirq": "#CC79A7"}
+COLORS = {"QUMO": "#009E73", "Qiskit": "#0072B2", "TKET": "#CC79A7", "Cirq": "#E69F00"}
 SDK_SCALE = alt.Scale(domain=LABELS, range=[COLORS[label] for label in LABELS])
 LEVELS = ["default", "max"]
 EXPECTED_RECORDS = 5632  # 4 SDKs x 2 levels x 704 (circuit, target) pairs of bench/neutral
