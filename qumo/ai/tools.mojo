@@ -141,6 +141,35 @@ def tool_error(err: String) -> ToolResult:
     return ToolResult(w.finish(), String(d), True)
 
 
+def _unknown_arguments_error(name: String, input_schema: String, args: JsonValue) -> String:
+    """QM-E801 text when `args` (an object) has a key the tool's input schema
+    does not list in `properties`; empty when every key is declared. A tool
+    whose schema has no properties accepts only the empty object."""
+    if not args.is_object():
+        return String()
+    var allowed = List[String]()
+    try:
+        var props = parse_json(input_schema).get("properties")
+        if props.is_object():
+            allowed = props.keys()
+    except:
+        pass
+    var unknown = List[String]()
+    for k in args.keys():
+        var ok = False
+        for a in allowed:
+            if a == k:
+                ok = True
+        if not ok:
+            unknown.append("'" + k + "'")
+    if len(unknown) == 0:
+        return String()
+    var allowed_text = String(", ").join(allowed) if len(allowed) > 0 else String("(none)")
+    var what = String("argument ") if len(unknown) == 1 else String("arguments ")
+    return ("QM-E801: unknown " + what + String(", ").join(unknown) + " for tool '" + name
+            + "'. Hint: allowed arguments: " + allowed_text + ".")
+
+
 struct ToolRegistry(Movable):
     var tools: List[ToolSpec]
 
@@ -176,10 +205,15 @@ struct ToolRegistry(Movable):
         return out^
 
     def call(self, name: String, args: JsonValue) -> ToolResult:
-        """Run a tool; every failure becomes an `is_error` result."""
+        """Run a tool; every failure becomes an `is_error` result. An argument
+        the tool's input schema does not declare is refused before the handler
+        runs (QM-E801): a misspelt key would otherwise fall back to its default."""
         var i = self.find(name)
         if i < 0:
             return tool_error("QM-E912: unknown tool '" + name + "'. Hint: available tools: " + String(", ").join(self.names()) + ".")
+        var unknown = _unknown_arguments_error(name, self.tools[i].input_schema, args)
+        if unknown.byte_length() > 0:
+            return tool_error(unknown)
         var h = self.tools[i].handler
         var ctx = ToolContext(self.names())
         try:
@@ -969,13 +1003,13 @@ def register_core_tools(mut reg: ToolRegistry):
     reg.add_read_only(
         "qumo_statevector", "Final state vector",
         "Return the exact final state vector (amplitudes with probability > threshold, sorted by basis index) of a unitary circuit. Measurements and resets are ignored; classically-conditioned gates are rejected (QM-E401), and so is a program with runtime control flow (QM-E585).",
-        "{\"type\":\"object\",\"properties\":{" + _QASM_PROP + "," + _CIRCUIT_PROP + "," + _PARAMS_PROP + ",\"max_amplitudes\":{\"type\":\"integer\",\"default\":64,\"minimum\":1},\"threshold\":{\"type\":\"number\",\"default\":1e-12},\"max_qubits\":{\"type\":\"integer\",\"default\":24}},\"additionalProperties\":false}",
+        "{\"type\":\"object\",\"properties\":{" + _QASM_PROP + "," + _CIRCUIT_PROP + "," + _PROGRAM_PROP + "," + _PARAMS_PROP + ",\"max_amplitudes\":{\"type\":\"integer\",\"default\":64,\"minimum\":1},\"threshold\":{\"type\":\"number\",\"default\":1e-12},\"max_qubits\":{\"type\":\"integer\",\"default\":24}},\"additionalProperties\":false}",
         _statevector,
     )
     reg.add_read_only(
         "qumo_expectation", "Pauli expectation value",
         "Exact expectation value <psi|H|psi> of a Pauli-sum observable (e.g. '0.5*Z0 Z1 - 1.2*X0 + 0.3' or dense 'ZZI') on the circuit's final state. Pass an array of observables to evaluate several at once. A program with runtime control flow has no single final state: QM-E585.",
-        "{\"type\":\"object\",\"properties\":{" + _QASM_PROP + "," + _CIRCUIT_PROP + ",\"observable\":{\"description\":\"Pauli sum string, or array of strings\",\"oneOf\":[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"type\":\"string\"}}]}," + _PARAMS_PROP + ",\"max_qubits\":{\"type\":\"integer\",\"default\":28}},\"required\":[\"observable\"],\"additionalProperties\":false}",
+        "{\"type\":\"object\",\"properties\":{" + _QASM_PROP + "," + _CIRCUIT_PROP + "," + _PROGRAM_PROP + ",\"observable\":{\"description\":\"Pauli sum string, or array of strings\",\"oneOf\":[{\"type\":\"string\"},{\"type\":\"array\",\"items\":{\"type\":\"string\"}}]}," + _PARAMS_PROP + ",\"max_qubits\":{\"type\":\"integer\",\"default\":28}},\"required\":[\"observable\"],\"additionalProperties\":false}",
         _expectation,
     )
     reg.add_read_only(

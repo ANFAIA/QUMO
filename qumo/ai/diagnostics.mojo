@@ -457,7 +457,7 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E731", "qec", "Correlated matching needs error probabilities up to 0.5.", "Use plain 'mwpm' for this detector error model.")
     _e(c, "QM-E730", "ft", "A computational circuit given to encode() contains noise channels, QEC annotations or unbound symbolic parameters.", "Encode noiseless, QEC-agnostic, bound circuits; add noise with qumo.ft.emulate.add_noise; use the comparator circuit for run-time angles.")
     # algorithms
-    _e(c, "QM-E801", "algorithms", "Invalid algorithm option.", "Check the option names/values in the function docstring.")
+    _e(c, "QM-E801", "algorithms", "Invalid algorithm option, or a tool argument its inputSchema does not declare (the message names it).", "Check the option names/values in the function docstring, or the tool's inputSchema for its argument names.")
     _e(c, "QM-E802", "algorithms", "Invalid size or index for an algorithm builder.", "Check qubit counts and indices.")
     _e(c, "QM-E803", "algorithms", "Hamiltonian/operator does not fit the register.", "Match observable qubits to the ansatz qubits.")
     _e(c, "QM-E804", "algorithms", "Parameter vector has the wrong length or index.", "Pass one value per circuit parameter.")

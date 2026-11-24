@@ -34,6 +34,7 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 
 ### Fixed
 
+- MCP and CLI tool calls refuse an argument name their input schema does not declare, with QM-E801 that names it and lists the allowed names, before the tool runs. Before, a misspelt key (`shot` for `shots`) was silently ignored and the default was used, which gave a wrong answer without an error. Found by an audit of every shipped tool: `qumo_statevector`, `qumo_expectation`, `qumo_estimate_resources`, `qumo_emulate`, `qumo_density`, `qumo_to_pbc` and `qumo_ft_encode` read a `program` argument that their schemas did not list; the schemas now declare it.
 - Pauli-frame sampler: a `CORRELATED_ERROR(0)` drew its geometric skip from `log1p(-0) = -0`, so the quotient was +-inf and `Int()` of it is platform-defined (a negative position would have written outside the batch). p = 0 now never draws, and the op still resets the chain, so a following `ELSE_CORRELATED_ERROR` is unchanged. Same-class check of the other channels: they were already guarded (`if p > 0`); the detector error model already ignores p <= 0. Found by reading after the Stim fix for `broadcast_pauli_errors` (Stim PR #1131); on macOS ARM64 the old sampler gave the right counts, so this is a latent undefined-behaviour fix, not a visible wrong result.
 
 ### Changed

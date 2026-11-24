@@ -854,8 +854,8 @@ Fix: Encode noiseless, QEC-agnostic, bound circuits; add noise with qumo.ft.emul
 
 ### QM-E801
 
-**Invalid algorithm option.**  
-Fix: Check the option names/values in the function docstring.
+**Invalid algorithm option, or a tool argument its inputSchema does not declare (the message names it).**  
+Fix: Check the option names/values in the function docstring, or the tool's inputSchema for its argument names.
 
 ### QM-E802
 

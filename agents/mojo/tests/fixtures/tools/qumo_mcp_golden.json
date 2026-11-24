@@ -76,6 +76,10 @@
       "type": "object",
       "description": "Alternative to qasm: circuit JSON in format qumo.circuit.v1 (see qumo_convert to='json')"
      },
+     "program": {
+      "type": "object",
+      "description": "Alternative to qasm: program JSON in format qumo.program.v1 (see qumo_convert to='json')"
+     },
      "params": {
       "description": "Values for 'input float' parameters: array in declaration order or object name->value",
       "oneOf": [
@@ -123,6 +127,10 @@
      "circuit": {
       "type": "object",
       "description": "Alternative to qasm: circuit JSON in format qumo.circuit.v1 (see qumo_convert to='json')"
+     },
+     "program": {
+      "type": "object",
+      "description": "Alternative to qasm: program JSON in format qumo.program.v1 (see qumo_convert to='json')"
      },
      "observable": {
       "description": "Pauli sum string, or array of strings",
@@ -430,6 +438,10 @@
       "type": "object",
       "description": "qumo.circuit.v1 JSON"
      },
+     "program": {
+      "type": "object",
+      "description": "qumo.program.v1 JSON"
+     },
      "profile": {
       "type": "string",
       "enum": [
@@ -609,6 +621,10 @@
       "type": "object",
       "description": "qumo.circuit.v1 JSON"
      },
+     "program": {
+      "type": "object",
+      "description": "qumo.program.v1 JSON"
+     },
      "target": {
       "type": "string"
      },
@@ -661,6 +677,10 @@
       "type": "object",
       "description": "qumo.circuit.v1 JSON"
      },
+     "program": {
+      "type": "object",
+      "description": "qumo.program.v1 JSON"
+     },
      "observable": {
       "type": "string"
      }
@@ -681,6 +701,10 @@
      "circuit": {
       "type": "object",
       "description": "qumo.circuit.v1 JSON"
+     },
+     "program": {
+      "type": "object",
+      "description": "qumo.program.v1 JSON"
      },
      "fix_clifford": {
       "type": "boolean",
@@ -910,6 +934,10 @@
      "circuit": {
       "type": "object",
       "description": "qumo.circuit.v1 JSON"
+     },
+     "program": {
+      "type": "object",
+      "description": "qumo.program.v1 JSON"
      },
      "architecture": {
       "type": "string",
