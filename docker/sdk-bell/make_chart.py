@@ -55,15 +55,18 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--name", default="docker_resources")
     ap.add_argument("--note", default="")
+    ap.add_argument("--grid", action="store_true", help="2 x 2 layout instead of one row")
     a = ap.parse_args()
     rows = load(a.data)
     n = min(r["runs"] for r in rows)
-    chart = alt.hconcat(
-        panel(rows, "size_mb", "Image size on disk (MB)", ",.0f"),
-        panel(rows, "wall_ms", "Run time (ms, log)", ",.0f", log=True),
-        panel(rows, "cpu_ms", "CPU time (ms, log)", ",.0f", log=True),
-        panel(rows, "rss_mib", "Peak memory (MiB)", ",.0f"),
-        spacing=26).properties(title=mc._title("Container cost of one SDK run, Bell state", f"Median of {n} runs per image. {a.note}".strip()))
+    w = 330 if a.grid else 250
+    panels = [panel(rows, "size_mb", "Image size on disk (MB)", ",.0f", width=w),
+              panel(rows, "wall_ms", "Run time (ms, log)", ",.0f", log=True, width=w),
+              panel(rows, "cpu_ms", "CPU time (ms, log)", ",.0f", log=True, width=w),
+              panel(rows, "rss_mib", "Peak memory (MiB)", ",.0f", width=w)]
+    body = (alt.vconcat(alt.hconcat(*panels[:2], spacing=40), alt.hconcat(*panels[2:], spacing=40), spacing=28)
+            if a.grid else alt.hconcat(*panels, spacing=26))
+    chart = body.properties(title=mc._title("Container cost of one SDK run, Bell state", f"Median of {n} runs per image. {a.note}".strip()))
     os.makedirs(a.out, exist_ok=True)
     mc.save(chart, a.out, a.name)
 
