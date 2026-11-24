@@ -13,7 +13,7 @@
 
 Records: 5632 of 5632 expected. Run complete.
 
-Bare python: 19 MB. Python with `from qiskit import qasm2`: 71 MB. Every worker imports it, so this part of each idle footprint is shared, not SDK-specific.
+Bare python: 18 MB. Python with `from qiskit import qasm2`: 71 MB. Every worker imports it, so this part of each idle footprint is shared, not SDK-specific.
 
 | SDK | records | idle MB | idle minus shared MB | median peak MB | growth median / p90 / max MB | base RSS, first 10% / last 10% MB |
 |---|---:|---:|---:|---:|---:|---:|
