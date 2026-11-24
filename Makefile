@@ -84,7 +84,8 @@ bench-charts:  ## charts and summary of compile time and memory per SDK (bench/r
 
 bench-result-charts:  ## charts of QUMO vs Qiskit: Benchpress time and 2Q ratios, state-vector time vs Aer
 	$(PY) bench/charts/make_result_charts.py --qumo bench/results/benchpress/qumo_full_2026-11-23.json.gz \
-	    --qiskit bench/results/benchpress/qiskit_full.json.gz --sv bench/results/sv_bench_2026-11-23.csv \
+	    --qiskit bench/results/benchpress/qiskit_full.json.gz --cirq bench/results/benchpress/cirq_full.json.gz \
+	    --sv bench/results/sv_bench_2026-11-23.csv \
 	    --out bench/results/charts
 
 # ---------------------------------------------------------------- AI agents (docs/AGENTS.md)
