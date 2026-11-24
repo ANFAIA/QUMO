@@ -92,7 +92,7 @@ body{padding:40px max(16px,env(safe-area-inset-left,0px)) 64px max(16px,env(safe
       <div class="sub">default level · at max level <b data-draw="x" data-sdk="TKET" data-level="max" data-field="time_x" data-source="ratios" data-where="sdk=TKET&amp;level=max">—</b>×</div>
       <div class="sub">CPU time <b data-draw="x" data-sdk="TKET" data-level="default" data-field="cpu_x" data-source="ratios" data-where="sdk=TKET&amp;level=default">—</b>× · peak memory <b data-draw="x" data-sdk="TKET" data-level="default" data-field="peak_mem_x" data-source="ratios" data-where="sdk=TKET&amp;level=default">—</b>×</div></div>
   </div>
-  <p class="muted">Each ratio is the geometric mean over the circuit and target pairs both SDKs compiled, with QUMO as 1×. Higher means the other SDK is slower or larger.</p>
+  <p class="muted">Each ratio is the geometric mean over the circuit and target pairs both SDKs compiled, with QUMO as 1×. Higher means the other SDK is slower or larger. These figures come from the neutral harness of this project (bench/neutral), not from Qiskit Benchpress. Benchpress was run for QUMO against Qiskit only; see docs/BENCHPRESS_RESULTS.md.</p>
 
   <div class="bar">
     <div class="seg" role="group" aria-label="Optimization level for the charts below">
