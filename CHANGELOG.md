@@ -32,6 +32,10 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 - Four features taken from qilisdk under QUMO names: QUBO models and conversion to Ising (`qumo/algorithms/qubo.mojo`), analog schedules (`qumo/algorithms/schedule.mojo`), angle perturbations (`qumo/sim/perturbation.mojo`), flow-style YAML for Pauli sums; and a SpeQtrum hardware provider. ([#2](https://github.com/ANFAIA/QUMO/pull/2), 2026-11-03)
 - `Program`: `while`, `break`, `continue`, classical variables and a derived control-flow graph above `Circuit` (`docs/CONTROL_FLOW.md`). ([#1](https://github.com/ANFAIA/QUMO/pull/1), 2026-11-03)
 
+### Fixed
+
+- Pauli-frame sampler: a `CORRELATED_ERROR(0)` drew its geometric skip from `log1p(-0) = -0`, so the quotient was +-inf and `Int()` of it is platform-defined (a negative position would have written outside the batch). p = 0 now never draws, and the op still resets the chain, so a following `ELSE_CORRELATED_ERROR` is unchanged. Same-class check of the other channels: they were already guarded (`if p > 0`); the detector error model already ignores p <= 0. Found by reading after the Stim fix for `broadcast_pauli_errors` (Stim PR #1131); on macOS ARM64 the old sampler gave the right counts, so this is a latent undefined-behaviour fix, not a visible wrong result.
+
 ### Changed
 
 - CLI options are strict: an option a command does not declare is a usage error (QM-E921, exit code 2) with a "did you mean" hint. Unknown options were ignored before, so a misspelt `--shot 10` ran with the default. `--quiet`, which was accepted and did nothing, is gone. `qumo help <unknown command>` exits with code 2 (QM-E912). The CLI moved to `cli/app.mojo` (`run_cli`, testable in process); `cli/main.mojo` is the entry file. (project review, 2026-11-10; not yet merged, as the next two entries)
