@@ -384,18 +384,21 @@ struct FrameBuffers(Movable):
                 if fo.c == 0:
                     for w in range(FW):
                         chain[w] = 0
-                var pos = _skip(rng, fo.lp)
-                while pos < BATCH:
-                    var w = pos >> 6
-                    var bit = UInt64(1) << UInt64(pos & 63)
-                    if (chain[w] & bit) == 0:
-                        chain[w] = chain[w] | bit
-                        for i in range(fo.b):
-                            var q = prog.product[fo.a + 2 * i] * FW
-                            var l = prog.product[fo.a + 2 * i + 1]
-                            if l == 1 or l == 2: _flip(xp, q, pos)
-                            if l >= 2: _flip(zp, q, pos)
-                    pos += 1 + _skip(rng, fo.lp)
+                # p = 0 never fires: skip the geometric draw, since log1p(-0) = -0
+                # makes the quotient +-inf and Int() of that is platform-defined.
+                if fo.p > 0.0:
+                    var pos = _skip(rng, fo.lp)
+                    while pos < BATCH:
+                        var w = pos >> 6
+                        var bit = UInt64(1) << UInt64(pos & 63)
+                        if (chain[w] & bit) == 0:
+                            chain[w] = chain[w] | bit
+                            for i in range(fo.b):
+                                var q = prog.product[fo.a + 2 * i] * FW
+                                var l = prog.product[fo.a + 2 * i + 1]
+                                if l == 1 or l == 2: _flip(xp, q, pos)
+                                if l >= 2: _flip(zp, q, pos)
+                        pos += 1 + _skip(rng, fo.lp)
             elif k == FrameKind.PC1:
                 var a = fo.a * FW
                 var pos = _skip(rng, fo.lp)

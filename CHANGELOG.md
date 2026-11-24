@@ -8,6 +8,7 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 
 ### Added
 
+- `make bench-result-charts` (`bench/charts/make_result_charts.py`): three charts in `bench/results/charts` from the Benchpress run of 2026-11-23 and the Qiskit run already stored (QUMO / Qiskit time and two-qubit-gate ratios per suite and target over 892 shared tests) and from a state-vector run against Aer (1.2x at 16 qubits, 0.7x at 18, 2.3x to 3.3x from 20 to 26). Both QUMO runs were taken on a machine that was not idle. The run data is stored beside them (`qumo_full_2026-11-23.json.gz`, `sv_bench_2026-11-23.csv`).
 - `agents/agents.local.json` (git-ignored, example in `agents/agents.local.example.json`): per-machine harness and models for the agents, laid over the shared `agents.json`. `"claude_code": {"auth": "subscription"}` keeps an exported `ANTHROPIC_API_KEY` from turning a Claude Code subscription run into a metered one.
 - `qumo-agents --backend mojo`: run any agent on QUMO's own native harness (`build/qumo-agent`) with its LLM on OpenRouter, chosen per run or per agent in `agents/agents.json` like the other back ends. `doctor` reports whether the harness is built.
 - `examples/optimization/qaoa_cvar.mojo`: QAOA with the CVaR objective, 14 checks, including the case where CVaR does not help.
@@ -34,6 +35,7 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 ### Fixed
 
 - MCP and CLI tool calls refuse an argument name their input schema does not declare, with QM-E801 that names it and lists the allowed names, before the tool runs. Before, a misspelt key (`shot` for `shots`) was silently ignored and the default was used, which gave a wrong answer without an error. Found by an audit of every shipped tool: `qumo_statevector`, `qumo_expectation`, `qumo_estimate_resources`, `qumo_emulate`, `qumo_density`, `qumo_to_pbc` and `qumo_ft_encode` read a `program` argument that their schemas did not list; the schemas now declare it.
+- Pauli-frame sampler: a `CORRELATED_ERROR(0)` drew its geometric skip from `log1p(-0) = -0`, so the quotient was +-inf and `Int()` of it is platform-defined (a negative position would have written outside the batch). p = 0 now never draws, and the op still resets the chain, so a following `ELSE_CORRELATED_ERROR` is unchanged. Same-class check of the other channels: they were already guarded (`if p > 0`); the detector error model already ignores p <= 0. Found by reading after the Stim fix for `broadcast_pauli_errors` (Stim PR #1131); on macOS ARM64 the old sampler gave the right counts, so this is a latent undefined-behaviour fix, not a visible wrong result.
 
 ### Changed
 

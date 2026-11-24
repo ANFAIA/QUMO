@@ -115,6 +115,40 @@ def test_pauli_channel_2_and_e() raises:
     print("  PAULI_CHANNEL_2, E, ELSE_CORRELATED_ERROR")
 
 
+def test_correlated_p0_p1_chain() raises:
+    # E(0) never fires and must not disturb the chain; E(1) always fires
+    var n = 100000
+    var zero = FrameSimulator(from_stim("E(0) X0\nM 0\nDETECTOR rec[-1]").circuit.copy()).sample_detectors(n, 21)
+    var fired0 = 0
+    for shot in range(n):
+        fired0 += len(zero.fired(shot))
+    assert_equal(fired0, 0, "E(0) never fires")
+    var one = FrameSimulator(from_stim("E(1) X0\nM 0\nDETECTOR rec[-1]").circuit.copy()).sample_detectors(n, 22)
+    var fired1 = 0
+    for shot in range(n):
+        fired1 += len(one.fired(shot))
+    assert_equal(fired1, n, "E(1) always fires")
+    # E(0) then ELSE(0.5): the ELSE fires on about half the shots, E's chain never blocks it
+    var ez = FrameSimulator(from_stim("E(0) X0\nELSE_CORRELATED_ERROR(0.5) X1\nM 0 1\nDETECTOR rec[-2]\nDETECTOR rec[-1]").circuit.copy()).sample_detectors(n, 23)
+    var else_hits = 0
+    var e_hits = 0
+    for shot in range(n):
+        e_hits += 1 if ez.get(shot, 0) else 0
+        else_hits += 1 if ez.get(shot, 1) else 0
+    assert_equal(e_hits, 0, "E(0) never fires before ELSE")
+    assert_true(abs(Float64(else_hits) / Float64(n) - 0.5) < 0.01, "ELSE(0.5) after E(0): " + String(else_hits))
+    # E(1) then ELSE(1): the chain is set by E, so ELSE never fires
+    var eo = FrameSimulator(from_stim("E(1) X0\nELSE_CORRELATED_ERROR(1) X1\nM 0 1\nDETECTOR rec[-2]\nDETECTOR rec[-1]").circuit.copy()).sample_detectors(n, 24)
+    var first = 0
+    var second = 0
+    for shot in range(n):
+        first += 1 if eo.get(shot, 0) else 0
+        second += 1 if eo.get(shot, 1) else 0
+    assert_equal(first, n, "E(1) fires on every shot")
+    assert_equal(second, 0, "ELSE(1) never fires after E(1)")
+    print("  E(0), E(1), E(0)+ELSE(0.5), E(1)+ELSE(1)")
+
+
 def test_dem_text() raises:
     var cc = generate_code("surface_z", 5, 5, NoiseParams.uniform(0.003))
     var dem = detector_error_model(cc.circuit)
@@ -245,6 +279,7 @@ def main() raises:
     test_syntax()
     test_mpp_and_friends()
     test_pauli_channel_2_and_e()
+    test_correlated_p0_p1_chain()
     test_dem_text()
     test_dem_sampler()
     test_missing_detectors()
