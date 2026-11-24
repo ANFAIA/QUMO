@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>QUMO Compiler Benchmark</title>
+<style>:root{--color-fg:#1d1d1f;--color-fg-muted:#5f6368;--color-bg:#fbfbfa;--color-panel:#ffffff;--color-border-line:#e3e3df;
+--cds-text-secondary:#5f6368;--cds-chart-grid:#ececea;--cds-chart-axis:#c9c9c4;--cds-chart-reference:#8a8a85;
+--cds-surface-popover:#ffffff;--cds-border:#d8d8d3;--cds-shadow-popover:0 4px 16px rgba(0,0,0,.12);
+--cds-font-size-caption:12.5px;--cds-font-size-body:15px;--cds-font-size-heading:18px;--cds-font-weight-medium:600;
+--cds-gap-sm:8px;--cds-gap-md:16px;--cds-gap-xl:40px;--cds-pad-lg:18px;--cds-radius:10px;
+--font-anthropic-sans:Inter,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;--font-anthropic-serif:"Iowan Old Style",Georgia,"Times New Roman",serif;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--color-fg:#ececea;--color-fg-muted:#a3a39e;--color-bg:#161615;--color-panel:#1f1f1d;--color-border-line:#33332f;
+--cds-text-secondary:#a3a39e;--cds-chart-grid:#2a2a27;--cds-chart-axis:#4a4a45;--cds-chart-reference:#85857f;--cds-surface-popover:#242421;--cds-border:#3d3d38;--cds-shadow-popover:0 4px 16px rgba(0,0,0,.5);color-scheme:dark}}
+html,body{margin:0;background:var(--color-bg);color:var(--color-fg);font-family:var(--font-anthropic-sans);font-size:var(--cds-font-size-body)}
+body{padding:40px max(16px,env(safe-area-inset-left,0px)) 64px max(16px,env(safe-area-inset-right,0px))}
+@media (prefers-reduced-motion:no-preference){html{scroll-behavior:smooth}}
+</style>
+</head><body>
+<style>
+.qb { max-width: 1080px; margin: 0 auto; display: flex; flex-direction: column; gap: var(--cds-gap-xl); font-family: var(--font-anthropic-sans); color: var(--color-fg); }
+.qb * { box-sizing: border-box; }
+.qb h1 { font-family: var(--font-anthropic-serif); font-weight: 400; font-size: clamp(30px, 5vw, 46px); line-height: 1.05; margin: 0 0 var(--cds-gap-md); letter-spacing: -0.01em; text-wrap: balance; }
+.qb h2 { font-size: var(--cds-font-size-heading); font-weight: var(--cds-font-weight-medium); margin: 0 0 4px; text-wrap: balance; }
+.qb p { margin: 0; line-height: 1.5; }
+.qb .eyebrow { font-size: var(--cds-font-size-caption); letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-fg-muted); margin-bottom: var(--cds-gap-sm); }
+.qb .lede { font-size: var(--cds-font-size-heading); line-height: 1.45; max-width: 66ch; color: var(--color-fg); }
+.qb .lede b { font-variant-numeric: tabular-nums; font-weight: var(--cds-font-weight-medium); }
+.qb .muted { color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); }
+.qb .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--cds-gap-md); }
+.qb .tile { background: var(--color-panel); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); padding: var(--cds-pad-lg); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.qb .tile .big { font-family: var(--font-anthropic-serif); font-size: 44px; line-height: 1; font-variant-numeric: tabular-nums; }
+.qb .tile .lbl { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+.qb .tile .sub { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); font-variant-numeric: tabular-nums; }
+.qb .tile .sub b { color: var(--color-fg); font-weight: var(--cds-font-weight-medium); }
+.qb .bar { display: flex; flex-wrap: wrap; gap: var(--cds-gap-md); align-items: center; justify-content: space-between; }
+.qb .seg { display: inline-flex; border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); overflow: hidden; }
+.qb .seg button { font: inherit; font-size: var(--cds-font-size-caption); padding: 7px 14px; border: 0; background: transparent; color: var(--color-fg-muted); cursor: pointer; }
+.qb .seg button + button { border-left: 1px solid var(--color-border-line); }
+.qb .seg button[aria-pressed="true"] { background: var(--color-fg); color: var(--color-bg); }
+.qb .seg button:focus-visible { outline: 2px solid var(--color-fg); outline-offset: -2px; }
+.qb .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+.qb .legend span { display: inline-flex; align-items: center; gap: 6px; }
+.qb .legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.qb .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); gap: var(--cds-gap-xl); }
+.qb section { min-width: 0; display: flex; flex-direction: column; gap: var(--cds-gap-sm); }
+.qb .chart { position: relative; width: 100%; min-height: 160px; }
+.qb .chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.qb .chart .ax text { fill: var(--cds-text-secondary); font-size: var(--cds-font-size-caption); font-family: var(--font-anthropic-sans); }
+.qb .chart .ax line, .qb .chart .ax path { stroke: var(--cds-chart-axis); }
+.qb .chart .gridl line { stroke: var(--cds-chart-grid); }
+.qb .chart .lab { fill: var(--color-fg); font-size: var(--cds-font-size-caption); font-variant-numeric: tabular-nums; }
+.qb .chart .name { fill: var(--color-fg); font-size: var(--cds-font-size-caption); font-weight: 500; }
+.qb .chart .ref { stroke: var(--cds-chart-reference); stroke-dasharray: 4 3; }
+.qb .chart .reflab { fill: var(--cds-text-secondary); font-size: 11px; }
+.qb .tip { position: absolute; pointer-events: none; background: var(--cds-surface-popover); border: 1px solid var(--cds-border); box-shadow: var(--cds-shadow-popover); color: var(--cds-text-secondary); border-radius: 6px; padding: 6px 9px; font-size: var(--cds-font-size-caption); line-height: 1.35; white-space: nowrap; z-index: 3; }
+.qb .tip b { color: var(--color-fg); }
+.qb .tblwrap { overflow-x: auto; border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); }
+.qb table { border-collapse: collapse; width: 100%; font-size: var(--cds-font-size-caption); font-variant-numeric: tabular-nums; }
+.qb th, .qb td { padding: 8px 12px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--color-border-line); }
+.qb th:first-child, .qb td:first-child, .qb th:nth-child(2), .qb td:nth-child(2) { text-align: left; }
+.qb th { font-weight: var(--cds-font-weight-medium); color: var(--color-fg-muted); background: var(--color-panel); }
+.qb tbody tr:last-child td { border-bottom: 0; }
+.qb tr.sep td { border-top: 2px solid var(--color-border-line); }
+.qb details { border-top: 1px solid var(--color-border-line); padding-top: var(--cds-gap-md); }
+.qb summary { cursor: pointer; font-weight: var(--cds-font-weight-medium); }
+.qb details ul { margin: var(--cds-gap-sm) 0 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 6px; line-height: 1.5; max-width: 72ch; }
+.qb .fail { color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); padding: var(--cds-pad-lg) 0; }
+@media (max-width: 520px) { .qb .tile .big { font-size: 38px; } }
+@media print { .qb .seg { display: none; } }
+</style>
+
+<div class="qb">
+  <header>
+    <div class="eyebrow">Hardware-neutral compiler benchmark · QUMO, Qiskit, TKET, Cirq</div>
+    <h1 id="title">QUMO compiler benchmark</h1>
+    <p class="lede" id="takeaway">At the default level QUMO compiles
+      <b data-draw="x" data-sdk="Qiskit" data-level="default" data-field="time_x" data-source="ratios" data-where="sdk=Qiskit&amp;level=default">—</b>× faster than Qiskit,
+      <b data-draw="x" data-sdk="Cirq" data-level="default" data-field="time_x" data-source="ratios" data-where="sdk=Cirq&amp;level=default">—</b>× faster than Cirq and
+      <b data-draw="x" data-sdk="TKET" data-level="default" data-field="time_x" data-source="ratios" data-where="sdk=TKET&amp;level=default">—</b>× faster than TKET,
+      with a smaller resident set and fewer two-qubit gates than all three. Figures are means of four sequential runs of the same suite.</p>
+  </header>
+
+  <div class="tiles" id="tiles">
+    <div class="tile"><div class="lbl">Compile time vs Qiskit</div>
+      <div class="big"><span data-draw="x" data-sdk="Qiskit" data-level="default" data-field="time_x" data-source="ratios" data-where="sdk=Qiskit&amp;level=default">—</span>×</div>
+      <div class="sub">default level · at max level <b data-draw="x" data-sdk="Qiskit" data-level="max" data-field="time_x" data-source="ratios" data-where="sdk=Qiskit&amp;level=max">—</b>×</div>
+      <div class="sub">CPU time <b data-draw="x" data-sdk="Qiskit" data-level="default" data-field="cpu_x" data-source="ratios" data-where="sdk=Qiskit&amp;level=default">—</b>× · peak memory <b data-draw="x" data-sdk="Qiskit" data-level="default" data-field="peak_mem_x" data-source="ratios" data-where="sdk=Qiskit&amp;level=default">—</b>×</div></div>
+    <div class="tile"><div class="lbl">Compile time vs Cirq</div>
+      <div class="big"><span data-draw="x" data-sdk="Cirq" data-level="default" data-field="time_x" data-source="ratios" data-where="sdk=Cirq&amp;level=default">—</span>×</div>
+      <div class="sub">default level · at max level <b data-draw="x" data-sdk="Cirq" data-level="max" data-field="time_x" data-source="ratios" data-where="sdk=Cirq&amp;level=max">—</b>×</div>
+      <div class="sub">CPU time <b data-draw="x" data-sdk="Cirq" data-level="default" data-field="cpu_x" data-source="ratios" data-where="sdk=Cirq&amp;level=default">—</b>× · peak memory <b data-draw="x" data-sdk="Cirq" data-level="default" data-field="peak_mem_x" data-source="ratios" data-where="sdk=Cirq&amp;level=default">—</b>×</div></div>
+    <div class="tile"><div class="lbl">Compile time vs TKET</div>
+      <div class="big"><span data-draw="x" data-sdk="TKET" data-level="default" data-field="time_x" data-source="ratios" data-where="sdk=TKET&amp;level=default">—</span>×</div>
+      <div class="sub">default level · at max level <b data-draw="x" data-sdk="TKET" data-level="max" data-field="time_x" data-source="ratios" data-where="sdk=TKET&amp;level=max">—</b>×</div>
+      <div class="sub">CPU time <b data-draw="x" data-sdk="TKET" data-level="default" data-field="cpu_x" data-source="ratios" data-where="sdk=TKET&amp;level=default">—</b>× · peak memory <b data-draw="x" data-sdk="TKET" data-level="default" data-field="peak_mem_x" data-source="ratios" data-where="sdk=TKET&amp;level=default">—</b>×</div></div>
+  </div>
+  <p class="muted">Each ratio is the geometric mean over the circuit and target pairs both SDKs compiled, with QUMO as 1×. Higher means the other SDK is slower or larger.</p>
+
+  <div class="bar">
+    <div class="seg" role="group" aria-label="Optimization level for the charts below">
+      <button type="button" data-level="default" aria-pressed="true">default level</button>
+      <button type="button" data-level="max" aria-pressed="false">max level</button>
+    </div>
+    <div class="legend" aria-hidden="true">
+      <span><i data-dot="QUMO"></i>QUMO</span><span><i data-dot="Qiskit"></i>Qiskit</span><span><i data-dot="TKET"></i>TKET</span><span><i data-dot="Cirq"></i>Cirq</span>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <section id="speed">
+      <h2>Throughput</h2>
+      <p class="muted">Jobs compiled per second of compile time, log scale. One job is one circuit on one target.</p>
+      <div class="chart" data-draw="c_through" data-source="summary"></div>
+    </section>
+    <section id="ratio">
+      <h2>How much slower the others are</h2>
+      <p class="muted">Time (solid) and CPU time (light) relative to QUMO, log scale. 1× is QUMO.</p>
+      <div class="chart" data-draw="c_ratio" data-source="ratios"></div>
+    </section>
+  </div>
+
+  <section id="byqubits">
+    <h2>Compile time by circuit width</h2>
+    <p class="muted">Median compile time in milliseconds per qubit count, with the interquartile band. Log scale.</p>
+    <div class="chart" data-draw="c_time" data-source="by_qubits" style="min-height:300px"></div>
+  </section>
+
+  <div class="grid2">
+    <section id="cpu">
+      <h2>CPU use</h2>
+      <p class="muted">CPU seconds per wall-clock second while compiling. Above 1 means more than one core in use.</p>
+      <div class="chart" data-draw="c_cpu" data-source="summary"></div>
+    </section>
+    <section id="memory">
+      <h2>Memory</h2>
+      <p class="muted">Resident set in MB: light is idle after warm-up, solid is the median peak during a job. Every worker includes a shared 70 MB python and qiskit import.</p>
+      <div class="chart" data-draw="c_mem" data-source="summary"></div>
+    </section>
+  </div>
+
+  <section id="table">
+    <h2>All figures</h2>
+    <div class="tblwrap">
+      <table data-source="summary" data-row-key="sdk,level">
+        <thead><tr>
+          <th data-field="sdk">SDK</th><th data-field="level">Level</th><th data-field="ok">Compiled</th><th data-field="unsupported">Unsupported</th>
+          <th data-field="total_wall_s">Wall s</th><th data-field="jobs_per_s">Jobs/s</th><th data-field="median_ms">Median ms</th><th data-field="p90_ms">p90 ms</th>
+          <th data-field="total_cpu_s">CPU s</th><th data-field="cpu_per_wall">CPU/wall</th><th data-field="idle_mb">Idle MB</th><th data-field="median_peak_mb">Peak MB</th><th data-field="run_cv_pct">Run CV %</th>
+        </tr></thead>
+        <tbody data-draw="sumtable"></tbody>
+      </table>
+    </div>
+    <p class="muted">Compiled, unsupported and failed jobs are counts per level out of 704 circuit and target pairs. Timings use only compiled jobs. Run CV is the mean spread of one job's wall time across the four runs.</p>
+  </section>
+
+  <section id="stability">
+    <h2>Run to run</h2>
+    <p class="muted">Median peak memory in each of the four runs. Compile times repeat within a few percent (Run CV above), but peak memory is higher in runs 2 to 4 than in run 1.</p>
+    <div class="chart" data-draw="c_runs" data-source="by_run" style="min-height:220px"></div>
+  </section>
+
+  <details>
+    <summary>How this was measured and what to keep in mind</summary>
+    <ul>
+      <li>The suite is 704 circuit and target pairs, each at two optimization levels, run one job at a time for QUMO, Qiskit, TKET and Cirq, four times in a row. Figures are means across those runs.</li>
+      <li>Cirq has no built-in target gateset for several of the suite's targets, so 320 of its 704 pairs per level are unsupported and 5 failed. Its ratios cover only the pairs it compiled.</li>
+      <li>The machine was also running other work (load average about 3 to 3.5), so absolute times are indicative. Ratios between SDKs held across all four runs.</li>
+      <li>Peak memory includes memory the worker process kept from earlier jobs, including the statevector check that runs between compiles. Read it as a comparison between SDKs, not as the cost of one compile. Idle memory is stable across runs.</li>
+      <li>Two-qubit gate counts are in the source data. In the mean, every other SDK produced more two-qubit gates than QUMO for the same job.</li>
+    </ul>
+  </details>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script>
+window.__DATA__={"summary":[{"level":"default","sdk":"QUMO","jobs":704,"ok":704,"unsupported":0,"failed":0,"total_wall_s":1.609,"total_cpu_s":4.549,"jobs_per_s":437.512,"median_ms":0.499,"p90_ms":4.347,"cpu_per_wall":2.827,"idle_mb":83,"median_peak_mb":227,"max_peak_mb":244,"run_cv_pct":3.948},{"level":"default","sdk":"Qiskit","jobs":704,"ok":704,"unsupported":0,"failed":0,"total_wall_s":3.877,"total_cpu_s":14.371,"jobs_per_s":181.561,"median_ms":2.745,"p90_ms":5.945,"cpu_per_wall":3.706,"idle_mb":160,"median_peak_mb":411,"max_peak_mb":440,"run_cv_pct":5.031},{"level":"default","sdk":"TKET","jobs":704,"ok":704,"unsupported":0,"failed":0,"total_wall_s":861.567,"total_cpu_s":860.347,"jobs_per_s":0.817,"median_ms":94.65,"p90_ms":1023.375,"cpu_per_wall":0.999,"idle_mb":253,"median_peak_mb":532,"max_peak_mb":592,"run_cv_pct":2.735},{"level":"default","sdk":"Cirq","jobs":704,"ok":379,"unsupported":320,"failed":5,"total_wall_s":211.318,"total_cpu_s":219.32,"jobs_per_s":1.794,"median_ms":52.004,"p90_ms":340.686,"cpu_per_wall":1.038,"idle_mb":222,"median_peak_mb":346,"max_peak_mb":509,"run_cv_pct":4.457},{"level":"max","sdk":"QUMO","jobs":704,"ok":704,"unsupported":0,"failed":0,"total_wall_s":4.574,"total_cpu_s":13.928,"jobs_per_s":153.906,"median_ms":1.075,"p90_ms":11.637,"cpu_per_wall":3.045,"idle_mb":83,"median_peak_mb":227,"max_peak_mb":246,"run_cv_pct":3.623},{"level":"max","sdk":"Qiskit","jobs":704,"ok":704,"unsupported":0,"failed":0,"total_wall_s":6.567,"total_cpu_s":21.85,"jobs_per_s":107.195,"median_ms":2.883,"p90_ms":7.723,"cpu_per_wall":3.327,"idle_mb":160,"median_peak_mb":411,"max_peak_mb":448,"run_cv_pct":5.296},{"level":"max","sdk":"TKET","jobs":704,"ok":704,"unsupported":0,"failed":0,"total_wall_s":1637.998,"total_cpu_s":1636.051,"jobs_per_s":0.43,"median_ms":187.717,"p90_ms":1812.798,"cpu_per_wall":0.999,"idle_mb":253,"median_peak_mb":532,"max_peak_mb":590,"run_cv_pct":2.718},{"level":"max","sdk":"Cirq","jobs":704,"ok":379,"unsupported":320,"failed":5,"total_wall_s":241.878,"total_cpu_s":250.087,"jobs_per_s":1.567,"median_ms":59.387,"p90_ms":399.094,"cpu_per_wall":1.034,"idle_mb":222,"median_peak_mb":346,"max_peak_mb":554,"run_cv_pct":4.308}],"ratios":[{"level":"default","sdk":"Qiskit","pairs":704,"time_x":5.76,"cpu_x":7.46,"peak_mem_x":1.85,"two_qubit_gates_x":1.14,"qumo_faster_pct":98},{"level":"default","sdk":"TKET","pairs":704,"time_x":195.28,"cpu_x":95.38,"peak_mem_x":2.46,"two_qubit_gates_x":1.16,"qumo_faster_pct":100},{"level":"default","sdk":"Cirq","pairs":379,"time_x":75.05,"cpu_x":37.42,"peak_mem_x":1.7,"two_qubit_gates_x":1.34,"qumo_faster_pct":100},{"level":"max","sdk":"Qiskit","pairs":704,"time_x":2.87,"cpu_x":3.68,"peak_mem_x":1.85,"two_qubit_gates_x":1.15,"qumo_faster_pct":76},{"level":"max","sdk":"TKET","pairs":704,"time_x":157.89,"cpu_x":71.07,"peak_mem_x":2.46,"two_qubit_gates_x":1.12,"qumo_faster_pct":100},{"level":"max","sdk":"Cirq","pairs":379,"time_x":38.36,"cpu_x":17.47,"peak_mem_x":1.7,"two_qubit_gates_x":1.36,"qumo_faster_pct":100}],"by_qubits":[{"level":"default","sdk":"QUMO","qubits":1,"jobs":11,"median_ms":0.034,"p25_ms":0.029,"p75_ms":0.045},{"level":"default","sdk":"QUMO","qubits":2,"jobs":66,"median_ms":0.071,"p25_ms":0.049,"p75_ms":0.263},{"level":"default","sdk":"QUMO","qubits":3,"jobs":88,"median_ms":0.271,"p25_ms":0.229,"p75_ms":0.475},{"level":"default","sdk":"QUMO","qubits":4,"jobs":132,"median_ms":0.313,"p25_ms":0.15,"p75_ms":0.635},{"level":"default","sdk":"QUMO","qubits":5,"jobs":88,"median_ms":0.524,"p25_ms":0.133,"p75_ms":1.051},{"level":"default","sdk":"QUMO","qubits":6,"jobs":33,"median_ms":1.618,"p25_ms":0.726,"p75_ms":1.983},{"level":"default","sdk":"QUMO","qubits":7,"jobs":55,"median_ms":1.786,"p25_ms":0.298,"p75_ms":3.001},{"level":"default","sdk":"QUMO","qubits":8,"jobs":33,"median_ms":1.036,"p25_ms":0.076,"p75_ms":11.46},{"level":"default","sdk":"QUMO","qubits":9,"jobs":55,"median_ms":1.472,"p25_ms":0.519,"p75_ms":1.992},{"level":"default","sdk":"QUMO","qubits":10,"jobs":44,"median_ms":1.738,"p25_ms":0.596,"p75_ms":1.992},{"level":"default","sdk":"QUMO","qubits":11,"jobs":33,"median_ms":2.59,"p25_ms":1.794,"p75_ms":3.244},{"level":"default","sdk":"QUMO","qubits":12,"jobs":22,"median_ms":7.246,"p25_ms":3.277,"p75_ms":67.833},{"level":"default","sdk":"QUMO","qubits":13,"jobs":22,"median_ms":3.409,"p25_ms":1.369,"p75_ms":9.919},{"level":"default","sdk":"QUMO","qubits":14,"jobs":22,"median_ms":1.032,"p25_ms":0.382,"p75_ms":5.214},{"level":"default","sdk":"Qiskit","qubits":1,"jobs":11,"median_ms":1.407,"p25_ms":1.303,"p75_ms":1.746},{"level":"default","sdk":"Qiskit","qubits":2,"jobs":66,"median_ms":1.792,"p25_ms":1.647,"p75_ms":1.948},{"level":"default","sdk":"Qiskit","qubits":3,"jobs":88,"median_ms":2.247,"p25_ms":2.021,"p75_ms":2.463},{"level":"default","sdk":"Qiskit","qubits":4,"jobs":132,"median_ms":2.283,"p25_ms":1.997,"p75_ms":2.588},{"level":"default","sdk":"Qiskit","qubits":5,"jobs":88,"median_ms":2.705,"p25_ms":2.319,"p75_ms":3.003},{"level":"default","sdk":"Qiskit","qubits":6,"jobs":33,"median_ms":3.416,"p25_ms":2.736,"p75_ms":7.652},{"level":"default","sdk":"Qiskit","qubits":7,"jobs":55,"median_ms":3.568,"p25_ms":3.111,"p75_ms":4.424},{"level":"default","sdk":"Qiskit","qubits":8,"jobs":33,"median_ms":4.011,"p25_ms":2.088,"p75_ms":25.229},{"level":"default","sdk":"Qiskit","qubits":9,"jobs":55,"median_ms":3.668,"p25_ms":3.35,"p75_ms":4.106},{"level":"default","sdk":"Qiskit","qubits":10,"jobs":44,"median_ms":3.922,"p25_ms":3.474,"p75_ms":4.254},{"level":"default","sdk":"Qiskit","qubits":11,"jobs":33,"median_ms":4.961,"p25_ms":4.364,"p75_ms":6.485},{"level":"default","sdk":"Qiskit","qubits":12,"jobs":22,"median_ms":23.247,"p25_ms":4.977,"p75_ms":103.395},{"level":"default","sdk":"Qiskit","qubits":13,"jobs":22,"median_ms":15.027,"p25_ms":3.815,"p75_ms":28.769},{"level":"default","sdk":"Qiskit","qubits":14,"jobs":22,"median_ms":4.27,"p25_ms":3.166,"p75_ms":4.915},{"level":"default","sdk":"TKET","qubits":1,"jobs":11,"median_ms":1.097,"p25_ms":1.043,"p75_ms":1.498},{"level":"default","sdk":"TKET","qubits":2,"jobs":66,"median_ms":6.337,"p25_ms":4.066,"p75_ms":14.037},{"level":"default","sdk":"TKET","qubits":3,"jobs":88,"median_ms":23.904,"p25_ms":21.627,"p75_ms":29.604},{"level":"default","sdk":"TKET","qubits":4,"jobs":132,"median_ms":46.368,"p25_ms":21.323,"p75_ms":64.934},{"level":"default","sdk":"TKET","qubits":5,"jobs":88,"median_ms":86.586,"p25_ms":58.113,"p75_ms":119.454},{"level":"default","sdk":"TKET","qubits":6,"jobs":33,"median_ms":226.635,"p25_ms":125.8,"p75_ms":4454.09},{"level":"default","sdk":"TKET","qubits":7,"jobs":55,"median_ms":405.63,"p25_ms":165.041,"p75_ms":687.82},{"level":"default","sdk":"TKET","qubits":8,"jobs":33,"median_ms":430.658,"p25_ms":6.501,"p75_ms":24415.547},{"level":"default","sdk":"TKET","qubits":9,"jobs":55,"median_ms":620.6,"p25_ms":209.18,"p75_ms":735.074},{"level":"default","sdk":"TKET","qubits":10,"jobs":44,"median_ms":423.021,"p25_ms":232.726,"p75_ms":728.889},{"level":"default","sdk":"TKET","qubits":11,"jobs":33,"median_ms":791.282,"p25_ms":422.898,"p75_ms":976.545},{"level":"default","sdk":"TKET","qubits":12,"jobs":22,"median_ms":15085.571,"p25_ms":950.041,"p75_ms":31453.306},{"level":"default","sdk":"TKET","qubits":13,"jobs":22,"median_ms":1207.159,"p25_ms":669.504,"p75_ms":1870.03},{"level":"default","sdk":"TKET","qubits":14,"jobs":22,"median_ms":695.529,"p25_ms":408.393,"p75_ms":892.077},{"level":"default","sdk":"Cirq","qubits":1,"jobs":6,"median_ms":0.411,"p25_ms":0.398,"p75_ms":0.535},{"level":"default","sdk":"Cirq","qubits":2,"jobs":36,"median_ms":3.349,"p25_ms":2.651,"p75_ms":4.646},{"level":"default","sdk":"Cirq","qubits":3,"jobs":48,"median_ms":13.541,"p25_ms":8.627,"p75_ms":17.769},{"level":"default","sdk":"Cirq","qubits":4,"jobs":70,"median_ms":14.484,"p25_ms":8.595,"p75_ms":23.287},{"level":"default","sdk":"Cirq","qubits":5,"jobs":46,"median_ms":44.695,"p25_ms":20.493,"p75_ms":62.641},{"level":"default","sdk":"Cirq","qubits":6,"jobs":17,"median_ms":64.293,"p25_ms":32.837,"p75_ms":1452.236},{"level":"default","sdk":"Cirq","qubits":7,"jobs":30,"median_ms":147.236,"p25_ms":109.082,"p75_ms":221.176},{"level":"default","sdk":"Cirq","qubits":8,"jobs":18,"median_ms":131.683,"p25_ms":2.276,"p75_ms":8339.275},{"level":"default","sdk":"Cirq","qubits":9,"jobs":30,"median_ms":134.354,"p25_ms":96.295,"p75_ms":191.172},{"level":"default","sdk":"Cirq","qubits":10,"jobs":24,"median_ms":157.779,"p25_ms":134.748,"p75_ms":163.359},{"level":"default","sdk":"Cirq","qubits":11,"jobs":18,"median_ms":264.404,"p25_ms":203.631,"p75_ms":595.002},{"level":"default","sdk":"Cirq","qubits":12,"jobs":12,"median_ms":7814.202,"p25_ms":283.019,"p75_ms":19319.572},{"level":"default","sdk":"Cirq","qubits":13,"jobs":12,"median_ms":502.119,"p25_ms":126.159,"p75_ms":1048.655},{"level":"default","sdk":"Cirq","qubits":14,"jobs":12,"median_ms":123.325,"p25_ms":37.413,"p75_ms":239.726},{"level":"max","sdk":"QUMO","qubits":1,"jobs":11,"median_ms":0.057,"p25_ms":0.05,"p75_ms":0.072},{"level":"max","sdk":"QUMO","qubits":2,"jobs":66,"median_ms":0.135,"p25_ms":0.099,"p75_ms":0.489},{"level":"max","sdk":"QUMO","qubits":3,"jobs":88,"median_ms":0.495,"p25_ms":0.422,"p75_ms":1.04},{"level":"max","sdk":"QUMO","qubits":4,"jobs":132,"median_ms":0.604,"p25_ms":0.301,"p75_ms":1.485},{"level":"max","sdk":"QUMO","qubits":5,"jobs":88,"median_ms":1.113,"p25_ms":0.277,"p75_ms":2.638},{"level":"max","sdk":"QUMO","qubits":6,"jobs":33,"median_ms":3.44,"p25_ms":1.561,"p75_ms":4.239},{"level":"max","sdk":"QUMO","qubits":7,"jobs":55,"median_ms":4.485,"p25_ms":0.64,"p75_ms":8.067},{"level":"max","sdk":"QUMO","qubits":8,"jobs":33,"median_ms":2.36,"p25_ms":0.128,"p75_ms":27.26},{"level":"max","sdk":"QUMO","qubits":9,"jobs":55,"median_ms":3.827,"p25_ms":1.203,"p75_ms":5.455},{"level":"max","sdk":"QUMO","qubits":10,"jobs":44,"median_ms":4.504,"p25_ms":1.328,"p75_ms":5.686},{"level":"max","sdk":"QUMO","qubits":11,"jobs":33,"median_ms":7.09,"p25_ms":3.61,"p75_ms":9.78},{"level":"max","sdk":"QUMO","qubits":12,"jobs":22,"median_ms":17.813,"p25_ms":11.413,"p75_ms":223.407},{"level":"max","sdk":"QUMO","qubits":13,"jobs":22,"median_ms":8.158,"p25_ms":3.814,"p75_ms":25.595},{"level":"max","sdk":"QUMO","qubits":14,"jobs":22,"median_ms":2.551,"p25_ms":0.829,"p75_ms":16.484},{"level":"max","sdk":"Qiskit","qubits":1,"jobs":11,"median_ms":1.386,"p25_ms":1.306,"p75_ms":1.864},{"level":"max","sdk":"Qiskit","qubits":2,"jobs":66,"median_ms":1.878,"p25_ms":1.718,"p75_ms":2.043},{"level":"max","sdk":"Qiskit","qubits":3,"jobs":88,"median_ms":2.287,"p25_ms":2.111,"p75_ms":2.58},{"level":"max","sdk":"Qiskit","qubits":4,"jobs":132,"median_ms":2.357,"p25_ms":2.098,"p75_ms":2.708},{"level":"max","sdk":"Qiskit","qubits":5,"jobs":88,"median_ms":2.862,"p25_ms":2.427,"p75_ms":3.198},{"level":"max","sdk":"Qiskit","qubits":6,"jobs":33,"median_ms":3.711,"p25_ms":3.038,"p75_ms":9.489},{"level":"max","sdk":"Qiskit","qubits":7,"jobs":55,"median_ms":3.79,"p25_ms":3.322,"p75_ms":5.061},{"level":"max","sdk":"Qiskit","qubits":8,"jobs":33,"median_ms":3.955,"p25_ms":2.132,"p75_ms":42.682},{"level":"max","sdk":"Qiskit","qubits":9,"jobs":55,"median_ms":3.88,"p25_ms":3.488,"p75_ms":4.537},{"level":"max","sdk":"Qiskit","qubits":10,"jobs":44,"median_ms":4.23,"p25_ms":3.626,"p75_ms":4.575},{"level":"max","sdk":"Qiskit","qubits":11,"jobs":33,"median_ms":5.169,"p25_ms":4.556,"p75_ms":7.27},{"level":"max","sdk":"Qiskit","qubits":12,"jobs":22,"median_ms":30.08,"p25_ms":5.397,"p75_ms":152.41},{"level":"max","sdk":"Qiskit","qubits":13,"jobs":22,"median_ms":23.435,"p25_ms":4.105,"p75_ms":30.537},{"level":"max","sdk":"Qiskit","qubits":14,"jobs":22,"median_ms":4.651,"p25_ms":3.276,"p75_ms":5.75},{"level":"max","sdk":"TKET","qubits":1,"jobs":11,"median_ms":2.14,"p25_ms":2.104,"p75_ms":2.704},{"level":"max","sdk":"TKET","qubits":2,"jobs":66,"median_ms":11.543,"p25_ms":8.208,"p75_ms":29.567},{"level":"max","sdk":"TKET","qubits":3,"jobs":88,"median_ms":50.351,"p25_ms":44.127,"p75_ms":57.853},{"level":"max","sdk":"TKET","qubits":4,"jobs":132,"median_ms":94.836,"p25_ms":42.445,"p75_ms":128.575},{"level":"max","sdk":"TKET","qubits":5,"jobs":88,"median_ms":175.224,"p25_ms":121.528,"p75_ms":203.068},{"level":"max","sdk":"TKET","qubits":6,"jobs":33,"median_ms":419.558,"p25_ms":184.15,"p75_ms":8578.504},{"level":"max","sdk":"TKET","qubits":7,"jobs":55,"median_ms":621.812,"p25_ms":332.313,"p75_ms":1163.61},{"level":"max","sdk":"TKET","qubits":8,"jobs":33,"median_ms":780.474,"p25_ms":13.004,"p75_ms":47415.524},{"level":"max","sdk":"TKET","qubits":9,"jobs":55,"median_ms":795.588,"p25_ms":432.132,"p75_ms":950.752},{"level":"max","sdk":"TKET","qubits":10,"jobs":44,"median_ms":858.294,"p25_ms":443.264,"p75_ms":957.644},{"level":"max","sdk":"TKET","qubits":11,"jobs":33,"median_ms":1059.08,"p25_ms":869.167,"p75_ms":1704.796},{"level":"max","sdk":"TKET","qubits":12,"jobs":22,"median_ms":29032.193,"p25_ms":1442.875,"p75_ms":62301.046},{"level":"max","sdk":"TKET","qubits":13,"jobs":22,"median_ms":2031.682,"p25_ms":876.211,"p75_ms":3631.178},{"level":"max","sdk":"TKET","qubits":14,"jobs":22,"median_ms":821.666,"p25_ms":791.232,"p75_ms":1330.821},{"level":"max","sdk":"Cirq","qubits":1,"jobs":6,"median_ms":0.565,"p25_ms":0.558,"p75_ms":0.709},{"level":"max","sdk":"Cirq","qubits":2,"jobs":36,"median_ms":3.949,"p25_ms":2.934,"p75_ms":5.48},{"level":"max","sdk":"Cirq","qubits":3,"jobs":48,"median_ms":14.948,"p25_ms":10.181,"p75_ms":19.472},{"level":"max","sdk":"Cirq","qubits":4,"jobs":70,"median_ms":16.674,"p25_ms":9.428,"p75_ms":27.41},{"level":"max","sdk":"Cirq","qubits":5,"jobs":46,"median_ms":60.034,"p25_ms":23.66,"p75_ms":69.963},{"level":"max","sdk":"Cirq","qubits":6,"jobs":17,"median_ms":77.416,"p25_ms":40.357,"p75_ms":1671.213},{"level":"max","sdk":"Cirq","qubits":7,"jobs":30,"median_ms":165.923,"p25_ms":121.084,"p75_ms":248.235},{"level":"max","sdk":"Cirq","qubits":8,"jobs":18,"median_ms":147.111,"p25_ms":2.797,"p75_ms":9245.034},{"level":"max","sdk":"Cirq","qubits":9,"jobs":30,"median_ms":149.022,"p25_ms":110.053,"p75_ms":233.246},{"level":"max","sdk":"Cirq","qubits":10,"jobs":24,"median_ms":179.793,"p25_ms":152.148,"p75_ms":191.93},{"level":"max","sdk":"Cirq","qubits":11,"jobs":18,"median_ms":316.188,"p25_ms":219.941,"p75_ms":681.921},{"level":"max","sdk":"Cirq","qubits":12,"jobs":12,"median_ms":8881.905,"p25_ms":350.93,"p75_ms":22203.255},{"level":"max","sdk":"Cirq","qubits":13,"jobs":12,"median_ms":547.717,"p25_ms":133.859,"p75_ms":1214.956},{"level":"max","sdk":"Cirq","qubits":14,"jobs":12,"median_ms":138.707,"p25_ms":41.814,"p75_ms":278.798}],"by_run":[{"run":1,"sdk":"QUMO","total_wall_s":6.42,"median_peak_mb":164},{"run":1,"sdk":"Qiskit","total_wall_s":10.846,"median_peak_mb":273},{"run":1,"sdk":"TKET","total_wall_s":2464.416,"median_peak_mb":349},{"run":1,"sdk":"Cirq","total_wall_s":465.986,"median_peak_mb":234},{"run":2,"sdk":"QUMO","total_wall_s":6.133,"median_peak_mb":241},{"run":2,"sdk":"Qiskit","total_wall_s":10.391,"median_peak_mb":435},{"run":2,"sdk":"TKET","total_wall_s":2667.272,"median_peak_mb":564},{"run":2,"sdk":"Cirq","total_wall_s":448.104,"median_peak_mb":352},{"run":3,"sdk":"QUMO","total_wall_s":6.086,"median_peak_mb":250},{"run":3,"sdk":"Qiskit","total_wall_s":10.265,"median_peak_mb":456},{"run":3,"sdk":"TKET","total_wall_s":2372.976,"median_peak_mb":610},{"run":3,"sdk":"Cirq","total_wall_s":449.304,"median_peak_mb":400},{"run":4,"sdk":"QUMO","total_wall_s":6.094,"median_peak_mb":247},{"run":4,"sdk":"Qiskit","total_wall_s":10.278,"median_peak_mb":478},{"run":4,"sdk":"TKET","total_wall_s":2493.595,"median_peak_mb":607},{"run":4,"sdk":"Cirq","total_wall_s":449.39,"median_peak_mb":399}]};
+window.dash=(function(){
+  const reg={};const cbs=[];
+  const colors=['#0072B2','#E69F00','#009E73','#CC79A7'];
+  const run=(n)=>document.querySelectorAll('[data-draw="'+n+'"]').forEach(el=>{try{reg[n](el)}catch(e){console.error(n,e)}});
+  return {colors,
+    data:(id)=>({status:'ok',data:window.__DATA__[id]||[]}),
+    draw:(n,fn)=>{if(fn){reg[n]=fn;run(n)}else if(reg[n]){run(n)}},
+    onData:(fn)=>{cbs.push(fn);fn()},
+    _all:()=>Object.keys(reg).forEach(run),
+    _cbs:()=>cbs.forEach(f=>f())};
+})();
+let _rt;window.addEventListener('resize',()=>{clearTimeout(_rt);_rt=setTimeout(()=>dash._all(),120)});
+</script>
+<script>
+
+(function () {
+  const SDKS = ['QUMO', 'Qiskit', 'TKET', 'Cirq'];
+  let level = 'default';
+  const col = (s) => dash.colors[SDKS.indexOf(s) % dash.colors.length];
+  const get = (id) => { const g = dash.data(id); return g.status === 'ok' && g.data && g.data.length ? g.data : null; };
+  const f = (v) => v >= 100 ? d3.format(',.0f')(v) : v >= 10 ? d3.format('.1f')(v) : d3.format('.2f')(v);
+  const NS = 'http://www.w3.org/2000/svg';
+  const MARK = (sel, id, field, where) => sel.attr('data-source', id).attr('data-field', field).attr('data-where', where);
+
+  function ph(el, id) {
+    const st = dash.data(id).status;
+    if (st === 'error' || st === 'missing') { el.replaceChildren(Object.assign(document.createElement('div'), { className: 'fail', textContent: 'This chart did not load.' })); }
+    else { el.replaceChildren(Object.assign(document.createElement('div'), { className: 'dash-skeleton', style: 'min-height:160px' })); }
+  }
+  function frame(el, H, label) {
+    const W = Math.max(280, el.clientWidth || 600);
+    const svg = d3.create('svg').attr('viewBox', `0 0 ${W} ${H}`).attr('role', 'img').attr('aria-label', label);
+    const tip = d3.create('div').attr('class', 'tip').style('display', 'none');
+    el.replaceChildren(svg.node(), tip.node());
+    const show = (ev, html) => {
+      const r = el.getBoundingClientRect();
+      tip.html(html).style('display', 'block');
+      const w = tip.node().offsetWidth;
+      let x = ev.clientX - r.left + 12; if (x + w > r.width) x = ev.clientX - r.left - w - 12;
+      tip.style('left', Math.max(0, x) + 'px').style('top', Math.max(0, ev.clientY - r.top - 36) + 'px');
+    };
+    return { W, svg, show, hide: () => tip.style('display', 'none') };
+  }
+  const row = (id, s) => (get(id) || []).find((r) => r.sdk === s && r.level === level);
+  const esc = (t) => String(t).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+
+  // Numbers in sentences and tiles.
+  dash.draw('x', (el) => {
+    const d = get('ratios');
+    const r = d && d.find((q) => q.sdk === el.dataset.sdk && q.level === el.dataset.level);
+    el.textContent = r ? f(r[el.dataset.field]) : '—';
+  });
+
+  function hbars(el, id, label, items, domain, unit, ref) {
+    const rowH = 38, m = { l: 64, r: 86, t: 6, b: 30 }, H = m.t + m.b + rowH * items.length;
+    const { W, svg, show, hide } = frame(el, H, label);
+    const x = d3.scaleLog().domain(domain).range([m.l, W - m.r]);
+    const ticks = [0.1, 1, 10, 100, 1000].filter((t) => t >= domain[0] && t <= domain[1]);
+    svg.append('g').attr('class', 'gridl').selectAll('line').data(ticks).join('line').attr('x1', x).attr('x2', x).attr('y1', m.t).attr('y2', H - m.b);
+    svg.append('g').attr('class', 'ax').attr('transform', `translate(0,${H - m.b})`).call(d3.axisBottom(x).tickValues(ticks).tickFormat((v) => d3.format('~g')(v) + unit).tickSize(4)).select('.domain').remove();
+    items.forEach((it, i) => {
+      const y = m.t + i * rowH;
+      svg.append('text').attr('class', 'name').attr('x', m.l - 8).attr('y', y + rowH / 2 + 4).attr('text-anchor', 'end').text(it.name);
+      (it.bars || []).forEach((b, j) => {
+        const n = it.bars.length, bh = n > 1 ? 13 : 20, by = y + rowH / 2 - (n * bh + (n - 1) * 3) / 2 + j * (bh + 3);
+        const w = Math.max(1, x(b.v) - x(domain[0]));
+        svg.append('rect').attr('x', x(domain[0])).attr('y', by).attr('width', w).attr('height', bh).attr('rx', 3)
+          .style('fill', col(it.sdk)).style('opacity', b.o || 1)
+          .on('mousemove', (ev) => show(ev, b.tip)).on('mouseleave', hide);
+        const t = svg.append('text').attr('class', 'lab').attr('x', x(b.v) + 6).attr('y', by + bh - 3).text(f(b.v) + (b.suffix || ''));
+        if (b.mark) MARK(t, ...b.mark);
+      });
+    });
+    return { svg, x };
+  }
+
+  dash.draw('c_through', (el) => {
+    const d = get('summary'); if (!d) return ph(el, 'summary');
+    const items = SDKS.map((s) => { const r = row('summary', s); return r && { name: s, sdk: s, bars: [{ v: r.jobs_per_s, suffix: '/s', tip: `<b>${s}</b> ${f(r.jobs_per_s)} jobs/s<br>median ${f(r.median_ms)} ms`, mark: ['summary', 'jobs_per_s', `sdk=${s}&level=${level}`] }] }; }).filter(Boolean);
+    hbars(el, 'summary', `Jobs compiled per second at the ${level} level`, items, [0.1, 1000], '');
+  });
+
+  dash.draw('c_ratio', (el) => {
+    const d = get('ratios'); if (!d) return ph(el, 'ratios');
+    const items = ['Qiskit', 'TKET', 'Cirq'].map((s) => { const r = d.find((q) => q.sdk === s && q.level === level); return r && { name: s, sdk: s, bars: [
+      { v: r.time_x, suffix: '×', tip: `<b>${s}</b> time ${f(r.time_x)}× QUMO<br>${r.pairs} pairs`, mark: ['ratios', 'time_x', `sdk=${s}&level=${level}`] },
+      { v: r.cpu_x, suffix: '×', o: 0.5, tip: `<b>${s}</b> CPU time ${f(r.cpu_x)}× QUMO`, mark: ['ratios', 'cpu_x', `sdk=${s}&level=${level}`] }] }; }).filter(Boolean);
+    hbars(el, 'ratios', `Time and CPU time relative to QUMO at the ${level} level`, items, [1, 1000], '×');
+  });
+
+  dash.draw('c_time', (el) => {
+    const d = get('by_qubits'); if (!d) return ph(el, 'by_qubits');
+    const data = d.filter((r) => r.level === level);
+    const m = { l: 62, r: 14, t: 10, b: 38 }, H = 300;
+    const { W, svg, show, hide } = frame(el, H, `Median compile time by qubit count at the ${level} level`);
+    const x = d3.scaleLinear().domain([1, 14]).range([m.l, W - m.r]);
+    const lo = d3.min(data, (r) => r.p25_ms), hi = d3.max(data, (r) => r.p75_ms);
+    const y = d3.scaleLog().domain([Math.max(0.01, lo * 0.7), hi * 1.4]).range([H - m.b, m.t]);
+    const yt = [0.01, 0.1, 1, 10, 100, 1000, 10000, 100000].filter((t) => t >= y.domain()[0] && t <= y.domain()[1]);
+    svg.append('g').attr('class', 'gridl').selectAll('line').data(yt).join('line').attr('x1', m.l).attr('x2', W - m.r).attr('y1', y).attr('y2', y);
+    svg.append('g').attr('class', 'ax').attr('transform', `translate(0,${H - m.b})`).call(d3.axisBottom(x).tickValues(d3.range(1, 15)).tickSize(4)).select('.domain').remove();
+    svg.append('g').attr('class', 'ax').attr('transform', `translate(${m.l},0)`).call(d3.axisLeft(y).tickValues(yt).tickFormat((v) => d3.format('~g')(v) + ' ms').tickSize(0)).select('.domain').remove();
+    svg.append('text').attr('class', 'ax').attr('x', (m.l + W - m.r) / 2).attr('y', H - 4).attr('text-anchor', 'middle').append('tspan').text('qubits').style('fill', 'var(--cds-text-secondary)').style('font-size', 'var(--cds-font-size-caption)');
+    SDKS.forEach((s) => {
+      const pts = data.filter((r) => r.sdk === s).sort((a, b) => a.qubits - b.qubits);
+      if (!pts.length) return;
+      svg.append('path').attr('d', d3.area().x((r) => x(r.qubits)).y0((r) => y(r.p25_ms)).y1((r) => y(r.p75_ms))(pts)).style('fill', col(s)).style('opacity', 0.13);
+      svg.append('path').attr('d', d3.line().x((r) => x(r.qubits)).y((r) => y(r.median_ms))(pts)).style('fill', 'none').style('stroke', col(s)).style('stroke-width', 2.2);
+      svg.selectAll(null).data(pts).join('circle').attr('cx', (r) => x(r.qubits)).attr('cy', (r) => y(r.median_ms)).attr('r', 3.6).style('fill', col(s))
+        .on('mousemove', (ev, r) => show(ev, `<b>${s}</b> ${r.qubits} qubits<br>median ${f(r.median_ms)} ms<br>IQR ${f(r.p25_ms)} to ${f(r.p75_ms)} ms · ${r.jobs} jobs`)).on('mouseleave', hide);
+    });
+  });
+
+  function vbars(el, label, groups, yfmt, refLine) {
+    const m = { l: 46, r: refLine ? 62 : 10, t: 22, b: 30 }, H = 250;
+    const { W, svg, show, hide } = frame(el, H, label);
+    const x0 = d3.scaleBand().domain(groups.map((g) => g.name)).range([m.l, W - m.r]).paddingInner(0.28).paddingOuter(0.1);
+    const ymax = Math.max(d3.max(groups, (g) => d3.max(g.bars, (b) => b.v)), refLine ? refLine.v : 0) * 1.12;
+    const y = d3.scaleLinear().domain([0, ymax]).nice().range([H - m.b, m.t]);
+    svg.append('g').attr('class', 'gridl').selectAll('line').data(y.ticks(4)).join('line').attr('x1', m.l).attr('x2', W - m.r).attr('y1', y).attr('y2', y);
+    svg.append('g').attr('class', 'ax').attr('transform', `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(4).tickFormat(yfmt).tickSize(0)).select('.domain').remove();
+    svg.append('g').attr('class', 'ax').attr('transform', `translate(0,${H - m.b})`).call(d3.axisBottom(x0).tickSize(0)).select('.domain').remove();
+    groups.forEach((g) => {
+      const inner = d3.scaleBand().domain(g.bars.map((_, i) => i)).range([0, x0.bandwidth()]).padding(0.12);
+      g.bars.forEach((b, i) => {
+        const bx = x0(g.name) + inner(i), bw = inner.bandwidth();
+        svg.append('rect').attr('x', bx).attr('y', y(b.v)).attr('width', bw).attr('height', Math.max(0, y(0) - y(b.v))).attr('rx', 3).style('fill', col(g.sdk)).style('opacity', b.o || 1)
+          .on('mousemove', (ev) => show(ev, b.tip)).on('mouseleave', hide);
+        const t = svg.append('text').attr('class', 'lab').attr('x', bx + bw / 2).attr('y', y(b.v) - 5).attr('text-anchor', 'middle').text(b.label);
+        MARK(t, ...b.mark);
+      });
+    });
+    if (refLine) {
+      svg.append('line').attr('class', 'ref').attr('x1', m.l).attr('x2', W - m.r).attr('y1', y(refLine.v)).attr('y2', y(refLine.v));
+      svg.append('text').attr('class', 'reflab').attr('x', W - m.r + 6).attr('y', y(refLine.v) + 4).attr('text-anchor', 'start').text(refLine.label);
+    }
+  }
+
+  dash.draw('c_cpu', (el) => {
+    const d = get('summary'); if (!d) return ph(el, 'summary');
+    const groups = SDKS.map((s) => { const r = row('summary', s); return r && { name: s, sdk: s, bars: [{ v: r.cpu_per_wall, label: f(r.cpu_per_wall), tip: `<b>${s}</b> ${f(r.cpu_per_wall)} CPU s per wall s<br>${f(r.total_cpu_s)} CPU s in total`, mark: ['summary', 'cpu_per_wall', `sdk=${s}&level=${level}`] }] }; }).filter(Boolean);
+    vbars(el, `CPU seconds per wall-clock second at the ${level} level`, groups, (v) => v, { v: 1, label: 'one core' });
+  });
+
+  dash.draw('c_mem', (el) => {
+    const d = get('summary'); if (!d) return ph(el, 'summary');
+    const groups = SDKS.map((s) => { const r = row('summary', s); return r && { name: s, sdk: s, bars: [
+      { v: r.idle_mb, label: Math.round(r.idle_mb), o: 0.4, tip: `<b>${s}</b> idle ${r.idle_mb} MB`, mark: ['summary', 'idle_mb', `sdk=${s}&level=${level}`] },
+      { v: r.median_peak_mb, label: Math.round(r.median_peak_mb), tip: `<b>${s}</b> median peak ${r.median_peak_mb} MB<br>largest ${r.max_peak_mb} MB`, mark: ['summary', 'median_peak_mb', `sdk=${s}&level=${level}`] }] }; }).filter(Boolean);
+    vbars(el, `Idle and peak resident memory at the ${level} level`, groups, (v) => v + ' MB');
+  });
+
+  dash.draw('c_runs', (el) => {
+    const d = get('by_run'); if (!d) return ph(el, 'by_run');
+    const m = { l: 52, r: 54, t: 14, b: 32 }, H = 220;
+    const { W, svg, show, hide } = frame(el, H, 'Median peak memory per run for each SDK');
+    const x = d3.scaleLinear().domain([1, 4]).range([m.l + 34, W - m.r]);
+    const y = d3.scaleLinear().domain([0, d3.max(d, (r) => r.median_peak_mb) * 1.1]).nice().range([H - m.b, m.t]);
+    svg.append('g').attr('class', 'gridl').selectAll('line').data(y.ticks(4)).join('line').attr('x1', m.l).attr('x2', W - m.r).attr('y1', y).attr('y2', y);
+    svg.append('g').attr('class', 'ax').attr('transform', `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(4).tickFormat((v) => v + ' MB').tickSize(0)).select('.domain').remove();
+    svg.append('g').attr('class', 'ax').attr('transform', `translate(0,${H - m.b})`).call(d3.axisBottom(x).tickValues([1, 2, 3, 4]).tickFormat((v) => 'run ' + v).tickSize(0)).select('.domain').remove();
+    SDKS.forEach((s) => {
+      const pts = d.filter((r) => r.sdk === s).sort((a, b) => a.run - b.run);
+      svg.append('path').attr('d', d3.line().x((r) => x(r.run)).y((r) => y(r.median_peak_mb))(pts)).style('fill', 'none').style('stroke', col(s)).style('stroke-width', 2.2);
+      svg.selectAll(null).data(pts).join('circle').attr('cx', (r) => x(r.run)).attr('cy', (r) => y(r.median_peak_mb)).attr('r', 3.6).style('fill', col(s))
+        .on('mousemove', (ev, r) => show(ev, `<b>${s}</b> run ${r.run}<br>median peak ${r.median_peak_mb} MB<br>${f(r.total_wall_s)} s compiling`)).on('mouseleave', hide);
+      const last = pts[pts.length - 1];
+      if (last) svg.append('text').attr('class', 'name').attr('x', x(4) + 8).attr('y', y(last.median_peak_mb) + 4).text(s);
+    });
+  });
+
+  dash.draw('sumtable', (tb) => {
+    const d = get('summary'); if (!d) { tb.replaceChildren(); return; }
+    const cols = ['sdk', 'level', 'ok', 'unsupported', 'total_wall_s', 'jobs_per_s', 'median_ms', 'p90_ms', 'total_cpu_s', 'cpu_per_wall', 'idle_mb', 'median_peak_mb', 'run_cv_pct'];
+    tb.replaceChildren(...d.map((r, i) => {
+      const tr = document.createElement('tr');
+      if (i > 0 && r.level !== d[i - 1].level) tr.className = 'sep';
+      cols.forEach((c) => { const td = document.createElement('td'); td.textContent = typeof r[c] === 'number' ? (Number.isInteger(r[c]) ? String(r[c]) : f(r[c])) : r[c]; tr.appendChild(td); });
+      return tr;
+    }));
+  });
+
+  // Controls and legend colors: attribute and style writes only.
+  const redraw = () => ['c_through', 'c_ratio', 'c_time', 'c_cpu', 'c_mem'].forEach((n) => dash.draw(n));
+  document.querySelectorAll('.qb .seg button').forEach((b) => b.addEventListener('click', () => {
+    level = b.dataset.level;
+    document.querySelectorAll('.qb .seg button').forEach((o) => o.setAttribute('aria-pressed', String(o === b)));
+    redraw();
+  }));
+  dash.onData(() => document.querySelectorAll('[data-dot]').forEach((e) => { e.style.background = col(e.dataset.dot); }));
+})();
+</script>
+
+</body></html>
