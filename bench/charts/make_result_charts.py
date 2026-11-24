@@ -117,11 +117,33 @@ def sv_figure(path, note):
         title=mc._title("State-vector time per circuit, QUMO against Qiskit Aer", note))
 
 
+def cirq_figure(cirq, qumo, qiskit):
+    """Time per test for the few Benchpress tests that its Cirq gym implements (circuit build, import, manipulate)."""
+    names = [n for n in cirq if n in qumo and n in qiskit]
+    rows = []
+    for n in names:
+        for label, run in (("QUMO", qumo), ("Qiskit", qiskit), ("Cirq", cirq)):
+            rows.append({"test": n.replace("test_", ""), "sdk": label, "ms": max(run[n][0] * 1e3, 0.012)})
+    order = [n.replace("test_", "") for n in sorted(names, key=lambda n: -cirq[n][0])]
+    sdk_order = ["QUMO", "Qiskit", "Cirq"]
+    chart = alt.Chart(alt.Data(values=rows)).mark_bar(cornerRadiusEnd=2).encode(
+        y=alt.Y("test:N", sort=order, title=None, axis=alt.Axis(labelFontSize=12, ticks=False, domain=False)),
+        yOffset=alt.YOffset("sdk:N", sort=sdk_order),
+        x=alt.X("ms:Q", scale=alt.Scale(type="log", domain=[0.01, 10000]), title="mean time per call, ms (log scale)",
+                axis=alt.Axis(values=[0.01, 0.1, 1, 10, 100, 1000, 10000], format="~g")),
+        x2=alt.datum(0.01),
+        color=alt.Color("sdk:N", sort=sdk_order, scale=alt.Scale(domain=sdk_order, range=[mc.COLORS[s] for s in sdk_order]),
+                        legend=alt.Legend(title=None, orient="top")))
+    return chart.properties(width=620, height=40 * len(order),
+                            title=mc._title("Benchpress tests its Cirq gym implements", f"{len(order)} of 1066 tests run; 1054 are skipped as Not implemented and 2 fail. Circuit build, import and manipulation, not transpile."))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--qumo", required=True)
     ap.add_argument("--qiskit", required=True)
     ap.add_argument("--sv", required=True)
+    ap.add_argument("--cirq", help="Benchpress Cirq gym run (json or json.gz), optional")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
@@ -135,6 +157,8 @@ def main():
     mc.save(ratio_figure(by, "twoq", "Benchpress two-qubit gates, QUMO against Qiskit", note,
                          "QUMO 2Q gates / Qiskit 2Q gates (left of 1: fewer)",
                          [0.5, 1.1], [0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1]), args.out, "benchpress_2q_ratio")
+    if args.cirq:
+        mc.save(cirq_figure(load_run(args.cirq), load_run(args.qumo), load_run(args.qiskit)), args.out, "benchpress_cirq_tests")
     mc.save(sv_figure(args.sv, "Labels give Aer time / QUMO time. 26 qubits is the largest size; "
                                "run on a loaded machine, so absolute times are indicative."),
             args.out, "sv_throughput")
