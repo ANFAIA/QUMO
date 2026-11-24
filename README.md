@@ -110,7 +110,7 @@ Full install, update, GPU and hardware steps: [docs/GETTING_STARTED.md](docs/GET
 
 The compiler was tuned on part of these benchmarks and the neutral harness was written by this project; read the disclosure sections of both reports. Most rows were measured around 2026-10-13 with Mojo 1.1 and Qiskit 2.5.2. The repository now pins Mojo 1.2 and the numbers have not been re-measured with it, so treat them as results of the older toolchain; each linked report states its own date and versions.
 
-### Four SDKs on this project's neutral harness (not Benchpress)
+### Benchmark by SDK
 
 The charts below do not come from Benchpress. They come from the neutral harness of this repository (`bench/neutral`: 704 circuit and target pairs at each of two optimization levels, QUMO, Qiskit, TKET and Cirq), mean of four sequential runs on a machine that was not idle (load average 3 to 3.5), so absolute times are indicative and the ratios are what to read. At the default level QUMO compiles 5.8x faster than Qiskit, 75x faster than Cirq and 195x faster than TKET (geometric mean over the pairs both compiled; 2.9x, 38x and 158x at the max level). Cirq compiled 379 of the 704 pairs, so its figures cover those only. Peak memory includes memory the worker process kept from earlier jobs, so compare SDKs with each other rather than reading it as the cost of one compile. Every figure is on one page, [bench/results/web/index.html](bench/results/web/index.html) (open it in a browser). Read the disclosure section of [docs/NEUTRAL_BENCHMARK_REPORT.md](docs/NEUTRAL_BENCHMARK_REPORT.md): this harness was written by this project.
 
