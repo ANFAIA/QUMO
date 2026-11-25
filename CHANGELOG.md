@@ -8,6 +8,7 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 
 ### Fixed
 
+- Native Mojo agent harness: `fetch_page`, `search_arxiv`, `sdk_releases` and `github_release_notes` now apply the outbound rules of the Python harness (`agents/mojo/qumo_agent/net/guard.mojo`): https and port 443 only, no address that is not globally routable (loopback, private, link-local and cloud metadata, CGNAT; an IP literal in any spelling, or a name with one such resolved address), the three API tools limited to `export.arxiv.org`, `pypi.org` and `api.github.com`, every redirect target checked the same way, at most 3 redirects (was 10), `Authorization` dropped on every redirect. Before, `fetch_page("https://127.0.0.1:1/x")` opened a connection to loopback, and a page could redirect the tool to `https://169.254.169.254/`. The plain `http://export.arxiv.org/` exception is gone (the Python harness never had it). A host name is resolved once and the checked addresses are the ones connected to. (project review, 2026-11-25)
 - MCP server: `max_iterations` has a ceiling of 1000000 per call (`qumo_run_qasm`, `qumo_run_device`), refused with QM-E913 like `shots` and `max_qubits`. Before, `{"qasm": "... while (true) { x q[0]; } ...", "max_iterations": 9000000000000000000}` blocked the single-threaded server, `ping` included. The CLI keeps its range. (project review, 2026-11-25)
 
 ### Changed
