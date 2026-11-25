@@ -294,6 +294,14 @@ implements MCP **2025-06-18** (it also accepts 2025-03-26 and 2024-11-05).
 | `tools/list` | Each tool's `name`, `title`, `description`, `inputSchema` (JSON Schema) and `annotations` (the four MCP hints, per tool; see below) |
 | `tools/call` | `{content: [{type: "text", text}], structuredContent, isError}` |
 
+**Server ceilings.** A call may not ask for more than the server allows, below the
+tools' own ranges (the CLI keeps those): `shots` 1000000, `max_qubits` 30 and
+`max_iterations` 1000000 (16 times the default of 65536). A call above one is
+refused before it runs with QM-E913 and the limit in the message; it is not
+clamped. The server has one thread, so a `while (true)` with `max_iterations` at
+2^62 would block `ping` for as long as it ran; at the ceiling it ends in about a
+second with QM-E480. Longer loops run from the CLI (`qumo run --max-iterations`).
+
 **Tool annotations.** Each tool carries its own `readOnlyHint`, `destructiveHint`,
 `idempotentHint` and `openWorldHint` (`ToolHints` in `qumo/ai/tools.mojo`). A tool
 registered with `reg.add` and no hints gets the MCP default: not read-only,

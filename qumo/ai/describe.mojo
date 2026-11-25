@@ -30,7 +30,7 @@ from qumo.ir.program import CReg, CVar, ForRangeField, MAX_NESTING, Program, Stm
 from qumo.ir.qasm import builtin_gate_table, format_param
 from qumo.core.json import JsonWriter, JsonValue, JsonKind, parse_json
 from qumo.ai.diagnostics import error_catalog, error_ranges, range_index_of
-from qumo.compiler.pass_manager import PassId, pass_name, pass_description, is_synth_pass
+from qumo.compiler.pass_manager import PassId, pass_decl, pass_description, arg_kind_name, ArgForm
 from std.os import getenv
 from std.os.path import exists
 
@@ -453,9 +453,50 @@ def describe_capabilities_json(tools: List[String], commands: List[String] = Lis
 # ---------------------------------------------------------------------------
 # Compiler passes and AI-transpiler models
 # ---------------------------------------------------------------------------
+def describe_passes_markdown() -> String:
+    """docs/PASSES.md, generated from the pass table (`pass_decl` in
+    qumo/compiler/pass_manager.mojo): every pass with its aliases and
+    arguments. tests/test_mcp.mojo compares it with the checked-in file and
+    rewrites the file when QUMO_UPDATE_DOCS=1."""
+    var s = String("# QUMO pipeline passes: names, aliases and arguments\n\n")
+    s += "<!-- GENERATED FILE, do not edit by hand. Source of truth: pass_decl() in\n"
+    s += "     qumo/compiler/pass_manager.mojo. Regenerate with\n"
+    s += "     QUMO_UPDATE_DOCS=1 .venv/bin/mojo run -I . tests/test_mcp.mojo -->\n\n"
+    s += "What each pass does and where it comes from is in [COMPILER.md](COMPILER.md). This page is the reference of\n"
+    s += "what a pipeline string may hold. An alias is another name for the same pass; `canonical()` prints the\n"
+    s += "canonical one. An argument is written `key=value`; where the table says so the value alone is enough.\n"
+    s += "When an argument is written twice the last one counts. A flag takes `0|1|true|false|on|off`.\n\n"
+    s += "| Pass | Aliases | Arguments |\n|---|---|---|\n"
+    for i in range(PassId.NUM):
+        var d = pass_decl(i)
+        var al = String()
+        for a in d.alias_list():
+            al += (", " if al.byte_length() > 0 else "") + "`" + a + "`"
+        var names = String()
+        for a in d.args:
+            names += (", " if names.byte_length() > 0 else "") + "`" + a.name + "`"
+        s += "| `" + d.name + "` | " + al + " | " + (names if names.byte_length() > 0 else String("none")) + " |\n"
+    for i in range(PassId.NUM):
+        var d = pass_decl(i)
+        if len(d.args) == 0:
+            continue
+        s += "\n## " + d.name + "\n\n" + d.summary + ".\n\n"
+        s += "| Argument | Written | Values | Default | Notes |\n|---|---|---|---|---|\n"
+        for a in d.args:
+            var written = String("`") + a.name + "=...`"
+            if a.form == ArgForm.KEY_OR_BARE:
+                written += " or the value alone"
+            elif a.form == ArgForm.BARE:
+                written = "the value alone"
+            s += "| `" + a.name + "` | " + written + " | `" + a.values().replace("|", "\\|") + "` | "
+            s += (("`" + a.default + "`") if a.default.byte_length() > 0 else String("")) + " | " + a.help.replace("|", "\\|") + " |\n"
+    return s
+
+
 def describe_passes_json() -> String:
     """Pass catalog (`qumo.passes.v1`): every pass of the text pipeline
-    language with its description, the AI synthesis passes flagged, the
+    language with its description, aliases and arguments (from the pass table), the AI
+    synthesis passes flagged, the
     preset families and the AI-transpiler error codes."""
     var w = JsonWriter()
     w.begin_object()
@@ -464,10 +505,24 @@ def describe_passes_json() -> String:
     w.key("passes")
     w.begin_array()
     for i in range(PassId.NUM):
+        var d = pass_decl(i)
         w.begin_object()
-        w.kv_string("name", pass_name(i))
+        w.kv_string("name", d.name)
         w.kv_string("description", pass_description(i))
-        w.kv_bool("ai_synthesis", is_synth_pass(i))
+        w.kv_bool("ai_synthesis", d.block_kind >= 0)
+        w.kv_string_list("aliases", d.alias_list())
+        w.key("args")
+        w.begin_array()
+        for a in d.args:
+            w.begin_object()
+            w.kv_string("name", a.name)
+            w.kv_string("type", arg_kind_name(a.kind))
+            w.kv_string("written", "key=value" if a.form == ArgForm.KEY else ("key=value or value" if a.form == ArgForm.KEY_OR_BARE else "value"))
+            w.kv_string("values", a.values())
+            w.kv_string("default", a.default)
+            w.kv_string("help", a.help)
+            w.end_object()
+        w.end_array()
         w.end_object()
     w.end_array()
     w.key("route_ai_keys")

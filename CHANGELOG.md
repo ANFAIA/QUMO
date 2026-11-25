@@ -6,6 +6,9 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 
 ## [Unreleased]
 
+### Fixed
+
+- MCP server: `max_iterations` has a ceiling of 1000000 per call (`qumo_run_qasm`, `qumo_run_device`), refused with QM-E913 like `shots` and `max_qubits`. Before, `{"qasm": "... while (true) { x q[0]; } ...", "max_iterations": 9000000000000000000}` blocked the single-threaded server, `ping` included. The CLI keeps its range. (project review, 2026-11-25)
 
 ### Changed
 
@@ -57,6 +60,9 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 
 ### Changed
 
+- Compiler passes are declared once, in `pass_decl` (`qumo/compiler/pass_manager.mojo`): name, aliases, description and arguments with type, default, values and help. Name and alias lookup, `pass_description`, the argument check of `parse_pipeline`, its hints and the values a pass reads (`PassArgs`) come from that table, in place of six switch tables kept in step by hand; `program_compile.mojo` asks the table which passes rename qubits. Every pass name, alias and argument spelling is unchanged, and the 24 compiled test cases have the same gate counts. What differs: `key = value` with spaces is accepted by every pass (it was by `route` and the synthesis passes only); when an argument is written twice the last one counts (`cancel(1,2)` used the first, `pauli_simp(objective=t,objective=2q)` used `t`); a bad `wrap_angles` bound is reported when the pipeline is parsed, not when the pass runs; the texts of QM-E602 hints are generated and list every argument (the `route` description had lost nine); parsing a pipeline takes about 2 microseconds more and a compilation 3 to 12 microseconds more, whatever the circuit size.
+- `qumo_describe` topic `passes` gives `aliases` and `args` (name, type, values, default, help) per pass, and `docs/PASSES.md` is generated from the table (`QUMO_UPDATE_DOCS=1 .venv/bin/mojo run -I . tests/test_mcp.mojo`).
+- The block kinds have one definition, `BlockKind` in `qumo/compiler/common.mojo`; `collect.KIND_*`, `blockalg.BlockKind` and `policy.MODEL_KIND_*` are those values, and the synthesis pass of a kind is a field of its declaration, not a difference of pass ids.
 - CLI options are strict: an option a command does not declare is a usage error (QM-E921, exit code 2) with a "did you mean" hint. Unknown options were ignored before, so a misspelt `--shot 10` ran with the default. `--quiet`, which was accepted and did nothing, is gone. `qumo help <unknown command>` exits with code 2 (QM-E912). The CLI moved to `cli/app.mojo` (`run_cli`, testable in process); `cli/main.mojo` is the entry file. (project review, 2026-11-10; not yet merged, as the next two entries)
 - `sample_auto` / `sample_on` (Mojo) and `qumo_py.sample_device` raise QM-E402 for a circuit without measurements whichever simulator is picked. A Clifford circuit routed to the tableau or Pauli-frame sampler returned `{"": shots}` before. The CLI and the MCP tools are unchanged: they measure all qubits and add the note QM-W004.
 - `qumo_py` argument checks, all of which returned a wrong or empty result before: `Circuit.depth_of` raises QM-E913 for an unknown gate name and QM-E911 for a wrong type (it returned 0); a `str` basis in `transpile` is one spec, a basis-set name such as `"sc_cz"` or a comma list, not a sequence of characters; `sample` and `sample_device` refuse `shots` and `seed` that are not integers (QM-E911) and do not convert them; `decode_dem` checks its arguments; `inject_noise` raises QM-E913 for input it cannot address and no longer returns the text unchanged, and it handles one-line OpenQASM and `measure q -> c`.
