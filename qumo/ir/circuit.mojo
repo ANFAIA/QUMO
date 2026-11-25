@@ -644,6 +644,17 @@ struct Circuit(Copyable, Writable, Sized):
                 return True
         return False
 
+    def without_noise(self) -> Circuit:
+        """A copy with every noise channel removed (the ideal circuit). Explicit
+        on purpose: `evolve`/`expectation` refuse noisy circuits (QM-E416)."""
+        var out = self.copy()
+        var kept = List[Instruction]()
+        for g in self.ops:
+            if not op_is_noise(g.kind):
+                kept.append(g)
+        out.ops = kept^
+        return out^
+
     def has_table_noise(self) -> Bool:
         """PAULI_CHANNEL_2 or E: Pauli noise that only the CPU stabilizer stack takes."""
         for g in self.ops:

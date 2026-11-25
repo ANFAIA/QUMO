@@ -179,7 +179,8 @@ The defaults of `sample`, `run` and `transpile` are those of the command line.
   is large enough. `method="statevector"`, `"ptsbe"` or `"branching"` forces
   one simulator. `device` is `"auto"`, `"cpu"` or `"gpu"`.
 * Index `i` of a state vector has qubit `q` in bit `q` (qubit 0 is the least
-  significant bit). Measurements and resets are skipped. A circuit with noise
+  significant bit). Terminal measurements are skipped; a reset or a mid-circuit
+  measurement raises QM-E416 (use `sample`). A circuit with noise
   channels has no state vector: `statevector` raises QM-E414 and points at
   `probabilities` / `expectation`.
 * An **observable** is a Pauli-sum string (`"Z0 Z1 + 0.5 * X0"`, or dense

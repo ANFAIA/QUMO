@@ -181,7 +181,8 @@ def statevector(circuit, params=None):
     """Final state vector as a NumPy ``complex128`` array of ``2**n`` amplitudes.
 
     Amplitude ``i`` has qubit ``q`` in bit ``q`` of ``i`` (qubit 0 is the least
-    significant bit). Measurements and resets are skipped. The simulator's
+    significant bit). Terminal measurements are skipped; a reset or a mid-circuit
+    measurement raises QM-E416. The simulator's
     state is written once into the array; no Python list is built.
 
     Args:
@@ -189,7 +190,8 @@ def statevector(circuit, params=None):
         params: values for symbolic parameters (dict or sequence).
 
     Raises:
-        QumoError: QM-E404 past 32 qubits; QM-E414 when the circuit holds
+        QumoError: QM-E404 past 32 qubits; QM-E416 for a reset or a mid-circuit
+            measurement (use `sample`); QM-E414 when the circuit holds
             noise channels (a noisy circuit has no state vector: use
             `probabilities` or `expectation`, which go through the density
             matrix).
@@ -297,6 +299,8 @@ def expectation(circuit, observable, params=None, *, noise: str = "auto", device
     obs = _observable(observable)
     if noise not in ("auto", "ignore", "error"):
         raise QumoError(f"unknown noise option '{noise}'", "QM-E913", "use 'auto', 'ignore' or 'error'.")
+    if noise == "ignore" and nat.has_noise():
+        nat = nat.without_noise()  # explicit: the native expectation refuses noisy circuits (QM-E416)
     if noise != "ignore" and nat.has_noise():
         if noise == "error":
             raise QumoError("the circuit has noise channels", "QM-E414",

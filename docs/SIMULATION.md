@@ -14,6 +14,16 @@ var res = sample(circuit, 1000, seed=7)   # res.counts, res.method
 var e = expectation(circuit, parse_pauli_sum("Z0 Z1"))
 ```
 
+`evolve` and `expectation` return one pure state, so they refuse a circuit that has a
+`reset`, a noise channel (Pauli noise, Kraus, correlated error) or a measurement
+followed by more gates on the measured qubit (QM-E416; classically conditioned gates
+are QM-E401). Terminal measurements, barriers, ticks, detectors and observables are
+ignored. The same check runs in `GpuStateVector.evolve` and in `run_estimator`. For
+those circuits use `sample` (trajectories) or the density-matrix simulator; to get the
+ideal value on purpose, `circuit.without_noise()` returns a copy with the channels removed. The check is
+`qumo.sim.runner.check_pure_state_circuit`; `evolve_into` and `build_plan` do not run it
+(they are the building blocks that `sample` and the trajectory code call).
+
 ## 1. Layers
 
 | Layer | Where | What |
