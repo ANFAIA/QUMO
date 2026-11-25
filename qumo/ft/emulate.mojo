@@ -392,6 +392,12 @@ def logical_to_circuit(lp: LogicalProgram) raises -> Circuit:
             for i in range(len(ladder) - 1):
                 c.cx(ladder[i], last)
             c.rz(g.angle, last)
+            # the basis changes and the CX ladder cancel when skipped: only the rotation is conditioned
+            if g.cond >= 0:
+                if g.cond_reg >= 0:
+                    c.c_if_register(lp.condition_bits(g), lp.condition_vals(g))
+                else:
+                    c.c_if(g.cond, g.cond_val)
             var i = len(ladder) - 2
             while i >= 0:
                 c.cx(ladder[i], last)

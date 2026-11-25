@@ -36,6 +36,9 @@ comptime MCP_PROTOCOL_VERSION = "2025-06-18"
 # a client must not be able to make the server reserve 2^40 amplitudes or sample for hours.
 comptime MCP_MAX_SHOTS = 1000000
 comptime MCP_MAX_QUBITS = 30  # dense simulation: 16 * 2^30 bytes = 16 GiB
+# Loop back-edges per shot: a `while (true)` runs until this budget, on the one thread that also
+# answers ping. 1M is 16x the library default (65536) and ends in about a second per shot.
+comptime MCP_MAX_ITERATIONS = 1000000
 
 
 def _over_server_limit(args: JsonValue) -> String:
@@ -47,6 +50,9 @@ def _over_server_limit(args: JsonValue) -> String:
         var max_q = args.get_int("max_qubits", 0)
         if max_q > MCP_MAX_QUBITS:
             return "QM-E913: argument 'max_qubits' = " + String(max_q) + " is above the MCP server limit of " + String(MCP_MAX_QUBITS) + ". Hint: larger dense simulations run from the CLI or the Mojo API."
+        var max_it = args.get_int("max_iterations", 0)
+        if max_it > MCP_MAX_ITERATIONS:
+            return "QM-E913: argument 'max_iterations' = " + String(max_it) + " is above the MCP server limit of " + String(MCP_MAX_ITERATIONS) + ". Hint: long loops run from the CLI (qumo run --max-iterations) or the Mojo API."
     except:
         pass  # a wrong type is reported by the tool itself
     return String()

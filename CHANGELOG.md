@@ -6,6 +6,9 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 
 ## [Unreleased]
 
+### Fixed
+
+- MCP server: `max_iterations` has a ceiling of 1000000 per call (`qumo_run_qasm`, `qumo_run_device`), refused with QM-E913 like `shots` and `max_qubits`. Before, `{"qasm": "... while (true) { x q[0]; } ...", "max_iterations": 9000000000000000000}` blocked the single-threaded server, `ping` included. The CLI keeps its range. (project review, 2026-11-25)
 
 ### Changed
 
@@ -43,8 +46,8 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 
 ### Fixed
 
-- Integer keys that overflowed at wide registers. `subspace_ground_state` packed `(state << 21) | index`, which wraps once a basis state has a bit at position 43 or higher, so at 44 to 48 qubits the lookup found nothing (H projected to 0, energy 0.0) or raised a false "listed twice" QM-E802; it now sorts the caller indices by state and compares whole states. `lie_closure` de-duplicated on `x * 4294967311 + z`, which is not injective past 32 qubits, so distinct Pauli strings were dropped (`{X1, Z33 Z4 Z3 Z2 Z1}` gave 1 instead of 3); it now keeps a hash index that compares the full (x, z) masks, valid to 64 qubits. Tests in `tests/test_sqd.mojo` and `tests/test_algorithms_tier1.mojo`.
 
+- Integer keys that overflowed at wide registers. `subspace_ground_state` packed `(state << 21) | index`, which wraps once a basis state has a bit at position 43 or higher, so at 44 to 48 qubits the lookup found nothing (H projected to 0, energy 0.0) or raised a false "listed twice" QM-E802; it now sorts the caller indices by state and compares whole states. `lie_closure` de-duplicated on `x * 4294967311 + z`, which is not injective past 32 qubits, so distinct Pauli strings were dropped (`{X1, Z33 Z4 Z3 Z2 Z1}` gave 1 instead of 3); it now keeps a hash index that compares the full (x, z) masks, valid to 64 qubits. Tests in `tests/test_sqd.mojo` and `tests/test_algorithms_tier1.mojo`.
 - OpenQASM: a `gate` definition with the name and signature of a native gate was dropped and the native gate ran, whatever the body said (`gate h a { x a; } h q[0];` gave an H). The body is now compared with the native unitary (up to global phase, up to 4 qubits): an equal definition still maps to the native opcode, so `to_qasm` output round-trips as before, and a different one (or one that cannot be compared) is used as written with the new warning QM-W056. Every definition `to_qasm` and `to_qasm2` write was checked and matches its native gate.
 - Pauli text inputs are checked (`qumo/ir/pauli.mojo`): `PauliSum.add_label` and `PauliTerm.label(n)` raise QM-E302 past 64 qubits (a 65-character label used to wrap and put the Pauli on the wrong qubit, silently); `parse_pauli_sum` raises QM-E301 for a qubit repeated inside one term (`"X0 Z0"` used to give `Y0`, `"Z0 Z0"` gave `Z0`) and for a sign with no term after it (`"Z0 +"` used to add a spurious identity term). `PauliTerm.label` now `raises`. Inputs that were correct give the same result.
 - OpenQASM slices: negative bounds are normalised before the range is walked, so `q[0:-1]` is the whole register and `q[-3:-1]` the last three qubits (it used to select nothing); a range that selects no qubits, bits or elements (`q[2:1]`) is now error `QM-E521` with line and column instead of aborting the process ("index 0 is out of bounds") or reading the next operand's qubit. Out-of-range slice bounds are reported even when the range is empty.
