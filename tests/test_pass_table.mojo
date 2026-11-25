@@ -85,9 +85,10 @@ def test_post_layout_call_limit() raises:
         var r = compile_spec(c, t, "route(sabre),basis," + spec + ",check")
         assert_equal(r.circuit.num_2q_gates(), base.circuit.num_2q_gates(), spec)
         assert_true(r.est_fidelity >= base.est_fidelity - 1e-12, spec)
-    # a limit of one step still returns a valid circuit
+    # the value reaches the pass: a limit of one step gains nothing over the routed circuit
+    # (0.9025 against 0.9900 on this line), so a dropped value cannot pass
     var tiny = compile_spec(c, t, "route(sabre),basis,post_layout(call_limit=1),check")
-    assert_true(tiny.est_fidelity <= base.est_fidelity + 1e-12)
+    assert_true(tiny.est_fidelity < base.est_fidelity - 1e-3)
     # the other passes with a number written both ways
     var a = compile_spec(c, t, "cancel(window=4),commute(window=4),route(sabre),basis,check")
     var b = compile_spec(c, t, "cancel(4),commute(4),route(sabre),basis,check")
