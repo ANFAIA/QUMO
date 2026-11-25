@@ -38,7 +38,7 @@ from qumo_agent.native.fs import (
     write_text,
 )
 from qumo_agent.native.regex import PosixRegex, py_regex_to_ere
-from qumo_agent.native.sandbox import CONF_CHECK, Confinement, confine
+from qumo_agent.native.sandbox import CONF_CHECK, Confinement, confine, venv_read_paths
 from qumo_agent.native.spawn import STDIO_NULL, STDIO_PIPE, SpawnSpec, minimal_child_env, run_capture
 from qumo_agent.util.pyfmt import cp_head, cp_len, cp_tail, py_json_dumps_string, py_splitlines, py_strip, universal_newlines
 
@@ -633,13 +633,20 @@ def tool_run_check(st: RepoState, argv: List[String], timeout_s: Int) -> String:
                         home = realpath_strict(h)
                     except:
                         home = h
+                # Below $HOME the check reads the sandbox (a write dir) and what its
+                # links and git need in the main checkout: `.git`, `build` and the two
+                # virtualenvs with their interpreters. Nothing else, so not the main
+                # checkout's sources, `.env` or `agents/agents.local.json`.
                 var read_allow = List[String]()
-                for rp in [st.repo_root, st.repo_root + "/.venv"]:
+                for rp in [st.repo_root + "/.git", st.repo_root + "/build"]:
                     try:
                         read_allow.append(realpath_strict(rp))
                     except:
                         pass
-                var c = Confinement(CONF_CHECK, write_dirs^, read_allow^, home, 0, CHECK_FSIZE_BYTES)
+                for venv in [st.repo_root + "/.venv", st.repo_root + "/bench/.venv"]:
+                    for rp in venv_read_paths(venv):
+                        read_allow.append(rp)
+                var c = Confinement(CONF_CHECK, write_dirs^, read_allow^, List[String](), home, 0, CHECK_FSIZE_BYTES)
                 spec = confine(spec, c, st.self_binary)
         except e:
             if tmp.byte_length() > 0:
