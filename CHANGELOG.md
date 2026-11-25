@@ -38,6 +38,8 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 
 ### Fixed
 
+- Integer keys that overflowed at wide registers. `subspace_ground_state` packed `(state << 21) | index`, which wraps once a basis state has a bit at position 43 or higher, so at 44 to 48 qubits the lookup found nothing (H projected to 0, energy 0.0) or raised a false "listed twice" QM-E802; it now sorts the caller indices by state and compares whole states. `lie_closure` de-duplicated on `x * 4294967311 + z`, which is not injective past 32 qubits, so distinct Pauli strings were dropped (`{X1, Z33 Z4 Z3 Z2 Z1}` gave 1 instead of 3); it now keeps a hash index that compares the full (x, z) masks, valid to 64 qubits. Tests in `tests/test_sqd.mojo` and `tests/test_algorithms_tier1.mojo`.
+
 - The resource estimator counted three synthesised rotations for every constant `U` gate, so `U(pi/2, 0, pi)` (H) and `U(0, 0, pi/4)` (T) were reported as non-Clifford rotations. Constant angles are now classified as for `RZ`/`RY`: a multiple of pi/2 is free, an odd multiple of pi/4 is one T, and when theta is a multiple of pi the two Rz merge into one rotation by phi + lambda (phi - lambda for an odd multiple). Symbolic angles still count three. `recommended_method` and `is_clifford()` are unchanged (they still treat `U` as non-Clifford). (`qumo/exec/resources.mojo`, `tests/test_orchestrator.mojo`)om/ANFAIA/QUMO/pull/1), 2026-11-03)
 
 ### Fixed

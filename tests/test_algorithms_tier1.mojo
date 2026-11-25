@@ -78,6 +78,21 @@ def test_lie_closure() raises:
     print("  lie_closure n(2n - 1) for n = 2..8")
 
 
+def test_lie_closure_wide() raises:
+    """Pauli strings on more than 32 qubits, and x masks with bit 31 or higher."""
+    var gens = List[PauliTerm]()
+    gens.append(PauliTerm(1.0, UInt64(1) << 1, 0))
+    gens.append(PauliTerm(1.0, 0, (UInt64(1) << 33) | 0b11110))
+    assert_equal(len(lie_closure(gens)), 3, "X1, Z33 Z4 Z3 Z2 Z1")
+    var hi = List[PauliTerm]()
+    hi.append(PauliTerm(1.0, UInt64(1) << 47, 0))
+    hi.append(PauliTerm(1.0, 0, UInt64(1) << 47))
+    hi.append(PauliTerm(1.0, UInt64(1) << 63, 0))
+    hi.append(PauliTerm(1.0, 0, UInt64(1) << 63))
+    assert_equal(len(lie_closure(hi)), 6, "su(2) at qubit 47 + su(2) at qubit 63")
+    print("  lie_closure wide registers")
+
+
 def test_iqp() raises:
     # PennyLane's 2-qubit demo: exact 0.17317819 for all three operators
     var m = IqpModel(2)
@@ -304,6 +319,7 @@ def test_trim_sqd() raises:
 def main() raises:
     test_hubbard()
     test_lie_closure()
+    test_lie_closure_wide()
     test_iqp()
     test_mpf()
     test_suzuki()

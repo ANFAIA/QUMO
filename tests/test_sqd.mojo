@@ -147,7 +147,37 @@ def test_product_basis_and_errors() raises:
     assert_true(abs(r.energy - 1.0) < 1e-12, "1x1 subspace")
 
 
+def test_wide_register() raises:
+    """Basis states with bits at 43..47: the lookup key must not overflow."""
+    var h = parse_pauli_sum("1.0*Z45")
+    var a: List[Int] = [1 << 45]
+    var r = subspace_ground_state(h, a, 48)
+    assert_true(abs(r.energy + 1.0) < 1e-12, "Z45 on |1<<45>: energy -1")
+    assert_equal(r.nonzeros, 1, "Z45 on |1<<45>: one nonzero")
+    var b: List[Int] = [1 << 45, 1 << 44]
+    var r2 = subspace_ground_state(h, b, 48)
+    assert_true(abs(r2.energy + 1.0) < 1e-12, "two distinct wide states accepted")
+    # X47 couples |1<<47> and |0>; ground energy of the 2x2 block is -1
+    var hx = parse_pauli_sum("1.0*X47")
+    var c: List[Int] = [1 << 47, 0, (1 << 47) | (1 << 3)]
+    var r3 = subspace_ground_state(hx, c, 48)
+    assert_true(abs(r3.energy + 1.0) < 1e-12, "X47 couples 1<<47 and 0")
+    # duplicates are still caught at wide registers
+    var raised = False
+    try:
+        var d: List[Int] = [1 << 47, 5, 1 << 47]
+        _ = subspace_ground_state(hx, d, 48)
+    except err:
+        raised = String(err).startswith("QM-E802")
+    assert_true(raised, "wide duplicate")
+    # the hamiltonians.mojo lookup (s * 8192 + i) stays in range at 48 qubits
+    var e = subspace_ground_energy(h, b, 48)
+    assert_true(abs(e + 1.0) < 1e-12, "subspace_ground_energy at 48 qubits")
+    print("  wide registers (bits 43..47)")
+
+
 def main() raises:
+    test_wide_register()
     test_hubbard()
     test_complex_and_sparse()
     test_product_basis_and_errors()
