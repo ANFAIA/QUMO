@@ -229,7 +229,9 @@ def test_expectation_observable_forms():
 def test_expectation_does_not_ignore_noise(q):
     """Regression: qumo_py.expectation returns 1.0 on a noisy Bell pair; density gives 0.9467."""
     noisy = qumo.Circuit(2).h(0).cx(0, 1).depolarize2(0.05, 0, 1)
-    assert math.isclose(q.expectation(noisy.native, "Z0 Z1"), 1.0, abs_tol=1e-12)  # the raw call skips channels
+    with pytest.raises(Exception, match="QM-E416"):  # the raw call used to skip the channels silently
+        q.expectation(noisy.native, "Z0 Z1")
+    assert math.isclose(q.expectation(noisy.native.without_noise(), "Z0 Z1"), 1.0, abs_tol=1e-12)
     value = qumo.expectation(noisy, "Z0 Z1")
     assert math.isclose(value, 1 - 0.05 * 16 / 15, abs_tol=1e-9) and round(value, 4) == 0.9467
     assert math.isclose(value, q.density_expectation(noisy.native, "Z0 Z1"), abs_tol=1e-12)

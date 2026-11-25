@@ -1044,6 +1044,25 @@ def test_pipeline_parsing() raises:
     print("  pipeline parsing + error codes ok")
 
 
+def test_small_rotations_accumulate() raises:
+    """Regression: remove_identities dropped each rotation below ~2e-6 rad on its
+    own, so `h; N x rz(1.9e-6); h` (= rz(N * 1.9e-6) between two h) compiled to an
+    empty circuit at O1-O3. The presets must keep what the rotations add up to."""
+    var c = Circuit(1, name="small_rz")
+    c.h(0)
+    for _ in range(100000):
+        c.rz(1.9e-6, 0)
+    c.h(0)
+    for level in range(1, 4):
+        var res = transpile(c, level)
+        assert_true(len(res.circuit.ops) > 0, "O" + String(level) + " dropped accumulated small rotations")
+        assert_equiv(c, res.circuit, "small rotations O" + String(level))
+    var x = c.copy()
+    _ = remove_identities(x)
+    assert_equiv(c, x, "remove_identities alone on small rotations")
+    print("  small rotations accumulate ok")
+
+
 def main() raises:
     test_targets()
     test_basis_rules()
@@ -1060,4 +1079,5 @@ def main() raises:
     test_conditioned()
     test_symbolic()
     test_pipeline_parsing()
+    test_small_rotations_accumulate()
     print("test_compiler OK")

@@ -232,6 +232,98 @@ def test_ptsbe_deterministic_and_cap() raises:
     print("  ptsbe seeded, cap reported")
 
 
+def _zeros15() -> List[Float64]:
+    var v = List[Float64]()
+    for _ in range(15):
+        v.append(0.0)
+    return v^
+
+
+def test_ptsbe_pauli_channel_2() raises:
+    # deterministic: XX (slot 4) flips both; a second channel (table offset 15) with XI flips qubit 0 back
+    var a = Circuit(2)
+    var p4 = _zeros15()
+    p4[4] = 1.0
+    a.pauli_channel_2(p4, 0, 1)
+    a.measure_all()
+    var ra = sample(a, 200, 3)
+    var pa = sample_ptsbe(a, 200, 3)
+    assert_equal(ra.counts.get("11", 0), 200, "sample XX")
+    assert_equal(pa.counts.get("11", 0), 200, "ptsbe XX")
+    var p3 = _zeros15()
+    p3[3] = 1.0  # XI: X on the first qubit
+    var d = Circuit(2)
+    d.pauli_channel_2(p4, 0, 1)
+    d.pauli_channel_2(p3, 0, 1)
+    d.measure_all()
+    var rd = sample(d, 200, 3)
+    var pd = sample_ptsbe(d, 200, 3)
+    assert_equal(rd.counts.get("10", 0), 200, "sample XX then XI")
+    assert_equal(pd.counts.get("10", 0), 200, "ptsbe XX then XI, second channel at a nonzero table offset")
+    # probabilistic: XX 0.3, XI 0.2, IY 0.1 -> 00: 0.4, 11: 0.3, 01: 0.2, 10: 0.1
+    var e = Circuit(2)
+    var pr = _zeros15()
+    pr[4] = 0.3
+    pr[3] = 0.2
+    pr[1] = 0.1
+    e.pauli_channel_2(pr, 0, 1)
+    e.measure_all()
+    var n = 100000
+    var rs = sample(e, n, 7)
+    var rp = sample_ptsbe(e, n, 7)
+    var keys = List[String]()
+    keys.append("00")
+    keys.append("11")
+    keys.append("01")
+    keys.append("10")
+    var want = List[Float64]()
+    want.append(0.4)
+    want.append(0.3)
+    want.append(0.2)
+    want.append(0.1)
+    for i in range(4):
+        # each count has sigma <= sqrt(0.25 / 1e5) = 0.0016, so 0.01 is more than 6 sigma
+        assert_true(abs(rp.probability(keys[i]) - want[i]) < 0.01, "ptsbe " + keys[i] + ": " + String(rp.probability(keys[i])))
+        assert_true(abs(rs.probability(keys[i]) - want[i]) < 0.01, "sample " + keys[i] + ": " + String(rs.probability(keys[i])))
+    print("  ptsbe PAULI_CHANNEL_2 matches sample and the exact weights")
+
+
+def test_ptsbe_refuses_correlated_error() raises:
+    var qs = List[Int]()
+    qs.append(0)
+    qs.append(1)
+    var ls = List[Int]()
+    ls.append(1)
+    ls.append(1)
+    var q1 = List[Int]()
+    q1.append(1)
+    var l1 = List[Int]()
+    l1.append(1)
+    # two E instructions (the second has a nonzero Pauli-table offset) and an ELSE chain
+    var c = Circuit(2)
+    c.correlated_error(0.5, qs, ls)
+    c.correlated_error(0.5, q1, l1)
+    c.correlated_error(0.5, qs, ls, True)
+    c.measure_all()
+    var s = sample(c, 100, 1)  # the reference sampler takes it
+    assert_equal(s.shots, 100, "sample takes E")
+    var hit = False
+    try:
+        _ = sample_ptsbe(c, 100)
+    except e:
+        expect_code("QM-E414", e)
+        hit = True
+    assert_true(hit, "E must be refused, not simulated as a one-qubit channel")
+    hit = False
+    try:
+        _ = plan_trajectories(c, 100)
+    except e:
+        expect_code("QM-E414", e)
+        hit = True
+    assert_true(hit, "plan_trajectories refuses E too")
+    print("  ptsbe E / ELSE QM-E414")
+
+
 def test_ptsbe_rejects() raises:
     var c = Circuit(1, 1)
     c.h(0)
@@ -313,6 +405,8 @@ def main() raises:
     test_ptsbe_same_distribution()
     test_ptsbe_deterministic_and_cap()
     test_ptsbe_rejects()
+    test_ptsbe_pauli_channel_2()
+    test_ptsbe_refuses_correlated_error()
     test_noise_model_from_target()
     test_emulate_tracks_estimate()
     print("test_noise_sim OK")
