@@ -38,6 +38,7 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 
 ### Fixed
 
+- `qumo_vqe` and `qumo_qaoa_maxcut` no longer abort the MCP server on a wide request (`num_qubits: 46`, graph `0-45`): both check the width against a new `max_qubits` argument (default 24) and answer QM-E930, and QAOA checks the 26-node limit (QM-E807) before the optimisation instead of after. `ExpectationEngine`, `PauliOperator`, `run_estimator` and `qaoa_maxcut` raise the existing QM-E404 / QM-E807 for a direct caller instead of allocating 2^n.
 - The resource estimator counted three synthesised rotations for every constant `U` gate, so `U(pi/2, 0, pi)` (H) and `U(0, 0, pi/4)` (T) were reported as non-Clifford rotations. Constant angles are now classified as for `RZ`/`RY`: a multiple of pi/2 is free, an odd multiple of pi/4 is one T, and when theta is a multiple of pi the two Rz merge into one rotation by phi + lambda (phi - lambda for an odd multiple). Symbolic angles still count three. `recommended_method` and `is_clifford()` are unchanged (they still treat `U` as non-Clifford). (`qumo/exec/resources.mojo`, `tests/test_orchestrator.mojo`)om/ANFAIA/QUMO/pull/1), 2026-11-03)
 
 ### Fixed

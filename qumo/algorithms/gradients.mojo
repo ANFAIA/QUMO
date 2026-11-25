@@ -53,7 +53,7 @@ from qumo.ir.gates import (
 from qumo.ir.param import Param
 from qumo.ir.pauli import PauliSum
 from qumo.sim.statevector import StateVector, PAR_MIN_ITEMS
-from qumo.sim.runner import evolve_into, apply_instruction
+from qumo.sim.runner import evolve_into, apply_instruction, check_statevector_size
 from qumo.algorithms.hamiltonians import PauliOperator, check_fits
 from qumo.algorithms.linalg import sv_dot, sv_assign
 
@@ -207,6 +207,7 @@ struct ExpectationEngine(Movable):
     def __init__(out self, circuit: Circuit, h: PauliSum, fd_step: Float64 = 1e-6) raises:
         circuit.validate()
         check_differentiable(circuit)
+        check_statevector_size(circuit.num_qubits)
         self.op = PauliOperator(h, circuit.num_qubits)
         self.circuit = circuit.copy()
         self.work = circuit.copy()

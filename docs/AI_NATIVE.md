@@ -341,7 +341,7 @@ Module tools (`qumo/exec/tools.mojo`, registered by `full_registry()`):
 |---|---|---|
 | `qumo_transpile` | `qasm` \| `circuit` \| `program`, `target` (e.g. `grid:4x4/sc_cz`, `heavy_hex:5/rz,sx,x,ecr`, `trapped_ion:11`, `neutral_atom:4x4`) or `edges` + `basis`, `level` 0-3, `pipeline`, `seed` | compiled QASM 3, per-pass report, layouts, swaps, estimated fidelity |
 | `qumo_estimate_resources` | `qasm`, `profile`: superconducting \| trapped_ion \| neutral_atom, `physical_error`, `error_budget` | logical, NISQ and fault-tolerant estimates |
-| `qumo_vqe`, `qumo_qaoa_maxcut` | Pauli-sum `hamiltonian` / edge-list `graph`, optimizer options, `seed` | energy or cut, parameters, convergence |
+| `qumo_vqe`, `qumo_qaoa_maxcut` | Pauli-sum `hamiltonian` / edge-list `graph`, optimizer options, `seed`, `max_qubits`=24 | energy or cut, parameters, convergence. A width above `max_qubits` is refused with QM-E930 before any work (the server caps `max_qubits` at 30); QAOA also refuses graphs of more than 26 nodes up front (QM-E807, the brute-force reference). |
 | `qumo_qec_memory` | `code`: surface_z \| surface_x \| repetition, `distance`, `rounds`, `p`, `shots`, `decoder`, `seed`, `max_errors` | logical error rate, std error, Wilson interval, per-round rate, timing |
 | `qumo_qec_dem` | `code`, `distance`, `rounds`, `p`, `include_stim` | detector error model in Stim DEM text |
 | `qumo_emulate` | `qasm` \| `circuit`, target as `qumo_transpile`, `calibration`, `compile`, `level`, `shots`=1024, `seed`=1234 | `counts` under the target's noise, `method`, `shots`, `seed`, `num_qubits`, `compiled` (whether it was transpiled first), `estimated_fidelity`, `target`; nothing touches a device. A circuit that does not fit the target is QM-E615 unless `compile` is true |

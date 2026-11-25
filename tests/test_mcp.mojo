@@ -589,6 +589,31 @@ def test_tier1_tools() raises:
     print("  tier 1 tools")
 
 
+def test_variational_tool_width_limits() raises:
+    """The qumo_vqe and qumo_qaoa_maxcut tools refuse a 2^n allocation before any work (QM-E930, QM-E807)."""
+    var s = McpServer()
+    var v = tool(s, 301, "qumo_vqe", "{\"hamiltonian\":\"Z0\",\"num_qubits\":46}")
+    assert_true(v.get("isError").as_bool(), v.to_json())
+    assert_equal(v.get("structuredContent").get("error").get("code").as_string(), "QM-E930")
+    var v2 = tool(s, 302, "qumo_vqe", "{\"hamiltonian\":\"Z45\"}")
+    assert_true(v2.get("isError").as_bool(), v2.to_json())
+    assert_equal(v2.get("structuredContent").get("error").get("code").as_string(), "QM-E930")
+    var v3 = tool(s, 303, "qumo_vqe", "{\"hamiltonian\":\"Z0\",\"num_qubits\":6,\"max_qubits\":4}")
+    assert_equal(v3.get("structuredContent").get("error").get("code").as_string(), "QM-E930")
+    var q = tool(s, 304, "qumo_qaoa_maxcut", "{\"graph\":\"0-45\"}")
+    assert_true(q.get("isError").as_bool(), q.to_json())
+    assert_equal(q.get("structuredContent").get("error").get("code").as_string(), "QM-E930")
+    # inside max_qubits but past the brute-force reference: refused before the optimisation
+    var q2 = tool(s, 305, "qumo_qaoa_maxcut", "{\"graph\":\"0-27\",\"max_qubits\":30}")
+    assert_equal(q2.get("structuredContent").get("error").get("code").as_string(), "QM-E807", q2.to_json())
+    # small cases still run
+    var ok = tool(s, 306, "qumo_vqe", "{\"hamiltonian\":\"-1.0*Z0\",\"layers\":1,\"maxiter\":20}")
+    assert_false(ok.get("isError").as_bool(), ok.to_json())
+    var ok2 = tool(s, 307, "qumo_qaoa_maxcut", "{\"graph\":\"0-1 1-2 2-0\",\"shots\":16}")
+    assert_false(ok2.get("isError").as_bool(), ok2.to_json())
+    print("  variational tool width limits")
+
+
 def _noop_tool(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
     return tool_ok("{}")
 
@@ -644,4 +669,5 @@ def main() raises:
     test_every_raised_code_is_catalogued()
     test_ai_transpiler_tools()
     test_tier1_tools()
+    test_variational_tool_width_limits()
     print("test_mcp OK")
