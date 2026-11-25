@@ -51,8 +51,13 @@ other QUMO modules plug their features into it.
 * **Portable output.** Native gates that are missing from `stdgates.inc`
   (`sxdg`, `iswap`, `iswapdg`, `ecr`, `rxx`, `ryy`, `rzz`, `ccz`) are emitted
   with exact `gate` definitions. The tests check each definition against the
-  native unitary to 1e-12. When QUMO reads such a definition back, it treats it
-  as a declaration and uses the exact native opcode.
+  native unitary to 1e-12. When QUMO reads a definition with the name and
+  signature of a native gate, it compares the body with the native gate (dense
+  unitary up to global phase, at three generic angle sets for a parametrised
+  gate, up to 4 qubits). If they are equal it uses the exact native opcode;
+  if they differ, or the comparison cannot be made (a noise gate name, a body
+  that calls a gate the file does not define), the definition is used as
+  written and QM-W056 is reported. `gate h a { x a; }` is an X, not an H.
 * **OpenQASM 2 for interoperability.** `qumo.ir.qasm2.to_qasm2` (MCP
   `qumo_convert` with `to: "qasm2"`, CLI `qumo convert --to qasm2`) writes
   `qelib1.inc` output for tools that only read OpenQASM 2. Without a
@@ -102,7 +107,10 @@ other QUMO modules plug their features into it.
   Modifiers `inv @`, `ctrl @`, `ctrl(n) @`, `negctrl @` and `pow(k) @` are
   applied through the IR functors `inverse()`, `controlled()` and `power()`.
 * Register broadcast (`h q;`, `cx q[0], q;`, `measure q -> c;`), inclusive
-  slices `q[0:2]`, index sets `q[{0,2}]` and negative indices.
+  slices `q[0:2]`, index sets `q[{0,2}]` and negative indices. Negative bounds count
+  from the end before the range is walked (`q[0:-1]` is the whole register, `q[-3:-1]` the last three
+  qubits), a negative step counts down (`q[3:-1:0]`), and a range that selects nothing (`q[2:1]`)
+  is error `QM-E521`.
 * `c = measure q;`, `c[0] = measure q[0];`, `measure q[0] -> c[0];`,
   `bit[2] c = measure q;`, `reset`, `barrier`.
 * Feed-forward on one bit: `if (c[0]) x q[1];`, `if (c[0] == 1) { ... } else { ... }`,
