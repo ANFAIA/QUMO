@@ -13,12 +13,18 @@ unless the request accepts it (`accept_ragged_eof`, research GETs only, X15).
 Redirects (D2c): at most `max_redirects` hops and 4 visits of one URL, https to http
 is always refused, and `Authorization` and `Cookie` are dropped when the scheme, host
 or port change.
+
+`request_guarded` (research GETs) also applies a `UrlGuard` (net/guard.mojo) to the first
+URL and to every redirect target before connecting, refuses a host that resolves to an
+address that is not globally routable, reports more than `max_redirects` hops as
+`refused URL: too many redirects`, and drops `Authorization` and `Cookie` on every redirect.
 """
 
 from std.memory import ArcPointer
 
 from qumo_agent.core.errors import E_NETWORK
 from qumo_agent.net.url import Url, parse_url, resolve_reference
+from qumo_agent.net.guard import UrlGuard, no_guard, refusal
 from qumo_agent.net.socket import ByteStream, NetStream, connect_stream
 from qumo_agent.net.tls import TlsContext
 
@@ -633,9 +639,10 @@ struct HttpClient(Movable):
             self.tls = ArcPointer(TlsContext())
         return self.tls
 
-    def _exchange(mut self, req: HttpRequest, opts: HttpOptions) raises -> _Exchange:
+    def _exchange(mut self, req: HttpRequest, opts: HttpOptions, guard: UrlGuard) raises -> _Exchange:
         """Sends `req`, following redirects per `opts`, and returns the final response
-        head with its unread body on the open connection."""
+        head with its unread body on the open connection. `guard` is applied to every URL
+        before its connection is opened."""
         var url = parse_url(req.url)
         var method = req.method.copy()
         var body = req.body.copy()
@@ -644,12 +651,13 @@ struct HttpClient(Movable):
         var visits = Dict[String, Int]()
         var hops = 0
         while True:
+            var public_only = guard.check(url)
             if url.scheme == "http" and not opts.allow_plain_http:
                 raise Error(E_NETWORK + ": refusing plain http URL " + url.to_string())
             var hop_req = HttpRequest(method, url.to_string(), names.copy(), values.copy(), body)
             var head_text = request_head(hop_req, url)
             var tls = self._tls_for(url)
-            var stream = connect_stream(url, tls, opts.connect_timeout_ms)
+            var stream = connect_stream(url, tls, opts.connect_timeout_ms, public_only)
             self.requests += 1
             stream.write_all(head_text + body, opts.io_timeout_ms)
             var reader = _Reader()
@@ -662,13 +670,15 @@ struct HttpClient(Movable):
                 return _Exchange(head^, url^, method, stream^, reader^)
             stream.close()
             hops += 1
+            if guard.enabled and hops > opts.max_redirects:
+                raise refusal("too many redirects")
             var key = target.to_string()
             var seen = visits.get(key, 0)
             if hops > opts.max_redirects or seen >= MAX_VISITS_PER_URL:
                 raise Error(E_NETWORK + ": redirect loop")
             visits[key] = seen + 1
             var drop = List[String]()
-            if not keeps_authorization(url, target):
+            if guard.enabled or not keeps_authorization(url, target):
                 drop.append("authorization")
                 drop.append("cookie")
             if opts.redirect_mode == REDIRECT_URLLIB and head.status != 307 and head.status != 308:
@@ -686,7 +696,11 @@ struct HttpClient(Movable):
 
     def request(mut self, req: HttpRequest, opts: HttpOptions) raises -> HttpResponse:
         """One request with redirects; the whole body is read under `opts`' cap."""
-        var ex = self._exchange(req, opts)
+        return self.request_guarded(req, opts, no_guard())
+
+    def request_guarded(mut self, req: HttpRequest, opts: HttpOptions, guard: UrlGuard) raises -> HttpResponse:
+        """`request` with `guard` applied to the URL and to every redirect target."""
+        var ex = self._exchange(req, opts, guard)
         var st = _framing(ex.head, ex.method, opts.accept_ragged_eof)
         var body = List[UInt8]()
         var truncated: Bool
@@ -701,6 +715,6 @@ struct HttpClient(Movable):
 
     def open(mut self, req: HttpRequest, opts: HttpOptions) raises -> HttpBodyStream:
         """Like `request`, but the body is streamed (redirects resolved before)."""
-        var ex = self._exchange(req, opts)
+        var ex = self._exchange(req, opts, no_guard())
         var st = _framing(ex.head, ex.method, opts.accept_ragged_eof)
         return ex^.into_body_stream(st^, opts)

@@ -51,7 +51,7 @@ written for this port). Implementers copy from the appendices, not from the repo
 | Id | Decision |
 |---|---|
 | D1 | Port what QUMO gets from deepagents with its call shape: virtual file tools, eviction to `/large_tool_results/` (strictly more than 80,000 code points), human-message eviction, parallel-mutation guard, `task` with general-purpose and named subagents (nested, isolated), summarization with its thresholds, prompt/argument truncation, dangling-call patching, unsupported content. No `write_todos`, no prompt caching. Texts byte-for-byte with MIT attribution. |
-| D2 | Deliberate fixes: (a) one `read_file`/`write_file`/`edit_file` per name, routed by path, accepting both argument vocabularies; (b) child processes never inherit secrets; (c) redirects: max 10, never https to http, drop `Authorization` across hosts; (d) mutation guard keys on `file_path` or `path`; (e) all-malformed turns get error results and continue; (f) limits count code points. |
+| D2 | Deliberate fixes: (a) one `read_file`/`write_file`/`edit_file` per name, routed by path, accepting both argument vocabularies; (b) child processes never inherit secrets; (c) redirects: max 10 (3 for research GETs, which also check every target, section 2.8.4), never https to http, drop `Authorization` across hosts; (d) mutation guard keys on `file_path` or `path`; (e) all-malformed turns get error results and continue; (f) limits count code points. |
 | D3 | Parity: OpenRouter wire format exactly as Python sends it (B3), reasoning discarded (B4), lenient argument parsing (B2), MCP results as text-part arrays (B6), inputSchema transform (B7), response-error handling (B5), openai retry policy (A6), 300 s per-operation model timeouts (A5), urllib-like research GETs. |
 | D4 | Fully native runtime: libc `posix_spawn` with file actions, chdir action, explicit envp, `waitpid`, process-group kill; `mkdtemp`; `time`/`localtime_r`/`strftime`; sockets; OpenSSL 3 via `OwnedDLHandle` with strict peer and hostname verification (no `X509_STRICT`), TLS >= 1.2, SNI; POSIX ERE via `regcomp`; `fnmatch`; HTTP/1.1 client; SSE reader for MCP streamable HTTP. |
 | D5 | All ten agents run natively; every Python tool is ported with its safety rules and caps; the Python export grows to cover what Mojo needs; Python stays the single source for the nine agents. |
@@ -76,7 +76,7 @@ written for this port). Implementers copy from the appendices, not from the repo
 | X2 | When one turn has two or more `task` calls and `--parallel N` > 1 (default 4), the subagents run concurrently as child processes (`qumo-agent subagent`, JSON over stdin/stdout); otherwise inline. | Python runs them concurrently; orchestrator fan-out would otherwise be sequential. |
 | X3 | QUMO's MCP server is used through one persistent stdio session per process, restarted after a failure, instead of a new process and session per call (Python, [critic C1]). No `tools/list` after `tools/call` and no `outputSchema` validation. | Speed (the current Mojo port does the same); QUMO's server is stateless per call (checked by `test_tools_qumo_mcp`, 8.2). |
 | X4 | Local tools never crash the run: Python exceptions outside the tools' own `try` (unknown `module` in `search_arxiv`/`module_watchlist`, `OSError` in `write_report`, unreadable files in `search_code`, undecodable `run_check` output) become `error: ...` results. | [gaps "Python behaviour to fix" 4], [critic B8]. |
-| X5 | `search_code` skips secret-named files and symlinks resolving outside the root; `run_check` refuses `git diff --output*`/`--no-index` and arguments ending in a newline, kills the whole process group on timeout, and decodes output lossily. | [gaps §2], [critic D2]. |
+| X5 | `list_files` and `search_code` skip files with a secret-looking name in any path component and symlinks resolving outside the root or to such a name (repo.py `_walkable`); `run_check` refuses `git diff --output*`/`--no-index` and arguments ending in a newline, kills the whole process group on timeout, and decodes output lossily. | [gaps §2], [critic D2]. |
 | X6 | `sdk_releases` reads up to 16 MiB (other research GETs keep 400,000 bytes). | Python's 400,000-byte cap truncates qiskit/stim/pytket JSON and the tool always fails [gaps §2]. |
 | X7 | `github_release_notes` accepts ASCII `[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+` only. | Python's Unicode `\w` lets non-ASCII through and then crashes in `http.client`. |
 | X8 | The virtual file system is text-only: `read_file` of an image/audio/video/PDF/PPT extension returns UnsupportedContent's placeholder text instead of a base64 block. | Text-only models; same text deepagents uses for unsupported media [ctx §12]. |
@@ -739,18 +739,33 @@ Pure Mojo (FIPS 180-4), so the manifest and eviction file names do not depend on
 #### 2.2.4 `util/redact.mojo`
 
 ```mojo
-def redact(s: String, secret: String) -> String   # moved verbatim from llm.mojo:205-233
+def redact(s: String, secret: String) -> String
 def secret_env_names(api_key_env: String) -> List[String]   # [api_key_env, "ALPHAXIV_API_KEY", "GITHUB_TOKEN"], duplicates removed
 def redact_all(s: String, env_names: List[String]) -> String
 ```
 
-`redact_all(s, names)` applies `redact(s, value)` for the current value of every variable in
-`names` that is set and non-empty (read with `getenv` at each call, never cached), then the
-existing `sk-`/`Bearer ` patterns of `redact`. Every component calls
+`redact(s, secret)` hides `secret` and its JSON-escaped form, then `sk-` followed by 8 or more
+key characters, and what follows `Bearer ` or `Basic ` in any letter case (8 or more of
+letters, digits and `_ - . ~ + / =`; after `Basic` only a value that looks like base64, not
+prose: a digit, `+ / =` or mixed case, or 20 bytes or more).
+
+Length rule for a known value: 8 bytes or more, hidden wherever it occurs; 4 to 7, only as a
+whole word (not next to a letter, digit, `_` or `-`); under 4, never. A very short value
+replaced everywhere would blank out pieces of ordinary words and mark every place where two or
+three common characters occur, which hides nothing; the cost is that a credential of 1 to 3
+characters, or one of 4 to 7 glued to other key characters, stays readable.
+
+`redact_all(s, names)` hides the current value (read with `getenv` at each call, never cached)
+of every variable in `names` and of every variable of the process whose name looks secret
+(`native/spawn.is_secret_env_name`: `*_API_KEY`, `*_TOKEN`, `*_SECRET`, `*_PASSWORD`,
+`*SECRET*`, `*PASSWORD*`), longest value first, each also JSON-escaped; then the patterns of
+`redact`. So the model key of every endpoint, the alphaXiv key (whatever `key_env` names it),
+`GITHUB_TOKEN` and an MCP `bearer_env` are covered without being listed. Every component calls
 `redact_all(text, secret_env_names(endpoint.api_key_env))` on every error text it produces from
 remote or child data (model HTTP errors, MCP HTTP and stdio errors, research `HTTPError`/
 `URLError` texts, subagent child errors) and on every stderr log line; `redact` alone is not
-used outside `redact_all`.
+used outside `redact_all`. Not covered: a JSON form that escapes `/` as `\/` or non-ASCII
+characters as `\uXXXX`, and the URL-encoded form (the harness sends keys in headers only).
 
 ### 2.3 `core/` (owner F)
 
@@ -1969,11 +1984,12 @@ def report_slug(name: String, max_len: Int, fallback: String) -> String
 Exact behaviour and texts (`W/agents/qumo_agents/tools/repo.py`, [gaps §2]):
 
 - `is_secret_name(n)`: case-insensitive search for `^\.env`, `secret`, `credential`, `\.pem$`,
-  `\.key$`, `id_rsa` in the final name.
-- `resolve_repo_path`: (1) `normpath(path)`: any part in `skip_dirs` or a secret final name
+  `\.key$`, `id_rsa` in one name. It is applied to every path component (repo.py `_forbidden`:
+  `secrets/a.txt` and `ok/../secrets/a.txt` are refused like `.env`).
+- `resolve_repo_path`: (1) `normpath(path)`: any part in `skip_dirs` or secret-looking
   raises `<path> is not readable by agents`; (2) `p = resolve_nonstrict(join_path(root, path))`
   (an absolute `path` replaces `root`); `p != root` and `root` not a parent of `p` raises
-  `<path> is outside <root>`; (3) the parts of `p` relative to `root` and its name are checked
+  `<path> is outside <root>`; (3) the parts of `p` relative to `root` are checked
   again, and when `p` exists, also the parts of `realpath_strict(p)` relative to
   `realpath_strict(root)`. Every skip-directory comparison (these three and the
   `list_files`/`search_code` walk filters) is made after ASCII lower-casing both the part and
@@ -1987,13 +2003,15 @@ Exact behaviour and texts (`W/agents/qumo_agents/tools/repo.py`, [gaps §2]):
   `"\n... (<len(lines)> lines total)"` when `len(lines) > s-1+len(chunk)`. OS errors:
   `error: [Errno N] <strerror>: '<abs path>'`.
 - `tool_list_files`: resolve; walk without following directory symlinks, pruning `skip_dirs`
-  (same output, faster); entries sorted by path parts (pathlib order: compare part lists, not
-  strings); keep files (following symlinks) whose root-relative parts avoid `skip_dirs` and whose
-  name matches `fnmatch_py(name, pattern)`; `rel` joined with `\n`; at 300 entries append
+  and secret-looking directories (same output, faster); entries sorted by path parts (pathlib
+  order: compare part lists, not strings); keep files (following symlinks) whose root-relative
+  parts avoid `skip_dirs` and secret-looking names, that do not link outside the root or to
+  such a name (repo.py `_walkable`), and whose name matches `fnmatch_py(name, pattern)`; `rel` joined with `\n`; at 300 entries append
   `... truncated` and stop; `""` when nothing matches (Python prints an empty string).
 - `tool_search_code`: `py_regex_to_ere` (failure: `error: <message>`), resolve; files from the
   walk matching `pathlib_glob_match(rel_parts_below_base, glob)`, sorted as above; skipped:
-  `skip_dirs`, non-files, and (X5) secret names and symlinks resolving outside the root;
+  `skip_dirs`, non-files, and (X5) secret-looking names in any path component and symlinks
+  resolving outside the root or to such a name (`_walkable`, as `list_files`);
   unreadable files are skipped (X4); per line (`py_splitlines` after universal newlines) a match
   gives `f"{rel}:{i}: {cp_head(py_strip(line), 200)}"`; at 200 hits append `... truncated`;
   `no matches` when empty.
@@ -2075,18 +2093,32 @@ def strip_html(raw: String) -> String
 Behaviour (`W/agents/qumo_agents/tools/research.py`, [gaps §2]); every result is
 `json.dumps(obj, indent=1, ensure_ascii=False)` (`py_json_dumps(..., False, 1)`):
 
-- `research_get`: only `https://` URLs, or URLs starting `http://export.arxiv.org/`, else
-  `ValueError: only https URLs are fetched`; headers `User-Agent: qumo-agents/0.1
-  (+https://github.com/ANFAIA/QUMO)` plus the given ones; `HttpOptions(30 s, 30 s, max_bytes,
-  truncate_at_max=True, REDIRECT_URLLIB, 10, allow_plain_http only for export.arxiv.org,
-  accept_ragged_eof=True)` (urllib parity, X15);
+- `research_get`: only `https://` URLs, else `ValueError: only https URLs are fetched`;
+  headers `User-Agent: qumo-agents/0.1 (+https://github.com/ANFAIA/QUMO)` plus the given
+  ones; `HttpOptions(30 s, 30 s, max_bytes, truncate_at_max=True, REDIRECT_URLLIB, 3,
+  allow_plain_http=False, accept_ragged_eof=True)` (urllib parity, X15), sent with
+  `HttpClient.request_guarded` and a `UrlGuard` (`net/guard.mojo`);
+- Outbound rules (`_check_url` and `_public_host` of `research.py`), applied to the URL and to
+  every redirect target before a connection is opened; each refusal is a `ValueError` with
+  Python's text: `only https URLs are fetched`; `only the default https port is fetched` (a
+  port other than 443); `<host> is not on the allow-list for this tool` (`search_arxiv`,
+  `sdk_releases` and `github_release_notes` call only `export.arxiv.org`, `pypi.org` and
+  `api.github.com`; `fetch_page` reads any public host); `<host> is not a public address` (an
+  IP literal in any spelling `getaddrinfo` reads, or a name with at least one resolved address,
+  that is not globally routable: loopback, private, link-local and metadata, CGNAT, the other
+  reserved ranges; "global" is `ipaddress.is_global` of CPython 3.12, an IPv4-mapped IPv6
+  address judged as its IPv4 address); `cannot resolve <host>`; `too many redirects` (more
+  than 3). `Authorization` is dropped on every redirect. A name is resolved once: the
+  addresses checked are the ones the socket connects to (`tcp_connect(..., public_only=True)`),
+  where Python resolves a second time to connect. `ResearchTools.plain_prefix` (empty outside
+  tests) exempts a loopback fixture server from these rules;
   non-2xx after redirects raises `HTTPError: HTTP Error <code>: <reason>`; network errors raise
   `URLError: <urlopen error <detail>>` or `TimeoutError: timed out`. These strings stand in for
   Python's `type(e).__name__: e`; they pass through `redact_all` (the GitHub token).
 - `search_arxiv`: unknown `module` gives `{"error": "unknown module '<m>'; choose one of ..."}`
   (X4); categories from the module (default `quant-ph`); terms `all:"<q>"` when the query has a
   space, else `all:<q>`; `q = "(<terms>) AND (<cat:A OR cat:B>)"`; URL
-  `http://export.arxiv.org/api/query?` + `urlencode(search_query, sortBy=submittedDate,
+  `https://export.arxiv.org/api/query?` + `urlencode(search_query, sortBy=submittedDate,
   sortOrder=descending, max_results=clamp(1..50))`; entries per Atom `entry`: `id` (id text after
   its last `/`), `title` (whitespace collapsed with `py_split_ws`), `published` (first 10),
   `authors` (first 6 `author/name`), `summary` (collapsed, first 900 code points), `url` (id
@@ -2102,8 +2134,8 @@ Behaviour (`W/agents/qumo_agents/tools/research.py`, [gaps §2]); every result i
   `{"error": "PyPI lookup failed for <pkg>: <Type>: <msg>"}`.
 - `github_release_notes`: `repo` must match `[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+` (X7) else
   `{"error": "repo must look like owner/name"}`; headers `Accept: application/vnd.github+json`
-  and, when `$GITHUB_TOKEN` is set, `Authorization: Bearer <token>` (dropped on cross-host
-  redirects, D2c); GET `https://api.github.com/repos/<repo>/releases?per_page=<clamp 1..10>`;
+  and, when `$GITHUB_TOKEN` is set, `Authorization: Bearer <token>` (dropped on every
+  redirect); GET `https://api.github.com/repos/<repo>/releases?per_page=<clamp 1..10>`;
   list of `{tag, date (published_at[:10] or ""), name, body (first 4000 code points or ""),
   url}`; errors `{"error": "GitHub lookup failed for <repo>: <Type>"}` (no message, on purpose).
 - `module_watchlist`: `{module, summary, sdks, arxiv_categories, arxiv_queries, mcp_tools,
@@ -2416,6 +2448,7 @@ text of this document. Everything else in section 2 holds as written.
 | `native/spawn` | `resolve_program(path, env, cwd)` (the absolute program a `SpawnSpec` will execute, PATH searched in the child's `env`); `exec_in_main(args)` is the `__exec-in DIR PATH ARG...` trampoline (`chdir` then `execve`) used where `posix_spawn_file_actions_addchdir_np` is missing. |
 | `native/libc` | A `CStr`/`CStrArray` is kept alive with `.keep()` after the C call (4.1 rule 3). Extra constants and `load_*`/`store_*` helpers for the layouts of 4.2; `c_open` and `c_readlink` wrappers. |
 | `net/url` | The parameter of `resolve_reference` is named `reference` (`ref` is a keyword in Mojo 1.2). |
+| `net/guard` | `UrlGuard.check`, `ipv4_is_global`, `ipv6_is_global`, `parse_ipv4_literal`, `parse_ipv6_literal`, `literal_is_global`: the outbound rules of the research GETs as pure functions (`test_net_guard`). |
 | `net/fdutil` | `now_ms`, `set_io_timeouts`, `set_cloexec`, `set_nosigpipe`, `poll_one`, `ip_literal_family`: socket helpers shared by `socket.mojo` and `tls.mojo`. |
 | `llm/client` | Retry constants public (`INITIAL_RETRY_DELAY_S`, `MAX_RETRY_DELAY_S`, `MAX_RETRY_AFTER_S`), `MAX_MODEL_BODY_BYTES`, `USER_AGENT`; error messages are clipped to `ERROR_MESSAGE_CODE_POINTS` before redaction. |
 | `mcp/protocol`, `mcp/results` | `tools_list_params_json(cursor)`, `call_params_json(name, args_json)`, `block_text(block)`, `MCP_CLIENT_NAME`/`MCP_CLIENT_VERSION`, `MCP_EMPTY_ERROR_TEXT` (the text of an `isError` result with no content). |
@@ -2916,13 +2949,13 @@ agent with `offset`/`limit`, as the stubs instruct (the critic A1 bug is fixed);
 | `grep` | default `max_count` 1000 | 80,000 body |
 | repository `read_file` | `_resolve` (skip dirs, secret names, inside root after symlinks); `max_lines` 1..2000 | 60,000 + footer |
 | `list_files` | same path rules; skip dirs pruned | 300 entries |
-| `search_code` | same path rules; secret names and outside-root symlinks skipped (X5); POSIX ERE subset | 200 hits, 200 per line |
+| `search_code` | same path rules; secret-looking names (any path component) and outside-root symlinks skipped, as in `list_files` (X5); POSIX ERE subset | 200 hits, 200 per line |
 | `run_check` | allow-list prefixes; ASCII path-like arguments, no `..`, no trailing newline, no `git diff --output*`/`--no-index` (X5); minimal env without secrets (D2b); cwd = sandbox or repo; process group killed on timeout; inside a sandbox: `CONF_CHECK` confinement (writes only to the sandbox, a per-call temp dir and the sandbox build cache; no network; no reads of `sensitive_home_paths`) | timeout 10..1800 s; output tail 12,000; 4 MiB bytes per stream kept |
 | repository paths | skip directories compared case-insensitively (X14) | - |
 | `write_report` | only `agents/reports/` of the main repository; ASCII slug | slug 80 |
 | `open_sandbox` | once per process tree; new branch from HEAD; nothing committed or pushed | stderr tail 500 |
 | sandbox `write_file`/`edit_file` | only inside the open sandbox, `_resolve` rules | - |
-| research GETs | `https` only (plus `http://export.arxiv.org/`); redirects per D2c; no retries; `Accept-Encoding: identity`; 30 s per operation | 400,000 bytes (PyPI 16 MiB, X6) |
+| research GETs | `https` only, port 443, public addresses only, the API tools on their three hosts; at most 3 redirects, each target checked (section 2.8.4); no retries; `Accept-Encoding: identity`; 30 s per operation | 400,000 bytes (PyPI 16 MiB, X6) |
 | `fetch_page` | text is data | 20,000 |
 | `search_arxiv` | `max_results` 1..50 | summary 900; 6 authors |
 | `github_release_notes` | ASCII `owner/name`; token only to api.github.com and dropped across hosts | `count` 1..10; body 4,000 |
@@ -3305,7 +3338,7 @@ retyped). Goldens are committed; regenerating them needs `agents/.venv`.
 | H | `test_harness_loop` | `wire_S1..S6` structural equality; D2e (all-invalid turn continues; mixed turn order: assistant, invalid errors, valid results); unknown tool text lists `execute` after `grep`; mutation guard for `file_path` and `path` (D2d), and for a V0 agent `notes.md` and `/notes.md` in one turn (same key, second refused); `execute` text; recursion: limit 25 gives 12 model calls then `QA-E110`, limit 200 gives 100; limit 24 with the final answer on call 12 gives `QA-E110` (R3), on call 11 it completes; a general-purpose subagent has no R3 step; answer and final-text rules |
 | H | `test_harness_subagents` | task listing (GP first, ancestors removed); unknown type text; isolation (child request has only system + description); final text skips trailing empty AI messages; file merge (child writes merged, child deletions not propagated, later call wins); inline path vs `run_subagents` (FakeEnv sees one batch of 2 when `parallel_limit` = 4); `replay_at` paths; failure gives `QA-E120` |
 | T | `test_tools_config`, `test_tools_catalog` | registry, `model_for` order, ancestors filtering, toolsmith prompt = preamble + role, stale-export message; guided descriptions byte-identical (the old `fixtures/guided_descriptions.json`); per-agent wire names equal Python's first request (`tests/fixtures/tools/wire_tool_names.json`, written by T's dev-time `tests/fixtures/tools/gen_wire_names.py` with the `r9-native-harness/capture.py` technique: `build_agent` with a fake model, tool names of the first request; equal to `capture_all.json` today) with a fake MCP list in server order |
-| T | `test_tools_repo` | `_resolve` vectors (`../`, `.env`, `.venv`, `build`, absolute outside, symlink escaping, and X14's `.GIT/config`, `Build/x`, `.Venv/x` refused); `read_file` format, footer and caps on a fixture with `\r\n`, `\f`, U+2028; `list_files` order (parts order: `a/b` before `a.b`) and 300 cap; `search_code` regex, glob, secret-name skip; `run_check` refusal texts byte-exact, ARG checks incl. trailing newline and `--output=x`, minimal env (allow-list injected with `/usr/bin/env`), timeout and group kill (allow-list injected with `/bin/sleep`), `git status --short` in a temp repo, universal newlines per stream (allow-list injected with `/usr/bin/printf 'a\r\nb\rc'` gives `a\nb\nc`), with a sandbox open a confined write outside the sandbox fails (allow-list injected with `/usr/bin/touch`); `write_report` path and slug; `open_sandbox` in a temp git repo (branch, worktree, symlinks, second call); sandbox write/edit texts |
+| T | `test_tools_repo` | `_resolve` vectors (`../`, `.env`, `.venv`, `build`, absolute outside, symlink escaping, and X14's `.GIT/config`, `Build/x`, `.Venv/x` refused); `read_file` format, footer and caps on a fixture with `\r\n`, `\f`, U+2028; `list_files` order (parts order: `a/b` before `a.b`) and 300 cap; `search_code` regex, glob, secret-name skip; a secret-looking directory (`secrets/a.txt`, `ok/../secrets/a.txt`) refused by `read_file`, the sandbox write/edit and `run_check build/qumo`, and hidden from `list_files` and `search_code` with symlinks to it; `run_check` refusal texts byte-exact, ARG checks incl. trailing newline and `--output=x`, minimal env (allow-list injected with `/usr/bin/env`), timeout and group kill (allow-list injected with `/bin/sleep`), `git status --short` in a temp repo, universal newlines per stream (allow-list injected with `/usr/bin/printf 'a\r\nb\rc'` gives `a\nb\nc`), with a sandbox open a confined write outside the sandbox fails (allow-list injected with `/usr/bin/touch`); `write_report` path and slug; `open_sandbox` in a temp git repo (branch, worktree, symlinks, second call); sandbox write/edit texts |
 | T | `test_tools_research`, `test_tools_atom_html` | Atom fixture (namespaced feed with CDATA and entities) gives the same JSON as Python's `search_arxiv_raw` (golden); PyPI and GitHub fixtures give Python's JSON (goldens, key order starting with `package`), including the 16 MiB path; `strip_html` equals Python's regex pipeline on 8 HTML fixtures; URL building; network paths through the fixture server |
 | T | `test_tools_qumo_mcp`, `test_tools_alphaxiv` | 24 tools for qumo-operator with guided descriptions; Bell circuit through `qumo_run_qasm`; session restart after killing the server; the same call sequence gives identical results through one persistent session and through a fresh session per call (X3); alphaXiv emulated over SSE: only the 5 read tools, description composition, one session per call with `DELETE` |
 | T | `agents/tests/test_agents.py` (Python) | export fresh (`export.stale()` covers the new files); `tools.json` descriptions equal `convert_to_openai_tool`; `modules.json` round trip; `generated_tools` values |
@@ -4249,7 +4282,7 @@ router decides "given" from the original arguments (before `validate_args` fills
 | E101 | `model request failed: HTTP <status> <reason>: <message>` |
 | E102 | `context overflow: HTTP <status>: <message>`, or A.12's recovery text |
 | E103 | `model returned an error: <json>`, `Response missing 'choices' key: dict_keys([...])`, `Received response with null value for 'choices'. ...`, `response has no choices` |
-| E104 | `<host>: <dns/connect/TLS/timeout detail>`, `refusing redirect from https to http`, `redirect loop`, `header injection refused`, `response body larger than <n> bytes`, `body truncated (<n> bytes missing)`, `body truncated (TLS connection closed without close_notify)` |
+| E104 | `<host>: <dns/connect/TLS/timeout detail>`, `refusing redirect from https to http`, `redirect loop`, `refused URL: <reason>` (research GETs, section 2.8.4), `header injection refused`, `response body larger than <n> bytes`, `body truncated (<n> bytes missing)`, `body truncated (TLS connection closed without close_notify)` |
 | E105 | `OpenSSL 3 not found (tried: ...). Hint: ...`, `<lib> (<version>) lacks <symbol>`, `no CA certificates found. Hint: set SSL_CERT_FILE` |
 | E110 | A.9 `RECURSION_LIMIT` |
 | E120 | `subagent <type> failed: <error>`, `subagent <type> failed: exit <code>`, `subagent <type> failed: result larger than 268435456 bytes`, `subagent <type> failed: malformed result: <text>` |
