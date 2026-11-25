@@ -23,7 +23,7 @@ from qumo.ir.circuit import Circuit, check_finite_values
 from qumo.ir.gates import Op
 from qumo.ir.pauli import PauliSum, PauliTerm
 from qumo.sim.statevector import StateVector
-from qumo.sim.runner import evolve, evolve_into, sample, SampleResult
+from qumo.sim.runner import evolve, evolve_into, sample, SampleResult, check_pure_state_circuit
 from qumo.sim.rng import Rng
 
 comptime PAR_SETS_MAX_QUBITS = 14
@@ -159,6 +159,7 @@ def pop_parity(x: Int) -> Bool:
 def run_estimator(pub: EstimatorPub) raises -> EstimatorResult:
     """Run one Estimator PUB (all parameter sets x all observables)."""
     pub.circuit.validate()
+    check_pure_state_circuit(pub.circuit, "run_estimator()")
     var nsets = pub.num_sets()
     var nobs = len(pub.observables)
     var exact = pub.precision <= 0.0

@@ -271,7 +271,7 @@ def error_ranges() -> List[ErrorRange]:
        "Raised by the Python package `qumo_hardware`, not by the Mojo core. This block mirrors `CATALOG` in plugins/hardware/qumo_hardware/errors.py (tests/test_mcp.mojo checks that every code used there is listed here). See [HARDWARE_PLUGINS.md](HARDWARE_PLUGINS.md#error-codes); `python -m qumo_hardware errors --json` prints the plugin's own catalogue. Messages never contain credentials.")
     _r(r, "QM-E96x", "benchmark", "Benchmark harness", "Benchmark harness (bench/run_benchmarks.py, Python)", 960, 969,
        "Raised by the Python benchmark harness, not by the Mojo core. Reported in the result JSON (`suites.<name>.reason`) and on stderr; a suite failure never aborts the run. See [BENCHMARKING_ON_CLOUD_GPUS.md](BENCHMARKING_ON_CLOUD_GPUS.md).")
-    _r(r, "QM-W0xx", "warning", "Warnings", "Warnings: lint findings QM-W001..W019 (qumo.ai.diagnostics.lint), execution notes QM-W020..W049, OpenQASM parser warnings QM-W050..W053 and QM-W055, Program lint QM-W054", 0, 99)
+    _r(r, "QM-W0xx", "warning", "Warnings", "Warnings: lint findings QM-W001..W019 (qumo.ai.diagnostics.lint), execution notes QM-W020..W049, OpenQASM parser warnings QM-W050..W053, QM-W055 and QM-W056, Program lint QM-W054", 0, 99)
     return r^
 
 
@@ -326,8 +326,9 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E411", "simulation", "The density-matrix simulator cannot follow one classical branch: classical conditions, or sampling after a mid-circuit measurement.", "Use sample(), which runs per-shot trajectories.")
     _e(c, "QM-E412", "simulation", "Stabilizer branching exceeded its branch limit (2^20): too many non-Clifford gates on non-commuting Paulis.", "Reduce the number of non-Clifford gates, or use the state vector.")
     _e(c, "QM-E413", "simulation", "The stabilizer branching simulator has no decomposition for this gate.", "Translate the circuit to Clifford gates and rotations first.")
-    _e(c, "QM-E414", "simulation", "Invalid or unsupported Kraus channel: wrong shape, not trace preserving, or used on a simulator that needs Pauli noise.", "Pass matrices with sum K^dag K = identity; run them on density_evolve() or sample().")
+    _e(c, "QM-E414", "simulation", "Invalid or unsupported Kraus channel: wrong shape, not trace preserving, or used on a simulator that needs Pauli noise, or a noise instruction the simulator does not take (density matrix: PAULI_CHANNEL_2 and E; PTSBE: E).", "Pass matrices with sum K^dag K = identity; run them on density_evolve() or sample().")
     _e(c, "QM-E415", "simulation", "An angle perturbation cannot apply: the standard deviation or the offset is not finite, or the standard deviation is negative.", "Pass a finite offset and a standard deviation >= 0, e.g. gaussian_angle_perturbation(circuit, 0.01, seed).")
+    _e(c, "QM-E416", "simulation", "evolve()/expectation() (CPU and GPU) cannot take a circuit with a reset, a noise channel or a mid-circuit measurement: a pure state would silently drop it.", "Use sample() (trajectories) or the density-matrix simulator; terminal measurements are fine.")
     _e(c, "QM-E408", "simulation", "Invalid cache-block size for execute_plan_reordered (need 1 <= nb <= num_qubits).", "Use execute_plan(), or pass nb in [1, num_qubits].")
     _e(c, "QM-E480", "simulation", "A shot of a Program passed its budget of loop iterations (max_iterations, default 65536 back-edges per shot).", "The loop may never exit; raise max_iterations if it is only long.")
     _e(c, "QM-E481", "simulation", "Division or remainder by zero, or an integer power with a negative exponent, while a shot of a Program ran. The message gives the shot and line.", "Guard the divisor with an if.")
@@ -542,6 +543,7 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-W053", "qasm", "OpenQASM box duration is ignored.", "QUMO circuits have no timing model; the box still keeps its gates together.")
     _e(c, "QM-W054", "qasm", "The body of a while loop cannot change its condition and has no break: the loop never runs, or runs until QM-E480.", "Assign a variable the condition reads, measure into a bit it reads, or add a break.")
     _e(c, "QM-W055", "qasm", "An integer division loses a remainder in a constant used as an angle or a float (float t = 3 / 4 * pi is 0), or a literal-only gate argument keeps real division where OpenQASM 3 and Qiskit truncate (rz(3/4*pi) is 3 pi / 4 here, 0 there).", "Write it in floats, such as 3.0 / 4, so that every tool reads the same value.")
+    _e(c, "QM-W056", "qasm", "An OpenQASM gate definition has the name and signature of a native gate but not its unitary (or cannot be compared with it), so the definition is used instead of the native gate.", "Rename the gate, or fix the body if you meant the built-in gate. The comparison covers unitary bodies of up to 4 qubits.")
     return c^
 
 

@@ -2,8 +2,12 @@
 
 Passes (each returns the number of rewrites, mutates the circuit in place):
   * `remove_identities`  - Qiskit `RemoveIdentityEquivalent`: any bound 1q/2q
-    gate within 1e-12 process infidelity of e^{i a} I (id, rz(4pi), rx(1e-9),
-    cp(2pi), ...) is dropped and its trace phase moved into `global_phase`.
+    gate equal to e^{i a} I to EXACT_TOL = 1e-14 (id, rz(4pi), rz(0), cp(2pi),
+    float residue of a cancelled pair, ...) is dropped and its trace phase moved
+    into `global_phase`. The tolerance is tight on purpose: the pass looks at one
+    gate at a time, so any looser bound lets many small rotations that add up to
+    something visible all go (Qiskit's 1e-12 infidelity drops rotations below
+    about 2e-6 rad). At 1e-14 the angle error per dropped gate is below 2e-14.
   * `cancel_inverses`    - TKET `RemoveRedundancies` / Qiskit
     `InverseCancellation` + `CommutativeInverseCancellation`: walks back along
     a wire through *commuting* gates (per-wire Pauli-axis rule) looking for the
@@ -95,46 +99,12 @@ def gate_identity_phase(g: Instruction, mut phase: Float64, tol: Float64 = ANG_T
     return False
 
 
-comptime IDENTITY_INFIDELITY = 1e-12
-
-
-def gate_near_identity(g: Instruction, mut phase: Float64) -> Bool:
-    """True when 1 - |Tr U / d|^2 < 1e-12 (Qiskit RemoveIdentityEquivalent's
-    default): numerically invisible rotations (|angle| < ~2e-6) are dropped and
-    the trace phase goes to `global_phase`."""
-    var k = g.kind
-    if k == Op.I:
-        phase = 0.0
-        return True
-    if not op_is_unitary(k) or g.is_parametric():
-        return False
-    var a = op_arity(k)
-    var tr_r = 0.0
-    var tr_i = 0.0
-    var d = 2.0
-    if a == 1:
-        var m = inst_matrix_1q(g)
-        tr_r = m.re[0] + m.re[3]
-        tr_i = m.im[0] + m.im[3]
-    elif a == 2:
-        var m = matrix_2q(k, g.p0.value())
-        for j in range(4):
-            tr_r += m.re[j * 5]
-            tr_i += m.im[j * 5]
-        d = 4.0
-    else:
-        return False
-    var f = (tr_r * tr_r + tr_i * tr_i) / (d * d)
-    if 1.0 - f < IDENTITY_INFIDELITY:
-        phase = atan2(tr_i, tr_r)
-        return True
-    return False
-
-
 def remove_identities(mut c: Circuit, exact: Bool = False) -> Int:
-    """Drop gates equal (to 1e-12 process infidelity) to a global phase. That is any
-    rotation below about 2e-6. `exact`, for a block of a Program, keeps every gate
-    further from the identity than EXACT_TOL: verify_program would see it go."""
+    """Drop gates equal to a global phase to EXACT_TOL (1e-14). The tolerance is the
+    same in every mode: it is tight enough that no number of dropped gates adds up
+    to anything visible (each is under 2e-14 rad from the identity), which a
+    per-gate bound such as 1e-12 infidelity (rotations below 2e-6) is not. `exact`
+    is kept for callers that pass it; it no longer changes the result."""
     var n = len(c.ops)
     var alive = List[Bool](length=n, fill=True)
     var removed = 0
@@ -143,7 +113,7 @@ def remove_identities(mut c: Circuit, exact: Bool = False) -> Int:
         if not op_is_unitary(g.kind):
             continue
         var ph = 0.0
-        if gate_identity_phase(g, ph, EXACT_TOL) if exact else gate_near_identity(g, ph):
+        if gate_identity_phase(g, ph, EXACT_TOL):
             alive[i] = False
             removed += 1
             if g.cond < 0:

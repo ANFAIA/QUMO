@@ -142,6 +142,16 @@ trait Decoder(Copyable, Deinitable):
   errors and decomposition pieces, weight log((1−p)/p); undecomposed
   hyperedges are decomposed against existing edges or dropped (counted).
   `graphlike_distance()` = fewest graph-like errors forming a logical.
+  DEM import (`parse_dem`) keeps Stim's `^` pieces; `graph_pieces`
+  (`qumo/qec/decoders.mojo`) is the one rule for them, shared by
+  `MatchingGraph`, `graphlike_dem` and the correlated decoder. A piece with no
+  detector only carries an observable flip (`error(0.1) D0 ^ L0`): its
+  observable mask is XORed into the adjacent piece (previous, else next) and
+  the empty piece disappears; a mechanism with no detector at all is
+  undetectable and is skipped (`num_undetectable` counts those with an
+  observable). A piece with more than two detectors is not graph-like: it is
+  decomposed against the existing edges like an undecomposed hyperedge, or
+  dropped and counted in `num_dropped` if that fails.
 * `UnionFindDecoder`: weighted cluster growth on integer edge lengths (32 per
   nat), event-driven growth step, union by size, boundary vertex grounds
   clusters, peeling on a BFS spanning forest rooted at the boundary.

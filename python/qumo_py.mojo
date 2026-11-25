@@ -325,6 +325,10 @@ struct PyCircuit(Movable, Writable):
         return Self._get(py_self)[].c.has_noise()
 
     @staticmethod
+    def without_noise(py_self: PythonObject) raises -> PythonObject:
+        return PythonObject(alloc=PyCircuit(Self._get(py_self)[].c.without_noise()))
+
+    @staticmethod
     def is_clifford(py_self: PythonObject) raises -> PythonObject:
         return Self._get(py_self)[].c.is_clifford()
 
@@ -2189,6 +2193,7 @@ def PyInit_qumo_py() abi("C") -> PythonObject:
             .def_method[PyCircuit.num_2q_gates]("num_2q_gates", docstring="num_2q_gates() -> int\n\nNumber of two-qubit gates.")
             .def_method[PyCircuit.t_count]("t_count", docstring="t_count() -> int\n\nNumber of T and Tdg gates.")
             .def_method[PyCircuit.parameter_names]("parameter_names", docstring="parameter_names() -> list\n\nNames of the symbolic parameters, in the order bind() takes their values.")
+            .def_method[PyCircuit.without_noise]("without_noise", docstring="without_noise() -> Circuit\n\nA copy with every noise channel removed (the ideal circuit).")
             .def_method[PyCircuit.has_noise]("has_noise", docstring="has_noise() -> bool\n\nTrue when the circuit holds a noise channel.")
             .def_method[PyCircuit.is_clifford]("is_clifford", docstring="is_clifford() -> bool\n\nTrue when every gate is Clifford (rotations by multiples of pi/2 count).")
             .def_method[PyCircuit.is_dynamic]("is_dynamic", docstring="is_dynamic() -> bool\n\nTrue with classical conditions, resets or gates after a measurement.")
@@ -2302,7 +2307,7 @@ def PyInit_qumo_py() abi("C") -> PythonObject:
         m.def_function[py_schedule]("schedule", docstring="schedule(jobs, devices, cost_weight=0.0) -> dict\n\nHEFT plan of quantum jobs over a device pool, without running them.")
         m.def_function[py_qec_memory]("qec_memory", docstring="qec_memory(code, distance, rounds, p) -> QecMemory\n\nMemory experiment for streaming: 'surface_z' | 'surface_x' | 'repetition' under uniform circuit noise p.")
         m.def_function[py_op_table]("op_table", docstring="op_table() -> dict\n\n{gate name: (kind, arity, num_params)} for every instruction; `kind` is what Circuit.extend_packed takes.")
-        m.def_function[py_statevector]("statevector", docstring="statevector(circuit, params=[]) -> numpy.ndarray\n\nFinal state as a complex128 array of 2^n amplitudes; amplitude i has qubit q in bit q of i. Measurements, resets and noise are skipped. The simulator's state is written once into the array (no Python lists). Needs NumPy. Limit 32 qubits (QM-E404).")
+        m.def_function[py_statevector]("statevector", docstring="statevector(circuit, params=[]) -> numpy.ndarray\n\nFinal state as a complex128 array of 2^n amplitudes; amplitude i has qubit q in bit q of i. Terminal measurements are skipped; resets and mid-circuit measurements raise QM-E416. The simulator's state is written once into the array (no Python lists). Needs NumPy. Limit 32 qubits (QM-E404).")
         m.def_function[py_probabilities]("probabilities", docstring="probabilities(circuit, params=[]) -> numpy.ndarray\n\nfloat64 array of 2^n outcome probabilities. A circuit with noise goes through the density matrix (limit 15 qubits).")
         m.def_function[py_emulate]("emulate", docstring="emulate(circuit, spec, shots, seed, compile, level) -> (counts, method, num_qubits, estimated_fidelity, target)\n\nSample `circuit` under the noise of the target `spec` (e.g. 'grid:2x2/sc_cz'), as `qumo emulate` does. compile=True transpiles first. Errors: QM-E615 when the circuit does not fit the target and compile is False.")
         m.def_function[py_parse_target]("parse_target", docstring="parse_target(spec) -> dict\n\nA one-line target, as the CLI takes it: '<topology>:<size>[/<basis>]', e.g. 'grid:2x2/sc_cz', 'line:20', 'heavy_hex:5/rz,sx,x,ecr', 'trapped_ion:11'. Returns name, modality, num_qubits, all_to_all, edges, basis. Errors: QM-E611.")
