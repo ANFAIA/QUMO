@@ -28,7 +28,7 @@ from pathlib import Path
 from . import jobs as job_store
 from . import runner
 from .base import CANCELLED, ERROR, TargetSpec
-from .errors import E_COMPILE, E_CONFIRM, E_INVALID_PAYLOAD, HardwareError, catalog
+from .errors import E_COMPILE, E_CONFIRM, E_INVALID_PAYLOAD, HardwareError, catalog, redact_text
 from .registry import get_provider, provider_names
 
 EXIT_OK, EXIT_ERR, EXIT_USAGE, EXIT_CONFIRM, EXIT_INTERRUPTED = 0, 1, 2, 3, 130
@@ -352,8 +352,10 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_INTERRUPTED
     except Exception as exc:  # no stack traces for users; QUMO_HW_DEBUG=1 shows them
         if os.environ.get("QUMO_HW_DEBUG"):
-            traceback.print_exc()
-        err = {"code": "QM-E999", "severity": "error", "message": f"unexpected {type(exc).__name__}: {exc}",
+            sys.stderr.write(redact_text(traceback.format_exc()))
+        # the text of an unexpected exception can echo request details: same redactor as safe_exc_text
+        err = {"code": "QM-E999", "severity": "error",
+               "message": f"unexpected {type(exc).__name__}: {redact_text(str(exc))}",
                "hint": "re-run with QUMO_HW_DEBUG=1 and report the traceback", "docs": "docs/HARDWARE_PLUGINS.md"}
         if as_json:
             print(json.dumps({"error": err}, indent=1))
