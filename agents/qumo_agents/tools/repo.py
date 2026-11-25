@@ -134,7 +134,10 @@ def search_code(regex: str, path: str = ".", glob: str = "*.mojo") -> str:
 # ----------------------------------------------------------------------------- commands
 # (description, argv prefix pattern); every argument after the prefix is checked below.
 ALLOWED = [(desc, list(prefix)) for desc, prefix in guard_spec.REPO["run_check_allowed"]]
-ARG_OK = re.compile(r"^[\w./:=,@+-]+$")
+# ASCII only, and the whole argument (fullmatch): `\w` took any Unicode letter or digit, and
+# `$` let a trailing newline through.
+ARG_OK = re.compile("[" + "".join(guard_spec.REPO["arg_chars"]["ranges"])
+                    + re.escape(guard_spec.REPO["arg_chars"]["others"]) + "]+")
 GIT_FLAGS = frozenset(guard_spec.REPO["git_flags"])
 # `build/qumo` takes subcommands and options from these lists only. `tool` and `mcp` are left
 # out (they call any registered tool). Output options write a file, so they are refused unless
@@ -229,7 +232,7 @@ def _run_check_refusal(argv: list[str]) -> str:
     """Why run_check refuses argv, or "" when it may run (the whole decision, no side effect)."""
     if not any(argv[:len(prefix)] == prefix for _, prefix in ALLOWED):
         return "refused: not on the allow-list. Allowed: " + "; ".join(" ".join(p) for _, p in ALLOWED)
-    if any(not ARG_OK.match(a) or ".." in a for a in argv):
+    if any(not ARG_OK.fullmatch(a) or ".." in a for a in argv):
         return "refused: arguments may only hold path-like characters"
     # Paths stay inside the working tree: no absolute path, bare or as an option value.
     if any(a.startswith("/") or "=/" in a for a in argv):

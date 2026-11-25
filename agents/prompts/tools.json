@@ -548,7 +548,7 @@
     ]
    ]
   ],
-  "arg_ok": "^[\\w./:=,@+-]+$"
+  "arg_ok": "[A-Za-z0-9_\\./:=,@\\+\\-]+"
  },
  "research": {
   "user_agent": "qumo-agents/0.1 (+https://github.com/ANFAIA/QUMO)",
