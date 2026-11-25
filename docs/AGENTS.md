@@ -190,7 +190,7 @@ the value.
 
 ## 7. What the agents may and may not do
 
-* Read the repository, except `.venv`, `build`, `.git`, `.worktrees` and secret-looking files (file or directory names; `read_file`, `list_files` and `search_code` share one rule, and symlinks leaving the repository are skipped).
+* Read the repository, except `.venv`, `build`, `.git`, `.worktrees` and secret-looking files (file or directory names; `read_file`, `list_files` and `search_code` share one rule, and symlinks leaving the repository are skipped; the native Mojo harness applies the same rule to every path component).
 * Run only allow-listed commands, without a shell: one Mojo test or example, one example
   through `examples/run_examples.py`, the hardware plugin tests, `build/qumo`, `git diff`
   and `git status`. Arguments are path-like only, never absolute, and `git` takes only
