@@ -140,6 +140,7 @@ Surface-code memory experiments, custom decoders, Stim interoperability.
 
 | Example | Origin | Reproduces | Tier | Source |
 |---|---|---|---|---|
+| [`dem_exact_comparison.mojo`](error_correction/dem_exact_comparison.mojo) — Exact comparison of detector error models: QUMO's extractor against a DEM worked out by hand | [QUMO](https://github.com/ANFAIA/QUMO) | Luo, Suzuki - DEMVal, exact comparison oracle for detector error models (Sec. 4.2, Alg. 1) | fast | [source](https://arxiv.org/abs/2611.20501) |
 | [`qec_custom_decoder.mojo`](error_correction/qec_custom_decoder.mojo) — Plug your own decoder (e.g. a neural / AlphaQubit-style model) into QUMO | [QUMO](https://github.com/ANFAIA/QUMO) |  | fast |  |
 | [`qec_memory_experiment.mojo`](error_correction/qec_memory_experiment.mojo) — Surface-code memory experiment end to end (Stim + PyMatching + Sinter, in Mojo) | [QUMO](https://github.com/ANFAIA/QUMO) |  | fast |  |
 | [`stim_interop_decoding.mojo`](error_correction/stim_interop_decoding.mojo) — Stim text in, correlated matching, sliding windows, and the detector lint | [Cirq (Google)](https://github.com/quantumlib/Cirq) | Stim 1.16 and PyMatching 2.3 - missing_detectors, correlated matching (arXiv:1310.0863) | fast | [source](https://github.com/quantumlib/Stim/blob/main/doc/python_api_reference_vDev.md) |

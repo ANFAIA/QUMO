@@ -481,6 +481,44 @@ def test_every_code_of_the_stack_is_in_the_catalogue() raises:
         assert_true(found, want + " is missing from error_catalog()")
 
 
+def _refusal(reg: ToolRegistry, name: String, args: String) raises -> JsonValue:
+    var r = reg.call(name, parse_json(args))
+    assert_true(r.is_error, name + " accepted " + args)
+    return parse_json(r.structured).get("error")
+
+
+def test_unknown_argument_is_refused() raises:
+    var reg = full_registry()
+    # a misspelt key (shot for shots) is refused, not silently defaulted
+    var e = _refusal(reg, "qumo_run_qasm", _qasm_args(RUS, ",\"shot\":500"))
+    assert_equal(e.get("code").as_string(), "QM-E801")
+    assert_true(e.get("message").as_string().find("'shot'") >= 0, e.get("message").as_string())
+    assert_true(e.get("hint").as_string().find("shots") >= 0, e.get("hint").as_string())
+    # every unknown key is named
+    var two = _refusal(reg, "qumo_validate_qasm", _qasm_args(RUS, ",\"x\":1,\"y\":2"))
+    assert_equal(two.get("code").as_string(), "QM-E801")
+    assert_true(two.get("message").as_string().find("'x'") >= 0 and two.get("message").as_string().find("'y'") >= 0, two.get("message").as_string())
+    # a tool without arguments takes only the empty object
+    var none = _refusal(reg, "qumo_gpu_info", "{\"shots\":1}")
+    assert_equal(none.get("code").as_string(), "QM-E801")
+    assert_true(none.get("hint").as_string().find("(none)") >= 0, none.get("hint").as_string())
+    var empty = reg.call("qumo_gpu_info", parse_json("{}"))
+    assert_false(empty.is_error and empty.structured.find("QM-E801") >= 0, empty.structured)
+    # the declared arguments still work
+    assert_equal(_call(reg, "qumo_run_qasm", _qasm_args(RUS, ",\"shots\":50")).get("shots").as_int(), 50)
+
+
+def test_every_tool_refuses_an_unknown_argument_first() raises:
+    var reg = full_registry()
+    # with and without the other arguments valid: the unknown key is reported before anything else
+    for t in reg.tools:
+        var bare = _refusal(reg, t.name, "{\"zz_not_an_argument\":1}")
+        assert_equal(bare.get("code").as_string(), "QM-E801", t.name)
+        assert_true(bare.get("message").as_string().find("'zz_not_an_argument'") >= 0, t.name + ": " + bare.get("message").as_string())
+        var with_qasm = _refusal(reg, t.name, _qasm_args(RUS, ",\"zz_not_an_argument\":1"))
+        assert_equal(with_qasm.get("code").as_string(), "QM-E801", t.name)
+
+
 def main() raises:
     test_json_round_trip()
     test_json_round_trip_of_the_control_flow_fixtures()
@@ -507,4 +545,6 @@ def main() raises:
     test_lint_w054()
     test_warnings_come_from_the_parser_that_stood()
     test_every_code_of_the_stack_is_in_the_catalogue()
+    test_unknown_argument_is_refused()
+    test_every_tool_refuses_an_unknown_argument_first()
     print("test_program_surfaces OK")

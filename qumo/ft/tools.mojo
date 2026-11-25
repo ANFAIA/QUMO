@@ -257,7 +257,7 @@ def _ft_verify_tool(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
     return tool_ok(w.finish())
 
 
-comptime _FT_CIRC = "\"qasm\":{\"type\":\"string\",\"description\":\"OpenQASM 2 or 3 program\"},\"circuit\":{\"type\":\"object\",\"description\":\"qumo.circuit.v1 JSON\"}"
+comptime _FT_CIRC = "\"qasm\":{\"type\":\"string\",\"description\":\"OpenQASM 2 or 3 program\"},\"circuit\":{\"type\":\"object\",\"description\":\"qumo.circuit.v1 JSON\"},\"program\":{\"type\":\"object\",\"description\":\"qumo.program.v1 JSON\"}"
 
 
 def register_ft_tools(mut reg: ToolRegistry):
