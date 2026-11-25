@@ -2434,7 +2434,7 @@ text of this document. Everything else in section 2 holds as written.
 | `tools/qumo_mcp` | `default_qumo_bin(root)`: `$QUMO_BIN`, else `<root>/build/qumo`. |
 | `tools/catalog` | `TOOLSMITH_GROUP` and `toolsmith_tool_names()` (the four `toolsmith_*` names, in wire order). |
 | `tools/config` | `SPECS_SCHEMA`, `MODULES_SCHEMA`, `TOOLS_SCHEMA`, `AGENTS_SCHEMA` (the export files are checked against them) and `EXPORT_HINT`. |
-| `tools/repo` | `run_check_refusal(argv, allowed)` and the refusal texts `REFUSED_NO_SANDBOX`, `REFUSED_ARGS`, `REFUSED_UNSANDBOXED`; caps `MAX_LIST_ENTRIES`, `MAX_SEARCH_HITS`, `CHECK_MAX_BYTES`, `CHECK_FSIZE_BYTES`. |
+| `tools/repo` | `run_check_refusal(argv, allowed, root, sandbox, skip_dirs)` and the refusal texts `REFUSED_NO_SANDBOX`, `REFUSED_ARGS`, `REFUSED_UNSANDBOXED`; caps `MAX_LIST_ENTRIES`, `MAX_SEARCH_HITS`, `CHECK_MAX_BYTES`, `CHECK_FSIZE_BYTES`. |
 | `tools/research` | `py_net_error(e)` (urllib-style messages), `error_json`, `research_get_prefixed`, `pypi_info_json`, `is_github_repo`, `github_releases_json`; the golden tests call them without a network. |
 | `toolsmith/manifest` | `MANIFEST_FILE`, `DEFAULT_TOOL_TIMEOUT_S`, `DEFAULT_MAX_OUTPUT_BYTES`, `empty_manifest(store)`, `tool_entry_from_json`, `build_record_from_value`, `display_name`, `is_inside(path, root)`. |
 | `toolsmith/generated` | `generated_suffix(entry)` (B.3), `entry_timeout_s`, `entry_max_output_bytes`, the message-cap bounds, `HINT_REVIEW`, `HINT_UNSANDBOXED`. |

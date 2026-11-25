@@ -278,7 +278,7 @@
    }
   },
   "run_check": {
-   "description": "Run one allow-listed command (no shell) in the sandbox if open, else in the\n    repository: `.venv/bin/mojo run -I . tests/test_x.mojo`, `bench/.venv/bin/python\n    examples/run_examples.py --only <file>`, the plugin pytest, `build/qumo ...`,\n    `git diff`, `git status --short`. Returns exit code and the output tail.",
+   "description": "Run one allow-listed command (no shell) in the sandbox if open, else in the\n    repository: `.venv/bin/mojo run -I . tests/test_x.mojo`, `bench/.venv/bin/python\n    examples/run_examples.py --only <file>`, the plugin pytest, `build/qumo ...`,\n    `git diff`, `git status --short`. `build/qumo` takes the run, statevector, expect, transpile,\n    emulate, validate, info, draw, convert, vqe and describe subcommands; its file arguments follow\n    the read_file rules, and -o/--output needs an open sandbox and a path inside it.\n    Returns exit code and the output tail.",
    "parameters": {
     "properties": {
      "argv": {

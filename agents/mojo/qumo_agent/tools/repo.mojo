@@ -473,7 +473,81 @@ def _arg_ok(a: String) -> Bool:
     return a.find("..") < 0
 
 
-def _allowed(argv: List[String], allowed: List[List[String]]) -> Bool:
+comptime REFUSED_ABSOLUTE = "refused: absolute paths are not allowed"
+comptime REFUSED_GIT_OPTIONS = "refused: git options allowed here: -- --cached --name-only --name-status --staged --stat"
+comptime REFUSED_QUMO_SUBCOMMANDS = "refused: build/qumo subcommands allowed here: convert describe draw emulate expect help info run statevector transpile validate version vqe"
+comptime REFUSED_QUMO_OUTPUT = "refused: build/qumo output options write a file; open_sandbox first (the main checkout is read-only for agents)"
+
+
+def _git_flags() -> List[String]:
+    """repo.py GIT_FLAGS."""
+    return ["--stat", "--name-only", "--name-status", "--cached", "--staged", "--"]
+
+
+def _qumo_subcommands() -> List[String]:
+    """repo.py QUMO_SUBCOMMANDS (`tool` and `mcp` are left out: they call any tool)."""
+    return ["run", "statevector", "expect", "transpile", "emulate", "validate", "info", "draw",
+            "convert", "vqe", "describe", "version", "help"]
+
+
+def _qumo_options() -> List[String]:
+    """repo.py QUMO_OPTIONS."""
+    return ["--shots", "--seed", "--params", "--max-qubits", "--max-iterations", "--device", "--precision",
+            "--json", "--pretty", "--max-amplitudes", "--observable", "--target", "--level", "--basis",
+            "--pipeline", "--qasm", "--compile", "--no-compile", "--width", "--unicode", "--to",
+            "--instructions", "--layers", "--entanglement", "--optimizer", "--gradient", "--maxiter",
+            "--qubits", "-h", "--help"]
+
+
+def _qumo_refusal(args: List[String], root: String, sandbox: String, skip_dirs: List[String]) -> String:
+    """repo.py _qumo_refusal: `args` are the arguments after `build/qumo`. Every file argument
+    passes resolve_repo_path (the read_file rule); an output option needs an open sandbox and a
+    path inside it."""
+    if len(args) == 0 or not _in(_qumo_subcommands(), args[0]):
+        return REFUSED_QUMO_SUBCOMMANDS
+    var i = 1
+    while i < len(args):
+        var a = args[i]
+        i += 1
+        if a.startswith("-") and a != "-":
+            var name = a
+            var value = String()
+            var has_eq = False
+            var eq = a.find("=")
+            if eq >= 0:
+                name = String(a[byte=0:eq])
+                value = String(a[byte=eq + 1:])
+                has_eq = True
+            if name == "-o" or name == "--output":
+                if not has_eq:
+                    if i < len(args):
+                        value = args[i]
+                    i += 1
+                if sandbox.byte_length() == 0:
+                    return REFUSED_QUMO_OUTPUT
+                if value.byte_length() == 0:
+                    return "refused: " + name + " needs a path"
+                try:
+                    _ = resolve_repo_path(value, sandbox, skip_dirs)
+                except e:
+                    return "refused: " + _strip_code(String(e))
+                continue
+            if not _in(_qumo_options(), name):
+                return "refused: build/qumo option " + name + " is not allowed here"
+            if not has_eq:
+                continue
+            a = value
+        if a == "-":
+            continue
+        try:
+            _ = resolve_repo_path(a, root, skip_dirs)
+        except e:
+            return "refused: " + _strip_code(String(e))
+    return String()
+
+
+def _matched_prefix_len(argv: List[String], allowed: List[List[String]]) -> Int:
+    """The length of the first allow-list entry that argv starts with, or -1."""
     for prefix in allowed:
         if len(argv) < len(prefix):
             continue
@@ -483,13 +557,15 @@ def _allowed(argv: List[String], allowed: List[List[String]]) -> Bool:
                 same = False
                 break
         if same:
-            return True
-    return False
+            return len(prefix)
+    return -1
 
 
-def run_check_refusal(argv: List[String], allowed: List[List[String]]) -> String:
-    """The refusal text for argv, or "" when it may run (repo.py run_check + X5)."""
-    if not _allowed(argv, allowed):
+def run_check_refusal(argv: List[String], allowed: List[List[String]], root: String, sandbox: String, skip_dirs: List[String]) -> String:
+    """The refusal text for argv, or "" when it may run (repo.py run_check + X5). `root` is
+    the open sandbox, else the repository; `sandbox` is "" until open_sandbox."""
+    var matched = _matched_prefix_len(argv, allowed)
+    if matched < 0:
         var listed = List[String]()
         for p in allowed:
             listed.append(String(" ").join(p))
@@ -497,10 +573,25 @@ def run_check_refusal(argv: List[String], allowed: List[List[String]]) -> String
     for a in argv:
         if not _arg_ok(a):
             return REFUSED_ARGS
-    if len(argv) >= 2 and argv[0] == "git" and argv[1] == "diff":
-        for i in range(2, len(argv)):
-            if argv[i].startswith("--output") or argv[i] == "--no-index":
-                return REFUSED_ARGS
+    # No absolute path, bare or as an option value. The allow-list entry itself is not an
+    # argument (the shipped entries are relative; tests inject absolute interpreters).
+    for i in range(matched, len(argv)):
+        if argv[i].startswith("/") or argv[i].find("=/") >= 0:
+            return REFUSED_ABSOLUTE
+    if argv[0] == "build/qumo":
+        var rest = List[String]()
+        for i in range(1, len(argv)):
+            rest.append(argv[i])
+        var why = _qumo_refusal(rest, root, sandbox, skip_dirs)
+        if why.byte_length() > 0:
+            return why
+    if argv[0] == "git" and len(argv) >= 2:
+        # `git diff` reads any two files with --no-index and writes one with --output.
+        var first = 2 if argv[1] == "diff" else 3
+        var flags = _git_flags()
+        for i in range(first, len(argv)):
+            if argv[i].startswith("-") and not _in(flags, argv[i]):
+                return REFUSED_GIT_OPTIONS
     return String()
 
 
@@ -515,7 +606,7 @@ def _env_with(var env: List[String], name: String, value: String) -> List[String
 
 
 def tool_run_check(st: RepoState, argv: List[String], timeout_s: Int) -> String:
-    var refusal = run_check_refusal(argv, st.allowed)
+    var refusal = run_check_refusal(argv, st.allowed, st.root(), st.sandbox, st.skip_dirs)
     if refusal.byte_length() > 0:
         return refusal
     var confined = st.sandbox.byte_length() > 0

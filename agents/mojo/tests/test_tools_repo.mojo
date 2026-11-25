@@ -35,8 +35,13 @@ from qumo_agent.native.sandbox import sandbox_kind
 from qumo_agent.native.spawn import STDIO_NULL, STDIO_PIPE, SpawnSpec, minimal_child_env, run_capture
 from qumo_agent.tools.repo import (
     RepoState,
+    REFUSED_ABSOLUTE,
+    REFUSED_GIT_OPTIONS,
     REFUSED_NO_SANDBOX,
+    REFUSED_QUMO_OUTPUT,
+    REFUSED_QUMO_SUBCOMMANDS,
     REFUSED_UNSANDBOXED,
+    run_check_refusal,
     is_secret_name,
     report_slug,
     resolve_repo_path,
@@ -292,6 +297,79 @@ def test_run_check(base: String) raises:
     assert_true(unconfined.startswith("exit 0\n") and unconfined.find("TMPDIR=") >= 0 and unconfined.find("MODULAR_CACHE_DIR=" + root + "/build/agent-sandbox-cache") >= 0, unconfined)
 
 
+def test_run_check_rules(base: String) raises:
+    """The Python run_check rules, mirrored: absolute paths, the git flag allow-list, and the
+    build/qumo subcommand, option and file rules. Refusals only: nothing is run."""
+    var root = realpath_strict(base) + "/rules"
+    var sandbox = root + "/.worktrees/agent-x"
+    make_dirs(root + "/examples")
+    make_dirs(sandbox + "/examples")
+    write_text(root + "/examples/bell.qasm", "OPENQASM 3.0;\n")
+    write_text(root + "/.env", "TOPSECRET=1\n")
+    var allowed = default_allowed()
+    var skip: List[String] = [".git", ".venv", "build", ".worktrees"]
+
+    # absolute paths: bare, or as an option value
+    assert_equal(run_check_refusal(["git", "diff", "/etc/hosts", "/dev/null"], allowed, root, "", skip), REFUSED_ABSOLUTE)
+    assert_equal(run_check_refusal(["git", "diff", "--stat=/x"], allowed, root, "", skip), REFUSED_ABSOLUTE)
+    assert_equal(run_check_refusal([".venv/bin/mojo", "run", "-I", ".", "/tmp/x.mojo"], allowed, root, "", skip), REFUSED_ABSOLUTE)
+    assert_equal(run_check_refusal(["build/qumo", "run", "/etc/hosts"], allowed, root, "", skip), REFUSED_ABSOLUTE)
+
+    # git options are an allow-list, not a deny-list
+    var bad_flags: List[String] = ["--no-index", "--output=x", "--output", "--ext-diff", "--textconv", "-O", "--stat=5", "-p"]
+    for f in bad_flags:
+        assert_equal(run_check_refusal(["git", "diff", f], allowed, root, "", skip), REFUSED_GIT_OPTIONS, f)
+    assert_equal(run_check_refusal(["git", "status", "--short", "--output=x"], allowed, root, "", skip), REFUSED_GIT_OPTIONS)
+    assert_equal(run_check_refusal(["git", "diff", "--stat", "--name-only", "HEAD", "--", "agents"], allowed, root, "", skip), "")
+    assert_equal(run_check_refusal(["git", "diff", "--cached", "--name-status"], allowed, root, "", skip), "")
+    assert_equal(run_check_refusal(["git", "status", "--short"], allowed, root, "", skip), "")
+
+    # build/qumo: output options need an open sandbox and a path inside it
+    var out_cases: List[List[String]] = [
+        ["build/qumo", "convert", "examples/bell.qasm", "-o", "README.md"],
+        ["build/qumo", "convert", "examples/bell.qasm", "--output", "README.md"],
+        ["build/qumo", "convert", "examples/bell.qasm", "--output=README.md"],
+        ["build/qumo", "transpile", "examples/bell.qasm", "-o", "x.qasm"],
+    ]
+    for c in out_cases:
+        assert_equal(run_check_refusal(c, allowed, root, "", skip), REFUSED_QUMO_OUTPUT, c[3])
+    var ok_out: List[String] = ["build/qumo", "convert", "examples/bell.qasm", "-o", "out.qasm"]
+    assert_equal(run_check_refusal(ok_out, allowed, sandbox, sandbox, skip), "")
+    var env_out: List[String] = ["build/qumo", "convert", "examples/bell.qasm", "-o", ".env"]
+    assert_equal(run_check_refusal(env_out, allowed, sandbox, sandbox, skip), "refused: .env is not readable by agents")
+    var git_out: List[String] = ["build/qumo", "convert", "examples/bell.qasm", "-o", ".git/hooks/x"]
+    assert_equal(run_check_refusal(git_out, allowed, sandbox, sandbox, skip), "refused: .git/hooks/x is not readable by agents")
+    # a symlink in the sandbox pointing at the main checkout does not lead out
+    symlink(root, sandbox + "/link")
+    var via_link: List[String] = ["build/qumo", "convert", "examples/bell.qasm", "-o", "link/README.md"]
+    assert_true(run_check_refusal(via_link, allowed, sandbox, sandbox, skip).startswith("refused: "), "symlink escape")
+    var missing: List[String] = ["build/qumo", "convert", "examples/bell.qasm", "-o"]
+    assert_true(run_check_refusal(missing, allowed, sandbox, sandbox, skip).startswith("refused: "))
+
+    # build/qumo: file arguments follow the read_file rule, options and subcommands are listed
+    assert_equal(run_check_refusal(["build/qumo", "validate", ".env"], allowed, root, "", skip), "refused: .env is not readable by agents")
+    assert_equal(run_check_refusal(["build/qumo", "run", "build/qumo"], allowed, root, "", skip), "refused: build/qumo is not readable by agents")
+    assert_equal(run_check_refusal(["build/qumo", "tool", "list"], allowed, root, "", skip), REFUSED_QUMO_SUBCOMMANDS)
+    assert_equal(run_check_refusal(["build/qumo", "mcp"], allowed, root, "", skip), REFUSED_QUMO_SUBCOMMANDS)
+    assert_equal(run_check_refusal(["build/qumo"], allowed, root, "", skip), REFUSED_QUMO_SUBCOMMANDS)
+    assert_equal(run_check_refusal(["build/qumo", "run", "examples/bell.qasm", "--bogus"], allowed, root, "", skip), "refused: build/qumo option --bogus is not allowed here")
+    assert_true(run_check_refusal(["build/qumo", "convert", "examples/bell.qasm", "-oREADME.md"], allowed, root, "", skip).startswith("refused: "))
+
+    # read-only uses still pass
+    var fine: List[List[String]] = [
+        ["build/qumo", "validate", "examples/bell.qasm"],
+        ["build/qumo", "run", "examples/bell.qasm", "--shots", "100", "--seed", "3", "--json"],
+        ["build/qumo", "transpile", "examples/bell.qasm", "--target", "grid:2x2/sc_cz", "--level", "2"],
+        ["build/qumo", "convert", "examples/bell.qasm", "--to", "qasm2"],
+        ["build/qumo", "expect", "examples/bell.qasm", "ZZ"],
+        ["build/qumo", "info", "-", "--qasm"],
+        ["build/qumo", "describe", "gates"],
+        ["build/qumo", "version"],
+    ]
+    for c in fine:
+        assert_equal(run_check_refusal(c, allowed, root, "", skip), "", String(" ").join(c))
+
+
 def test_git_status(base: String) raises:
     var g = base + "/gitrepo"
     make_dirs(g)
@@ -338,12 +416,16 @@ def test_confined_check(base: String) raises:
     var outside = base + "/confined_outside.txt"
     var allowed = List[List[String]]()
     allowed.append(["/usr/bin/touch"])
+    allowed.append(["/bin/sh", "escape.sh"])
     allowed.append(["/usr/bin/env"])
     var st = RepoState(realpath_strict(repo_root), realpath_strict(sandbox), [".git"], 60000, 12000, allowed^, tramp, kind, False)
     var inside = tool_run_check(st, ["/usr/bin/touch", "inside.txt"], 30)
     assert_equal(inside, "exit 0\n")
     assert_true(exists(sandbox + "/inside.txt"))
-    var denied = tool_run_check(st, ["/usr/bin/touch", outside], 30)
+    # an absolute path is refused as an argument; a script inside the sandbox still tries the write
+    assert_equal(tool_run_check(st, ["/usr/bin/touch", outside], 30), REFUSED_ABSOLUTE)
+    write_text(sandbox + "/escape.sh", "touch " + outside + "\n")
+    var denied = tool_run_check(st, ["/bin/sh", "escape.sh"], 30)
     assert_true(denied.startswith("exit 1\n") and denied.find("Operation not permitted") >= 0, denied)
     assert_false(exists(outside))
     var env_out = tool_run_check(st, ["/usr/bin/env"], 30)
@@ -434,6 +516,7 @@ def main() raises:
     test_secret_names()
     test_report_slug()
     test_run_check(base)
+    test_run_check_rules(base)
     test_git_status(base)
     test_confined_check(base)
     test_write_report(base)

@@ -100,6 +100,115 @@ def test_autoresearch_cannot_fetch_and_run():
         assert not ("research" in spec.tool_groups and "check" in spec.tool_groups)
 
 
+# ----------------------------------------------------------------------------- build/qumo
+@pytest.fixture
+def fake_tree(tmp_path, monkeypatch):
+    """A fake repository root with a bell file and a secret-looking file, and subprocess stubbed."""
+    (tmp_path / "examples").mkdir()
+    (tmp_path / "examples" / "bell.qasm").write_text("OPENQASM 3.0;\n")
+    (tmp_path / ".env").write_text("TOPSECRET=1\n")
+    (tmp_path / "README.md").write_text("readme\n")
+    monkeypatch.setattr(repo, "REPO_ROOT", tmp_path)
+    monkeypatch.setitem(repo._state, "sandbox", None)
+    calls = []
+
+    class Done:
+        returncode, stdout, stderr = 0, "ok", ""
+
+    monkeypatch.setattr(repo.subprocess, "run", lambda argv, **kw: calls.append((argv, kw)) or Done())
+    return tmp_path, calls
+
+
+@pytest.mark.parametrize("argv", [
+    ["build/qumo", "convert", "examples/bell.qasm", "-o", "README.md"],         # reported: overwrite a file
+    ["build/qumo", "convert", "examples/bell.qasm", "--output", "README.md"],
+    ["build/qumo", "convert", "examples/bell.qasm", "--output=README.md"],
+    ["build/qumo", "transpile", "examples/bell.qasm", "-o", "x.qasm"],
+    ["build/qumo", "validate", ".env"],                                         # echoes the source line
+    ["build/qumo", "validate", "examples/.env.local"],
+    ["build/qumo", "run", "/etc/hosts"],                                        # absolute path
+    ["build/qumo", "run", "--output=/tmp/x"],
+    ["build/qumo", "tool", "list"],                                             # not an allowed subcommand
+    ["build/qumo", "mcp"],
+    ["build/qumo"],
+    ["build/qumo", "run", "examples/bell.qasm", "--unknown"],
+    ["build/qumo", "convert", "examples/bell.qasm", "-oREADME.md"],
+    ["build/qumo", "validate", "build/qumo"],                                   # skipped directory
+])
+def test_build_qumo_refused_without_a_sandbox(fake_tree, argv):
+    _, calls = fake_tree
+    assert repo.run_check.invoke({"argv": argv}).startswith("refused")
+    assert calls == []
+
+
+def test_build_qumo_output_only_inside_the_sandbox(fake_tree, tmp_path_factory, monkeypatch):
+    _, calls = fake_tree
+    sandbox = tmp_path_factory.mktemp("sandbox")
+    (sandbox / "examples").mkdir()
+    monkeypatch.setitem(repo._state, "sandbox", sandbox)
+    ok = repo.run_check.invoke({"argv": ["build/qumo", "convert", "examples/bell.qasm", "-o", "out.qasm"]})
+    assert ok.startswith("exit 0") and calls[-1][1]["cwd"] == sandbox
+    for out in ("../escape.qasm", ".env", ".git/hooks/x", "/tmp/x"):
+        argv = ["build/qumo", "convert", "examples/bell.qasm", "-o", out]
+        assert repo.run_check.invoke({"argv": argv}).startswith("refused"), out
+    (sandbox / "link").symlink_to(fake_tree[0])
+    argv = ["build/qumo", "convert", "examples/bell.qasm", "-o", "link/README.md"]
+    assert repo.run_check.invoke({"argv": argv}).startswith("refused")
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("argv", [
+    ["build/qumo", "validate", "examples/bell.qasm"],
+    ["build/qumo", "run", "examples/bell.qasm", "--shots", "100", "--seed", "3", "--json"],
+    ["build/qumo", "transpile", "examples/bell.qasm", "--target", "grid:2x2/sc_cz", "--level", "2"],
+    ["build/qumo", "convert", "examples/bell.qasm", "--to", "qasm2"],
+    ["build/qumo", "expect", "examples/bell.qasm", "ZZ"],
+    ["build/qumo", "info", "-", "--qasm"],
+    ["build/qumo", "describe", "gates"],
+    ["build/qumo", "version"],
+])
+def test_build_qumo_read_only_uses_still_run(fake_tree, argv):
+    _, calls = fake_tree
+    assert repo.run_check.invoke({"argv": argv}).startswith("exit 0")
+    assert calls[-1][0] == argv
+
+
+def test_cli_back_end_has_no_bare_build_qumo_rule():
+    from qumo_agents import backends
+    from qumo_agents.config import Settings
+    for name in registry.AGENTS:
+        cmd = backends.claude_code_command(registry.get(name), "t", Settings.load(), None)
+        rules = cmd[cmd.index("--allowedTools") + 1].split(",")
+        assert "Bash(build/qumo:*)" not in rules, name
+        assert not any(r.startswith(("Bash(build/qumo convert", "Bash(build/qumo transpile",
+                                     "Bash(build/qumo tool", "Bash(build/qumo mcp")) for r in rules), name
+
+
+# ----------------------------------------------------------------------------- CLI environment
+FAKE_ENV = {"PATH": "/bin", "HOME": "/h", "OPENROUTER_API_KEY": "or", "GITHUB_TOKEN": "gh",
+            "AWS_SECRET_ACCESS_KEY": "aws", "IBM_QUANTUM_TOKEN": "ibm", "SSH_AUTH_SOCK": "/s",
+            "ANTHROPIC_API_KEY": "ant", "CLAUDE_CODE_OAUTH_TOKEN": "oauth", "OPENAI_API_KEY": "oai",
+            "CODEX_HOME": "/c", "ALPHAXIV_API_KEY": "ax"}
+
+
+def test_cli_env_is_unchanged_by_default_and_scrubbed_on_request():
+    from qumo_agents import backends
+    from qumo_agents.config import Settings
+    raw = Settings.load().raw
+    assert backends.claude_code_env(Settings(raw), FAKE_ENV) == FAKE_ENV
+    assert backends.codex_env(Settings(raw), FAKE_ENV) == FAKE_ENV
+    claude = backends.claude_code_env(Settings({**raw, "claude_code": {"env": "scrub"}}), FAKE_ENV)
+    assert claude == {"PATH": "/bin", "HOME": "/h", "SSH_AUTH_SOCK": "/s", "ANTHROPIC_API_KEY": "ant",
+                      "CLAUDE_CODE_OAUTH_TOKEN": "oauth", "CODEX_HOME": "/c", "ALPHAXIV_API_KEY": "ax"}
+    both = backends.claude_code_env(Settings({**raw, "claude_code": {"env": "scrub", "auth": "subscription"}}),
+                                    FAKE_ENV)
+    assert "ANTHROPIC_API_KEY" not in both and both["CLAUDE_CODE_OAUTH_TOKEN"] == "oauth"
+    codex = backends.codex_env(Settings({**raw, "codex": {"env": "scrub"}}), FAKE_ENV)
+    assert codex["OPENAI_API_KEY"] == "oai" and codex["CODEX_HOME"] == "/c"
+    assert not {"OPENROUTER_API_KEY", "GITHUB_TOKEN", "AWS_SECRET_ACCESS_KEY", "IBM_QUANTUM_TOKEN",
+                "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"} & set(codex)
+    with pytest.raises(RuntimeError, match="scrub"):
+        backends.claude_code_env(Settings({**raw, "claude_code": {"env": "none"}}), FAKE_ENV)
 # ----------------------------------------------------------------- web text never reaches code raw
 import dataclasses  # noqa: E402
 

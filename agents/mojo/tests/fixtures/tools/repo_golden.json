@@ -933,7 +933,7 @@
      "é"
     ]
    },
-   "python": "error: [Errno 2] No such file or directory: 'build/qumo'",
+   "python": "refused: build/qumo subcommands allowed here: convert describe draw emulate expect help info run statevector transpile validate version vqe",
    "mojo": "refused: arguments may only hold path-like characters",
    "why": "arguments are ASCII only (X5; Python's \\w is Unicode)"
   },
@@ -945,7 +945,7 @@
      "x\n"
     ]
    },
-   "python": "error: [Errno 2] No such file or directory: 'build/qumo'",
+   "python": "refused: build/qumo subcommands allowed here: convert describe draw emulate expect help info run statevector transpile validate version vqe",
    "mojo": "refused: arguments may only hold path-like characters",
    "why": "a trailing newline is refused (X5; Python's $ accepts it)"
   },
@@ -958,9 +958,7 @@
      "--output=x"
     ]
    },
-   "python": "refused: git options allowed here: -- --cached --name-only --name-status --staged --stat",
-   "mojo": "refused: arguments may only hold path-like characters",
-   "why": "git diff --output is refused (X5)"
+   "python": "refused: git options allowed here: -- --cached --name-only --name-status --staged --stat"
   },
   {
    "tool": "run_check",
@@ -973,9 +971,127 @@
      "b"
     ]
    },
-   "python": "refused: git options allowed here: -- --cached --name-only --name-status --staged --stat",
-   "mojo": "refused: arguments may only hold path-like characters",
-   "why": "git diff --no-index is refused (X5)"
+   "python": "refused: git options allowed here: -- --cached --name-only --name-status --staged --stat"
+  },
+  {
+   "tool": "run_check",
+   "args": {
+    "argv": [
+     "git",
+     "diff",
+     "/etc/hosts",
+     "/dev/null"
+    ]
+   },
+   "python": "refused: absolute paths are not allowed"
+  },
+  {
+   "tool": "run_check",
+   "args": {
+    "argv": [
+     "git",
+     "status",
+     "--short",
+     "--output=x"
+    ]
+   },
+   "python": "refused: git options allowed here: -- --cached --name-only --name-status --staged --stat"
+  },
+  {
+   "tool": "run_check",
+   "args": {
+    "argv": [
+     "build/qumo",
+     "convert",
+     "a.qasm",
+     "-o",
+     "../README.md"
+    ]
+   },
+   "python": "refused: arguments may only hold path-like characters"
+  },
+  {
+   "tool": "run_check",
+   "args": {
+    "argv": [
+     "build/qumo",
+     "convert",
+     "a.qasm",
+     "--output=../README.md"
+    ]
+   },
+   "python": "refused: arguments may only hold path-like characters"
+  },
+  {
+   "tool": "run_check",
+   "args": {
+    "argv": [
+     "build/qumo",
+     "validate",
+     ".env"
+    ]
+   },
+   "python": "refused: .env is not readable by agents"
+  },
+  {
+   "tool": "run_check",
+   "args": {
+    "argv": [
+     "build/qumo",
+     "validate",
+     "/etc/hosts"
+    ]
+   },
+   "python": "refused: absolute paths are not allowed"
+  },
+  {
+   "tool": "run_check",
+   "args": {
+    "argv": [
+     "build/qumo",
+     "tool",
+     "list"
+    ]
+   },
+   "python": "refused: build/qumo subcommands allowed here: convert describe draw emulate expect help info run statevector transpile validate version vqe"
+  },
+  {
+   "tool": "run_check",
+   "args": {
+    "argv": [
+     "build/qumo",
+     "run",
+     "src/a.py",
+     "--bogus"
+    ]
+   },
+   "python": "refused: build/qumo option --bogus is not allowed here"
+  },
+  {
+   "tool": "run_check",
+   "args": {
+    "argv": [
+     "build/qumo",
+     "convert",
+     "src/a.py",
+     "-o",
+     "../escape.qasm"
+    ]
+   },
+   "python": "refused: arguments may only hold path-like characters"
+  },
+  {
+   "tool": "run_check",
+   "args": {
+    "argv": [
+     "build/qumo",
+     "convert",
+     "src/a.py",
+     "-o",
+     ".env"
+    ]
+   },
+   "python": "refused: .env is not readable by agents"
   }
  ]
 }

@@ -193,7 +193,32 @@ the value.
 * Read the repository, except `.venv`, `build`, `.git`, `.worktrees` and secret-looking files (file or directory names; `read_file`, `list_files` and `search_code` share one rule, and symlinks leaving the repository are skipped).
 * Run only allow-listed commands, without a shell: one Mojo test or example, one example
   through `examples/run_examples.py`, the hardware plugin tests, `build/qumo`, `git diff`
-  and `git status`.
+  and `git status`. Arguments are path-like only, never absolute, and `git` takes only
+  `--stat --name-only --name-status --cached --staged --`. `build/qumo` takes the `run`,
+  `statevector`, `expect`, `transpile`, `emulate`, `validate`, `info`, `draw`, `convert`, `vqe`
+  and `describe` subcommands (not `tool` or `mcp`) and the options listed in
+  `agents/qumo_agents/tools/repo.py`; every file argument follows the `read_file` rules (so
+  `validate .env` is refused), and `-o` / `--output` is refused unless a sandbox is open and the
+  path is inside it. This holds in the Python tool and in the native Mojo harness.
+* On the `claude-code` back end a read-only agent may run `build/qumo` only with the
+  subcommands that cannot write a file (`run`, `statevector`, `expect`, `emulate`, `validate`,
+  `info`, `draw`, `vqe`, `describe`). `convert` and `transpile` are not allowed there, because
+  a Claude Code rule can only match a command prefix and cannot refuse `-o`; the `qumo` MCP
+  tools do both without writing a file. Claude Code's own `Read` tool is not limited by these
+  rules.
+* Checks run on the `openrouter`, `local` and `mojo` back ends get an environment without
+  variables named like `TOKEN`, `SECRET`, `KEY`, `PASSWORD`, `CREDENTIAL`, `AUTH`, `COOKIE` or
+  `SESSION`. The `claude-code` and `codex` CLIs run with your whole environment by default,
+  and so does every command an agent runs through them. `"claude_code": {"env": "scrub"}` and
+  `"codex": {"env": "scrub"}` (in `agents.local.json`) remove variables of other services
+  named like `TOKEN`, `SECRET`, `KEY`, `PASSWORD`, `CREDENTIAL` or `COOKIE`
+  (`OPENROUTER_API_KEY`, `GITHUB_TOKEN`, cloud and quantum-vendor tokens) and keep the CLI's own
+  `ANTHROPIC_` / `CLAUDE_` (or `OPENAI_` / `CODEX_`) variables and `ALPHAXIV_API_KEY`, which the MCP config names. The subscription login is not an
+  environment variable (it is in the CLI's home directory config or the keychain), but this
+  has not been tried against the real login, so `scrub` is opt-in. With a Bedrock or Vertex
+  setup keep `"inherit"`: the CLI needs its `AWS_` or `GOOGLE_` variables. The trade-off: a
+  run that does not need your other credentials no longer holds them, and a run that does
+  (for example a hardware plugin test with a vendor token) fails until you go back to `"inherit"`.
 * Write only `agents/reports/`, and (autoresearch) files inside its own sandbox worktree.
 * Use only alphaXiv's read tools. Its library, folder and follow tools are never loaded.
 * Treat fetched papers, release notes and pages as data. The prompts tell every agent to

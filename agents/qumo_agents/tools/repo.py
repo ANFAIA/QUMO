@@ -141,6 +141,18 @@ ALLOWED = [
 ]
 ARG_OK = re.compile(r"^[\w./:=,@+-]+$")
 GIT_FLAGS = frozenset({"--stat", "--name-only", "--name-status", "--cached", "--staged", "--"})
+# `build/qumo` takes subcommands and options from these lists only. `tool` and `mcp` are left
+# out (they call any registered tool). Output options write a file, so they are refused unless
+# a sandbox is open and the path resolves inside it.
+QUMO_SUBCOMMANDS = frozenset({"run", "statevector", "expect", "transpile", "emulate", "validate", "info",
+                              "draw", "convert", "vqe", "describe", "version", "help"})
+QUMO_OUTPUT_OPTIONS = frozenset({"-o", "--output"})
+QUMO_OPTIONS = frozenset({
+    "--shots", "--seed", "--params", "--max-qubits", "--max-iterations", "--device", "--precision",
+    "--json", "--pretty", "--max-amplitudes", "--observable", "--target", "--level", "--basis",
+    "--pipeline", "--qasm", "--compile", "--no-compile", "--width", "--unicode", "--to",
+    "--instructions", "--layers", "--entanglement", "--optimizer", "--gradient", "--maxiter",
+    "--qubits", "-h", "--help"})
 # Checks run code the agent may have written, so they do not inherit credentials.
 SECRET_ENV = re.compile(r"TOKEN|SECRET|KEY|PASSWORD|CREDENTIAL|AUTH|COOKIE|SESSION", re.I)
 
@@ -149,12 +161,58 @@ def _check_env() -> dict[str, str]:
     return {k: v for k, v in os.environ.items() if not SECRET_ENV.search(k)}
 
 
+def _qumo_refusal(args: list[str]) -> str:
+    """Why `build/qumo <args>` is refused, or "" when it may run.
+
+    Every file argument passes the same rule as read_file (`_resolve`: inside the root, no
+    skipped directory, no secret-looking name), so `validate .env` is refused, and an output
+    option is accepted only with an open sandbox and a path inside it."""
+    if not args or args[0] not in QUMO_SUBCOMMANDS:
+        return "refused: build/qumo subcommands allowed here: " + " ".join(sorted(QUMO_SUBCOMMANDS))
+    sandbox = _state["sandbox"]
+    i = 1
+    while i < len(args):
+        a = args[i]
+        i += 1
+        if a.startswith("-") and a != "-":
+            name, eq, value = a.partition("=")
+            if name in QUMO_OUTPUT_OPTIONS:
+                if not eq:
+                    value = args[i] if i < len(args) else ""
+                    i += 1
+                if sandbox is None:
+                    return ("refused: build/qumo output options write a file; open_sandbox first "
+                            "(the main checkout is read-only for agents)")
+                if not value:
+                    return f"refused: {name} needs a path"
+                try:
+                    _resolve(value, sandbox)
+                except ValueError as e:
+                    return f"refused: {e}"
+                continue
+            if name not in QUMO_OPTIONS:
+                return f"refused: build/qumo option {name} is not allowed here"
+            if not eq:
+                continue
+            a = value  # an `--opt=value` value is checked like a positional argument
+        if a == "-":
+            continue
+        try:
+            _resolve(a, _root())
+        except ValueError as e:
+            return f"refused: {e}"
+    return ""
+
+
 @tool
 def run_check(argv: list[str], timeout_s: int = 600) -> str:
     """Run one allow-listed command (no shell) in the sandbox if open, else in the
     repository: `.venv/bin/mojo run -I . tests/test_x.mojo`, `bench/.venv/bin/python
     examples/run_examples.py --only <file>`, the plugin pytest, `build/qumo ...`,
-    `git diff`, `git status --short`. Returns exit code and the output tail."""
+    `git diff`, `git status --short`. `build/qumo` takes the run, statevector, expect, transpile,
+    emulate, validate, info, draw, convert, vqe and describe subcommands; its file arguments follow
+    the read_file rules, and -o/--output needs an open sandbox and a path inside it.
+    Returns exit code and the output tail."""
     if not any(argv[:len(prefix)] == prefix for _, prefix in ALLOWED):
         return "refused: not on the allow-list. Allowed: " + "; ".join(" ".join(p) for _, p in ALLOWED)
     if any(not ARG_OK.match(a) or ".." in a for a in argv):
@@ -162,6 +220,10 @@ def run_check(argv: list[str], timeout_s: int = 600) -> str:
     # Paths stay inside the working tree: no absolute path, bare or as an option value.
     if any(a.startswith("/") or "=/" in a for a in argv):
         return "refused: absolute paths are not allowed"
+    if argv[0] == "build/qumo":
+        why = _qumo_refusal(argv[1:])
+        if why:
+            return why
     if argv[0] == "git":
         # `git diff` reads any two files with --no-index and writes one with --output.
         extra = argv[2:] if argv[1] == "diff" else argv[3:]
