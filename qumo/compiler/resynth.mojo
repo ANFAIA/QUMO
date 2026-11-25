@@ -90,6 +90,16 @@ comptime MAX_W_CLIFFORD = 12  # phase measured on a 2^n statevector column
 comptime MAX_W_PAULI = 8  # dense 2^n x 2^n unitary check
 comptime MAX_W_LINEAR = 64  # GF(2) rows are 64-bit masks
 comptime MAX_W_PERM = 64
+# Non-Clifford rotations of one collected Pauli-network block at most (the
+# `max_rotations` default of the pauli_network pass). The synthesis of a block
+# is quadratic in its rotations (block_synth._pn_greedy scores every pending
+# rotation for every emitted gate), so an uncapped run of rotations on <= 6
+# qubits (a Trotter circuit) made the pass quadratic in the circuit length.
+# 1024 keeps a block under about a second and is above every block of the
+# tests, examples and benchmark circuits, whose output it does not change; a
+# smaller cap costs 2q gates on long narrow circuits (measured in the pull
+# request that added it).
+comptime DEFAULT_MAX_ROTATIONS = 1024
 
 # method ids (winner bookkeeping)
 comptime _M_EXACT = 0
@@ -108,6 +118,8 @@ struct SynthOptions(Copyable):
     kind:       KIND_CLIFFORD (0) / KIND_LINEAR (1) / KIND_PERM (2) / KIND_PAULI (3).
     method:     auto | exact | astar | greedy | policy.
     max_qubits: block width cap (qubits); min_block: minimum gates per block.
+    max_rotations: non-Clifford rotations per Pauli-network block at most
+                (<= 0 = no cap; a longer run is split into consecutive blocks).
     direction:  forward | backward | both (collection sweep direction).
     commute:    commutation-aware collection.
     reps:       collect-and-resynthesize repetitions (stop early when nothing changes).
@@ -124,6 +136,7 @@ struct SynthOptions(Copyable):
     var method: String
     var max_qubits: Int
     var min_block: Int
+    var max_rotations: Int
     var direction: String
     var commute: Bool
     var reps: Int
@@ -141,6 +154,7 @@ struct SynthOptions(Copyable):
         self.method = "auto"
         self.max_qubits = 9
         self.min_block = 2
+        self.max_rotations = DEFAULT_MAX_ROTATIONS if kind == KIND_PAULI else 0
         self.direction = "both"
         self.commute = True
         self.reps = 10
@@ -157,7 +171,9 @@ struct SynthOptions(Copyable):
     def default(kind: Int) -> SynthOptions:
         """IBM collector defaults: Clifford 9 qubits / 2 gates, linear function
         9 / 4, permutation 12 / 4, Pauli network 6 / 4; reps 10, both
-        directions, commutation-aware, method auto, model auto."""
+        directions, commutation-aware, method auto, model auto. The cap on
+        the rotations of a Pauli-network block (DEFAULT_MAX_ROTATIONS) is
+        QUMO's own."""
         var o = SynthOptions(kind)
         if kind == KIND_LINEAR:
             o.max_qubits = 9
@@ -960,7 +976,8 @@ def _sweep(mut c: Circuit, target: Target, physical: Bool, opts: SynthOptions, f
            mut stats: SynthStats, mut wins: List[Int], mut skipped_wide: Int, mut errors: Int,
            mut policy_note: String) raises -> Int:
     var order = List[Int]()
-    var all_blocks = collect_blocks_ordered(c, opts.kind, opts.min_block, opts.max_qubits, from_back, opts.commute, order)
+    var all_blocks = collect_blocks_ordered(c, opts.kind, opts.min_block, opts.max_qubits, from_back, opts.commute, order,
+                                            opts.max_rotations if opts.kind == KIND_PAULI else 0)
     # keep blocks with >= 2 two-qubit gates whose induced coupling subgraph is
     # connected (a block with a single entangling gate is already optimal in
     # 2q cost, and cannot be an identity)

@@ -29,7 +29,7 @@ When an argument is written twice the last one counts. A flag takes `0|1|true|fa
 | `clifford_synth` | `ai_clifford`, `clifford_synthesis` | `method`, `max_qubits`, `min_block`, `direction`, `commute`, `reps`, `model`, `beams`, `searches`, `metric`, `strict`, `budget`, `model_dir`, `seed` |
 | `linear_synth` | `ai_linear`, `ai_linear_function`, `linear_function_synth` | `method`, `max_qubits`, `min_block`, `direction`, `commute`, `reps`, `model`, `beams`, `searches`, `metric`, `strict`, `budget`, `model_dir`, `seed` |
 | `perm_synth` | `ai_permutation`, `permutation_synth` | `method`, `max_qubits`, `min_block`, `direction`, `commute`, `reps`, `model`, `beams`, `searches`, `metric`, `strict`, `budget`, `model_dir`, `seed` |
-| `pauli_network` | `ai_pauli_network`, `pauli_network_synth` | `method`, `max_qubits`, `min_block`, `direction`, `commute`, `reps`, `model`, `beams`, `searches`, `metric`, `strict`, `budget`, `model_dir`, `seed` |
+| `pauli_network` | `ai_pauli_network`, `pauli_network_synth` | `method`, `max_qubits`, `min_block`, `direction`, `commute`, `reps`, `model`, `beams`, `searches`, `metric`, `strict`, `budget`, `model_dir`, `seed`, `max_rotations` |
 | `wrap_angles` | `wrap`, `fold_angles` | `bounds` |
 | `post_layout` | `vf2_post_layout`, `noise_layout` | `call_limit` |
 
@@ -194,6 +194,7 @@ collect Pauli-rotation networks (Clifford + rx/ry/rz/rzz/rxx/ryy; <= 6 qubits) a
 | `budget` | `budget=...` | `N` | `0` | search node cap (0 = the method's own) |
 | `model_dir` | `model_dir=...` | `<model_dir>` |  | model directory, searched first |
 | `seed` | `seed=...` | `N` |  | default: the compile seed |
+| `max_rotations` | `max_rotations=...` | `N` | `1024` | most non-Clifford rotations of a collected block; a longer run is split into consecutive blocks (synthesis time grows with the square of it); 0 = no cap |
 
 ## wrap_angles
 

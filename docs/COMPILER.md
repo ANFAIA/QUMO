@@ -128,7 +128,9 @@ depth), `ai_level=1..3` (effort), `layout_mode=optimize|improve|keep`,
 
 Synthesis pass keys (`clifford_synth`, `linear_synth`, `perm_synth`,
 `pauli_network`): `method=auto|exact|astar|greedy|policy` (a bare word is the
-method), `max_qubits`, `min_block`, `direction=forward|backward|both`,
+method), `max_qubits`, `min_block`, `max_rotations` (`pauli_network` only:
+most non-Clifford rotations of one block, default 1024, 0 = no cap; a longer
+run is split into consecutive blocks), `direction=forward|backward|both`,
 `commute=0|1`, `reps`, `model=auto|off|<id>`, `beams`, `searches`,
 `metric=cost_depth|cost`, `strict=0|1` (raise QM-E619 instead of silently
 keeping a block whose proposal fails verification), `budget` (search node
