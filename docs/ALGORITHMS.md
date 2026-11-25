@@ -11,7 +11,7 @@ qumo/algorithms/
   gradients.mojo     ExpectationEngine: adjoint / parameter-shift / finite-difference gradients, batched evaluation
   optimizers.mojo    Objective + Optimizer traits; BFGS, Adam, GradientDescent, SPSA, NelderMead; minimize()
   variational.mojo   VQE, QAOA-MaxCut, parameter sweeps / landscapes
-  linalg.mojo        state-vector BLAS-1, Jacobi eigensolver, tridiagonal bisection
+  linalg.mojo        state-vector BLAS-1, Jacobi eigensolver, tridiagonal bisection, the Lanczos recurrence (`lanczos`)
   mitigation.mojo    zero-noise extrapolation: unitary folding, Richardson/poly/exp extrapolation, ZNE driver
 ```
 
@@ -95,6 +95,7 @@ Run the tests and examples from the repo root:
 | `apply_hamiltonian(h, src, mut dst)` | one-shot H\|psi> |
 | `ground_state(h, n, max_iter=160, tol=1e-12, seed=2024) -> GroundState(energy, state, iterations, residual)` | Lanczos with full re-orthogonalisation (n <= 20) |
 | `ground_energy(h, n=-1)` | Lanczos energy |
+| `lanczos(op, x0r, x0i, max_steps, breakdown, conv_tol=0, check_every=4) -> LanczosRun` (`linalg.mojo`) | the one Lanczos recurrence (full re-orthogonalisation, complex vectors as two `List[Float64]`) behind `ground_state`, `subspace_ground_energy` and `subspace_ground_state`; `op` is any struct with the `HermitianOperator` trait (`apply_vec(xr, xi, mut yr, mut yi)`); `LanczosRun.lowest()` is the smallest Ritz value, `.ritz_vector(mut xr, mut xi)` its vector |
 | `dense_matrix(h, n)` (n <= 12), `exact_spectrum(h, n)` (n <= 7) | dense Hermitian matrix; all eigenvalues by Jacobi (complex H via real embedding) |
 | `exact_evolve(h, psi, t)` | `exp(-iHt)|psi>` by scaled Taylor series (Trotter reference) |
 | `projected_hamiltonian(h, basis_states, n)` | dense (re, im) m x m matrix `<b_i|H|b_j>` on sampled basis states (m <= 4096, QM-E807; duplicates / out-of-range QM-E802); each Pauli string maps a basis state to one basis state, so the cost is O(m terms log m), no 2^n work |

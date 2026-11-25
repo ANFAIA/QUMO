@@ -8,6 +8,7 @@ QUMO is a research prototype. Its version string is `0.2.0` (`build/qumo version
 
 ### Changed
 
+- One Lanczos recurrence instead of three. `ground_state`, the sparse path of `subspace_ground_energy` and `subspace_ground_state` each had their own copy of the loop (three-term recurrence, two passes of full re-orthogonalisation, breakdown and convergence tests); they now call `lanczos` in `qumo/algorithms/linalg.mojo`, generic over a `HermitianOperator` (`PauliOperator`, the COO projected matrix, the ELL projected matrix). Names, arguments, error codes and limits are unchanged. `ground_state` returns the same bits as before on the cases checked; the two subspace solvers differ in the last digits (at most 1e-14 on the cases of the tests) because the copies rounded the re-orthogonalisation and the normalisation differently. The element-wise updates of the subspace solvers are now multi-threaded above 8192 states. Test: `test_lanczos_kernel` in `tests/test_algorithms_ext.mojo`.
 - Version string `0.2.0` (was `0.1.0`): `build/qumo version`, the MCP server info, `qumo.__version__`, `pyproject.toml` and `CITATION.cff`. The hardware plugin and the agents package keep their own versions.
 
 ### Fixed
