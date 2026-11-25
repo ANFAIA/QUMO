@@ -291,6 +291,22 @@ struct LogicalProgram(Copyable, Writable, Sized):
                     raise Error("QM-E727: logical instruction #" + String(i) + " re-allocates handle L" + String(g.q0) + ". Hint: use alloc()/prep_t() to obtain fresh handles.")
                 state[g.q0] = 1
                 continue
+            if g.kind == LogicalOpKind.PAULI_EXP:
+                var any_pauli = False
+                if g.q0 < 0 or g.q1 <= 0 or g.q0 + 2 * g.q1 > len(self.pauli_args):
+                    raise Error("QM-E724: logical instruction #" + String(i) + " 'pauli_exp' has a malformed operand list. Hint: build it with LogicalProgram.pauli_exp(theta, paulis, qubits).")
+                for j in range(g.q1):
+                    var q = self.pauli_args[g.q0 + 2 * j]
+                    if q < 0 or q >= self.num_logical or state[q] != 1:
+                        raise Error("QM-E727: logical instruction #" + String(i) + " 'pauli_exp' uses handle L" + String(q) + " which is not live. Hint: allocate before use; MEASURE, FREE and INJECT_T (magic operand) consume a qubit.")
+                    for m in range(j):
+                        if self.pauli_args[g.q0 + 2 * m] == q:
+                            raise Error("QM-E724: logical instruction #" + String(i) + " 'pauli_exp' repeats handle L" + String(q) + ". Hint: one Pauli letter per distinct qubit.")
+                    if self.pauli_args[g.q0 + 2 * j + 1] != ord("I"):
+                        any_pauli = True
+                if not any_pauli:
+                    raise Error("QM-E724: logical instruction #" + String(i) + " 'pauli_exp' has an all-identity Pauli string. Hint: it would only be a global phase; drop it, or use X, Y or Z on at least one qubit.")
+                continue
             var a = lop_arity(g.kind)
             for j in range(a):
                 var q = g.q0 if j == 0 else g.q1
