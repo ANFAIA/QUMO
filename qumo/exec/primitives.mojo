@@ -23,7 +23,7 @@ from qumo.ir.circuit import Circuit, check_finite_values
 from qumo.ir.gates import Op
 from qumo.ir.pauli import PauliSum, PauliTerm
 from qumo.sim.statevector import StateVector
-from qumo.sim.runner import evolve, evolve_into, sample, SampleResult, check_pure_state_circuit
+from qumo.sim.runner import evolve, evolve_into, sample, SampleResult, check_statevector_size, check_pure_state_circuit
 
 comptime PAR_SETS_MAX_QUBITS = 14
 
@@ -221,6 +221,7 @@ def _shots_for_precision(observables: List[PauliSum], precision: Float64) raises
 def run_estimator(pub: EstimatorPub) raises -> EstimatorResult:
     """Run one Estimator PUB (all parameter sets x all observables)."""
     pub.circuit.validate()
+    check_statevector_size(pub.circuit.num_qubits)
     var nsets = pub.num_sets()
     var nobs = len(pub.observables)
     var exact = pub.precision <= 0.0

@@ -136,4 +136,14 @@ def main() raises:
     var outs = run_sampler(sp)
     assert_equal(len(outs), 8)
     assert_equal(outs[0].counts.get("00", 0), 1000)
+    var wide = Circuit(46)
+    wide.h(0)
+    var obs1 = List[PauliSum]()
+    obs1.append(parse_pauli_sum("Z0"))
+    var refused = False
+    try:
+        _ = run_estimator(EstimatorPub(wide, obs1))
+    except e:
+        refused = String(e).startswith("QM-E404")
+    assert_true(refused, "run_estimator refuses 46 qubits with QM-E404")
     print("test_exec OK")
