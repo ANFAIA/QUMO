@@ -14,6 +14,16 @@ var res = sample(circuit, 1000, seed=7)   # res.counts, res.method
 var e = expectation(circuit, parse_pauli_sum("Z0 Z1"))
 ```
 
+`evolve` and `expectation` return one pure state, so they refuse a circuit that has a
+`reset`, a noise channel (Pauli noise, Kraus, correlated error) or a measurement
+followed by more gates on the measured qubit (QM-E416; classically conditioned gates
+are QM-E401). Terminal measurements, barriers, ticks, detectors and observables are
+ignored. The same check runs in `GpuStateVector.evolve` and in `run_estimator`. For
+those circuits use `sample` (trajectories) or the density-matrix simulator; to get the
+ideal value on purpose, `circuit.without_noise()` returns a copy with the channels removed. The check is
+`qumo.sim.runner.check_pure_state_circuit`; `evolve_into` and `build_plan` do not run it
+(they are the building blocks that `sample` and the trajectory code call).
+
 ## 1. Layers
 
 | Layer | Where | What |
@@ -474,8 +484,11 @@ the MCP tools measure all qubits instead and add the note QM-W004.
 
 * The density matrix has no selective measurement; the state-vector path covers
   feed-forward. `sample_density` refuses mid-circuit measurements.
-* `sample_ptsbe` takes neither Kraus channels, PAULI_CHANNEL_2 nor E (the sampler of
-  `sample()` does).
+* `sample_ptsbe` takes the Pauli channels X, Y, Z, DEPOLARIZE1/2, PAULI_CHANNEL_1 and
+  PAULI_CHANNEL_2 (QM-E409 for Kraus channels). It refuses CORRELATED_ERROR and
+  ELSE_CORRELATED_ERROR with QM-E414: a chain of them draws one outcome among several
+  Pauli products on any number of qubits, which the one-error-per-site patterns do not
+  hold. `sample()` takes them.
 
 ## 8. Origins
 
