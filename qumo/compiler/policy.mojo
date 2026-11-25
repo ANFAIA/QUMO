@@ -31,9 +31,9 @@ Everything is single-threaded and in a fixed summation order: bit-identical runs
 
 from std.collections import List, Dict
 from std.os import getenv
-from std.os.path import exists
+from std.os.path import exists, islink, realpath, dirname
 from std.memory import bitcast
-from qumo.core.json import parse_json, JsonValue
+from qumo.core.json import parse_json, JsonValue, JsonKind
 from qumo.ir.gates import Op
 from qumo.compiler.blockalg import SubGraph, BlockKind
 
@@ -286,6 +286,54 @@ struct ModelFile(Movable):
         return self.shapes[self.tensor_index(name)].copy()
 
 
+# Manifest limits. The manifest is not covered by the weights checksum, so every
+# number in it is checked before it is used as a size or an index.
+comptime MAX_TENSORS = 4096  # tensors per model
+comptime MAX_TENSOR_RANK = 8  # dimensions per tensor
+
+
+def _check_weights_name(dir: String, wfile: String) raises:
+    """`weights_file` must be a plain file name inside the model directory:
+    no path separator, no drive / stream colon, not empty, not '.' or '..'
+    (so it is neither absolute nor a way out of the directory), and not a
+    symbolic link that resolves outside the directory."""
+    var bad = wfile.byte_length() == 0 or wfile == "." or wfile == ".."
+    if wfile.find("/") >= 0 or wfile.find("\\") >= 0 or wfile.find(":") >= 0:
+        bad = True
+    for b in wfile.as_bytes():
+        if b < 32:
+            bad = True
+    if bad:
+        raise _e617(dir, "weights_file '" + wfile.replace("\"", "'") + "' is not a plain file name inside the model directory")
+    var wpath = dir + "/" + wfile
+    if islink(wpath):
+        var inside: Bool
+        try:
+            inside = dirname(realpath(wpath)) == realpath(dir)
+        except:
+            inside = False
+        if not inside:
+            raise _e617(dir, "weights_file '" + wfile + "' is a symbolic link that leaves the model directory")
+
+
+def _tensor_count(dir: String, name: String, shape: List[Int], esz: Int, total: Int) raises -> Int:
+    """Element count of a tensor of `shape` with `esz`-byte elements, checked
+    against a weights file of `total` bytes without overflow: every dimension
+    is positive and the product is bounded by what the file can hold *before*
+    it is multiplied."""
+    if len(shape) > MAX_TENSOR_RANK:
+        raise _e617(dir, "tensor '" + name + "' has " + String(len(shape)) + " dimensions (at most " + String(MAX_TENSOR_RANK) + ")")
+    var limit = total // esz
+    var cnt = 1
+    for s in shape:
+        if s <= 0:
+            raise _e617(dir, "tensor '" + name + "' has a non-positive dimension " + String(s))
+        if s > limit or cnt > limit // s:
+            raise _e617(dir, "tensor '" + name + "' is larger than weights.bin (" + String(total) + " bytes)")
+        cnt *= s
+    return cnt
+
+
 def _int_list(v: JsonValue) raises -> List[Int]:
     var out = List[Int]()
     for i in range(len(v)):
@@ -297,7 +345,11 @@ def load_model_file(dir: String) raises -> ModelFile:
     """Load `<dir>/manifest.json` + weights, verify format and checksum.
 
     Raises QM-E617 on a missing file, unparsable manifest, unknown format,
-    size/offset error or FNV-1a 64 mismatch."""
+    size/offset error or FNV-1a 64 mismatch. The checksum covers weights.bin
+    only, so the manifest's own numbers are validated here: `weights_file` is
+    a plain file name inside `dir`, at most MAX_TENSORS tensors, every
+    dimension positive, and shape product and offset checked against the file
+    length without overflow."""
     var mpath = dir + "/manifest.json"
     if not exists(mpath):
         raise _e617(dir, "manifest.json not found")
@@ -358,6 +410,7 @@ def load_model_file(dir: String) raises -> ModelFile:
                 for i in range(len(ap)):
                     m.act_perms.append(_int_list(ap.at(i)))
         var wfile = man.get_string("weights_file", "weights.bin")
+        _check_weights_name(dir, wfile)
         var wpath = dir + "/" + wfile
         if not exists(wpath):
             raise _e617(dir, wfile + " not found")
@@ -371,19 +424,21 @@ def load_model_file(dir: String) raises -> ModelFile:
         if fnv != fwant:
             raise _e617(dir, "checksum mismatch (fnv1a64 " + fnv + " != manifest " + fwant + ")")
         var tj = man.get("tensors")
+        if len(tj) > MAX_TENSORS:
+            raise _e617(dir, "manifest lists " + String(len(tj)) + " tensors (at most " + String(MAX_TENSORS) + ")")
         for i in range(len(tj)):
             var t = tj.at(i)
             var name = t.get("name").as_string()
             var shape = _int_list(t.get("shape"))
-            var cnt = 1
-            for s in shape:
-                cnt *= s
             var dt = t.get_string("dtype", "f32")
             var off = t.get("offset").as_int()
             var esz = 4 if dt == "f32" else 2
             if dt != "f32" and dt != "f16":
                 raise _e617(dir, "tensor '" + name + "' has unsupported dtype '" + dt + "'")
-            if off < 0 or off + cnt * esz > len(wbytes):
+            # cnt * esz <= len(wbytes) is established by _tensor_count, so the
+            # subtraction below cannot overflow
+            var cnt = _tensor_count(dir, name, shape, esz, len(wbytes))
+            if off < 0 or off > len(wbytes) - cnt * esz:
                 raise _e617(dir, "tensor '" + name + "' lies outside weights.bin")
             var data = List[Float32](capacity=cnt)
             if esz == 4:
@@ -448,17 +503,32 @@ struct ModelIndexEntry(Copyable):
 
 
 def read_model_index(root: String, sub: String) -> List[ModelIndexEntry]:
-    """Rows of `<root>/<sub>/INDEX.json` (empty when absent or unreadable)."""
+    """Rows of `<root>/<sub>/INDEX.json` (empty when absent or unreadable; use
+    `read_model_index_checked` to learn why an index was unreadable)."""
+    var problem = String()
+    return read_model_index_checked(root, sub, problem)
+
+
+def read_model_index_checked(root: String, sub: String, mut problem: String) -> List[ModelIndexEntry]:
+    """`read_model_index` that reports instead of hiding: `problem` is '' for an
+    absent or valid index, else one sentence naming the file, the row and the
+    cause. An index with a bad row yields no rows (as before), so callers must
+    show `problem`: without it a lookup just finds no model."""
+    problem = String()
     var out = List[ModelIndexEntry]()
     var ipath = root + "/" + sub + "/INDEX.json"
     if not exists(ipath):
         return out^
+    var row = -1
     try:
         var text: String
         with open(ipath, "r") as f:
             text = f.read()
         var j = parse_json(text)
+        if j.kind() != JsonKind.ARRAY:
+            raise Error("the top-level value is not a JSON array of model rows")
         for i in range(len(j)):
+            row = i
             var r = j.at(i)
             var e = ModelIndexEntry()
             e.id = r.get("id").as_string()
@@ -473,9 +543,29 @@ def read_model_index(root: String, sub: String) -> List[ModelIndexEntry]:
             e.wl_hash = r.get_string("wl_hash", "")
             e.path = root + "/" + sub + "/" + r.get("dir").as_string()
             out.append(e^)
-    except:
+    except e:
+        var where = String(" (row ") + String(row) + ")" if row >= 0 else String()
+        var raw = String(e)
+        var hint_at = raw.find(" Hint:")
+        var full = String(raw[byte=0:hint_at]) if hint_at > 0 else raw.copy()
+        var cause = full.replace("\\", "/").replace("\"", "'").replace("\n", " ")
+        problem = "model index " + ipath + " is unreadable" + where + ", its models are ignored: " + cause
         return List[ModelIndexEntry]()
     return out^
+
+
+def model_index_problems(dirs: List[String], sub: String) -> String:
+    """Problems of `<root>/<sub>/INDEX.json` over the roots `dirs`, joined with
+    '; ' ('' when every index is absent or valid)."""
+    var all = String()
+    for root in dirs:
+        var problem = String()
+        _ = read_model_index_checked(root, sub, problem)
+        if problem.byte_length() > 0:
+            if all.byte_length() > 0:
+                all += "; "
+            all += problem
+    return all
 
 
 # ----------------------------------------------------------------- MLP policy
@@ -899,6 +989,11 @@ def load_synth_index(dirs: List[String]) -> List[ModelIndexEntry]:
         for e in r:
             rows.append(e.copy())
     return rows^
+
+
+def synth_index_problems(dirs: List[String]) -> String:
+    """Why a `<root>/synth/INDEX.json` of `dirs` was ignored ('' when none was)."""
+    return model_index_problems(dirs, "synth")
 
 
 def find_model(kind: Int, g: SubGraph, request: String, dirs: List[String]) -> ModelMatch:
