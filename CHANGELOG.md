@@ -9,6 +9,11 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 ### Added
 
 - `qumo.ft.faults`: `fault_tolerant_state_preparation`, the exact t-fault-tolerance check of post-selected state preparations (Definition 1 of Schmid and Wille, [arXiv:2611.25107](https://arxiv.org/abs/2611.25107)), with `FaultModel.circuit_level()` and `FaultModel.xz_only()`, `reduced_weight`, `count_undetected` and `single_faults`; error code QM-E738. `steane_prep_zero_ft` passes at t = 1 and the encoder alone does not. `examples/ft/ft_state_prep_check.mojo` and its Stim-only reference `examples/ft/ft_state_prep_check_stim.py` agree on every count ([FT](docs/FT.md)). (weekly job, 2026-11-23)
+- Benchpress Cirq gym run (`bench/results/benchpress/cirq_full.json.gz`): 10 of 1066 tests run, 1054 are skipped as Not implemented by Benchpress and 2 fail; `bench/charts/make_result_charts.py --cirq` draws the 10 tests that run (`benchpress_cirq_tests`), and the README says which charts are Benchpress and which are the neutral harness.
+- Speed and resource charts in the README (`bench/results/readme/`: compile throughput, memory per worker, container cost) from `bench/charts/make_readme_charts.py` and `docker/sdk-bell/make_chart.py`. `docker/sdk-bell/` holds one production-style image per SDK (scratch base, non-root, only the interpreter or binary, the SDK and its libraries; each run optimizes a Bell circuit for a device and simulates it) and `run_measure.sh`, which reports image size, time, CPU and peak memory. Measured on Docker Desktop (aarch64), median of 10 runs: QUMO 21 MB / 4 ms / 19 MiB, Qiskit 346 MB / 205 ms / 93 MiB, TKET 402 MB / 115 ms / 51 MiB, Cirq 574 MB / 660 ms / 188 MiB.
+- The chart palette now has QUMO in green, Qiskit in blue, TKET in pink and Cirq in amber (`bench/charts/make_charts.py`); every stored chart and the results page were redrawn with it.
+- Neutral compiler benchmark, four runs of 2026-11-23 (QUMO, Qiskit, TKET, Cirq, both levels, 5632 records each): per-job means in `bench/results/neutral_mean4_2026-11-23.jsonl.gz`, the speed, CPU and memory charts in `bench/results/charts_2026-11-23_mean4/`, and a self-contained page with every figure in `bench/results/web/index.html` (open it in a browser; it loads d3 from cdnjs). QUMO compiles 5.8x faster than Qiskit, 75x faster than Cirq and 195x faster than TKET at the default level (geometric mean over the pairs both compiled; 2.9x, 38x and 158x at max). The machine was not idle (load average 3 to 3.5). Cirq compiled 379 of 704 pairs per level. Peak memory is higher in runs 2 to 4 than in run 1, so only idle memory and the ratios are comparable across runs.
+- `make bench-result-charts` (`bench/charts/make_result_charts.py`): three charts in `bench/results/charts` from the Benchpress run of 2026-11-23 and the Qiskit run already stored (QUMO / Qiskit time and two-qubit-gate ratios per suite and target over 892 shared tests) and from a state-vector run against Aer (1.2x at 16 qubits, 0.7x at 18, 2.3x to 3.3x from 20 to 26). Both QUMO runs were taken on a machine that was not idle. The run data is stored beside them (`qumo_full_2026-11-23.json.gz`, `sv_bench_2026-11-23.csv`).
 - `agents/agents.local.json` (git-ignored, example in `agents/agents.local.example.json`): per-machine harness and models for the agents, laid over the shared `agents.json`. `"claude_code": {"auth": "subscription"}` keeps an exported `ANTHROPIC_API_KEY` from turning a Claude Code subscription run into a metered one.
 - `qumo-agents --backend mojo`: run any agent on QUMO's own native harness (`build/qumo-agent`) with its LLM on OpenRouter, chosen per run or per agent in `agents/agents.json` like the other back ends. `doctor` reports whether the harness is built.
 - `examples/optimization/qaoa_cvar.mojo`: QAOA with the CVaR objective, 14 checks, including the case where CVaR does not help.
@@ -30,7 +35,20 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 - 21 more Classiq examples; `examples/CATALOG.md`; `run_examples.py --framework NAME`. ([#4](https://github.com/ANFAIA/QUMO/pull/4), 2026-11-05)
 - The AI agent layer (`agents/`, `bin/qumo-agents`, `docs/AGENTS.md`): nine agents built on deepagents. Benchmark charts of compile time and memory per SDK (`make bench-charts`). Classiq examples. ([#3](https://github.com/ANFAIA/QUMO/pull/3), 2026-11-05)
 - Four features taken from qilisdk under QUMO names: QUBO models and conversion to Ising (`qumo/algorithms/qubo.mojo`), analog schedules (`qumo/algorithms/schedule.mojo`), angle perturbations (`qumo/sim/perturbation.mojo`), flow-style YAML for Pauli sums; and a SpeQtrum hardware provider. ([#2](https://github.com/ANFAIA/QUMO/pull/2), 2026-11-03)
-- `Program`: `while`, `break`, `continue`, classical variables and a derived control-flow graph above `Circuit` (`docs/CONTROL_FLOW.md`). ([#1](https://github.com/ANFAIA/QUMO/pull/1), 2026-11-03)
+- `Program`: `while`, `break`, `continue`, classical variables and a derived control-flow graph above `Circuit` (`docs/CONTROL_FLOW.md`). ([#1](https://github.c
+
+### Fixed
+
+- The resource estimator counted three synthesised rotations for every constant `U` gate, so `U(pi/2, 0, pi)` (H) and `U(0, 0, pi/4)` (T) were reported as non-Clifford rotations. Constant angles are now classified as for `RZ`/`RY`: a multiple of pi/2 is free, an odd multiple of pi/4 is one T, and when theta is a multiple of pi the two Rz merge into one rotation by phi + lambda (phi - lambda for an odd multiple). Symbolic angles still count three. `recommended_method` and `is_clifford()` are unchanged (they still treat `U` as non-Clifford). (`qumo/exec/resources.mojo`, `tests/test_orchestrator.mojo`)om/ANFAIA/QUMO/pull/1), 2026-11-03)
+
+### Fixed
+
+- MCP and CLI tool calls refuse an argument name their input schema does not declare, with QM-E801 that names it and lists the allowed names, before the tool runs. Before, a misspelt key (`shot` for `shots`) was silently ignored and the default was used, which gave a wrong answer without an error. Found by an audit of every shipped tool: `qumo_statevector`, `qumo_expectation`, `qumo_estimate_resources`, `qumo_emulate`, `qumo_density`, `qumo_to_pbc` and `qumo_ft_encode` read a `program` argument that their schemas did not list; the schemas now declare it.
+- Pauli-frame sampler: a `CORRELATED_ERROR(0)` drew its geometric skip from `log1p(-0) = -0`, so the quotient was +-inf and `Int()` of it is platform-defined (a negative position would have written outside the batch). p = 0 now never draws, and the op still resets the chain, so a following `ELSE_CORRELATED_ERROR` is unchanged. Same-class check of the other channels: they were already guarded (`if p > 0`); the detector error model already ignores p <= 0. Found by reading after the Stim fix for `broadcast_pauli_errors` (Stim PR #1131); on macOS ARM64 the old sampler gave the right counts, so this is a latent undefined-behaviour fix, not a visible wrong result.
+
+### Fixed
+
+- Stim text import (`from_stim`, `parse_dem`, the MCP `qumo_stim_import` tool) no longer crashes or exhausts memory on untrusted input: `REPEAT` blocks nest at most 256 levels (QM-E734 / QM-E735 beyond), the detector error model parser now has the instruction budget the circuit parser has (2,000,000 lines, QM-E735; `repeat 1000000000 { error(0.1) D0 }` appended a mechanism per pass until memory ran out), and empty `REPEAT` bodies are charged per pass. At 3000 nested `REPEAT` lines the circuit parser overflowed the stack (exit 139). Same bug class as Qiskit GHSA-9g9r-qpqr-c8fr. (SDK sweep, 2026-11-23)
 
 ### Changed
 
@@ -44,6 +62,10 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 ### Removed
 
 - The Python training stack of the AI transpiler (17 files and its `requirements.txt`). It stays recoverable at the git tag `legacy-python-training`. ([#6](https://github.com/ANFAIA/QUMO/pull/6), 2026-11-09)
+
+### Fixed
+
+- `apply_noise_model` silently inserted no gate error after a 3-qubit gate (CCX, CSWAP, CCZ), so a noisy circuit looked better than its model said. It now raises QM-E738 when the model has any gate error (1q, 2q or per-edge) and the circuit has a 3-qubit gate; the hint names the decomposition (`qumo.compiler.basis.unroll_3q`). A model with zero gate error still accepts them, with idle noise only.
 
 ### Security
 

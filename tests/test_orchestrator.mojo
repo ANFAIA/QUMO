@@ -1,4 +1,5 @@
 from qumo.ir.circuit import Circuit
+from qumo.ir.param import Param
 from qumo.ir.pauli import parse_pauli_sum
 from qumo.exec.orchestrator import Workflow, Device, job_precision
 from std.math import pi
@@ -44,6 +45,31 @@ def test_rotation_t_cost() raises:
     var rf = estimate_resources(f)
     assert_equal(rf.t_exact, 4)
     assert_equal(rf.rotations, 0)
+    # U(theta, phi, lambda) = Rz(phi) Ry(theta) Rz(lambda) up to phase: a multiple of pi
+    # makes Ry Clifford and merges the two Rz (phi + lambda, or phi - lambda for odd
+    # multiples; checked against the unitary matrices). Each case is one circuit.
+    var u0 = Circuit(1)
+    u0.u(pi / 2, 0.0, pi, 0)  # U = H: Clifford, no T, no rotation
+    var ru0 = estimate_resources(u0)
+    assert_equal(ru0.t_count, 0)
+    assert_equal(ru0.rotations, 0)
+    var u1 = Circuit(1)
+    u1.u(0.0, 0.0, pi / 4, 0)  # U = T up to phase: one exact T
+    var ru1 = estimate_resources(u1)
+    assert_equal(ru1.t_exact, 1)
+    assert_equal(ru1.rotations, 0)
+    var u2 = Circuit(1)
+    u2.u(0.0, 0.3, 0.4, 0)  # U = Rz(0.7): one rotation (phi + lambda)
+    assert_equal(estimate_resources(u2).rotations, 1)
+    var u3 = Circuit(1)
+    u3.u(pi, 0.3, 0.4, 0)  # Ry(pi) = -iY: one rotation (phi - lambda)
+    assert_equal(estimate_resources(u3).rotations, 1)
+    var u4 = Circuit(1)
+    u4.u(0.7, 0.3, 0.4, 0)  # no multiple of pi: three rotations
+    assert_equal(estimate_resources(u4).rotations, 3)
+    var u5 = Circuit(1)
+    u5.u(Param.symbol(0), 0.3, 0.4, 0)  # symbolic: worst case, three rotations
+    assert_equal(estimate_resources(u5).rotations, 3)
     # the fault-tolerant estimate pays for the synthesised T states
     assert_equal(estimate_fault_tolerant(c).logical_cycles, 200 * 48)  # budget 1e-2 / 3
 
