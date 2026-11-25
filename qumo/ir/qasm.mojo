@@ -23,8 +23,12 @@ Implementation
   applied with the IR functors `Circuit.inverse()/controlled()/power()`.
 * Definitions of gates QUMO already knows natively (e.g. the `gate rzz(...)`
   blocks the emitter writes for non-`stdgates.inc` gates) are treated as
-  declarations: the native, exact opcode is used. This keeps emit -> parse
-  round trips bit-exact while staying portable to other tools.
+  declarations only when the body really is the native gate: the parser builds
+  both unitaries (qumo/ir/gate_equiv.mojo, up to 4 qubits, up to global phase,
+  three generic angle sets for a parametrised gate) and uses the exact native
+  opcode if they are equal. This keeps emit -> parse round trips bit-exact while
+  staying portable to other tools. A definition that differs, or cannot be
+  compared, is inlined as written and reports QM-W056.
 * QUMO-only IR (noise channels, QEC detectors/observables, ticks, original
   parameter names) is carried in `#pragma qumo ...` lines that this parser
   reads back and other tools ignore.
