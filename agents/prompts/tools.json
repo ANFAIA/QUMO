@@ -495,7 +495,7 @@
    "models",
    "node_modules"
   ],
-  "secret_names": "(^\\.env|secret|credential|\\.pem$|\\.key$|id_rsa)",
+  "secret_names": "(^\\.env|secret|credential|id_rsa|\\.pem$|\\.key$)",
   "max_read": 60000,
   "max_output": 12000,
   "run_check_allowed": [

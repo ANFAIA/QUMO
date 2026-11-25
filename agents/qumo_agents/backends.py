@@ -22,6 +22,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from qumo_agents import guard_spec
 from qumo_agents.config import REPO_ROOT, Settings
 from qumo_agents.registry import AgentSpec
 from qumo_agents.tools import alphaxiv, qumo_mcp, repo
@@ -198,10 +199,10 @@ def claude_code_env(settings: Settings, environ: dict[str, str] | None = None) -
 
 # Variables that look like credentials (the same idea as the deepagents back end's check env,
 # without AUTH and SESSION: SSH_AUTH_SOCK and the terminal session ids are not secrets).
-CLI_SECRET_ENV = re.compile(r"TOKEN|SECRET|KEY|PASSWORD|CREDENTIAL|COOKIE", re.I)
+CLI_SECRET_ENV = re.compile(guard_spec.substrings_pattern(guard_spec.ENV["secret_name_substrings"]), re.I)
 # What each CLI itself reads to sign in or choose its provider is kept when scrubbing.
 # ALPHAXIV_ stays too: the MCP config of both CLIs refers to ALPHAXIV_API_KEY by name.
-CLI_OWN_ENV = {"claude_code": ("ANTHROPIC_", "CLAUDE_", "ALPHAXIV_"), "codex": ("OPENAI_", "CODEX_", "ALPHAXIV_")}
+CLI_OWN_ENV = {section: tuple(prefixes) for section, prefixes in guard_spec.ENV["cli_own_prefixes"].items()}
 
 
 def scrub_env(env: dict[str, str], section: str) -> dict[str, str]:

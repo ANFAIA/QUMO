@@ -21,6 +21,7 @@ writes a lot to stderr never blocks while the parent waits for stdout.
 from std.os import getenv, setenv
 from std.pathlib import cwd
 
+from qumo_agent.core.guard_rules import minimal_child_env_names
 from qumo_agent.native.shutdown import ignore_sigpipe_signal, register_child, unregister_child
 from qumo_agent.native.libc import (
     CStr,
@@ -938,10 +939,21 @@ def is_secret_env_name(name: String) -> Bool:
     )
 
 
+def check_env_keeps(name: String) -> Bool:
+    """Whether a child (a run_check command, git) inherits the variable `name`: only the
+    names of `lists.env.minimal_child_env` (agents/spec/guard_rules.json), and none that
+    looks like a secret."""
+    if is_secret_env_name(name):
+        return False
+    for n in minimal_child_env_names():
+        if n == name:
+            return True
+    return False
+
+
 def minimal_child_env() -> List[String]:
-    var names: List[String] = ["HOME", "LOGNAME", "PATH", "SHELL", "TERM", "USER", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR"]
     var out = List[String]()
-    for e in env_subset(names):
+    for e in env_subset(minimal_child_env_names()):
         var eq = e.find("=")
         if not is_secret_env_name(String(e[byte=0:eq])):
             out.append(e)

@@ -17,11 +17,13 @@ from __future__ import annotations
 import re
 import secrets
 
-MARKER = "UNTRUSTED-DATA"
+from qumo_agents import guard_spec
+
+MARKER = guard_spec.UNTRUSTED["marker"]
 # What a subagent answer may carry across a web-to-code delegation (bounded, see wrap).
-MAX_ANSWER_CHARS = 6000
+MAX_ANSWER_CHARS = guard_spec.UNTRUSTED["max_answer_chars"]
 # What a report copy in a sandbox, or a report read, may carry.
-MAX_REPORT_CHARS = 60000
+MAX_REPORT_CHARS = guard_spec.UNTRUSTED["max_report_chars"]
 
 FIELDS = "source URL | claim | proposed change"
 _LOOKALIKE = re.compile(rf"<<<\s*/?\s*{MARKER}[^>]*>>>|{MARKER}", re.I)
