@@ -739,18 +739,33 @@ Pure Mojo (FIPS 180-4), so the manifest and eviction file names do not depend on
 #### 2.2.4 `util/redact.mojo`
 
 ```mojo
-def redact(s: String, secret: String) -> String   # moved verbatim from llm.mojo:205-233
+def redact(s: String, secret: String) -> String
 def secret_env_names(api_key_env: String) -> List[String]   # [api_key_env, "ALPHAXIV_API_KEY", "GITHUB_TOKEN"], duplicates removed
 def redact_all(s: String, env_names: List[String]) -> String
 ```
 
-`redact_all(s, names)` applies `redact(s, value)` for the current value of every variable in
-`names` that is set and non-empty (read with `getenv` at each call, never cached), then the
-existing `sk-`/`Bearer ` patterns of `redact`. Every component calls
+`redact(s, secret)` hides `secret` and its JSON-escaped form, then `sk-` followed by 8 or more
+key characters, and what follows `Bearer ` or `Basic ` in any letter case (8 or more of
+letters, digits and `_ - . ~ + / =`; after `Basic` only a value that looks like base64, not
+prose: a digit, `+ / =` or mixed case, or 20 bytes or more).
+
+Length rule for a known value: 8 bytes or more, hidden wherever it occurs; 4 to 7, only as a
+whole word (not next to a letter, digit, `_` or `-`); under 4, never. A very short value
+replaced everywhere would blank out pieces of ordinary words and mark every place where two or
+three common characters occur, which hides nothing; the cost is that a credential of 1 to 3
+characters, or one of 4 to 7 glued to other key characters, stays readable.
+
+`redact_all(s, names)` hides the current value (read with `getenv` at each call, never cached)
+of every variable in `names` and of every variable of the process whose name looks secret
+(`native/spawn.is_secret_env_name`: `*_API_KEY`, `*_TOKEN`, `*_SECRET`, `*_PASSWORD`,
+`*SECRET*`, `*PASSWORD*`), longest value first, each also JSON-escaped; then the patterns of
+`redact`. So the model key of every endpoint, the alphaXiv key (whatever `key_env` names it),
+`GITHUB_TOKEN` and an MCP `bearer_env` are covered without being listed. Every component calls
 `redact_all(text, secret_env_names(endpoint.api_key_env))` on every error text it produces from
 remote or child data (model HTTP errors, MCP HTTP and stdio errors, research `HTTPError`/
 `URLError` texts, subagent child errors) and on every stderr log line; `redact` alone is not
-used outside `redact_all`.
+used outside `redact_all`. Not covered: a JSON form that escapes `/` as `\/` or non-ASCII
+characters as `\uXXXX`, and the URL-encoded form (the harness sends keys in headers only).
 
 ### 2.3 `core/` (owner F)
 
