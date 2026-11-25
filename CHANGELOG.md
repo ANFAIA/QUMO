@@ -38,6 +38,7 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 
 ### Fixed
 
+- A classically conditioned `LogicalProgram.pauli_exp` (`c_if` / `c_if_register`) was applied unconditionally by the Iceberg implementation, and `logical_to_circuit` skipped the condition too, so the reference hid the bug (Iceberg k=4, `pauli_exp(pi, "XXXX")` then `c_if(0, 1)` with c0 = 0 gave 11110 instead of 00000). Both now honour the condition, like the conditioned rz/rzz. `LogicalProgram.validate` also checks the handles of `pauli_exp` are live (QM-E727; before, `Engine.pauli_exp` indexed unchecked) and rejects an all-identity string or a repeated handle (QM-E724; the reference path read past an empty ladder). (`qumo/ft/implement.mojo`, `qumo/ft/emulate.mojo`, `qumo/ft/logical.mojo`, `tests/test_ft_encode.mojo`)
 - The resource estimator counted three synthesised rotations for every constant `U` gate, so `U(pi/2, 0, pi)` (H) and `U(0, 0, pi/4)` (T) were reported as non-Clifford rotations. Constant angles are now classified as for `RZ`/`RY`: a multiple of pi/2 is free, an odd multiple of pi/4 is one T, and when theta is a multiple of pi the two Rz merge into one rotation by phi + lambda (phi - lambda for an odd multiple). Symbolic angles still count three. `recommended_method` and `is_clifford()` are unchanged (they still treat `U` as non-Clifford). (`qumo/exec/resources.mojo`, `tests/test_orchestrator.mojo`)om/ANFAIA/QUMO/pull/1), 2026-11-03)
 
 ### Fixed
