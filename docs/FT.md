@@ -255,6 +255,22 @@ which would need automorphism gates, fold-transversal S and a non-matching decod
   post-selected flags): stabilizers +1 and logical Bloch vector
   (cos theta, sin theta, 0). This one is defined in `qumo.ft.gadgets`, not in
   `qumo.ft.verify` (import it from there); it takes codes with k = 1 (`QM-E723` otherwise).
+* `fault_tolerant_state_preparation(semantic, impl, code, num_ancillas, t, model, max_fault_sets)`
+  (`qumo.ft.faults`): the exact t-fault-tolerance check of Definition 1 of Schmid and Wille,
+  [arXiv:2611.25107](https://arxiv.org/abs/2611.25107). Every set F of at most t faults
+  (default t = (d-1)/2) must be detected by a verification measurement or leave a data error
+  whose X and Z parts each have weight at most |F| after reduction by the prepared state's
+  stabilizers (`reduced_weight`). `valid_stabilizer_state_preparation` checks the circuit
+  without faults only; it accepts preparations that are not fault tolerant.
+  `FaultModel.circuit_level()` (default): X after each reset and after the initial |0> of each
+  qubit whose first operation is not a reset, X/Y/Z after each 1q gate, the 15 two-qubit Paulis after each CX/CZ, an outcome flip
+  per measurement; `FaultModel.xz_only()` drops Y and the mixed two-qubit Paulis. Idle faults
+  are not modelled. The report gives the counts, the first dangerous set (witness), CX count
+  and CX depth. `count_undetected(..., order)` counts the undetected sets of exactly `order`
+  faults. Steane: the encoder alone has 29 dangerous single faults out of 136;
+  `steane_prep_zero_ft` (flag on Z1 Z3 Z5) has none out of 183, so it is 1-fault tolerant;
+  a flag on the stabilizer Z0 Z1 Z2 Z3 leaves 21. Stim reproduces every count
+  (examples/ft/ft_state_prep_check_stim.py).
 
 Failures name the operator, e.g. the incorrect non-CSS [[4,2,2]] gadget of
 Guppy FT's tests is reported as "the right operator with the wrong sign".
@@ -331,3 +347,11 @@ pairs are not fault tolerant, so a single 2-qubit fault can be a logical error.
   gates reach its limit of 2^20 branches (QM-E412).
 * Non-CSS codes are supported by the code library and the verifier;
   architectures (encode / decode) are Steane and Iceberg.
+* `fault_tolerant_state_preparation` covers one block of a CSS code with a CSS target state,
+  at most 64 qubits and 64 measurements, built from reset, measure, H, S, SDG, Pauli gates,
+  CX and CZ with deterministic verification measurements (QM-E738 otherwise). The exact coset
+  reduction takes rank at most 24 per Pauli type, so in practice codes up to about 48 qubits:
+  surface_code(5) works, surface_code(7) raises QM-E738. It enumerates fault sets exactly:
+  about (single faults)^t / t! sets. With 15 Paulis per CX, t = 2 on about 100 CX is about a
+  million pairs, and on 300 CX about 10 million, above the default `max_fault_sets` of
+  5,000,000, which stops such runs with QM-E738. No idle faults.

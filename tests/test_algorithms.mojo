@@ -7,6 +7,7 @@ from std.testing import assert_true, assert_almost_equal, assert_equal
 
 from qumo.ir.circuit import Circuit
 from qumo.ir.param import Param
+from qumo.ir.gates import Op
 from qumo.ir.pauli import PauliSum, PauliTerm, parse_pauli_sum
 from qumo.sim.statevector import StateVector
 from qumo.sim.runner import evolve, sample
@@ -16,6 +17,7 @@ from qumo.algorithms.library import (
     num_mcz_ancillas, bernstein_vazirani, deutsch_jozsa, qpe, qpe_phase,
     hardware_efficient_ansatz, qaoa_ansatz, qaoa_maxcut_ansatz, h2_ansatz, uccsd_ansatz,
     append_pauli_rotation, pauli_exponential, trotter, bitstring_to_int,
+    dicke_state, append_dicke_state, dicke_amplitudes,
 )
 from qumo.algorithms.hamiltonians import (
     Graph, maxcut, transverse_field_ising, heisenberg_xxz, h2_sto3g, H2_EXACT_ENERGY,
@@ -84,6 +86,104 @@ def test_ghz_qft() raises:
         assert_almost_equal(s2.re[k], cos(ang) / sqrt(8.0), atol=1e-12)
         assert_almost_equal(s2.im[k], sin(ang) / sqrt(8.0), atol=1e-12)
     print("  qft: max |QFT - DFT| =", maxerr)
+
+
+def test_dicke() raises:
+    # every (n, k) with 2 <= n <= 10: state vector == closed form
+    var worst = 0.0
+    for n in range(2, 11):
+        for k in range(n + 1):
+            var sv = evolve(dicke_state(n, k))
+            var amp = dicke_amplitudes(n, k)
+            for i in range(1 << n):
+                worst = max(worst, abs(sv.re[i] - amp[i]))
+                worst = max(worst, abs(sv.im[i]))
+    assert_true(worst < 1e-10, "dicke_state != dicke_amplitudes, err=" + String(worst))
+    # the closed form itself: C(5,2) = 10 entries of 1/sqrt(10), and they are the weight-2 ones
+    var a52 = dicke_amplitudes(5, 2)
+    assert_equal(len(a52), 32)
+    assert_almost_equal(a52[0b00011], 1 / sqrt(10.0), atol=1e-15)
+    assert_almost_equal(a52[0b10100], 1 / sqrt(10.0), atol=1e-15)
+    assert_almost_equal(a52[0b00111], 0.0, atol=0.0)
+    # D_1^n is the W state: 1/sqrt(n) on |0..010..0>
+    for n in range(2, 9):
+        var w = evolve(dicke_state(n, 1))
+        for i in range(1 << n):
+            var expect = 1 / sqrt(Float64(n)) if (i & (i - 1)) == 0 and i != 0 else 0.0
+            assert_almost_equal(w.re[i], expect, atol=1e-12)
+    # k = 0 is empty, k = n is one X layer
+    assert_equal(len(dicke_state(6, 0)), 0)
+    var full = dicke_state(6, 6)
+    assert_equal(len(full), 6)
+    assert_equal(full.count(Op.X), 6)
+    # gate counts: r = min(k, n-k), T = (n-r)(r-1) + (r-1)(r-2)/2 doubly controlled RY
+    var c104 = dicke_state(10, 4)  # r = 4, T = 21
+    assert_equal(c104.count(Op.CRY), 9)
+    assert_equal(c104.count(Op.RY), 84)
+    assert_equal(c104.count(Op.CX), 144)
+    assert_equal(c104.count(Op.X), 4)
+    var c107 = dicke_state(10, 7)  # complement: r = 3, T = 15, X on 3 then on all 10
+    assert_equal(c107.count(Op.CRY), 9)
+    assert_equal(c107.count(Op.RY), 60)
+    assert_equal(c107.count(Op.CX), 108)
+    assert_equal(c107.count(Op.X), 13)
+    # on a subset of a bigger register, with qubit 0 already in |1>
+    var c = Circuit(7)
+    c.x(0)
+    var sub: List[Int] = [5, 1, 3, 6]
+    append_dicke_state(c, sub, 2)
+    var sv = evolve(c)
+    var mask = (1 << 5) | (1 << 1) | (1 << 3) | (1 << 6)
+    var hits = 0
+    for i in range(1 << 7):
+        var inside = i & mask
+        var ones = 0
+        for q in range(7):
+            ones += (inside >> q) & 1
+        var expect = 1 / sqrt(6.0) if (i & 1) == 1 and (i & ~(mask | 1)) == 0 and ones == 2 else 0.0
+        if expect > 0:
+            hits += 1
+        assert_almost_equal(sv.re[i], expect, atol=1e-12)
+        assert_almost_equal(sv.im[i], 0.0, atol=1e-12)
+    assert_equal(hits, 6)
+    # range errors: all QM-E802
+    var codes = List[String]()
+    try:
+        _ = dicke_state(4, 5)
+    except e:
+        codes.append(_err_code(String(e)))
+    try:
+        _ = dicke_state(4, -1)
+    except e:
+        codes.append(_err_code(String(e)))
+    try:
+        _ = dicke_state(0, 0)
+    except e:
+        codes.append(_err_code(String(e)))
+    try:
+        _ = dicke_state(65, 1)
+    except e:
+        codes.append(_err_code(String(e)))
+    try:
+        _ = dicke_amplitudes(21, 1)
+    except e:
+        codes.append(_err_code(String(e)))
+    try:
+        var c2 = Circuit(3)
+        var bad: List[Int] = [0, 3]
+        append_dicke_state(c2, bad, 1)
+    except e:
+        codes.append(_err_code(String(e)))
+    try:
+        var c3 = Circuit(3)
+        var dup: List[Int] = [0, 1, 1]
+        append_dicke_state(c3, dup, 1)
+    except e:
+        codes.append(_err_code(String(e)))
+    assert_equal(len(codes), 7)
+    for code in codes:
+        assert_equal(code, "QM-E802")
+    print("  dicke: 2 <= n <= 10, all k, max |amp err| =", worst)
 
 
 def test_grover() raises:
@@ -611,6 +711,7 @@ def test_oversize_width_is_refused() raises:
 def main() raises:
     test_oversize_width_is_refused()
     test_ghz_qft()
+    test_dicke()
     test_grover()
     test_qpe()
     test_oracles()

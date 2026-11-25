@@ -17,12 +17,14 @@ from std.collections import Dict
 from std.math import log
 from qumo.ir.gates import Op
 from qumo.ir.circuit import Circuit
+from qumo.ir.program import MAX_NESTING
 from qumo.qec.codes import CodeCircuit, NoiseParams
 from qumo.qec.dem import DetectorErrorModel, DemError, _xor_sorted, _split
 from qumo.sim.frame import DetectorSamples, BATCH, FW
 from qumo.core.rng import Rng
 
-comptime _MAX_INSTRUCTIONS = 50_000_000
+comptime _MAX_INSTRUCTIONS = 50_000_000  # circuit lines after unrolling
+comptime _MAX_DEM_INSTRUCTIONS = 2_000_000  # DEM lines after unrolling: about 1 GB at a million mechanisms
 
 
 def _stim_error(line: Int, msg: String) -> Error:
@@ -249,8 +251,9 @@ def _records(c: Circuit, targets: List[String], where_: Int) raises -> List[Int]
     return out^
 
 
-def _run_block(p: _Parser, start: Int, stop: Int, mut b: _Builder) raises:
-    """Execute lines[start:stop] (REPEAT recursion, targets resolved as we go)."""
+def _run_block(p: _Parser, start: Int, stop: Int, mut b: _Builder, level: Int) raises:
+    """Execute lines[start:stop] (REPEAT recursion, targets resolved as we go).
+    `level` is the number of REPEAT blocks around this one; the recursion is bounded by MAX_NESTING."""
     var i = start
     while i < stop:
         ref line = p.lines[i]
@@ -264,6 +267,8 @@ def _run_block(p: _Parser, start: Int, stop: Int, mut b: _Builder) raises:
         var targets = List[String]()
         _split_instruction(line, name, args, targets, where_)
         if name == "REPEAT":
+            if level >= MAX_NESTING:
+                raise _stim_error(where_, "REPEAT nested deeper than " + String(MAX_NESTING) + " levels. Hint: write the inner blocks one after another")
             var count = Int(targets[0])
             var depth = 1
             var j = i
@@ -276,7 +281,11 @@ def _run_block(p: _Parser, start: Int, stop: Int, mut b: _Builder) raises:
             if depth != 0:
                 raise _stim_error(where_, "REPEAT block is not closed")
             for _ in range(count):
-                _run_block(p, i, j - 1, b)
+                # charge each pass, so an empty body cannot spin for a billion iterations
+                b.count += 1
+                if b.count > _MAX_INSTRUCTIONS:
+                    raise _stim_error(where_, "more than " + String(_MAX_INSTRUCTIONS) + " instructions after unrolling. Hint: lower the REPEAT counts")
+                _run_block(p, i, j - 1, b, level + 1)
             i = j
             continue
         if name == "}":
@@ -442,7 +451,7 @@ def from_stim(text: String) raises -> CodeCircuit:
     if spare:
         n += 1
     var b = _Builder(max(n, 1))
-    _run_block(p, 0, len(p.lines), b)
+    _run_block(p, 0, len(p.lines), b, 0)
     b.c.num_clbits = max(b.c.num_clbits, 0)
     var cc = CodeCircuit(b.c.copy(), "stim", "", 0, 0, NoiseParams.noiseless())
     cc.detector_coords = b.coords.copy()
@@ -466,26 +475,34 @@ struct _DemBuilder:
     var offset: Int
     var max_det: Int
     var max_obs: Int
+    var count: Int  # lines after unrolling, the budget of _MAX_DEM_INSTRUCTIONS
 
     def __init__(out self):
         self.dem = DetectorErrorModel(0, 0)
         self.offset = 0
         self.max_det = -1
         self.max_obs = -1
+        self.count = 0
 
 
-def _run_dem(p: _Parser, start: Int, stop: Int, mut b: _DemBuilder) raises:
+def _run_dem(p: _Parser, start: Int, stop: Int, mut b: _DemBuilder, level: Int) raises:
+    """`level` is the number of repeat blocks around this one; bounded by MAX_NESTING."""
     var i = start
     while i < stop:
         ref line = p.lines[i]
         var where_ = p.numbers[i]
         i += 1
+        b.count += 1
+        if b.count > _MAX_DEM_INSTRUCTIONS:
+            raise _dem_error(where_, "more than " + String(_MAX_DEM_INSTRUCTIONS) + " instructions after unrolling. Hint: lower the repeat counts")
         var name = String("")
         var args = List[Float64]()
         var targets = List[String]()
         _split_instruction(line, name, args, targets, where_)
         name = name.lower()
         if name == "repeat":
+            if level >= MAX_NESTING:
+                raise _dem_error(where_, "repeat nested deeper than " + String(MAX_NESTING) + " levels. Hint: write the inner blocks one after another")
             var count = Int(targets[0])
             var depth = 1
             var j = i
@@ -498,7 +515,10 @@ def _run_dem(p: _Parser, start: Int, stop: Int, mut b: _DemBuilder) raises:
             if depth != 0:
                 raise _dem_error(where_, "repeat block is not closed")
             for _ in range(count):
-                _run_dem(p, i, j - 1, b)
+                b.count += 1
+                if b.count > _MAX_DEM_INSTRUCTIONS:
+                    raise _dem_error(where_, "more than " + String(_MAX_DEM_INSTRUCTIONS) + " instructions after unrolling. Hint: lower the repeat counts")
+                _run_dem(p, i, j - 1, b, level + 1)
             i = j
         elif name == "}":
             continue
@@ -554,7 +574,7 @@ def parse_dem(text: String) raises -> DetectorErrorModel:
     """Stim detector error model text; `repeat` blocks are expanded."""
     var p = _Parser(text)
     var b = _DemBuilder()
-    _run_dem(p, 0, len(p.lines), b)
+    _run_dem(p, 0, len(p.lines), b, 0)
     b.dem.num_detectors = b.max_det + 1
     b.dem.num_observables = b.max_obs + 1
     return b.dem.copy()

@@ -71,11 +71,13 @@ Every example below is run and verified by `bench/.venv/bin/python examples/run_
 | Folder | Examples | Origins | Fast / slow |
 |---|---|---|---|
 | [`foundations/`](foundations/) | 17 | Amazon Braket, Cirq (Google), Classiq, QUMO, Qiskit (IBM), TKET (Quantinuum) | 17 / 0 |
-| [`algorithms/`](algorithms/) | 29 | Cirq (Google), Classiq, Q# / Azure Quantum, QUMO, Qibo, Qiskit (IBM), TKET (Quantinuum) | 29 / 0 |
+| [`algorithms/`](algorithms/) | 30 | Cirq (Google), Classiq, Q# / Azure Quantum, QUMO, Qibo, Qiskit (IBM), TKET (Quantinuum) | 30 / 0 |
 | [`optimization/`](optimization/) | 10 | CUDA-Q (NVIDIA), Classiq, QUMO, Qiskit (IBM) | 10 / 0 |
 | [`chemistry_and_physics/`](chemistry_and_physics/) | 17 | CUDA-Q (NVIDIA), Cirq (Google), Classiq, QUMO, Qibo, Qiskit (IBM), TKET (Quantinuum) | 16 / 1 |
 | [`qml/`](qml/) | 14 | PennyLane (Xanadu), QUMO, Qibo | 14 / 0 |
 | [`error_correction/`](error_correction/) | 3 | Cirq (Google), QUMO | 3 / 0 |
+| [`ft/`](ft/) | 8 | Guppy FT (Quantinuum), QUMO | 7 / 1 |
+| [`error_correction/`](error_correction/) | 4 | Cirq (Google), QUMO | 4 / 0 |
 | [`ft/`](ft/) | 6 | Guppy FT (Quantinuum) | 5 / 1 |
 | [`noise_and_mitigation/`](noise_and_mitigation/) | 8 | Amazon Braket, CUDA-Q (NVIDIA), Cirq (Google), Classiq, QUMO, Qiskit (IBM) | 7 / 1 |
 | [`compilation/`](compilation/) | 6 | Q# / Azure Quantum, QUMO, Qiskit (IBM), TKET (Quantinuum) | 6 / 0 |

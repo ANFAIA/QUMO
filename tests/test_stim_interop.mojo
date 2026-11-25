@@ -3,6 +3,7 @@
 from std.testing import assert_equal, assert_true
 from qumo.ir.circuit import Circuit
 from qumo.ir.gates import Op
+from qumo.ir.program import MAX_NESTING
 from qumo.qec.codes import NoiseParams, generate_code, to_stim
 from qumo.qec.dem import detector_error_model
 from qumo.qec.decoders import MatchingGraph, count_logical_errors, UnionFindDecoder, graphlike_dem
@@ -336,6 +337,54 @@ def test_dem_piece_with_three_detectors() raises:
     print("  DEM pieces with 3 detectors follow the hyperedge rule")
 
 
+def _nest(open_line: String, body: String, depth: Int) -> String:
+    """`open_line {` repeated `depth` times around `body`."""
+    var text = String("")
+    for _ in range(depth):
+        text += open_line + " {\n"
+    text += body
+    for _ in range(depth):
+        text += "}\n"
+    return text^
+
+
+def _circuit_error(text: String) -> String:
+    try:
+        _ = from_stim(text)
+    except e:
+        return String(e)
+    return ""
+
+
+def _dem_error_of(text: String) -> String:
+    try:
+        _ = parse_dem(text)
+    except e:
+        return String(e)
+    return ""
+
+
+def test_nesting_and_budget() raises:
+    # nesting: MAX_NESTING levels parse, one more is QM-E734 / QM-E735
+    var c = from_stim(_nest("REPEAT 1", "H 0\n", MAX_NESTING)).circuit.copy()
+    assert_equal(c.count(Op.H), 1, "innermost body once per level")
+    assert_equal(_circuit_error(_nest("REPEAT 1", "H 0\n", MAX_NESTING)), "", "circuit at the limit parses")
+    var over = _circuit_error(_nest("REPEAT 1", "H 0\n", MAX_NESTING + 1))
+    assert_true(over.startswith("QM-E734") and over.find(String(MAX_NESTING)) >= 0, "circuit one past the limit: " + over)
+    assert_equal(_dem_error_of(_nest("repeat 1", "error(0.1) D0\n", MAX_NESTING)), "", "DEM at the limit parses")
+    var dem_over = _dem_error_of(_nest("repeat 1", "error(0.1) D0\n", 3000))
+    assert_true(dem_over.startswith("QM-E735") and dem_over.find(String(MAX_NESTING)) >= 0, "DEM far past the limit: " + dem_over)
+    # budget: a DEM repeat that expands past the budget is refused before it fills memory
+    var big = _dem_error_of("repeat 1000000000 {\nerror(0.1) D0\n}\n")
+    assert_true(big.startswith("QM-E735") and big.find("instructions after unrolling") >= 0, "DEM budget: " + big)
+    var empty = _circuit_error("REPEAT 1000000000 {\n}\nH 0\n")
+    assert_true(empty.startswith("QM-E734"), "empty REPEAT bodies are charged too: " + empty)
+    # normal repeated circuits are unaffected
+    var rep = from_stim("H 0\nREPEAT 2000 {\n  X 0\n  TICK\n}\nH 0\n").circuit.copy()
+    assert_equal(rep.count(Op.X), 2000, "REPEAT 2000 unrolled")
+    print("  nesting limit, repeat budget, normal repeats")
+
+
 def main() raises:
     test_round_trip_generated()
     test_syntax()
@@ -349,4 +398,5 @@ def main() raises:
     test_window_approaches_plain()
     test_dem_piece_without_detectors()
     test_dem_piece_with_three_detectors()
+    test_nesting_and_budget()
     print("test_stim_interop OK")

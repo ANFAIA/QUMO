@@ -827,12 +827,12 @@ Fix: Sample it with the Pauli-frame simulator.
 
 ### QM-E734
 
-**Stim circuit text could not be imported: unknown or unsupported instruction, bad target, or too many instructions after unrolling.**  
-Fix: See the message; docs/QEC.md lists what from_stim takes.
+**Stim circuit text could not be imported: unknown or unsupported instruction, bad target, REPEAT nested too deeply, or too many instructions after unrolling.**  
+Fix: See the message; docs/QEC.md lists what from_stim takes and its limits.
 
 ### QM-E735
 
-**Stim detector error model text could not be parsed.**  
+**Stim detector error model text could not be parsed, a repeat nests too deeply, or it unrolls to too many instructions.**  
 Fix: Use Stim's format: error(p) D0 D1 ^ D2 L0, detector, logical_observable, shift_detectors, repeat.
 
 ### QM-E736
@@ -850,10 +850,20 @@ Fix: Bind parameters and remove non-Clifford gates.
 **Correlated matching needs error probabilities up to 0.5.**  
 Fix: Use plain 'mwpm' for this detector error model.
 
+### QM-E738
+
+**apply_noise_model got a unitary gate of arity 3 (CCX, CSWAP, CCZ) while the noise model has gate errors; a 3-qubit gate has no gate-error rule.**  
+Fix: Decompose it into 1- and 2-qubit gates first (qumo.compiler.basis.unroll_3q, or transpile to a target without CCX), then add noise.
+
 ### QM-E730
 
 **A computational circuit given to encode() contains noise channels, QEC annotations or unbound symbolic parameters.**  
 Fix: Encode noiseless, QEC-agnostic, bound circuits; add noise with qumo.ft.emulate.add_noise; use the comparator circuit for run-time angles.
+
+### QM-E738
+
+**Input outside the scope of the exact fault-tolerance check (qumo.ft.faults): non-CSS code or state, more than 64 qubits or measurements, a conditioned or unsupported operation, a random verification measurement, a state group too large, or more fault sets than max_fault_sets.**  
+Fix: Use a CSS code and a one-block preparation of reset, measure, H, S, SDG, X, Y, Z, CX, CZ whose verification measurements are deterministic; lower t or raise max_fault_sets.
 
 ## QM-E8xx — Algorithms
 

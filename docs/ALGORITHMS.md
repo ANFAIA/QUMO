@@ -47,6 +47,9 @@ Run the tests and examples from the repo root:
 | Builder | Qubit layout | Params | Origin of the idea |
 |---|---|---|---|
 | `ghz(n)` | 0..n-1 | none | textbook |
+| `dicke_state(n, k)` | 0..n-1, no ancillas; \|D_k^n> = C(n,k)^(-1/2) sum over the strings x with k ones of \|x> | none | Bärtschi-Eidenbenz (arXiv:1904.07358): X on the last k qubits, then split-and-cyclic-shift unitaries. With r = min(k, n-k), for 0 < k < n: n-1 CRY and T = (n-r)(r-1) + (r-1)(r-2)/2 doubly controlled RY (4 RY + 4 CX each), 2(n-1) + 6T CX, O(n) depth. k = 0 is empty, k = n is one X layer. For 2k > n it prepares \|D_{n-k}^n> and flips every qubit. n <= 64; D_1^n is the W state |
+| `append_dicke_state(mut c, qubits, k)` | n = len(qubits); qubits[j] = bit j; the qubits must start in \|0> | none | as `dicke_state`, on any subset of a register |
+| `dicke_amplitudes(n, k)` | - | - | closed form as a dense vector of 2^n entries, n <= 20 (tests, references) |
 | `qft(n, do_swaps=True, approximation_degree=0)` | register value little-endian on 0..n-1; `QFT|j> = 2^{-n/2} sum_k e^{2 pi i jk/2^n} |k>` | none | Qiskit `QFT` (incl. AQFT degree) |
 | `iqft(n, ...)` | as `qft` | none | built with the Adjoint functor (`inverse()`), Q# style |
 | `append_qft(mut c, qubits, do_swaps, approximation_degree)` | qubits[k] = bit k | none | |
@@ -377,6 +380,12 @@ Every error starts with a stable code and ends with a `Hint:` where a fix is kno
   (`projected_hamiltonian`, `subspace_ground_energy`).
 * **Shor implementations (Qiskit, Q#, Cirq, CUDA-Q)**: the generic
   controlled-permutation oracle replaces hand-made SWAP networks for N > 15.
+* **Bärtschi and Eidenbenz, arXiv:1904.07358**: `dicke_state`, the deterministic Dicke-state
+  circuit without ancillas. The newer construction of arXiv:2611.27640 (O(n) gates, O(log n)
+  depth, no ancillas) is not implemented: it is a theory paper with no gate constants, its
+  ancilla-free weight-phase circuit is not explicit: for n <= 31, and for the 31-qubit blocks it
+  uses when n >= 32, the paper relies on generic exact synthesis, so no explicit circuit is given;
+  and it is an unreviewed v1.
 
 ## Limitations
 
@@ -395,6 +404,9 @@ Every error starts with a stable code and ends with a `Hint:` where a fix is kno
   windowing): keep the work register <= ~6 bits for simulation.
 * ZNE uses Pauli-channel noise models (trajectories); readout error is not folded
   (mitigate it separately with `ReadoutCalibration` / `mitigate_counts`).
+* `dicke_state` keeps the CNOT that Bärtschi and Eidenbenz cancel in each doubly controlled
+  rotation (6 CX per such gate instead of 5) and emits all-to-all gates; their
+  linear-nearest-neighbour layout is left to the transpiler.
 
 ## Framework examples
 
