@@ -394,6 +394,126 @@ def test_noise_and_tools() raises:
     assert_true(r4.structured.find("\"valid\":true") >= 0, r4.structured)
 
 
+def _low_bits_only(c: LogicalCounts, n: Int, expect: String, what: String) raises:
+    """Every accepted shot reads `expect` on the n source clbits (the leading
+    characters of a key are compile-internal snapshot clbits, if any)."""
+    assert_true(c.accepted > 0, what + ": no accepted shot")
+    for k in c.keys():
+        assert_equal(String(k[byte=k.byte_length() - n:]), expect, what + ": counts " + String(c))
+
+
+def test_clbit_reuse_after_overwrite() raises:
+    """A measured qubit that is used again, and a classical-lane qubit that
+    read a clbit, keep the value the clbit had when it was measured / read,
+    even if the clbit is overwritten in between."""
+    # (1) quantum reuse: c0 is overwritten before q0 is used again
+    var a = Circuit(2, 2, "reuse")
+    a.x(0)
+    a.measure(0, 0)
+    a.h(1)
+    a.h(1)
+    a.measure(1, 0)
+    a.z(0)
+    a.measure(0, 1)
+    var ref_a = reference_counts(a, 200, 3)
+    assert_equal(ref_a.counts.get("10", 0), 200)
+    # (2) classical lane: q2 := c0 (c0 = 1), then c0 := 0, then read q2
+    var b = Circuit(3, 2, "lane")
+    b.x(0)
+    b.measure(0, 0)
+    b.x(2)
+    b.c_if(0, 1)
+    b.h(1)
+    b.h(1)
+    b.measure(1, 0)
+    b.measure(2, 1)
+    var ref_b = reference_counts(b, 100, 4)
+    assert_equal(ref_b.counts.get("10", 0), 100)
+    var steane = SteaneBuilder().build(4)
+    var lp_a = compile(steane, a)
+    _low_bits_only(reference_counts(logical_to_circuit(lp_a), 200, 5), 2, "10", "compiled reuse")
+    var lp_b = compile(steane, b)
+    _low_bits_only(reference_counts(logical_to_circuit(lp_b), 100, 6), 2, "10", "compiled lane")
+    var archs = List[String]()
+    archs.append("steane frame")
+    archs.append("steane eager")
+    archs.append("iceberg_2")
+    for name in archs:
+        var arch = SteaneBuilder().build(5)
+        if name == "steane eager":
+            arch = SteaneBuilder().with_feed_forward("eager").build(5)
+        elif name == "iceberg_2":
+            arch = IcebergBuilder(2).build(3)
+        var ea = run_encoded(encode(arch, a), 200, 7)
+        assert_equal(ea.accepted, 200)
+        _low_bits_only(ea, 2, "10", name + " encoded reuse")
+        var eb = run_encoded(encode(arch, b), 100, 8)
+        assert_equal(eb.accepted, 100)
+        _low_bits_only(eb, 2, "10", name + " encoded lane")
+
+    # no overwrite: the compiled program is exactly what it was before the fix
+    var n = Circuit(2, 3, "plain")
+    n.x(0)
+    n.measure(0, 0)
+    n.h(1)
+    n.h(1)
+    n.measure(1, 1)
+    n.z(0)
+    n.measure(0, 2)
+    var want = String("logical program plain handles=3 clbits=3\n")
+    want += "  alloc L0\n  x L0\n  measure L0 -> c0\n  alloc L1\n  h L1\n  h L1\n  measure L1 -> c1\n"
+    want += "  alloc L2\n  if(c0==1) x L2\n  z L2\n  measure L2 -> c2\n"
+    assert_equal(String(compile(steane, n)), want)
+    # overwritten but never used again: no snapshot either
+    var m = Circuit(2, 1, "dead")
+    m.x(0)
+    m.measure(0, 0)
+    m.h(1)
+    m.h(1)
+    m.measure(1, 0)
+    assert_equal(compile(steane, m).num_clbits, 1)
+    # a reset ends the pending reuse: no snapshot
+    var r = Circuit(2, 1, "reset")
+    r.x(0)
+    r.measure(0, 0)
+    r.h(1)
+    r.h(1)
+    r.measure(1, 0)
+    r.reset(0)
+    r.h(0)
+    r.measure(0, 0)
+    assert_equal(compile(steane, r).num_clbits, 1)
+
+
+def test_clbit_snapshot_budget() raises:
+    """Snapshots take fresh clbits; past the 62-bit classical register the
+    compile stops with QM-E406 instead of producing a wrong program."""
+    var c = Circuit(2, 62, "full")
+    c.x(0)
+    c.measure(0, 0)
+    c.h(1)
+    c.h(1)
+    c.measure(1, 0)
+    c.z(0)
+    c.measure(0, 1)
+    var hit = False
+    try:
+        _ = compile(SteaneBuilder().build(3), c)
+    except e:
+        assert_true(String(e).startswith("QM-E406"), String(e))
+        hit = True
+    assert_true(hit, "62 source clbits + a snapshot must raise QM-E406")
+    var ok = Circuit(2, 61, "almost")
+    ok.x(0)
+    ok.measure(0, 0)
+    ok.h(1)
+    ok.h(1)
+    ok.measure(1, 0)
+    ok.z(0)
+    ok.measure(0, 1)
+    assert_equal(compile(SteaneBuilder().build(3), ok).num_clbits, 62)
+
+
 def _cond_pauli_exp_program(c0: Int) raises -> LogicalProgram:
     """Iceberg k=4: c0 := c0, then pauli_exp(pi, XXXX) if c0 == 1, then read the block."""
     var lp = LogicalProgram("cond_pauli_exp")
@@ -494,5 +614,7 @@ def main() raises:
     test_t_gates_statevector()
     test_errors()
     test_noise_and_tools()
+    test_clbit_reuse_after_overwrite()
+    test_clbit_snapshot_budget()
     test_conditioned_pauli_exp()
     print("test_ft_encode OK")

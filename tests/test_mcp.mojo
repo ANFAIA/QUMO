@@ -10,7 +10,7 @@ from qumo.core.json import JsonWriter, JsonValue, parse_json, json_quote
 from qumo.ai.mcp import McpServer, handle_request
 from qumo.ai.tools import default_registry, ToolRegistry, ToolHints, ToolContext, ToolResult, tool_ok
 from qumo.ai.describe import (
-    describe_gates_json, describe_errors_json, describe_errors_markdown, describe_error_json,
+    describe_gates_json, describe_errors_json, describe_errors_markdown, describe_error_json, describe_passes_markdown,
     describe_capabilities_json, circuit_to_json, circuit_from_json, circuit_summary_json,
 )
 from qumo.ai.diagnostics import (
@@ -511,6 +511,17 @@ def test_errors_doc_in_sync() raises:
     assert_true(md.find("rzx") < 0)
 
 
+def test_passes_doc_in_sync() raises:
+    """The checked-in docs/PASSES.md equals the text generated from the pass table (QUMO_UPDATE_DOCS=1 rewrites it)."""
+    var md = describe_passes_markdown()
+    if getenv("QUMO_UPDATE_DOCS") == "1":
+        with open("docs/PASSES.md", "w") as f:
+            f.write(md)
+        print("docs/PASSES.md regenerated from pass_decl()")
+    var cur = _read("docs/PASSES.md")
+    assert_true(cur == md, "docs/PASSES.md is stale: regenerate it with QUMO_UPDATE_DOCS=1 .venv/bin/mojo run -I . tests/test_mcp.mojo")
+
+
 def test_every_raised_code_is_catalogued() raises:
     """A code used in qumo/, cli/, python/, the hardware plugins or the
     benchmark harness must be in error_catalog() (and thus in docs/ERRORS.md)."""
@@ -666,6 +677,7 @@ def main() raises:
     test_convert_qasm2_and_describe_markdown()
     test_exec_tools()
     test_errors_doc_in_sync()
+    test_passes_doc_in_sync()
     test_every_raised_code_is_catalogued()
     test_ai_transpiler_tools()
     test_tier1_tools()

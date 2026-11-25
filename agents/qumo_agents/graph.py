@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from qumo_agents import registry
+from qumo_agents import registry, untrusted
 from qumo_agents.config import Settings, chat_model
 from qumo_agents.registry import AgentSpec
 from qumo_agents.tools import alphaxiv, qumo_mcp
@@ -52,6 +52,32 @@ def tree(spec: AgentSpec) -> list[AgentSpec]:
     return order
 
 
+def untrusted_answer(runnable, source: str):
+    """runnable, with its final answer replaced by untrusted.wrap(answer): the form in which an
+    agent that reaches code execution receives web-derived text from a subagent. The task tool
+    returns the last non-empty AI message, so a wrapped copy appended as the last message is
+    what the delegating agent reads."""
+    from langchain_core.messages import AIMessage
+    from langchain_core.runnables import RunnableLambda
+
+    def wrap_result(result: dict) -> dict:
+        text = ""
+        for m in reversed(result.get("messages", [])):
+            if isinstance(m, AIMessage) and m.text:
+                text = m.text
+                break
+        return {**result, "messages": [*result.get("messages", []),
+                                       AIMessage(untrusted.wrap(text, source))]}
+
+    def run(state, config=None):
+        return wrap_result(runnable.invoke(state, config))
+
+    async def arun(state, config=None):
+        return wrap_result(await runnable.ainvoke(state, config))
+
+    return RunnableLambda(run, afunc=arun, name=source)
+
+
 def build_agent(spec: AgentSpec, settings: Settings, shared: dict[str, list],
                 model_factory: Callable[[str], Any], model_override: str | None = None,
                 _cache: dict[str, Any] | None = None, _path: tuple[str, ...] = (), backend: str = "openrouter",
@@ -71,6 +97,8 @@ def build_agent(spec: AgentSpec, settings: Settings, shared: dict[str, list],
         sub = registry.get(sub_name)
         runnable = build_agent(sub, settings, shared, model_factory, None, cache, _path + (spec.name,), backend,
                                _fallback=chosen if backend == "local" else None)
+        if sub_name in spec.untrusted_subagents:
+            runnable = untrusted_answer(runnable, sub_name)
         subagents.append(CompiledSubAgent(name=sub.name, description=sub.description, runnable=runnable))
     agent = create_deep_agent(
         model=model_factory(chosen),

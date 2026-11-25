@@ -20,6 +20,7 @@ from pathlib import Path
 
 from langchain_core.tools import tool
 
+from qumo_agents import untrusted
 from qumo_agents.config import REPO_ROOT, REPORTS_DIR
 
 SKIP_DIRS = {".git", ".venv", "build", "node_modules", "__pycache__", ".worktrees", ".pixi", "models"}
@@ -78,7 +79,12 @@ def read_file(path: str, start_line: int = 1, max_lines: int = 400) -> str:
         return f"error: {e}"
     chunk = lines[max(0, start_line - 1): start_line - 1 + max(1, min(max_lines, 2000))]
     out = "\n".join(f"{start_line + i}\t{line}" for i, line in enumerate(chunk))
-    return out[:MAX_READ] + (f"\n... ({len(lines)} lines total)" if len(lines) > start_line - 1 + len(chunk) else "")
+    out = out[:MAX_READ] + (f"\n... ({len(lines)} lines total)" if len(lines) > start_line - 1 + len(chunk) else "")
+    # Reports are written by agents that read web pages: a reader gets them labelled. (A
+    # sandbox copy was wrapped when it was made.)
+    if p.parent == REPORTS_DIR.resolve():
+        out = untrusted.wrap(out, f"report {p.name}", untrusted.MAX_REPORT_CHARS)
+    return out
 
 
 @tool
@@ -212,7 +218,10 @@ def open_sandbox(topic: str) -> str:
             continue
         if not dst.exists() and not dst.is_symlink():
             dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(src, dst)
+            # Reports can hold text fetched from the web: the coding agent in the sandbox reads
+            # a bounded copy inside the untrusted-data wrapper, not the raw file.
+            text = src.read_text(errors="replace")
+            dst.write_text(untrusted.wrap(text, f"report {src.name}", untrusted.MAX_REPORT_CHARS))
     _state["sandbox"] = path
     return json.dumps({"sandbox": str(path), "branch": branch})
 
