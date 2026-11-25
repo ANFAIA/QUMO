@@ -117,8 +117,9 @@ run the circuit at amplified noise, extrapolate the expectation value to zero no
 
 Folding rejects (QM-E801) scale < 1, noise channels (fold first, then add noise),
 resets, classical control and mid-circuit measurements; terminal measurements are
-removed and re-appended. The exact Estimator primitive evolves only the unitary part
-of a circuit, so noisy estimates sample instead.
+removed and re-appended. The exact Estimator primitive (`run_estimator` with
+`precision <= 0`) and `expectation` refuse a circuit with noise channels (QM-E416),
+so noisy estimates sample instead.
 
 Measured (tests/examples): GHZ-6 <Z^6> with gate errors e1 = 1e-3, e2 = 1e-2
 (DEPOLARIZE1(1.5e-3), DEPOLARIZE2(1.25e-2)), scales [1, 3, 5], 20k shots:
@@ -310,6 +311,13 @@ difference, and a 2000-qubit model runs. Not compared with PennyLane's own sampl
 RNGs differ and PennyLane is not in `bench/.venv`.
 
 ## Sample-based quantum diagonalisation (`sqd.mojo`)
+
+`subspace_ground_state(h, basis_states, num_qubits)` is the diagonalisation behind it:
+restarted Lanczos on H projected on the listed basis states, for 1 to 48 qubits and up
+to 2^21 states (QM-E807 above; QM-E802 for a state listed twice or outside
+[0, 2^n)). Basis states are compared as whole integers, so the whole 48-qubit range
+is usable (until 2026-11-25 a state with a bit at position 43 or higher
+gave energy 0.0 or a false "listed twice").
 
 `partition_subsample` (disjoint batches), `recover_configurations` (Robledo-Moreno
 et al.'s modified ReLU), `sqd_iteration(..., policy)`. `policy="standard"` keeps the

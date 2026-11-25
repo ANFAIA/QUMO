@@ -36,7 +36,7 @@ from std.time import perf_counter_ns
 from qumo.ir.circuit import Circuit
 from qumo.sim.statevector import StateVector
 from qumo.sim.runner import evolve, evolve_into, bitstring
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.algorithms.library import qft, iqft
 from qumo.algorithms.linalg import sv_dot
 from qumo.exec.dispatch import sample_on

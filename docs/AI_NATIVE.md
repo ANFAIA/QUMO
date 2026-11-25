@@ -343,8 +343,8 @@ same.
 | Tool | Arguments | Result |
 |---|---|---|
 | `qumo_run_qasm` | `qasm` \| `circuit` \| `program`, `shots`=1024, `seed`=1234, `params`, `max_qubits`=28, `max_iterations`=65536 | `counts` (sorted), `method` (`statevector:static` or `:trajectories`), `most_frequent`, `warnings`, `timing_ms`; a program adds `iterations` and `outputs`. Circuits without measurements are measured on all qubits (QM-W004). |
-| `qumo_statevector` | `qasm`, `params`, `max_amplitudes`=64, `threshold`, `max_qubits`=24 | `amplitudes[{index, bitstring, re, im, probability}]`, `num_nonzero`, `truncated`, `norm` |
-| `qumo_expectation` | `qasm`, `observable` (string or array), `params` | `expectation`, `results[]` |
+| `qumo_statevector` | `qasm`, `params`, `max_amplitudes`=64, `threshold`, `max_qubits`=24 | `amplitudes[{index, bitstring, re, im, probability}]`, `num_nonzero`, `truncated`, `norm`. Terminal measurements are ignored; a reset, a noise channel or a mid-circuit measurement is refused (QM-E416): use `qumo_run_qasm` or `qumo_density` |
+| `qumo_expectation` | `qasm`, `observable` (string or array), `params` | `expectation`, `results[]`. Exact value on one pure state, so the same circuits are refused (QM-E416); `qumo_density` gives the exact noisy value |
 | `qumo_validate_qasm` | `qasm` | `valid`, `errors[]` (every error the parser can reach, not only the first), `errors_complete`, `warnings[]` (lint; QM-W054 for a program), `summary` when valid. After a failing gate call, measurement or assignment the check goes on to the next statement; an error in a declaration or a block header stops it, and `errors_complete` is then `false` (later lines were not checked) |
 | `qumo_describe` | `topic`: gates \| gate \| errors \| error \| capabilities, `name`, `format`: json \| markdown | self-description JSON (`markdown`, topic `errors` only: the text of docs/ERRORS.md) |
 | `qumo_circuit_info` | `qasm` \| `program`, `include_instructions`, `include_qasm`, `include_lint` | `summary`, `lint`, and optionally `circuit` (`program` for a program) and `qasm` |
@@ -560,7 +560,7 @@ from qumo.core.json import JsonValue, JsonWriter
 from qumo.ai.describe import write_circuit_summary
 from qumo.ir.qasm import to_qasm
 from qumo.compiler.pass_manager import transpile
-from qumo.compiler.target import parse_target
+from qumo.device.target import parse_target
 
 def _transpile(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
     var warnings = List[String]()

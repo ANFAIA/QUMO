@@ -115,7 +115,7 @@ See `rl/drivers/route/README.md`: QUMO's routing environment (`qumo/compiler/ai_
 ## Determinism and the thread count
 
 For a given seed and configuration, a run is **independent of `--cores` and bit-identical across reruns** on the same
-machine and binary. All randomness is the seeded `qumo.sim.rng.Rng`, derived per consumer from a seed tree
+machine and binary. All randomness is the seeded `qumo.core.rng.Rng`, derived per consumer from a seed tree
 (`seed_for(run_seed, tag, a, b, c)`); parallel work is cut into fixed items (episodes, virtual workers of fixed chunks)
 whose results are merged in index order, and gradient buffers are reduced in a fixed tree. `--cores` is clamped to
 `parallelism_level()` and changes only the speed. This replaces the statement of the Python era that training was not

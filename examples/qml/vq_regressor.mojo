@@ -32,7 +32,7 @@ example-meta: {"framework": "qibo", "tier": "fast", "timeout": 60, "requires": [
 from std.math import sin
 from qumo.ir.circuit import Circuit
 from qumo.ir.pauli import PauliSum, parse_pauli_sum
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.algorithms.gradients import Grad, value_and_gradient, expectation_value
 from qumo.algorithms.optimizers import Objective, Adam
 from qumo.testing.checks import CheckLog

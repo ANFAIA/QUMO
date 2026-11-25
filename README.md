@@ -78,14 +78,16 @@ Full install, update, GPU and hardware steps: [docs/GETTING_STARTED.md](docs/GET
 | Module | What it does |
 |---|---|
 | `qumo.ir` | Circuit IR, `Program` (`while`, classical variables), symbolic parameters, OpenQASM 2/3 |
-| `qumo.compiler` | Any coupling map + basis, text-spec pass pipelines, SABRE routing, KAK, AI transpiler |
+| `qumo.device` | `Target`: coupling graph, native basis, errors and durations, one-line specs (`parse_target`) |
+| `qumo.compiler` | Compiles for any `Target`: text-spec pass pipelines ([docs/PASSES.md](docs/PASSES.md)), SABRE routing, KAK, AI transpiler |
 | `qumo.sim` | State vector (SIMD, threads), stabilizer tableau, Pauli-frame sampler, density matrix |
+| `qumo.noise` | `NoiseModel` from calibration data, randomized benchmarking, T1/Ramsey fits, readout mitigation (tensored and M3) |
 | `qumo.gpu` | One Mojo source for NVIDIA, AMD and Apple GPUs |
 | `qumo.exec` | Sampler/Estimator primitives, HEFT orchestration over CPU/GPU/QPU, resource estimation |
 | `qumo.algorithms` | QFT, Grover, QPE, Trotter, UCCSD, gradients, VQE, QAOA, QML |
 | `qumo.qec`, `qumo.ft` | Surface codes, decoders, detector error models; fault-tolerant programming |
 | `qumo.ai`, `cli/` | JSON everywhere, stable `QM-Exxx` error codes with hints, MCP server, CLI |
-| `qumo.net`, `qumo.bench`, `qumo.testing` | Support code: native HTTP/TLS client used by the hardware clients, benchmark circuit generators, `CheckLog` for machine-checked examples |
+| `qumo.core`, `qumo.net`, `qumo.bench`, `qumo.testing` | Support code: JSON and the seeded `Rng`, native HTTP/TLS client used by the hardware clients, benchmark circuit generators, `CheckLog` for machine-checked examples |
 | `plugins/hardware` | Run compiled circuits on IBM Quantum and Quantinuum (dry-run by default) |
 | `agents/` | AI agents that keep QUMO current: a Python package (`agents/qumo_agents`, on deepagents) and a native Mojo harness (`agents/mojo/`, from pull request #7) |
 

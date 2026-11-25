@@ -21,7 +21,7 @@ example-meta: {"framework": "qsharp", "tier": "fast", "timeout": 120, "requires"
 from std.math import cos, pi
 from qumo.ir.circuit import Circuit
 from qumo.sim.branching import sample_branching, BranchingSimulator
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.testing.checks import CheckLog
 
 

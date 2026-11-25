@@ -45,7 +45,7 @@ All line numbers refer to the files as of this worktree (HEAD e0ad469).
   NOT bit-reproducible (twisterl uses an unseeded `thread_rng`; README line "Training is not
   bit-reproducible"). Models are fixed hashed artefacts. So the native port does not need to
   reproduce Python RNG streams (Mersenne Twister, PCG64, torch Philox/MT) bit-for-bit; it should
-  use the seeded `qumo.sim.rng.Rng` everywhere and become deterministic per (seed, threads).
+  use the seeded `qumo.core.rng.Rng` everywhere and become deterministic per (seed, threads).
   Exception worth keeping: golden comparison tests against the COMMITTED models/manifests
   (those hold Python-derived expectations and are the independent oracle).
 
