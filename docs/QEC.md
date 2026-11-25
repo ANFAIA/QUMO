@@ -341,7 +341,7 @@ callers, the algorithms and the execution layer). `qumo.qec.characterization` an
     is handled by mitigation).
   * gates of arity 3 (CCX, CSWAP, CCZ) have no gate-error rule: when the model
     has any gate error (1q, 2q or per-edge), `apply_noise_model` rejects them
-    with QM-E738; decompose them into 1q and 2q gates first
+    with QM-E739; decompose them into 1q and 2q gates first
     (`qumo.compiler.basis.unroll_3q`). With zero gate error they pass, with idle
     noise only.
 * `randomized_benchmarking_1q(lengths, num_sequences, shots, seed,

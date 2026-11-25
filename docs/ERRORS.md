@@ -850,7 +850,7 @@ Fix: Bind parameters and remove non-Clifford gates.
 **Correlated matching needs error probabilities up to 0.5.**  
 Fix: Use plain 'mwpm' for this detector error model.
 
-### QM-E738
+### QM-E739
 
 **apply_noise_model got a unitary gate of arity 3 (CCX, CSWAP, CCZ) while the noise model has gate errors; a 3-qubit gate has no gate-error rule.**  
 Fix: Decompose it into 1- and 2-qubit gates first (qumo.compiler.basis.unroll_3q, or transpile to a target without CCX), then add noise.

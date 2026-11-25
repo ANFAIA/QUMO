@@ -12,7 +12,7 @@
         gates, DEPOLARIZE2(5/4 e2') after 2q gates (Qiskit's
         `NoiseModel.from_backend` convention of not double counting T1/T2).
         Gates of arity 3 (CCX, CSWAP, CCZ) have no gate-error rule: when the
-        model has any gate error, `apply_noise_model` rejects them (QM-E738);
+        model has any gate error, `apply_noise_model` rejects them (QM-E739);
         decompose them into 1q and 2q gates first.
       - readout: X_ERROR((p01 + p10)/2) before each measurement (a Pauli
         channel cannot be asymmetric; use `ReadoutCalibration` +
@@ -30,7 +30,7 @@
     section over the rate, linear least squares for amplitude/offset).
 
 Error codes: QM-E709 (invalid calibration / noise model), QM-E710 (fit failure),
-QM-E738 (gate of arity 3 under a noise model with gate errors).
+QM-E739 (gate of arity 3 under a noise model with gate errors).
 """
 
 from std.math import exp, log, sqrt
@@ -240,7 +240,7 @@ def _add_pauli_channel(mut out: Circuit, ch: PauliProbs, q: Int):
 def apply_noise_model(circuit: Circuit, model: NoiseModel) raises -> Circuit:
     """Copy of `circuit` with the model's noise channels inserted (see module doc).
 
-    Unitary gates of arity 3 (CCX, CSWAP, CCZ) are rejected with QM-E738 when
+    Unitary gates of arity 3 (CCX, CSWAP, CCZ) are rejected with QM-E739 when
     the model has any gate error: the model has no depolarising rule for them,
     so the error would be silently dropped. Gates marked virtual by `op_time`
     (duration 0) get no gate error and are accepted. Decompose such gates into
@@ -292,7 +292,7 @@ def apply_noise_model(circuit: Circuit, model: NoiseModel) raises -> Circuit:
         var is_virtual = len(model.op_time) > 0 and dur == 0.0
         if op_is_unitary(k) and k != Op.I and not is_virtual:
             if a >= 3 and model.has_gate_error():
-                raise Error("QM-E738: " + op_name(k) + " acts on " + String(a) + " qubits and the noise model has gate errors, but a gate of arity 3 has no gate-error rule. Hint: decompose " + op_name(k) + " into 1- and 2-qubit gates first (qumo.compiler.basis.unroll_3q, or transpile to a target without CCX), then add noise.")
+                raise Error("QM-E739: " + op_name(k) + " acts on " + String(a) + " qubits and the noise model has gate errors, but a gate of arity 3 has no gate-error rule. Hint: decompose " + op_name(k) + " into 1- and 2-qubit gates first (qumo.compiler.basis.unroll_3q, or transpile to a target without CCX), then add noise.")
             for j in range(a):
                 _add_pauli_channel(out, model.idle_channel(g.qubit(j), dur), g.qubit(j))
             if a == 1:
