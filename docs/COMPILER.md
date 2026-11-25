@@ -70,7 +70,11 @@ arg      := word | key "=" value | item          # fixpoint(...) nests pipelines
 
 Example: `remove_identities,elide_swaps,fixpoint(cancel,commute,fuse1q,max=4),route(sabre,layout=auto,trials=20,swap_trials=20),kak,basis,cancel,commute,fuse1q,check`.
 `PassManager(spec).canonical()` prints the normalised spec; `describe_passes()`
-is a JSON catalog. Each pass yields a `PassReport` (gates / 2q / depth before
+is a JSON catalog. Every pass is declared once, in `pass_decl` (its name,
+aliases, description and arguments); the argument check, the hints of QM-E602
+and the values a pass reads all come from that table, and so does
+[PASSES.md](PASSES.md), the generated reference of every name, alias and
+argument with its values and default. Each pass yields a `PassReport` (gates / 2q / depth before
 and after, wall time in µs, note); `CompileResult.to_json()` is the
 machine-readable summary.
 
@@ -84,7 +88,7 @@ machine-readable summary.
 | `eject_z` | push Z rotations through Z-type wires, swaps, Pauli-Z frames through CX targets, into U gates | Cirq `eject_z` (virtual Z) |
 | `phase_fold` | phase-polynomial folding of diagonal rotations on equal parities (T-count), RZZ folds too | TKET / PyZX phase folding, T-par |
 | `wrap_angles(gate[min:max])` | bring constant angles into the target's bounds with Pauli corrections; not in presets unless the target has bounds | Qiskit `WrapAngles`, IBM `FoldRzzAngle` |
-| `post_layout(call_limit)` | rename physical qubits to the best embedding under the calibration; not in presets unless the target is calibrated | Qiskit `VF2PostLayout` |
+| `post_layout(call_limit=N)` | rename physical qubits to the best embedding under the calibration; not in presets unless the target is calibrated | Qiskit `VF2PostLayout` |
 | `pauli_simp` | Pauli-gadget resynthesis: a bit-packed stabiliser tableau pulls every rotation back to the input frame (`U = C_total . prod exp(-i t P_k)`), identical commuting Paulis merge, gadgets are re-emitted as basis change + CX chain + rz with each chain reusing the previous chain's prefix (ladders cancel between consecutive terms), commuting gadgets are reordered greedily; kept only when it beats the original after cancel/commute/KAK | TKET `PauliSimp`, Qiskit Pauli-network synthesis |
 | `elide_swaps` | delete SWAPs by relabelling (folded into `final_layout`); only trailing swaps once routed | Qiskit `ElidePermutations` |
 | `unroll3q` | ccx / ccz / cswap → 1q + cx | Qiskit `Unroll3qOrMore` |
@@ -101,7 +105,10 @@ machine-readable summary.
 `route` keys: `layout=auto|sabre|dense|trivial|random|vf2`, `seed`, `trials`,
 `iterations`, `swap_trials`, `lookahead` (extended-set size), `weight`,
 `decay`, `heuristic=auto|extended|layer`, `vf2_steps`, `valve`, `star=on|off`,
-`absorb` / `absorb_alt` (score factor for absorbable swaps; 1.0 / 0.9).
+`absorb` / `absorb_alt` (score factor for absorbable swaps; 1.0 / 0.9),
+`mirror=on|off|free|auto` and `mirror_gain` (mirror-gate routing),
+`commute=on|off|auto` (commutation-aware routing DAG). The complete list with
+defaults is in [PASSES.md](PASSES.md#route).
 AI routing keys (docs/AI_TRANSPILER.md): `policy=off|auto|<model id>` (off by
 default; otherwise the learned-policy layout + routing runs after SABRE on the
 same circuit, seeded with SABRE's layout, and replaces it only when its
