@@ -298,6 +298,13 @@ does, so no simulator needed a new opcode. `M(p)` flips the record and not the q
 which `X_ERROR` cannot do, so it measures a copy on one spare qubit. `to_stim` gives
 Stim text back, with MPP lowered.
 
+Limits, enforced by the parsers before they allocate (QM-E734 for circuits, QM-E735 for
+detector error models): `REPEAT` blocks nest at most 256 levels, the same as the OpenQASM
+parser's `MAX_NESTING` (deeper text used to overflow the stack and crash the process);
+a circuit unrolls to at most 50,000,000 lines and a detector error model to at most
+2,000,000 lines, counted per pass of every `REPEAT`, so an empty body is charged too.
+The detector error model limit is about 1 GB of memory at a million mechanisms.
+
 Two noise opcodes use side tables, since `Instruction` holds three qubits:
 `PAULI_CHANNEL_2` (`Circuit.noise_table`) and `E` / `ELSE_CORRELATED_ERROR`
 (`Circuit.pauli_table`). Frames, the tableau, trajectories and DEM extraction take
