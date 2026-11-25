@@ -30,7 +30,8 @@ from qumo_agent.native.fs import make_dirs, make_temp_dir, realpath_strict, remo
 from qumo_agent.native.spawn import check_env_keeps, is_secret_env_name
 from qumo_agent.net.guard import UrlGuard, literal_is_global
 from qumo_agent.net.url import Url, parse_url, resolve_reference
-from qumo_agent.tools.config import LocalToolsCatalog
+from qumo_agent.harness.untrusted import untrusted_wrap
+from qumo_agent.tools.config import AgentSpecData, LocalToolsCatalog, Registry, check_web_exec
 from qumo_agent.tools.repo import resolve_repo_path, run_check_refusal
 
 comptime SPEC_PATH = "agents/spec/guard_rules.json"
@@ -138,6 +139,40 @@ def run_model_key(inp: JsonValue) raises -> String:
     return String()
 
 
+def run_delegation(inp: JsonValue) raises -> String:
+    var agents = inp.get("agents")
+    var specs = List[AgentSpecData]()
+    for i in range(len(agents)):
+        var a = agents.at(i)
+        specs.append(AgentSpecData(
+            agents.key_at(i), String(), strings(a.get("tool_groups")), False, List[String](),
+            strings(a.get("subagents")), False, False, List[String](), String(), String(), False,
+            strings(a.get("untrusted_subagents"))))
+    try:
+        check_web_exec(specs)
+    except e:
+        return String(e)
+    return String()
+
+
+def run_delegation_shipped() raises -> String:
+    """The agents this harness really loads: agents/prompts/specs.json and agents/mojo/specs/."""
+    try:
+        _ = Registry(".")
+    except e:
+        return String(e)
+    return String()
+
+
+def run_untrusted_wrap(vec: JsonValue) raises -> String:
+    """"" when the wrapped text is the vector's `output` (its random token written TOKEN)."""
+    var inp = vec.get("input")
+    var got = untrusted_wrap(inp.get("text").as_string(), inp.get("source").as_string(), inp.get_int("limit", 0), "TOKEN")
+    if got == vec.get("output").as_string():
+        return String()
+    return "output differs: " + got
+
+
 def run_vector(spec: JsonValue, vec: JsonValue, root: String) raises -> String:
     """"" when the harness allows the input, else the reason class of its refusal."""
     var rule = vec.get("rule").as_string()
@@ -151,6 +186,12 @@ def run_vector(spec: JsonValue, vec: JsonValue, root: String) raises -> String:
         text = run_url(inp)
     elif rule == "model_key":
         text = run_model_key(inp)
+    elif rule == "delegation":
+        text = run_delegation(inp)
+    elif rule == "delegation_shipped":
+        return run_delegation_shipped()
+    elif rule == "untrusted_wrap":
+        return run_untrusted_wrap(vec)
     elif rule == "check_env":
         return String() if check_env_keeps(inp.get("name").as_string()) else "dropped"
     elif rule == "secret_env_name":
@@ -207,7 +248,7 @@ def test_vectors(spec: JsonValue) raises:
         except e:
             got = "error: " + String(e)
         ran += 1
-        if expect == "allowed":
+        if expect == "allowed" or expect == "wrapped":
             if got.byte_length() > 0:
                 failures.append(id + ": expected allowed, refused with " + got)
         elif got.byte_length() == 0:

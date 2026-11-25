@@ -47,7 +47,7 @@ def task_tool_spec(names: List[String], descriptions: List[String]) -> ToolSpec:
 
 def general_purpose_def(parent: AgentDef) -> AgentDef:
     return AgentDef(GENERAL_PURPOSE, GENERAL_PURPOSE_DESCRIPTION, DEFAULT_SUBAGENT_PROMPT,
-                    parent.model, List[String](), SUBAGENT_RECURSION_LIMIT)
+                    parent.model, List[String](), SUBAGENT_RECURSION_LIMIT, List[String]())
 
 
 def unknown_subagent_text(subagent_type: String, allowed: List[String]) -> String:
