@@ -25,7 +25,8 @@ QM-E803 (operator does not fit the register), QM-E808 (Trotter options),
 QM-E810 (QPE options).
 """
 
-from std.math import pi, sqrt, asin, floor, sin
+from std.math import pi, sqrt, asin, acos, floor, sin
+from std.bit import pop_count
 from std.collections import Optional
 from qumo.ir.circuit import Circuit
 from qumo.ir.gates import Op
@@ -78,6 +79,115 @@ def ghz(n: Int) raises -> Circuit:
     for q in range(n - 1):
         c.cx(q, q + 1)
     return c^
+
+
+def _check_dicke_k(n: Int, k: Int, what: String) raises:
+    if k < 0 or k > n:
+        raise Error("QM-E802: " + what + " needs 0 <= k <= n, got k=" + String(k) + " for n=" + String(n) + ". Hint: k is the Hamming weight of every basis state in the superposition.")
+
+
+def _append_ccry(mut c: Circuit, theta: Float64, c0: Int, c1: Int, t: Int):
+    """RY(theta) on t when c0 and c1 are both 1: 4 RY(+-theta/4) and 4 CX
+    (uniformly controlled rotation; X RY(a) X = RY(-a))."""
+    var q = theta / 4.0
+    c.ry(q, t)
+    c.cx(c0, t)
+    c.ry(-q, t)
+    c.cx(c1, t)
+    c.ry(q, t)
+    c.cx(c0, t)
+    c.ry(-q, t)
+    c.cx(c1, t)
+
+
+def _append_scs(mut c: Circuit, qubits: List[Int], m: Int, kk: Int):
+    """Split & cyclic shift SCS_{m,kk} of Bärtschi-Eidenbenz on paper qubits
+    m-kk..m (1-based paper index p is qubits[p - 1])."""
+    var last = qubits[m - 1]
+    # gate (i) on paper qubits (m-1, m)
+    var a = qubits[m - 2]
+    c.cx(a, last)
+    c.cry(2.0 * acos(sqrt(1.0 / Float64(m))), last, a)
+    c.cx(a, last)
+    # gates (ii)_l on paper qubits (m-l, m-l+1, m), l = 2..kk
+    for l in range(2, kk + 1):
+        var t = qubits[m - l - 1]
+        var mid = qubits[m - l]
+        c.cx(t, last)
+        _append_ccry(c, 2.0 * acos(sqrt(Float64(l) / Float64(m))), last, mid, t)
+        c.cx(t, last)
+
+
+def append_dicke_state(mut c: Circuit, qubits: List[Int], k: Int) raises:
+    """Prepare the Dicke state |D_k^n> (n = len(qubits)) on `qubits`, which must
+    start in |0...0>: the equal superposition of the C(n, k) basis states with
+    exactly k ones, all amplitudes +C(n,k)^(-1/2).
+
+    Bärtschi and Eidenbenz, arXiv:1904.07358: X on the last k qubits, then the
+    split-and-cyclic-shift unitaries SCS_{n,k}, ..., SCS_{k+1,k}, SCS_{k,k-1},
+    ..., SCS_{2,1}. For 2k > n it prepares |D_{n-k}^n> and applies X to every
+    qubit (fewer gates, same state). With r = min(k, n-k) >= 1: n-1 CRY,
+    T = (n-r)(r-1) + (r-1)(r-2)/2 doubly controlled RY (each 4 RY + 4 CX),
+    2(n-1) + 6T CX. No ancillas. k = 0 adds nothing; k = n adds one X layer.
+    """
+    var n = len(qubits)
+    _check_n(n, "append_dicke_state()", 1, 64)
+    _check_dicke_k(n, k, "append_dicke_state()")
+    for i in range(n):
+        if qubits[i] < 0 or qubits[i] >= c.num_qubits:
+            raise Error("QM-E802: append_dicke_state() got qubit " + String(qubits[i]) + " but the circuit has " + String(c.num_qubits) + " qubits. Hint: use qubit indices 0 to num_qubits - 1.")
+        for j in range(i + 1, n):
+            if qubits[i] == qubits[j]:
+                raise Error("QM-E802: append_dicke_state() lists qubit " + String(qubits[i]) + " twice. Hint: the qubits must be distinct.")
+    var complement = 2 * k > n
+    var w = n - k if complement else k
+    for p in range(n - w, n):
+        c.x(qubits[p])
+    if w >= 1:
+        var m = n
+        while m > w:
+            _append_scs(c, qubits, m, w)
+            m -= 1
+        while m >= 2:
+            _append_scs(c, qubits, m, m - 1)
+            m -= 1
+    if complement:
+        for p in range(n):
+            c.x(qubits[p])
+
+
+def dicke_state(n: Int, k: Int) raises -> Circuit:
+    """Dicke state |D_k^n> = C(n,k)^(-1/2) sum_{wt(x)=k} |x> on qubits 0..n-1.
+
+    Layout: qubits 0..n-1, no ancillas. Params: none. Gates: see
+    `append_dicke_state` (O(n min(k, n-k)) gates, O(n) depth). Deterministic,
+    Bärtschi-Eidenbenz (arXiv:1904.07358). D_1^n is the W state.
+    """
+    _check_n(n, "dicke_state()", 1, 64)
+    _check_dicke_k(n, k, "dicke_state()")
+    var c = Circuit(n, name="dicke")
+    var qs = List[Int](capacity=n)
+    for i in range(n):
+        qs.append(i)
+    append_dicke_state(c, qs, k)
+    return c^
+
+
+def dicke_amplitudes(n: Int, k: Int) raises -> List[Float64]:
+    """Amplitudes of |D_k^n> as a dense real vector of 2^n entries (index = basis
+    state, little-endian): C(n,k)^(-1/2) where the index has k ones, else 0.
+    For tests and references; n <= 20."""
+    _check_n(n, "dicke_amplitudes()", 1, 20)
+    _check_dicke_k(n, k, "dicke_amplitudes()")
+    var binom = 1.0
+    for i in range(k):
+        binom = binom * Float64(n - i) / Float64(i + 1)
+    var a = 1.0 / sqrt(binom)
+    var out = List[Float64](length=1 << n, fill=0.0)
+    for i in range(1 << n):
+        if Int(pop_count(i)) == k:
+            out[i] = a
+    return out^
 
 
 # ---------------------------------------------------------------------------
