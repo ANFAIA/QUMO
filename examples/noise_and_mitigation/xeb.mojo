@@ -38,8 +38,8 @@ from std.time import perf_counter_ns
 from max.algorithm import parallelize
 from qumo.ir.circuit import Circuit
 from qumo.sim.runner import evolve, sample
-from qumo.sim.rng import Rng
-from qumo.qec.characterization import fit_decay
+from qumo.core.rng import Rng
+from qumo.noise.characterization import fit_decay
 from qumo.testing.checks import CheckLog
 
 comptime E_PAULI = 5e-3

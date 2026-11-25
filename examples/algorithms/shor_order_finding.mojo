@@ -44,9 +44,9 @@ example-meta: {"framework": "qiskit", "tier": "fast", "timeout": 120, "requires"
 from std.math import sqrt
 from qumo.ir.circuit import Circuit
 from qumo.sim.runner import evolve, sample
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.algorithms.library import iqft, order_finding, order_from_phase
-from qumo.compiler.target import parse_target
+from qumo.device.target import parse_target
 from qumo.compiler.pass_manager import transpile
 from qumo.testing.checks import CheckLog
 

@@ -18,7 +18,8 @@ var e = expectation(circuit, parse_pauli_sum("Z0 Z1"))
 `reset`, a noise channel (Pauli noise, Kraus, correlated error) or a measurement
 followed by more gates on the measured qubit (QM-E416; classically conditioned gates
 are QM-E401). Terminal measurements, barriers, ticks, detectors and observables are
-ignored. The same check runs in `GpuStateVector.evolve` and in `run_estimator`. For
+ignored. The same check runs in `GpuStateVector.evolve` and in the exact path of
+`run_estimator` (`precision <= 0`; with `precision > 0` it samples, so these circuits run). For
 those circuits use `sample` (trajectories) or the density-matrix simulator; to get the
 ideal value on purpose, `circuit.without_noise()` returns a copy with the channels removed. The check is
 `qumo.sim.runner.check_pure_state_circuit`; `evolve_into` and `build_plan` do not run it
@@ -378,7 +379,7 @@ Which sampler runs a noisy circuit: `sample()` always uses state-vector trajecto
 (`qumo.exec.dispatch`) and the CLI switch to Pauli frames or the tableau when the
 circuit is Clifford with Pauli noise; those refuse Kraus channels (QM-E414). To
 derive channels from a device's error rates instead of writing them by hand, use
-`NoiseModel` + `apply_noise_model` (`qumo.qec.characterization`) or `emulate` below.
+`NoiseModel` + `apply_noise_model` (`qumo.noise.characterization`) or `emulate` below.
 
 ### Simulators for noise
 
