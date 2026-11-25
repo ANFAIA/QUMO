@@ -514,6 +514,99 @@ def test_clbit_snapshot_budget() raises:
     assert_equal(compile(SteaneBuilder().build(3), ok).num_clbits, 62)
 
 
+def _cond_pauli_exp_program(c0: Int) raises -> LogicalProgram:
+    """Iceberg k=4: c0 := c0, then pauli_exp(pi, XXXX) if c0 == 1, then read the block."""
+    var lp = LogicalProgram("cond_pauli_exp")
+    var qs = List[Int]()
+    for _ in range(4):
+        qs.append(lp.alloc())
+    lp.set_bit(0, XorExpr.one() if c0 == 1 else XorExpr())
+    lp.pauli_exp(pi, "XXXX", qs)
+    lp.c_if(0, 1)
+    for i in range(4):
+        lp.measure(qs[i], 1 + i)
+    return lp^
+
+
+def _two(a: Int, b: Int) -> List[Int]:
+    var l = List[Int]()
+    l.append(a)
+    l.append(b)
+    return l^
+
+
+def _one_outcome(c: LogicalCounts, key: String) -> Bool:
+    return c.counts.get(key, 0) == c.shots
+
+
+def test_conditioned_pauli_exp() raises:
+    """A classical condition on pauli_exp is honoured by the reference circuit and the Iceberg engine."""
+    var arch = IcebergBuilder(4).build(1)
+    for c0 in range(2):
+        var lp = _cond_pauli_exp_program(c0)
+        var ref_c = reference_counts(logical_to_circuit(lp), 200, 5)
+        var enc = run_encoded(implement_ops(arch, lp), 200, 6)
+        # c0 and the four block bits all equal c0: c0 = 0 leaves 00000, c0 = 1 flips the block
+        var key = "11111" if c0 == 1 else "00000"
+        assert_true(_one_outcome(ref_c, key), "reference c0=" + String(c0) + ": " + String(ref_c))
+        assert_true(_one_outcome(enc, key), "implemented c0=" + String(c0) + ": " + String(enc))
+    # register condition (AND of two bits) is honoured too
+    var lp2 = LogicalProgram("cond_reg")
+    var qs = List[Int]()
+    for _ in range(4):
+        qs.append(lp2.alloc())
+    lp2.set_bit(0, XorExpr.one())
+    lp2.set_bit(1, XorExpr())
+    lp2.pauli_exp(pi, "ZZZZ", qs)
+    lp2.h(qs[0])
+    lp2.pauli_exp(pi, "XXXX", qs)
+    var bits = List[Int]()
+    var vals = List[Int]()
+    bits.append(0)
+    bits.append(1)
+    vals.append(1)
+    vals.append(0)
+    lp2.c_if_register(bits, vals)
+    for i in range(4):
+        lp2.measure(qs[i], 2 + i)
+    var r1 = reference_counts(logical_to_circuit(lp2), 400, 7)
+    var r2 = run_encoded(implement_ops(arch, lp2), 400, 8)
+    _close(r2, r1, 0.12, "register-conditioned pauli_exp")
+    # handles and strings are validated
+    var bad = LogicalProgram("dead")
+    var hits = 0
+    bad.pauli_exp(0.1, "XX", _two(5, 6))
+    try:
+        bad.validate()
+    except e:
+        assert_true(String(e).startswith("QM-E727"), String(e))
+        hits += 1
+    var idl = LogicalProgram("identity")
+    var a = idl.alloc()
+    var b = idl.alloc()
+    idl.pauli_exp(0.1, "II", _two(a, b))
+    try:
+        _ = logical_to_circuit(idl)
+    except e:
+        assert_true(String(e).startswith("QM-E724"), String(e))
+        hits += 1
+    try:
+        _ = implement_ops(IcebergBuilder(2).build(1), idl)
+    except e:
+        assert_true(String(e).startswith("QM-E724"), String(e))
+        hits += 1
+    var dup = LogicalProgram("dup")
+    var d = dup.alloc()
+    _ = dup.alloc()
+    dup.pauli_exp(0.1, "XZ", _two(d, d))
+    try:
+        dup.validate()
+    except e:
+        assert_true(String(e).startswith("QM-E724"), String(e))
+        hits += 1
+    assert_equal(hits, 4)
+
+
 def main() raises:
     test_logical_semantics()
     test_encoded_clifford_programs()
@@ -523,4 +616,5 @@ def main() raises:
     test_noise_and_tools()
     test_clbit_reuse_after_overwrite()
     test_clbit_snapshot_budget()
+    test_conditioned_pauli_exp()
     print("test_ft_encode OK")

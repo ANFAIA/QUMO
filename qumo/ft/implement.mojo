@@ -856,7 +856,7 @@ struct Engine(Movable):
             for q in qs:
                 self.emit(Op.H, q, -1, 0.0, c)
 
-    def pauli_exp(mut self, lp: LogicalProgram, g: LogicalInstr) raises:
+    def pauli_exp(mut self, lp: LogicalProgram, g: LogicalInstr, e: XorExpr) raises:
         """exp(-i angle/2 P) for a Pauli on a whole block: one weight-2 rotation."""
         var first = lp.pauli_args[g.q0]
         var letters = List[UInt8](length=self.k, fill=UInt8(ord("I")))
@@ -873,7 +873,7 @@ struct Engine(Movable):
             if self.hlive[h] and self.hblock[h] == self.hblock[first]:
                 self.flush(h)
         var dummy = List[Int]()
-        self.emit_template(iceberg_rotation(self.n, kind[0], kind[1], -1, g.angle), self.block_qubits(first), self.cond_of(XorExpr.one()), dummy)
+        self.emit_template(iceberg_rotation(self.n, kind[0], kind[1], -1, g.angle), self.block_qubits(first), self.cond_of(e), dummy)
 
     def _iceberg_gate(mut self, kind: Int, h0: Int, h1: Int, angle: Float64, e: XorExpr) raises:
         var hp = pi / 2
@@ -1251,7 +1251,8 @@ def implement_ops(arch: Architecture, lp: LogicalProgram) raises -> EncodedProgr
         elif k == LogicalOpKind.PAULI_EXP:
             if arch.kind != "iceberg":
                 raise Error("QM-E724: pauli_exp is an Iceberg op. Hint: Steane takes Clifford + T; compile() synthesises rotations.")
-            eng.pauli_exp(lp, g)
+            var e = eng.logical_cond(lp, g)
+            eng.pauli_exp(lp, g, e)
         elif k == LogicalOpKind.BARRIER:
             eng._sync_size()
             eng.circ.barrier()

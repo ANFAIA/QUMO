@@ -119,6 +119,8 @@ layout (X_i = X_t X_i, Z_i = Z_b Z_i):
 | X except Z at i | RYY(b, d_i) | - |
 | Z except X at i | RYY(t, d_i) | - |
 
+`pauli_exp` takes `c_if` / `c_if_register` like a rotation: the whole gadget, syndrome checks included, runs only when the condition holds (the reference `logical_to_circuit` conditions the rotation). Its handles must be live (`QM-E727`); an all-`I` string would be a global phase and is rejected (`QM-E724`), as is a repeated handle.
+
 guppyft has the operations and no Iceberg gadgets, so there is nothing to compare
 with: `valid_clifford_implementation` verifies each at theta = pi/2 for k = 2, 4, 6.
 

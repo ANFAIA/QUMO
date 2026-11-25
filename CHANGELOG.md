@@ -6,6 +6,9 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 
 ## [Unreleased]
 
+### Fixed
+
+- MCP server: `max_iterations` has a ceiling of 1000000 per call (`qumo_run_qasm`, `qumo_run_device`), refused with QM-E913 like `shots` and `max_qubits`. Before, `{"qasm": "... while (true) { x q[0]; } ...", "max_iterations": 9000000000000000000}` blocked the single-threaded server, `ping` included. The CLI keeps its range. (project review, 2026-11-25)
 
 ### Changed
 
@@ -44,6 +47,7 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 ### Fixed
 
 - `qumo.ft.encode.compile`: a measured qubit that is used again, and a classical-lane qubit that read a clbit, now use the value from when it was measured / read even if the clbit is overwritten in between (before, the logical program used the new value: `x(0); measure(0,0); h(1); h(1); measure(1,0); z(0); measure(0,1)` compiled to c1=0, the source gives 1). `compile` copies the bit to a fresh private clbit only when such an overwrite happens, so every other compiled program is unchanged; the copies show up as extra leading clbits, and a copy past the 62-bit register raises QM-E406. Test: `test_clbit_reuse_after_overwrite` in `tests/test_ft_encode.mojo`. (project review, 2026-11-25)
+- A classically conditioned `LogicalProgram.pauli_exp` (`c_if` / `c_if_register`) was applied unconditionally by the Iceberg implementation, and `logical_to_circuit` skipped the condition too, so the reference hid the bug (Iceberg k=4, `pauli_exp(pi, "XXXX")` then `c_if(0, 1)` with c0 = 0 gave 11110 instead of 00000). Both now honour the condition, like the conditioned rz/rzz. `LogicalProgram.validate` also checks the handles of `pauli_exp` are live (QM-E727; before, `Engine.pauli_exp` indexed unchecked) and rejects an all-identity string or a repeated handle (QM-E724; the reference path read past an empty ladder). (`qumo/ft/implement.mojo`, `qumo/ft/emulate.mojo`, `qumo/ft/logical.mojo`, `tests/test_ft_encode.mojo`)
 - OpenQASM: a `gate` definition with the name and signature of a native gate was dropped and the native gate ran, whatever the body said (`gate h a { x a; } h q[0];` gave an H). The body is now compared with the native unitary (up to global phase, up to 4 qubits): an equal definition still maps to the native opcode, so `to_qasm` output round-trips as before, and a different one (or one that cannot be compared) is used as written with the new warning QM-W056. Every definition `to_qasm` and `to_qasm2` write was checked and matches its native gate.
 - Pauli text inputs are checked (`qumo/ir/pauli.mojo`): `PauliSum.add_label` and `PauliTerm.label(n)` raise QM-E302 past 64 qubits (a 65-character label used to wrap and put the Pauli on the wrong qubit, silently); `parse_pauli_sum` raises QM-E301 for a qubit repeated inside one term (`"X0 Z0"` used to give `Y0`, `"Z0 Z0"` gave `Z0`) and for a sign with no term after it (`"Z0 +"` used to add a spurious identity term). `PauliTerm.label` now `raises`. Inputs that were correct give the same result.
 - OpenQASM slices: negative bounds are normalised before the range is walked, so `q[0:-1]` is the whole register and `q[-3:-1]` the last three qubits (it used to select nothing); a range that selects no qubits, bits or elements (`q[2:1]`) is now error `QM-E521` with line and column instead of aborting the process ("index 0 is out of bounds") or reading the next operand's qubit. Out-of-range slice bounds are reported even when the range is empty.
