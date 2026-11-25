@@ -27,6 +27,9 @@ from qumo_agents.config import REPO_ROOT, REPORTS_DIR
 # specification the Mojo harness reads too.
 SKIP_DIRS = set(guard_spec.REPO["skip_dirs"])
 SECRET_NAMES = re.compile(guard_spec.secret_names_pattern(), re.I)
+# Skip directories are compared case-folded: on a case-insensitive file system (macOS)
+# `.GIT/config` is `.git/config`, and so are `model\u017f` and `.wor\u212atrees`.
+_SKIP_FOLDED = frozenset(d.casefold() for d in SKIP_DIRS)
 MAX_READ = 60_000
 MAX_OUTPUT = 12_000
 SANDBOX_ROOT = REPO_ROOT / ".worktrees"
@@ -35,9 +38,10 @@ _state = {"sandbox": None}  # Path of the sandbox worktree opened in this proces
 
 
 def _forbidden(parts) -> bool:
-    """True when any path component is a skipped directory or a secret-looking name.
+    """True when any path component is a skipped directory (in any letter case) or a
+    secret-looking name.
     The one rule behind _resolve, list_files and search_code, so they cannot drift."""
-    return any(part in SKIP_DIRS or SECRET_NAMES.search(part) for part in parts)
+    return any(part.casefold() in _SKIP_FOLDED or SECRET_NAMES.search(part) for part in parts)
 
 
 def _walkable(p: Path, root: Path) -> bool:

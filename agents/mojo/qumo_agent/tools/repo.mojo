@@ -86,14 +86,25 @@ def _strip_code(msg: String) -> String:
 
 
 def _ascii_lower(s: String) -> String:
+    """`s` case-folded for the comparison with a skip directory: ASCII letters lower-cased, and
+    the two other characters that fold to an ASCII letter, U+212A (Kelvin sign, k) and U+017F
+    (long s, s). A case-insensitive file system folds them too, so `model\u017f` is `models`."""
     var bs = s.as_bytes()
     var out = List[UInt8](capacity=len(bs))
-    for b in bs:
-        var c = Int(b)
+    var i = 0
+    while i < len(bs):
+        var c = Int(bs[i])
         if c >= 0x41 and c <= 0x5A:
             out.append(UInt8(c + 32))
+        elif c == 0xE2 and i + 2 < len(bs) and Int(bs[i + 1]) == 0x84 and Int(bs[i + 2]) == 0xAA:
+            out.append(UInt8(0x6B))
+            i += 2
+        elif c == 0xC5 and i + 1 < len(bs) and Int(bs[i + 1]) == 0xBF:
+            out.append(UInt8(0x73))
+            i += 1
         else:
-            out.append(b)
+            out.append(bs[i])
+        i += 1
     return String(unsafe_from_utf8=Span(out))
 
 

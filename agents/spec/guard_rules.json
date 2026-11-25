@@ -316,7 +316,9 @@
    "root/src/.env",
    "root/keys/server.pem",
    "root/.git/config",
-   "outside/file.txt"
+   "outside/file.txt",
+   "root/models/m.bin",
+   "root/.worktrees/w/f"
   ],
   "symlinks": [
    [
@@ -371,6 +373,15 @@
   {"id": "path-31", "rule": "path", "input": {"path": "/etc/passwd"}, "expect": "refused", "reason": "outside"},
   {"id": "path-32", "rule": "path", "input": {"path": "src/../../outside/file.txt"}, "expect": "refused", "reason": "outside"},
   {"id": "path-33", "rule": "path", "input": {"path": "link_out/file.txt"}, "expect": "refused", "reason": "outside"},
+  {"id": "path-34", "rule": "path", "input": {"path": ".GIT/config"}, "expect": "refused", "reason": "not_readable"},
+  {"id": "path-35", "rule": "path", "input": {"path": "Build/qumo"}, "expect": "refused", "reason": "not_readable"},
+  {"id": "path-36", "rule": "path", "input": {"path": ".Venv/bin/python"}, "expect": "refused", "reason": "not_readable"},
+  {"id": "path-37", "rule": "path", "input": {"path": "NODE_MODULES/x"}, "expect": "refused", "reason": "not_readable"},
+  {"id": "path-38", "rule": "path", "input": {"path": "Models/m.bin"}, "expect": "refused", "reason": "not_readable"},
+  {"id": "path-39", "rule": "path", "input": {"path": "src/.Worktrees/x"}, "expect": "refused", "reason": "not_readable"},
+  {"id": "path-40", "rule": "path", "input": {"path": "model\u017f/m.bin"}, "expect": "refused", "reason": "not_readable"},
+  {"id": "path-41", "rule": "path", "input": {"path": ".wor\u212atrees/w/f"}, "expect": "refused", "reason": "not_readable"},
+  {"id": "path-42", "rule": "path", "input": {"path": "NODE_MODULE\u017f/x"}, "expect": "refused", "reason": "not_readable"},
   {"id": "command-01", "rule": "command", "input": {"argv": [".venv/bin/mojo", "run", "-I", ".", "tests/test_x.mojo"], "sandbox_open": false}, "expect": "allowed"},
   {"id": "command-02", "rule": "command", "input": {"argv": ["bench/.venv/bin/python", "examples/run_examples.py", "--only", "bell.mojo"], "sandbox_open": false}, "expect": "allowed"},
   {"id": "command-03", "rule": "command", "input": {"argv": ["bench/.venv/bin/python", "-m", "pytest", "-q", "plugins/hardware/tests"], "sandbox_open": false}, "expect": "allowed"},
@@ -429,6 +440,7 @@
   {"id": "command-56", "rule": "command", "input": {"argv": [".venv/bin/mojo", "run", "-I", ".", "tests/x.mojo\n"], "sandbox_open": false}, "expect": "refused", "reason": "bad_argument"},
   {"id": "command-57", "rule": "command", "input": {"argv": [".venv/bin/mojo", "run", "-I", ".", "tests/x\u0661.mojo"], "sandbox_open": false}, "expect": "refused", "reason": "bad_argument"},
   {"id": "command-58", "rule": "command", "input": {"argv": [".venv/bin/mojo", "run", "-I", ".", "tests/\u30c6\u30b9\u30c8.mojo"], "sandbox_open": false}, "expect": "refused", "reason": "bad_argument"},
+  {"id": "command-59", "rule": "command", "input": {"argv": ["build/qumo", "run", ".GIT/config"], "sandbox_open": false}, "expect": "refused", "reason": "path_not_readable"},
   {"id": "url-01", "rule": "url", "input": {"hops": ["https://export.arxiv.org/api/query?search_query=all:x"], "hosts": "api", "resolve": {"export.arxiv.org": ["151.101.0.223"], "pypi.org": ["151.101.0.223", "2a04:4e42::223"], "api.github.com": ["140.82.112.3"], "example.org": ["93.184.215.14"]}}, "expect": "allowed"},
   {"id": "url-02", "rule": "url", "input": {"hops": ["https://pypi.org/pypi/qiskit/json"], "hosts": "api", "resolve": {"export.arxiv.org": ["151.101.0.223"], "pypi.org": ["151.101.0.223", "2a04:4e42::223"], "api.github.com": ["140.82.112.3"], "example.org": ["93.184.215.14"]}}, "expect": "allowed"},
   {"id": "url-03", "rule": "url", "input": {"hops": ["https://api.github.com/repos/a/b/releases?per_page=3"], "hosts": "api", "resolve": {"export.arxiv.org": ["151.101.0.223"], "pypi.org": ["151.101.0.223", "2a04:4e42::223"], "api.github.com": ["140.82.112.3"], "example.org": ["93.184.215.14"]}}, "expect": "allowed"},
