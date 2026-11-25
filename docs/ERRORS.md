@@ -216,7 +216,7 @@ Fix: Translate the circuit to Clifford gates and rotations first.
 
 ### QM-E414
 
-**Invalid or unsupported Kraus channel: wrong shape, not trace preserving, or used on a simulator that needs Pauli noise.**  
+**Invalid or unsupported Kraus channel: wrong shape, not trace preserving, or used on a simulator that needs Pauli noise, or a noise instruction the simulator does not take (density matrix: PAULI_CHANNEL_2 and E; PTSBE: E).**  
 Fix: Pass matrices with sum K^dag K = identity; run them on density_evolve() or sample().
 
 ### QM-E415
