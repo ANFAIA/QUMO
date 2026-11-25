@@ -141,10 +141,18 @@ CALLS = [
      "arguments are ASCII only (X5; Python's \\w is Unicode)"),
     ("run_check", {"argv": ["build/qumo", "x\n"]}, "refused: arguments may only hold path-like characters",
      "a trailing newline is refused (X5; Python's $ accepts it)"),
-    ("run_check", {"argv": ["git", "diff", "--output=x"]}, "refused: arguments may only hold path-like characters",
-     "git diff --output is refused (X5)"),
-    ("run_check", {"argv": ["git", "diff", "--no-index", "a", "b"]}, "refused: arguments may only hold path-like characters",
-     "git diff --no-index is refused (X5)"),
+    ("run_check", {"argv": ["git", "diff", "--output=x"]}),
+    ("run_check", {"argv": ["git", "diff", "--no-index", "a", "b"]}),
+    ("run_check", {"argv": ["git", "diff", "/etc/hosts", "/dev/null"]}),
+    ("run_check", {"argv": ["git", "status", "--short", "--output=x"]}),
+    ("run_check", {"argv": ["build/qumo", "convert", "a.qasm", "-o", "../README.md"]}),
+    ("run_check", {"argv": ["build/qumo", "convert", "a.qasm", "--output=../README.md"]}),
+    ("run_check", {"argv": ["build/qumo", "validate", ".env"]}),
+    ("run_check", {"argv": ["build/qumo", "validate", "/etc/hosts"]}),
+    ("run_check", {"argv": ["build/qumo", "tool", "list"]}),
+    ("run_check", {"argv": ["build/qumo", "run", "src/a.py", "--bogus"]}),
+    ("run_check", {"argv": ["build/qumo", "convert", "src/a.py", "-o", "../escape.qasm"]}),
+    ("run_check", {"argv": ["build/qumo", "convert", "src/a.py", "-o", ".env"]}),
 ]
 # Results that depend on the tree's search order and the X5 skips are recomputed below.
 X5_SEARCHES = {("search_code", "TODO", "*.mojo"), ("search_code", "(?i)todo", "*"), ("search_code", "TODO", "*.txt")}
