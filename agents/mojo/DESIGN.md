@@ -76,7 +76,7 @@ written for this port). Implementers copy from the appendices, not from the repo
 | X2 | When one turn has two or more `task` calls and `--parallel N` > 1 (default 4), the subagents run concurrently as child processes (`qumo-agent subagent`, JSON over stdin/stdout); otherwise inline. | Python runs them concurrently; orchestrator fan-out would otherwise be sequential. |
 | X3 | QUMO's MCP server is used through one persistent stdio session per process, restarted after a failure, instead of a new process and session per call (Python, [critic C1]). No `tools/list` after `tools/call` and no `outputSchema` validation. | Speed (the current Mojo port does the same); QUMO's server is stateless per call (checked by `test_tools_qumo_mcp`, 8.2). |
 | X4 | Local tools never crash the run: Python exceptions outside the tools' own `try` (unknown `module` in `search_arxiv`/`module_watchlist`, `OSError` in `write_report`, unreadable files in `search_code`, undecodable `run_check` output) become `error: ...` results. | [gaps "Python behaviour to fix" 4], [critic B8]. |
-| X5 | `search_code` skips secret-named files and symlinks resolving outside the root; `run_check` refuses `git diff --output*`/`--no-index` and arguments ending in a newline, kills the whole process group on timeout, and decodes output lossily. | [gaps §2], [critic D2]. |
+| X5 | `list_files` and `search_code` skip files with a secret-looking name in any path component and symlinks resolving outside the root or to such a name (repo.py `_walkable`); `run_check` refuses `git diff --output*`/`--no-index` and arguments ending in a newline, kills the whole process group on timeout, and decodes output lossily. | [gaps §2], [critic D2]. |
 | X6 | `sdk_releases` reads up to 16 MiB (other research GETs keep 400,000 bytes). | Python's 400,000-byte cap truncates qiskit/stim/pytket JSON and the tool always fails [gaps §2]. |
 | X7 | `github_release_notes` accepts ASCII `[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+` only. | Python's Unicode `\w` lets non-ASCII through and then crashes in `http.client`. |
 | X8 | The virtual file system is text-only: `read_file` of an image/audio/video/PDF/PPT extension returns UnsupportedContent's placeholder text instead of a base64 block. | Text-only models; same text deepagents uses for unsupported media [ctx §12]. |
@@ -1969,11 +1969,12 @@ def report_slug(name: String, max_len: Int, fallback: String) -> String
 Exact behaviour and texts (`W/agents/qumo_agents/tools/repo.py`, [gaps §2]):
 
 - `is_secret_name(n)`: case-insensitive search for `^\.env`, `secret`, `credential`, `\.pem$`,
-  `\.key$`, `id_rsa` in the final name.
-- `resolve_repo_path`: (1) `normpath(path)`: any part in `skip_dirs` or a secret final name
+  `\.key$`, `id_rsa` in one name. It is applied to every path component (repo.py `_forbidden`:
+  `secrets/a.txt` and `ok/../secrets/a.txt` are refused like `.env`).
+- `resolve_repo_path`: (1) `normpath(path)`: any part in `skip_dirs` or secret-looking
   raises `<path> is not readable by agents`; (2) `p = resolve_nonstrict(join_path(root, path))`
   (an absolute `path` replaces `root`); `p != root` and `root` not a parent of `p` raises
-  `<path> is outside <root>`; (3) the parts of `p` relative to `root` and its name are checked
+  `<path> is outside <root>`; (3) the parts of `p` relative to `root` are checked
   again, and when `p` exists, also the parts of `realpath_strict(p)` relative to
   `realpath_strict(root)`. Every skip-directory comparison (these three and the
   `list_files`/`search_code` walk filters) is made after ASCII lower-casing both the part and
@@ -1987,13 +1988,15 @@ Exact behaviour and texts (`W/agents/qumo_agents/tools/repo.py`, [gaps §2]):
   `"\n... (<len(lines)> lines total)"` when `len(lines) > s-1+len(chunk)`. OS errors:
   `error: [Errno N] <strerror>: '<abs path>'`.
 - `tool_list_files`: resolve; walk without following directory symlinks, pruning `skip_dirs`
-  (same output, faster); entries sorted by path parts (pathlib order: compare part lists, not
-  strings); keep files (following symlinks) whose root-relative parts avoid `skip_dirs` and whose
-  name matches `fnmatch_py(name, pattern)`; `rel` joined with `\n`; at 300 entries append
+  and secret-looking directories (same output, faster); entries sorted by path parts (pathlib
+  order: compare part lists, not strings); keep files (following symlinks) whose root-relative
+  parts avoid `skip_dirs` and secret-looking names, that do not link outside the root or to
+  such a name (repo.py `_walkable`), and whose name matches `fnmatch_py(name, pattern)`; `rel` joined with `\n`; at 300 entries append
   `... truncated` and stop; `""` when nothing matches (Python prints an empty string).
 - `tool_search_code`: `py_regex_to_ere` (failure: `error: <message>`), resolve; files from the
   walk matching `pathlib_glob_match(rel_parts_below_base, glob)`, sorted as above; skipped:
-  `skip_dirs`, non-files, and (X5) secret names and symlinks resolving outside the root;
+  `skip_dirs`, non-files, and (X5) secret-looking names in any path component and symlinks
+  resolving outside the root or to such a name (`_walkable`, as `list_files`);
   unreadable files are skipped (X4); per line (`py_splitlines` after universal newlines) a match
   gives `f"{rel}:{i}: {cp_head(py_strip(line), 200)}"`; at 200 hits append `... truncated`;
   `no matches` when empty.
@@ -2916,7 +2919,7 @@ agent with `offset`/`limit`, as the stubs instruct (the critic A1 bug is fixed);
 | `grep` | default `max_count` 1000 | 80,000 body |
 | repository `read_file` | `_resolve` (skip dirs, secret names, inside root after symlinks); `max_lines` 1..2000 | 60,000 + footer |
 | `list_files` | same path rules; skip dirs pruned | 300 entries |
-| `search_code` | same path rules; secret names and outside-root symlinks skipped (X5); POSIX ERE subset | 200 hits, 200 per line |
+| `search_code` | same path rules; secret-looking names (any path component) and outside-root symlinks skipped, as in `list_files` (X5); POSIX ERE subset | 200 hits, 200 per line |
 | `run_check` | allow-list prefixes; ASCII path-like arguments, no `..`, no trailing newline, no `git diff --output*`/`--no-index` (X5); minimal env without secrets (D2b); cwd = sandbox or repo; process group killed on timeout; inside a sandbox: `CONF_CHECK` confinement (writes only to the sandbox, a per-call temp dir and the sandbox build cache; no network; no reads of `sensitive_home_paths`) | timeout 10..1800 s; output tail 12,000; 4 MiB bytes per stream kept |
 | repository paths | skip directories compared case-insensitively (X14) | - |
 | `write_report` | only `agents/reports/` of the main repository; ASCII slug | slug 80 |
@@ -3305,7 +3308,7 @@ retyped). Goldens are committed; regenerating them needs `agents/.venv`.
 | H | `test_harness_loop` | `wire_S1..S6` structural equality; D2e (all-invalid turn continues; mixed turn order: assistant, invalid errors, valid results); unknown tool text lists `execute` after `grep`; mutation guard for `file_path` and `path` (D2d), and for a V0 agent `notes.md` and `/notes.md` in one turn (same key, second refused); `execute` text; recursion: limit 25 gives 12 model calls then `QA-E110`, limit 200 gives 100; limit 24 with the final answer on call 12 gives `QA-E110` (R3), on call 11 it completes; a general-purpose subagent has no R3 step; answer and final-text rules |
 | H | `test_harness_subagents` | task listing (GP first, ancestors removed); unknown type text; isolation (child request has only system + description); final text skips trailing empty AI messages; file merge (child writes merged, child deletions not propagated, later call wins); inline path vs `run_subagents` (FakeEnv sees one batch of 2 when `parallel_limit` = 4); `replay_at` paths; failure gives `QA-E120` |
 | T | `test_tools_config`, `test_tools_catalog` | registry, `model_for` order, ancestors filtering, toolsmith prompt = preamble + role, stale-export message; guided descriptions byte-identical (the old `fixtures/guided_descriptions.json`); per-agent wire names equal Python's first request (`tests/fixtures/tools/wire_tool_names.json`, written by T's dev-time `tests/fixtures/tools/gen_wire_names.py` with the `r9-native-harness/capture.py` technique: `build_agent` with a fake model, tool names of the first request; equal to `capture_all.json` today) with a fake MCP list in server order |
-| T | `test_tools_repo` | `_resolve` vectors (`../`, `.env`, `.venv`, `build`, absolute outside, symlink escaping, and X14's `.GIT/config`, `Build/x`, `.Venv/x` refused); `read_file` format, footer and caps on a fixture with `\r\n`, `\f`, U+2028; `list_files` order (parts order: `a/b` before `a.b`) and 300 cap; `search_code` regex, glob, secret-name skip; `run_check` refusal texts byte-exact, ARG checks incl. trailing newline and `--output=x`, minimal env (allow-list injected with `/usr/bin/env`), timeout and group kill (allow-list injected with `/bin/sleep`), `git status --short` in a temp repo, universal newlines per stream (allow-list injected with `/usr/bin/printf 'a\r\nb\rc'` gives `a\nb\nc`), with a sandbox open a confined write outside the sandbox fails (allow-list injected with `/usr/bin/touch`); `write_report` path and slug; `open_sandbox` in a temp git repo (branch, worktree, symlinks, second call); sandbox write/edit texts |
+| T | `test_tools_repo` | `_resolve` vectors (`../`, `.env`, `.venv`, `build`, absolute outside, symlink escaping, and X14's `.GIT/config`, `Build/x`, `.Venv/x` refused); `read_file` format, footer and caps on a fixture with `\r\n`, `\f`, U+2028; `list_files` order (parts order: `a/b` before `a.b`) and 300 cap; `search_code` regex, glob, secret-name skip; a secret-looking directory (`secrets/a.txt`, `ok/../secrets/a.txt`) refused by `read_file`, the sandbox write/edit and `run_check build/qumo`, and hidden from `list_files` and `search_code` with symlinks to it; `run_check` refusal texts byte-exact, ARG checks incl. trailing newline and `--output=x`, minimal env (allow-list injected with `/usr/bin/env`), timeout and group kill (allow-list injected with `/bin/sleep`), `git status --short` in a temp repo, universal newlines per stream (allow-list injected with `/usr/bin/printf 'a\r\nb\rc'` gives `a\nb\nc`), with a sandbox open a confined write outside the sandbox fails (allow-list injected with `/usr/bin/touch`); `write_report` path and slug; `open_sandbox` in a temp git repo (branch, worktree, symlinks, second call); sandbox write/edit texts |
 | T | `test_tools_research`, `test_tools_atom_html` | Atom fixture (namespaced feed with CDATA and entities) gives the same JSON as Python's `search_arxiv_raw` (golden); PyPI and GitHub fixtures give Python's JSON (goldens, key order starting with `package`), including the 16 MiB path; `strip_html` equals Python's regex pipeline on 8 HTML fixtures; URL building; network paths through the fixture server |
 | T | `test_tools_qumo_mcp`, `test_tools_alphaxiv` | 24 tools for qumo-operator with guided descriptions; Bell circuit through `qumo_run_qasm`; session restart after killing the server; the same call sequence gives identical results through one persistent session and through a fresh session per call (X3); alphaXiv emulated over SSE: only the 5 read tools, description composition, one session per call with `DELETE` |
 | T | `agents/tests/test_agents.py` (Python) | export fresh (`export.stale()` covers the new files); `tools.json` descriptions equal `convert_to_openai_tool`; `modules.json` round trip; `generated_tools` values |

@@ -8,6 +8,7 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 
 ### Fixed
 
+- Native agent harness (`build/qumo-agent`): a secret-looking name is refused in every path component, as the Python harness does (`_forbidden`). Before, only the last component was checked: with a file `secrets/a.txt`, `read_file("secrets/a.txt")` and `read_file("ok/../secrets/a.txt")` returned its text, `search_code` returned its lines and `list_files` listed it together with `.env` and `x.pem`. Now `read_file`, `list_files`, `search_code`, the sandbox `write_file` / `edit_file` and the file arguments of `run_check build/qumo` refuse such a path, and listings and searches hide those files and symlinks that lead to them or out of the root (`agents/mojo/qumo_agent/tools/repo.mojo`; the golden fixture is regenerated from the Python tools). (project review, 2026-11-25)
 - MCP server: `max_iterations` has a ceiling of 1000000 per call (`qumo_run_qasm`, `qumo_run_device`), refused with QM-E913 like `shots` and `max_qubits`. Before, `{"qasm": "... while (true) { x q[0]; } ...", "max_iterations": 9000000000000000000}` blocked the single-threaded server, `ping` included. The CLI keeps its range. (project review, 2026-11-25)
 
 ### Changed

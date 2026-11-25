@@ -2,7 +2,7 @@
 `agents/qumo_agents/tools/repo.py` with the same texts.
 
 * Reading is confined to the repository, or the open sandbox (no .git, .venv, build, other
-  skip directories, nor secret-looking names), after symlinks are resolved. Skip directories
+  skip directories, nor secret-looking names, in any path component), after symlinks are resolved. Skip directories
   are compared case-insensitively (X14), so `.GIT/config` cannot reach `.git` on macOS.
 * Writing goes to agents/reports/ of the main repository, or into a sandbox git worktree that
   the agent opens with open_sandbox on a fresh branch. The main checkout is never written.
@@ -125,10 +125,11 @@ def _name(path: String) -> String:
     return ps[len(ps) - 1]
 
 
-def _any_skipped(parts: List[String], skip_lower: List[String]) -> Bool:
-    """set(parts) & SKIP_DIRS, both sides ASCII lower-cased (X14)."""
+def _forbidden(parts: List[String], skip_lower: List[String]) -> Bool:
+    """repo.py _forbidden: any path component is a skip directory (ASCII lower-cased, X14) or
+    a secret-looking name. The one rule behind resolve_repo_path, list_files and search_code."""
     for p in parts:
-        if _in(skip_lower, _ascii_lower(p)):
+        if _in(skip_lower, _ascii_lower(p)) or is_secret_name(p):
             return True
     return False
 
@@ -216,13 +217,13 @@ def resolve_repo_path(path: String, root: String, skip_dirs: List[String]) raise
     # The path as written first, so a forbidden directory is refused by its own rule even
     # when it is a symlink that resolves outside the repository (.venv often is).
     var lexical = normpath(path)
-    if _any_skipped(_parts(lexical), skip) or is_secret_name(_name(lexical)):
+    if _forbidden(_parts(lexical), skip):
         raise Error(refused)
     var p = resolve_nonstrict(join_path(root, path))
     var rel = _relative_parts(p, root)
     if not rel:
         raise Error(path + " is outside " + root)
-    if _any_skipped(rel.value(), skip) or is_secret_name(_name(p)):
+    if _forbidden(rel.value(), skip):
         raise Error(refused)
     if exists(p):
         var rp = realpath_strict(p)
@@ -230,18 +231,33 @@ def resolve_repo_path(path: String, root: String, skip_dirs: List[String]) raise
         var rrel = _relative_parts(rp, rr)
         if not rrel:
             raise Error(path + " is outside " + root)
-        if _any_skipped(rrel.value(), skip) or is_secret_name(_name(rp)):
+        if _forbidden(rrel.value(), skip):
             raise Error(refused)
     return p^
 
 
-def _inside_real_root(p: String, real_root: String) -> Bool:
-    try:
-        if _relative_parts(realpath_strict(p), real_root):
-            return True
+def _walkable(rel: String, root: String, real_root: String, skip_lower: List[String]) -> Bool:
+    """repo.py _walkable, for a regular file found by the walk: nothing forbidden in its
+    root-relative path, and a symlink must not leave the root or reach a forbidden name."""
+    if _forbidden(_parts(rel), skip_lower):
         return False
+    var p = root + "/" + rel
+    if not is_symlink(p):
+        return True   # the walk enters no symlinked directory, so the path is already real
+    try:
+        var real = _relative_parts(realpath_strict(p), real_root)
+        if not real:
+            return False
+        return not _forbidden(real.value(), skip_lower)
     except:
         return False
+
+
+def _real_root(root: String) -> String:
+    try:
+        return realpath_strict(root)
+    except:
+        return root
 
 
 # --------------------------------------------------------------------------- read_file
@@ -345,8 +361,8 @@ def _sort_paths(mut items: List[String]):
 
 def _collect_files(dir: String, rel: String, skip_lower: List[String], mut out: List[String]):
     """Root-relative paths of the regular files (following file symlinks) below `dir`,
-    without entering symlinked directories or skip directories (their files would be
-    filtered out anyway). Unreadable directories are skipped, as rglob does."""
+    without entering symlinked directories, skip directories or secret-looking directories
+    (their files would be filtered out anyway). Unreadable directories are skipped, as rglob does."""
     var names: List[String]
     try:
         names = list_dir(dir)
@@ -356,7 +372,7 @@ def _collect_files(dir: String, rel: String, skip_lower: List[String], mut out: 
         var p = dir + "/" + name
         var r = name if rel.byte_length() == 0 else rel + "/" + name
         if is_dir(p):
-            if is_symlink(p) or _in(skip_lower, _ascii_lower(name)):
+            if is_symlink(p) or _in(skip_lower, _ascii_lower(name)) or is_secret_name(name):
                 continue
             _collect_files(p, r, skip_lower, out)
         elif is_file(p):
@@ -385,10 +401,10 @@ def tool_list_files(st: RepoState, path: String, pattern: String) -> String:
     except e:
         return "error: " + _strip_code(String(e))
     var skip = _lower_set(st.skip_dirs)
+    var real_root = _real_root(root)
     var out = List[String]()
     for rel in _walk_files(base, root, skip):
-        var parts = _parts(rel)
-        if _any_skipped(parts, skip) or not fnmatch_py(parts[len(parts) - 1], pattern):
+        if not fnmatch_py(_name(rel), pattern) or not _walkable(rel, root, real_root, skip):
             continue
         out.append(rel)
         if len(out) >= MAX_LIST_ENTRIES:
@@ -415,11 +431,7 @@ def tool_search_code(st: RepoState, regex: String, path: String, glob: String) -
         base = resolve_repo_path(path, root, st.skip_dirs)
     except e:
         return "error: " + _strip_code(String(e))
-    var real_root: String
-    try:
-        real_root = realpath_strict(root)
-    except:
-        real_root = root
+    var real_root = _real_root(root)
     var skip = _lower_set(st.skip_dirs)
     var base_rel = _relative_parts(base, root)
     var below = 0
@@ -427,21 +439,17 @@ def tool_search_code(st: RepoState, regex: String, path: String, glob: String) -
         below = len(base_rel.value())
     var hits = List[String]()
     for rel in _walk_files(base, root, skip):
-        var parts = _parts(rel)
-        if _any_skipped(parts, skip):
+        # X5: secret-looking names (any component) and symlinks leaving the root are never
+        # searched.
+        if not _walkable(rel, root, real_root, skip):
             continue
+        var parts = _parts(rel)
         var under_base = List[String]()
         for k in range(below, len(parts)):
             under_base.append(parts[k])
         if not pathlib_glob_match(under_base, glob):
             continue
-        var name = parts[len(parts) - 1]
         var p = root + "/" + rel
-        # X5: secret-looking files and symlinks leaving the root are never searched.
-        if is_secret_name(name):
-            continue
-        if is_symlink(p) and not _inside_real_root(p, real_root):
-            continue
         var lines: List[String]
         try:
             lines = _read_lines(p)
