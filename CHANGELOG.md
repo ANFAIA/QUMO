@@ -38,6 +38,7 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 
 ### Fixed
 
+- Pauli text inputs are checked (`qumo/ir/pauli.mojo`): `PauliSum.add_label` and `PauliTerm.label(n)` raise QM-E302 past 64 qubits (a 65-character label used to wrap and put the Pauli on the wrong qubit, silently); `parse_pauli_sum` raises QM-E301 for a qubit repeated inside one term (`"X0 Z0"` used to give `Y0`, `"Z0 Z0"` gave `Z0`) and for a sign with no term after it (`"Z0 +"` used to add a spurious identity term). `PauliTerm.label` now `raises`. Inputs that were correct give the same result.
 - The resource estimator counted three synthesised rotations for every constant `U` gate, so `U(pi/2, 0, pi)` (H) and `U(0, 0, pi/4)` (T) were reported as non-Clifford rotations. Constant angles are now classified as for `RZ`/`RY`: a multiple of pi/2 is free, an odd multiple of pi/4 is one T, and when theta is a multiple of pi the two Rz merge into one rotation by phi + lambda (phi - lambda for an odd multiple). Symbolic angles still count three. `recommended_method` and `is_clifford()` are unchanged (they still treat `U` as non-Clifford). (`qumo/exec/resources.mojo`, `tests/test_orchestrator.mojo`)om/ANFAIA/QUMO/pull/1), 2026-11-03)
 
 ### Fixed
