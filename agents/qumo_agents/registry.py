@@ -23,6 +23,10 @@ class AgentSpec:
     # Reviewed Mojo-generated tools (gen_*) this agent may call in the native Mojo harness:
     # () none, None every reviewed tool, or a list of names. The Python agents ignore it.
     generated_tools: tuple[str, ...] | None = ()
+    # Subagents whose answers may carry web-derived text into this agent. Required for every
+    # such edge of an agent that can reach both web fetch and code execution (see
+    # check_web_exec); graph.build_agent then returns their answers wrapped (untrusted.wrap).
+    untrusted_subagents: tuple[str, ...] = ()
 
     @property
     def uses_mcp(self) -> bool:
@@ -54,6 +58,7 @@ AGENTS: dict[str, AgentSpec] = {a.name: a for a in [
         "Improves one QUMO module step by step in a sandbox branch: hypothesis, baseline, change, measurement, review.",
         prompts.AUTORESEARCH, ("read", "check", "report", "sandbox"), QUMO_SIM,
         subagents=("research-watch", "code-review", "algorithm-research", "qec-research", "compiler-research"),
+        untrusted_subagents=("research-watch", "algorithm-research", "qec-research", "compiler-research"),
         writes_code=True, generated_tools=ALL_GENERATED),
     AgentSpec(
         "qumo-operator",
@@ -84,18 +89,68 @@ AGENTS: dict[str, AgentSpec] = {a.name: a for a in [
         "Splits a problem between classical, AI and quantum stages and delegates to every research and execution agent.",
         prompts.ORCHESTRATOR, ("read", "report"), ("qumo_estimate_resources", "qumo_describe"),
         subagents=("qumo-operator", "execution", "algorithm-research", "qec-research", "compiler-research",
-                   "research-watch", "code-review", "autoresearch")),
+                   "research-watch", "code-review", "autoresearch"),
+        untrusted_subagents=("algorithm-research", "qec-research", "compiler-research", "research-watch",
+                             "autoresearch")),
 ]}
 
 
-def _check_no_web_and_exec() -> None:
-    # An agent that can fetch web pages must not also run code: fetched text could steer it.
-    for spec in AGENTS.values():
-        if "research" in spec.tool_groups and "check" in spec.tool_groups:
+WEB_GROUPS = frozenset({"research"})  # fetch_page reaches any public https host
+EXEC_GROUPS = frozenset({"check"})  # run_check runs code, including code the agent wrote
+
+
+def closure(name: str, agents: dict[str, AgentSpec]) -> set[str]:
+    """name and every agent reachable from it through delegation."""
+    seen, stack = set(), [name]
+    while stack:
+        n = stack.pop()
+        if n not in seen:
+            seen.add(n)
+            stack.extend(agents[n].subagents)
+    return seen
+
+
+def _reach(name: str, agents: dict[str, AgentSpec]) -> tuple[bool, bool]:
+    groups = {g for n in closure(name, agents) for g in agents[n].tool_groups}
+    return bool(groups & WEB_GROUPS), bool(groups & EXEC_GROUPS)
+
+
+def reaches_web_and_exec(agents: dict[str, AgentSpec] | None = None) -> set[str]:
+    """Agents whose delegation closure holds both a web-fetch and a code-execution tool."""
+    agents = AGENTS if agents is None else agents
+    return {n for n in agents if all(_reach(n, agents))}
+
+
+def check_web_exec(agents: dict[str, AgentSpec] | None = None) -> None:
+    """The invariant, enforced at import:
+    1. no agent has web fetch and code execution among its own tool groups;
+    2. every agent that reaches both through delegation declares, for each subagent that
+       reaches web fetch, that its answer is web-derived (untrusted_subagents), and
+       declares nothing else (the declaration is exact);
+    graph.build_agent turns each declared edge into a wrapped, size-bounded answer."""
+    agents = AGENTS if agents is None else agents
+    for spec in agents.values():
+        if spec.tool_groups and WEB_GROUPS & set(spec.tool_groups) and EXEC_GROUPS & set(spec.tool_groups):
             raise RuntimeError(f"{spec.name}: research and check tools may not be combined")
+        for s in spec.untrusted_subagents:
+            if s not in spec.subagents:
+                raise RuntimeError(f"{spec.name}: untrusted_subagents names {s!r}, which is not a subagent")
+    for name in reaches_web_and_exec(agents):
+        spec = agents[name]
+        need = {s for s in spec.subagents if _reach(s, agents)[0]}
+        missing, extra = need - set(spec.untrusted_subagents), set(spec.untrusted_subagents) - need
+        if missing:
+            raise RuntimeError(f"{name}: reaches web fetch and code execution; its answers from "
+                               f"{', '.join(sorted(missing))} carry web text and must be in untrusted_subagents")
+        if extra:
+            raise RuntimeError(f"{name}: untrusted_subagents lists {', '.join(sorted(extra))}, "
+                               "which do not reach web fetch")
+    for name, spec in agents.items():
+        if name not in reaches_web_and_exec(agents) and spec.untrusted_subagents:
+            raise RuntimeError(f"{name}: declares untrusted_subagents but does not reach both web and exec")
 
 
-_check_no_web_and_exec()
+check_web_exec()
 
 
 def get(name: str) -> AgentSpec:
