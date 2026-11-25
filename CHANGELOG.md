@@ -6,6 +6,10 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 
 ## [Unreleased]
 
+### Fixed
+
+- Agent tools `list_files` and `search_code` (`agents/qumo_agents/tools/repo.py`) no longer list or return lines of secret-looking files (`.env`, `secrets.yaml`, `*.pem`, `*.key`, anything under a secret-named directory) or of symlinks that leave the repository; `read_file`, `write_file`, `edit_file`, `list_files` and `search_code` now share one path rule (`_forbidden`), as the Mojo port already did.
+
 ### Added
 
 - Benchpress Cirq gym run (`bench/results/benchpress/cirq_full.json.gz`): 10 of 1066 tests run, 1054 are skipped as Not implemented by Benchpress and 2 fail; `bench/charts/make_result_charts.py --cirq` draws the 10 tests that run (`benchpress_cirq_tests`), and the README says which charts are Benchpress and which are the neutral harness.
