@@ -34,7 +34,13 @@ build/qumo transpile examples/foundations/bell.qasm --pipeline 'cancel,fuse1q,ro
 Run `.venv/bin/mojo run -I . examples/compilation/compile_demo.mojo` for a tour and
 `.venv/bin/mojo run -I . tests/test_compiler.mojo` for the statevector-verified tests.
 
-## Targets (`target.mojo`)
+## Targets (`qumo.device.target`)
+
+`Target`, `parse_target` and `parse_basis` are defined in `qumo/device/target.mojo`
+(`from qumo.device.target import Target, parse_target`, or `from qumo import ...`):
+the simulators, the noise model and the execution layer use a target without
+importing the compiler. `qumo.compiler.target` still imports the same names for one
+release.
 
 A `Target` is plain data (Qiskit `Target` / Braket device properties /
 PennyLane TOML capabilities): `num_qubits`, undirected coupling `edges`,
@@ -69,6 +75,10 @@ arg      := word | key "=" value | item          # fixpoint(...) nests pipelines
 ```
 
 Example: `remove_identities,elide_swaps,fixpoint(cancel,commute,fuse1q,max=4),route(sabre,layout=auto,trials=20,swap_trials=20),kak,basis,cancel,commute,fuse1q,check`.
+Spaces around `=` are allowed in every pass (`cancel(window = 4)`), and when an
+argument is written twice the last one counts (`cancel(1,2)` uses 2). An unknown
+argument or a bad value is QM-E602 when the pipeline is parsed, with a hint that
+lists the pass's arguments.
 `PassManager(spec).canonical()` prints the normalised spec; `describe_passes()`
 is a JSON catalog. Every pass is declared once, in `pass_decl` (its name,
 aliases, description and arguments); the argument check, the hints of QM-E602

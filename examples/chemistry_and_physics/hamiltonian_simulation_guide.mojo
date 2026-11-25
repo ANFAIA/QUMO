@@ -25,7 +25,7 @@ from qumo.ir.kraus import KrausChannel
 from qumo.ir.param import Param
 from qumo.ir.pauli import PauliSum, PauliTerm
 from qumo.sim.density import density_evolve
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.sim.runner import evolve
 from qumo.sim.statevector import StateVector
 from qumo.algorithms.hamiltonians import dense_matrix, exact_evolve

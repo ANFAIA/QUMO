@@ -35,10 +35,10 @@ example-meta: {"framework": "qumo", "tier": "fast", "timeout": 120, "requires": 
 
 from std.math import log, sqrt
 
-from qumo.ai.describe import program_from_json, program_to_json
+from qumo.ir.json import program_from_json, program_to_json
 from qumo.core.json import parse_json
 from qumo.compiler.program_compile import compact_qubits, compile_program
-from qumo.compiler.target import parse_target
+from qumo.device.target import parse_target
 from qumo.ir.program import Program
 from qumo.ir.qasm import load_any, to_qasm
 from qumo.sim.program_runner import sample_program

@@ -35,7 +35,7 @@ from std.math import cos, log, pi, sin, sqrt
 
 from qumo.algorithms.library import bitstring_to_int, qpe
 from qumo.compiler.program_compile import compact_qubits, compile_program
-from qumo.compiler.target import parse_target
+from qumo.device.target import parse_target
 from qumo.ir.circuit import Circuit
 from qumo.ir.program import Program
 from qumo.ir.qasm import load_any

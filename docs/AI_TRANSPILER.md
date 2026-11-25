@@ -16,7 +16,7 @@ used. The shipped weights were produced by the earlier trainer built on those
 packages; a native retrain is a separate, measured decision.
 
 ```mojo
-from qumo.compiler.target import parse_target
+from qumo.device.target import parse_target
 from qumo.compiler.pass_manager import transpile_ai, compile_spec
 
 var t = parse_target("heavy_hex:5/sc_cz")

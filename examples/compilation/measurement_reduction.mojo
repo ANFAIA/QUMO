@@ -41,7 +41,7 @@ from qumo.ir.pauli import PauliSum, PauliTerm, parse_pauli_sum
 from qumo.sim.runner import evolve, sample
 from qumo.exec.primitives import EstimatorPub, run_estimator, pop_parity
 from qumo.algorithms.library import hardware_efficient_ansatz
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.testing.checks import CheckLog
 
 comptime N = 5

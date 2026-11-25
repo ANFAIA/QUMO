@@ -240,7 +240,7 @@ Scale: ★ basic · ★★ solid · ★★★ industry reference.
 | Phase folding / phase polynomials | TKET PhasePolyBox, PyZX | `qumo.compiler` phase_fold |
 | Virtual-Z / Pauli pushing | Cirq `eject_z`, `eject_phased_paulis` | `qumo.compiler` |
 | 1q fusion and ZYZ resynthesis | Qiskit `Optimize1qGatesDecomposition`, Cirq `merge_single_qubit_gates` | fuse1q |
-| `Target` as single source of truth | Qiskit Target, Braket device properties | `qumo.compiler.target.Target` (modality presets, none default) |
+| `Target` as single source of truth | Qiskit Target, Braket device properties | `qumo.device.target.Target` (modality presets, none default) |
 | Capability errors at compile time | Q# RCA | validation with `QM-E…` codes before execution |
 
 ### 11.3 Quantum execution (hardware abstraction + protocols)
@@ -263,7 +263,7 @@ Scale: ★ basic · ★★ solid · ★★★ industry reference.
 | DEM as the narrow waist | Stim, CUDA-Q QEC `dem_from_kernel` | `qumo.qec.dem` (Stim-compatible text) |
 | Swappable decoders (UF, MWPM, lookup, AI) | PyMatching, CUDA-Q QEC, AlphaQubit | `qumo.qec.decoders` (common interface) |
 | Reproducible statistics harness | Sinter | `qumo.qec.experiments` (threshold sweeps) |
-| Calibration as code / noise from T1, T2, errors | Qibocal, Braket emulator, Qiskit `NoiseModel.from_backend` | `qumo.qec.characterization` (NoiseModel, RB, readout mitigation) |
+| Calibration as code / noise from T1, T2, errors | Qibocal, Braket emulator, Qiskit `NoiseModel.from_backend` | `qumo.noise.characterization` (NoiseModel, RB, readout mitigation) |
 
 ---
 

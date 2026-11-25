@@ -41,7 +41,7 @@ from qumo.ir.pauli import parse_pauli_sum
 from qumo.ir.qasm import parse_qasm, load_qasm, to_qasm
 from qumo.ir.qasm2 import to_qasm2
 from qumo.sim.runner import sample, evolve, expectation
-from qumo.compiler.target import parse_target
+from qumo.device.target import parse_target
 from qumo.compiler.pass_manager import transpile
 from qumo.exec.emulate import emulate
 ```
@@ -72,7 +72,7 @@ Python functions take keyword arguments, and the defaults are the CLI's (`shots=
 
 ### Qiskit primitives
 
-QUMO has the same two primitives with the same "PUB" idea (a circuit plus what to evaluate) in `qumo.exec.primitives`: `SamplerPub` with `run_sampler`, and `EstimatorPub` with `run_estimator`. See the execution section of [ARCHITECTURE.md](ARCHITECTURE.md) and [examples/foundations/chsh.mojo](../examples/foundations/chsh.mojo).
+QUMO has the same two primitives with the same "PUB" idea (a circuit plus what to evaluate) in `qumo.exec.primitives`: `SamplerPub` with `run_sampler`, and `EstimatorPub` with `run_estimator`. `precision` is the standard error to stay under: 0 (the default) returns the exact value on the state vector and refuses a circuit with a reset, noise or a mid-circuit measurement (QM-E416); a positive value samples, with shots per measurement setting = ceil(sum over qubit-wise commuting groups of (sum |coeff|)^2 / precision^2), at most 10,000,000 (QM-E913 past it). See the execution section of [ARCHITECTURE.md](ARCHITECTURE.md) and [examples/foundations/chsh.mojo](../examples/foundations/chsh.mojo).
 
 ## Moving a circuit with OpenQASM
 

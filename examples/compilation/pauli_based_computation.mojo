@@ -21,7 +21,7 @@ example-meta: {"framework": "qiskit", "tier": "fast", "timeout": 120, "requires"
 from qumo.ir.circuit import Circuit
 from qumo.compiler.pbc import to_pbc
 from qumo.compiler.pass_manager import compile_spec
-from qumo.compiler.target import Target
+from qumo.device.target import Target
 from qumo.sim.runner import evolve
 from qumo.testing.checks import CheckLog
 

@@ -24,7 +24,7 @@ from std.bit import pop_count
 from std.math import sqrt
 from qumo.algorithms.hamiltonians import Graph, fermi_hubbard
 from qumo.algorithms.sqd import recover_configurations, sqd_iteration, product_basis, subspace_ground_state
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.testing.checks import CheckLog
 
 

@@ -37,7 +37,7 @@ out, initial, final, report = q.transpile_program(p, 7, [[i, i + 1] for i in ran
 
 ```mojo
 from qumo.compiler.program_compile import compile_program
-from qumo.compiler.target import parse_target
+from qumo.device.target import parse_target
 from qumo.ir.qasm import load_any, to_qasm
 from qumo.sim.program_runner import sample_program
 

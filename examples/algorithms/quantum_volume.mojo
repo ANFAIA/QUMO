@@ -32,7 +32,7 @@ from qumo.bench.circuits import quantum_volume
 from qumo.ir.circuit import Circuit
 from qumo.ir.gates import Op, op_arity
 from qumo.algorithms.library import bitstring_to_int
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.testing.checks import CheckLog
 
 
