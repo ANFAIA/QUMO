@@ -49,7 +49,8 @@ from qumo.compiler.blockalg import Perm, SubGraph
 from qumo.compiler.block_synth import synth_perm
 from qumo.compiler.common import reduce_angle, shell_like
 from qumo.compiler.pass_manager import (
-    PassId, PassManager, is_synth_pass, parse_pipeline, preset_pipeline, route_options, split_top_level, transpile,
+    PassArgs, PassId, PassManager, is_synth_pass, nested_pipeline, parse_pipeline, pass_relabels, preset_pipeline, route_options,
+    split_top_level, transpile,
 )
 from qumo.compiler.routing import RouteOptions, plan_route, route_circuit
 from qumo.compiler.target import Target
@@ -152,15 +153,11 @@ def _leaf(p: Program, lo: Int, hi: Int, num_qubits: Int) -> Circuit:
 def _relabels(spec: String) raises -> Bool:
     """Does the pipeline text hold a pass that renames qubits for what follows it?"""
     for q in parse_pipeline(spec):
-        if q.id == PassId.ROUTE or q.id == PassId.ELIDE_SWAPS or q.id == PassId.POST_LAYOUT:
+        if pass_relabels(q.id):
             return True
-        if q.id == PassId.FIXPOINT:
-            var inner = String()
-            for a in q.args:
-                if not a.startswith("max="):
-                    inner += ("," if inner.byte_length() > 0 else "") + a
-            if _relabels(inner):
-                return True
+        var inner = nested_pipeline(q)
+        if inner.byte_length() > 0 and _relabels(inner):
+            return True
     return False
 
 
@@ -180,7 +177,7 @@ def _split_pipeline(spec: String, mut pre: String, mut route: String, mut post: 
             route = it
             seen = True
             continue
-        if id == PassId.ELIDE_SWAPS or id == PassId.POST_LAYOUT:
+        if pass_relabels(id):
             continue
         if _relabels(it):
             raise Error("QM-E630: '" + it + "' renames qubits inside a repeated pass, which a Program cannot follow. Hint: take route, elide_swaps and post_layout out of fixpoint.")
@@ -194,9 +191,8 @@ def _check_no_ai(spec: String) raises:
     for s in parse_pipeline(spec):
         if is_synth_pass(s.id):
             raise Error("QM-E630: pass '" + String(s) + "' is not available for a Program. Hint: the AI passes need a whole circuit; use a preset level or a pipeline without them.")
-        for a in s.args:
-            if a.startswith("policy=") and a != "policy=off":
-                raise Error("QM-E630: the learned router is not available for a Program. Hint: use route without a policy.")
+        if s.id == PassId.ROUTE and PassArgs(s.id, s.args).get_text("policy") != "off":
+            raise Error("QM-E630: the learned router is not available for a Program. Hint: use route without a policy.")
 
 
 def _restore_perm(cur: List[Int], want: List[Int], n: Int, N: Int, label: List[Int]) -> List[Int]:

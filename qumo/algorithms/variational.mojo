@@ -23,7 +23,7 @@ from std.builtin.sort import sort
 from qumo.algorithms.qubo import qubo_energy_of_ising
 from qumo.ir.circuit import Circuit
 from qumo.ir.pauli import PauliSum
-from qumo.sim.runner import sample, evolve_into, SampleResult
+from qumo.sim.runner import sample, evolve_into, SampleResult, check_statevector_size
 from qumo.sim.statevector import StateVector
 from qumo.sim.rng import Rng
 from qumo.algorithms.gradients import ExpectationEngine, Grad, grad_method_name, batch_expectation
@@ -372,6 +372,8 @@ def qaoa_maxcut(graph: Graph, p: Int = 1, method: String = "bfgs", restarts: Int
     is then the CVaR value while `expected_cut` stays the exact mean cut.
     """
     _check_alpha(alpha)
+    graph.check_max_cut_size()  # the reference runs after the optimisation: fail first
+    check_statevector_size(graph.num_nodes)
     if alpha < 1.0:
         return _qaoa_maxcut_cvar(graph, p, method, restarts, shots, seed, maxiter, alpha)
     var t0 = perf_counter_ns()

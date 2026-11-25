@@ -257,6 +257,12 @@ cannot drift from the implementation:
 * **Circuit JSON** (`qumo.circuit.v1`): `circuit_to_json` and
   `circuit_from_json` round-trip. Every tool accepts `circuit` (JSON) instead
   of `qasm`, for agents that prefer structured input.
+  The loader bounds sizes (QM-E911, the wire rule under "Size limits") and the values
+  in each instruction: qubits and clbits against the register, records against the
+  measurements made so far (absolute from 0, or negative to count back), an observable
+  index in 0 to 63, probabilities in [0, 1] (a channel's branches add up to at most 1),
+  Pauli letters 1 to 3, Kraus matrices of 2 x 2^n x 2^n numbers, condition bits of 0 or
+  more and condition values of 0 or 1.
 * **Program JSON** (`qumo.program.v1`): `program_to_json` and `program_from_json`
   round-trip, wrapping circuit JSON. Malformed input is QM-E587, or QM-E583 for a
   wrong nesting; every index is checked before anything runs.
@@ -287,6 +293,14 @@ implements MCP **2025-06-18** (it also accepts 2025-03-26 and 2024-11-05).
 | `ping` | `{}` |
 | `tools/list` | Each tool's `name`, `title`, `description`, `inputSchema` (JSON Schema) and `annotations` (the four MCP hints, per tool; see below) |
 | `tools/call` | `{content: [{type: "text", text}], structuredContent, isError}` |
+
+**Server ceilings.** A call may not ask for more than the server allows, below the
+tools' own ranges (the CLI keeps those): `shots` 1000000, `max_qubits` 30 and
+`max_iterations` 1000000 (16 times the default of 65536). A call above one is
+refused before it runs with QM-E913 and the limit in the message; it is not
+clamped. The server has one thread, so a `while (true)` with `max_iterations` at
+2^62 would block `ping` for as long as it ran; at the ceiling it ends in about a
+second with QM-E480. Longer loops run from the CLI (`qumo run --max-iterations`).
 
 **Tool annotations.** Each tool carries its own `readOnlyHint`, `destructiveHint`,
 `idempotentHint` and `openWorldHint` (`ToolHints` in `qumo/ai/tools.mojo`). A tool
@@ -349,7 +363,7 @@ Module tools (`qumo/exec/tools.mojo`, registered by `full_registry()`):
 |---|---|---|
 | `qumo_transpile` | `qasm` \| `circuit` \| `program`, `target` (e.g. `grid:4x4/sc_cz`, `heavy_hex:5/rz,sx,x,ecr`, `trapped_ion:11`, `neutral_atom:4x4`) or `edges` + `basis`, `level` 0-3, `pipeline`, `seed` | compiled QASM 3, per-pass report, layouts, swaps, estimated fidelity |
 | `qumo_estimate_resources` | `qasm`, `profile`: superconducting \| trapped_ion \| neutral_atom, `physical_error`, `error_budget` | logical, NISQ and fault-tolerant estimates |
-| `qumo_vqe`, `qumo_qaoa_maxcut` | Pauli-sum `hamiltonian` / edge-list `graph`, optimizer options, `seed` | energy or cut, parameters, convergence |
+| `qumo_vqe`, `qumo_qaoa_maxcut` | Pauli-sum `hamiltonian` / edge-list `graph`, optimizer options, `seed`, `max_qubits`=24 | energy or cut, parameters, convergence. A width above `max_qubits` is refused with QM-E930 before any work (the server caps `max_qubits` at 30); QAOA also refuses graphs of more than 26 nodes up front (QM-E807, the brute-force reference). |
 | `qumo_qec_memory` | `code`: surface_z \| surface_x \| repetition, `distance`, `rounds`, `p`, `shots`, `decoder`, `seed`, `max_errors` | logical error rate, std error, Wilson interval, per-round rate, timing |
 | `qumo_qec_dem` | `code`, `distance`, `rounds`, `p`, `include_stim` | detector error model in Stim DEM text |
 | `qumo_emulate` | `qasm` \| `circuit`, target as `qumo_transpile`, `calibration`, `compile`, `level`, `shots`=1024, `seed`=1234 | `counts` under the target's noise, `method`, `shots`, `seed`, `num_qubits`, `compiled` (whether it was transpiled first), `estimated_fidelity`, `target`; nothing touches a device. A circuit that does not fit the target is QM-E615 unless `compile` is true |

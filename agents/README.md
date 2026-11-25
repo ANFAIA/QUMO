@@ -96,6 +96,14 @@ shows what each agent would run on. Details: [docs/AGENTS.md](../docs/AGENTS.md)
 * Commands run from an allow-list, without a shell.
 * Papers, release notes and pages are data: the prompts tell the agents never to follow
   instructions found in them.
+* No agent fetches web pages and runs code. `registry.py` checks this at import, also through
+  delegation: an agent that reaches both (`autoresearch`, `orchestrator`) must declare each
+  subagent that reaches web fetch in `untrusted_subagents`, and the openrouter and local back
+  ends return those answers, and reports copied into a sandbox or read from `agents/reports/`,
+  cut to a size limit inside an `UNTRUSTED-DATA` block. This labels and bounds the text; it does
+  not stop a model from obeying it, and the Claude Code, Codex and Mojo back ends do not wrap.
+* `run_check` runs an allow-listed command without a shell and without credential-looking
+  environment variables, but not in a process confined from the file system or the network.
 * alphaXiv: only read tools are loaded; library, folder and follow tools are never exposed.
 
 ## Tests

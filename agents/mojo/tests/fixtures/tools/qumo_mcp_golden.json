@@ -56,7 +56,7 @@
       "type": "integer",
       "minimum": 1,
       "default": 65536,
-      "description": "Loop back-edges allowed per shot; past it the run stops with QM-E480"
+      "description": "Loop back-edges allowed per shot; past it the run stops with QM-E480. The MCP server accepts at most 1000000"
      }
     },
     "additionalProperties": false
@@ -475,6 +475,11 @@
      "num_qubits": {
       "type": "integer"
      },
+     "max_qubits": {
+      "type": "integer",
+      "default": 24,
+      "description": "Safety limit for dense simulation (16*2^n bytes)"
+     },
      "layers": {
       "type": "integer",
       "default": 2
@@ -544,6 +549,11 @@
      "seed": {
       "type": "integer",
       "default": 7
+     },
+     "max_qubits": {
+      "type": "integer",
+      "default": 24,
+      "description": "Safety limit for dense simulation (16*2^n bytes)"
      }
     },
     "required": [
@@ -804,7 +814,7 @@
       "type": "integer",
       "minimum": 1,
       "default": 65536,
-      "description": "Loop back-edges allowed per shot; past it the run stops with QM-E480"
+      "description": "Loop back-edges allowed per shot; past it the run stops with QM-E480. The MCP server accepts at most 1000000"
      },
      "shots": {
       "type": "integer",

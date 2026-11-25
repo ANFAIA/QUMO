@@ -428,7 +428,7 @@ def test_generated_tools_values():
         want = "all" if name in ("qumo-operator", "autoresearch") else []
         assert specs[name]["generated_tools"] == want, name
         assert list(specs[name]) == ["description", "tool_groups", "mcp_tools", "subagents", "writes_code",
-                                     "generated_tools"]
+                                     "generated_tools", "untrusted_subagents"]
     assert (export.PROMPTS_DIR / "preamble.md").read_text() == prompts_preamble()
 
 

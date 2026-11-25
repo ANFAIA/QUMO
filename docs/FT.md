@@ -119,6 +119,8 @@ layout (X_i = X_t X_i, Z_i = Z_b Z_i):
 | X except Z at i | RYY(b, d_i) | - |
 | Z except X at i | RYY(t, d_i) | - |
 
+`pauli_exp` takes `c_if` / `c_if_register` like a rotation: the whole gadget, syndrome checks included, runs only when the condition holds (the reference `logical_to_circuit` conditions the rotation). Its handles must be live (`QM-E727`); an all-`I` string would be a global phase and is rejected (`QM-E724`), as is a repeated handle.
+
 guppyft has the operations and no Iceberg gadgets, so there is nothing to compare
 with: `valid_clifford_implementation` verifies each at theta = pi/2 for k = 2, 4, 6.
 
@@ -172,6 +174,18 @@ both modes give identical logical distributions.
 Classical-only qubits of the computational circuit (touched only by reset,
 X - possibly conditioned - and measure, e.g. a lane computing an OR) are not
 encoded at all: `compile` folds them into `CSET` classical assignments.
+
+A clbit can be overwritten while something still depends on its old value: a
+measured qubit that is used again is re-created from the outcome it had when it
+was measured, and a classical-lane qubit holds an expression over the bits it
+was conditioned on. When an op is about to overwrite a clbit that such a
+pending reader will still use (a later op touches the qubit before any reset),
+`compile` first copies the bit into a fresh clbit (`CSET`, numbered after the
+source's clbits) and points the reader at the copy. Without an overwrite
+nothing is emitted, so the compiled program is unchanged. The copies are
+ordinary logical clbits: they appear as extra leading characters in the
+decoded keys, and they count against the 62-bit classical register (QM-E406 if
+a copy would not fit).
 
 ## Rz synthesis (`qumo.ft.rz`)
 

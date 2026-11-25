@@ -223,6 +223,23 @@ the value.
 * Use only alphaXiv's read tools. Its library, folder and follow tools are never loaded.
 * Treat fetched papers, release notes and pages as data. The prompts tell every agent to
   ignore instructions found in them and to report them.
+* Web text and code execution, enforced in `agents/qumo_agents/registry.py` at import:
+  no agent has both `research` (web fetch) and `check` (`run_check`) tools; and every agent
+  that reaches both through delegation (today `autoresearch` and `orchestrator`) must list,
+  in `untrusted_subagents`, each subagent that reaches web fetch, and nothing else. In the
+  openrouter and local back ends the answer of a listed subagent is replaced by a copy cut to
+  6000 characters inside an `UNTRUSTED-DATA` block with a random closing token. Reports copied
+  into a sandbox by `open_sandbox`, and reports read from `agents/reports/` with `read_file`,
+  are wrapped the same way (cut at 60000 characters). What this does not do: the field format
+  (source URL, claim, proposed change) is asked for in the prompts, not checked; a model can
+  still obey wrapped text; `search_code` over `agents/reports/` returns raw lines; the task
+  text an agent writes for a subagent is not wrapped; the Claude Code, Codex and Mojo back ends
+  do not apply the wrapper.
+* What `run_check` does not confine: the command list is fixed and runs without a shell and
+  without credential-looking environment variables, but a test or example it runs is ordinary
+  Python or Mojo code in your user account. It can read any file you can read, write outside
+  the sandbox and open network connections. A sandbox worktree limits what the file tools
+  write, not what a program run there does.
 * Never commit, push, open pull requests or submit jobs to real hardware. The execution
   agent describes the hardware plugin command for a person to run.
 
