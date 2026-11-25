@@ -126,7 +126,7 @@ range has a `bit` in its body.
 
 | Surface | Program support |
 |---|---|
-| Mojo | `load_any`, `parse_qasm_program`, `to_qasm`, `draw_program` (`qumo.ir.qasm`); `sample_program` (`qumo.sim.program_runner`); `compile_program`, `compile_spec_program`, `verify_program`, `program_metrics` (`qumo.compiler.program_compile`); `program_to_json`, `program_from_json` (`qumo.ai.describe`); `lint_program` (`qumo.ai.diagnostics`); `ProgramBuilder` (`qumo.ir.program`) |
+| Mojo | `load_any`, `parse_qasm_program`, `to_qasm`, `draw_program` (`qumo.ir.qasm`); `sample_program` (`qumo.sim.program_runner`); `compile_program`, `compile_spec_program`, `verify_program`, `program_metrics` (`qumo.compiler.program_compile`); `program_to_json`, `program_from_json` (`qumo.ir.json`; `qumo.ai.describe` re-exports them); `lint_program` (`qumo.ai.diagnostics`); `ProgramBuilder` (`qumo.ir.program`) |
 | Python | `qumo_py.Program`, `load_program`, `program_from_json`, `sample_program`, `transpile_program`, `draw_program` |
 | CLI | `qumo run` with `--max-iterations`; `qumo draw`, `validate`, `info`, `convert` |
 | MCP | `qumo_run_qasm`, `qumo_run_device`, `qumo_transpile`, `qumo_draw`, `qumo_validate_qasm`, `qumo_circuit_info`, `qumo_convert` take `qasm`, `program` or `circuit`. Every tool that needs one circuit answers QM-E585 |

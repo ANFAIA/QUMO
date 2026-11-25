@@ -18,7 +18,7 @@ from qumo.ai.tools import (
     ToolRegistry, ToolResult, ToolContext, tool_ok, arg_circuit, arg_int, arg_max_iterations, arg_program,
     arg_program_params, arg_required, arg_params, write_program_outputs, write_warnings,
 )
-from qumo.ai.describe import write_program_json
+from qumo.ir.json import write_program_json
 from qumo.ir.gates import op_from_name
 from qumo.exec.emulate import emulate
 from qumo.sim.density import density_evolve

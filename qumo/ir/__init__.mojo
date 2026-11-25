@@ -42,6 +42,7 @@ Text formats:
     qasm_emit.mojo     Circuit or Program -> OpenQASM 3 text
     qasm2.mojo         the OpenQASM 2 emitter, for interoperability
     noise_inject.mojo  insert `#pragma qumo` noise channels into compiled OpenQASM 2 text
+    json.mojo          circuit and program JSON (`qumo.circuit.v1`, `qumo.program.v1`): write and read back
 
 Programs with control flow and neutral-atom programs:
 

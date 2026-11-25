@@ -45,10 +45,10 @@ from qumo.ai.diagnostics import (
 )
 from qumo.ai.describe import (
     QUMO_VERSION, describe_gates_json, describe_gate_json, describe_errors_json,
-    describe_errors_markdown, describe_error_json, describe_capabilities_json, write_circuit_json,
-    write_circuit_summary, circuit_from_json, describe_passes_json, describe_models_json,
-    program_from_json, write_program_json,
+    describe_errors_markdown, describe_error_json, describe_capabilities_json,
+    write_circuit_summary, describe_passes_json, describe_models_json,
 )
+from qumo.ir.json import write_circuit_json, circuit_from_json, program_from_json, write_program_json
 
 
 # ---------------------------------------------------------------------------
