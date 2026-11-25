@@ -205,7 +205,7 @@ this work: `rz(3/4*pi)` is 0.0 and `rz(10000000000*10000000000)` is 1e20.
 | Non-finite constants | In a flat declaration or gate argument, gate bodies included, QM-E533: `sqrt(-1.0)`, `ln(0.0)`, `1e308 * 10`. In a program, QM-E482 at the gate that reads one |
 | `switch` | On an integer or bits; on a float it is QM-E580. A label of the wrong sign for the target is QM-E580 |
 | Variables in a shot | Nothing survives from the shot before: variables, slots and bits start again |
-| Loop budget | `max_iterations` back-edges per shot, 65536 by default; past it, QM-E480 |
+| Loop budget | `max_iterations` back-edges per shot, 65536 by default; past it, QM-E480. The MCP server refuses more than 1000000 (QM-E913); the CLI and the Mojo API have no ceiling |
 | `input angle[n]` | A float in radians in both parsers, not quantised to n bits. In expressions it behaves as a float |
 
 ### Warnings

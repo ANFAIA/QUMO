@@ -6,6 +6,10 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 
 ## [Unreleased]
 
+### Fixed
+
+- MCP server: `max_iterations` has a ceiling of 1000000 per call (`qumo_run_qasm`, `qumo_run_device`), refused with QM-E913 like `shots` and `max_qubits`. Before, `{"qasm": "... while (true) { x q[0]; } ...", "max_iterations": 9000000000000000000}` blocked the single-threaded server, `ping` included. The CLI keeps its range. (project review, 2026-11-25)
+
 ### Added
 
 - Benchpress Cirq gym run (`bench/results/benchpress/cirq_full.json.gz`): 10 of 1066 tests run, 1054 are skipped as Not implemented by Benchpress and 2 fail; `bench/charts/make_result_charts.py --cirq` draws the 10 tests that run (`benchpress_cirq_tests`), and the README says which charts are Benchpress and which are the neutral harness.
