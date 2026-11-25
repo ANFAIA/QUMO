@@ -394,3 +394,37 @@ def test_env_scrub_keeps_git_usable(monkeypatch):
     assert r.returncode == 0 and "Bearer abc" not in r.stdout, r.stderr
     cli = backends.scrub_env(dict(os.environ), "codex")
     assert not [k for k in cli if k.startswith("GIT_CONFIG_")]
+
+
+# ----------------------------------------------------------------------------- keys over plain http
+def test_model_key_is_not_sent_over_plain_http(monkeypatch):
+    """A key goes over plain http only to this machine (agents/spec/guard_rules.json,
+    rule model_key); a local server keeps working, with or without a key."""
+    from qumo_agents import config
+    from qumo_agents.tools import alphaxiv
+
+    def settings(**over):
+        return config.Settings({"schema": "qumo.agents.v1", "default_model": "m", **over})
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k-test")
+    with pytest.raises(config.ConfigError, match="OPENROUTER_API_KEY to http://example.org over plain http"):
+        config.openrouter_chat_model(settings(openrouter={"base_url": "http://example.org/v1"}), "m")
+    assert config.openrouter_chat_model(settings(), "m") is not None
+
+    monkeypatch.delenv("QUMO_AGENTS_LOCAL_URL", raising=False)
+    monkeypatch.delenv(config.LOCAL_KEY_ENV, raising=False)
+    assert config.local_chat_model(settings(), "m") is not None  # http://localhost:11434/v1, no key
+    lan = settings(local={"base_url": "http://192.168.1.20:11434/v1"})
+    assert config.local_chat_model(lan, "m") is not None  # no key: nothing secret is sent
+    monkeypatch.setenv(config.LOCAL_KEY_ENV, "k-local")
+    assert config.local_chat_model(settings(), "m") is not None  # localhost with a key
+    with pytest.raises(config.ConfigError, match="over plain http") as err:
+        config.local_chat_model(lan, "m")
+    assert "k-local" not in str(err.value)
+
+    monkeypatch.setenv(alphaxiv.KEY_ENV, "k-ax")
+    monkeypatch.setattr(alphaxiv, "ALPHAXIV_URL", "http://papers.example/mcp/v1")
+    with pytest.raises(config.ConfigError, match="ALPHAXIV_API_KEY"):
+        alphaxiv.server_config()
+    monkeypatch.setattr(alphaxiv, "ALPHAXIV_URL", alphaxiv.DEFAULT_URL)
+    assert alphaxiv.server_config()["alphaxiv"]["url"] == alphaxiv.DEFAULT_URL

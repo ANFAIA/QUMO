@@ -6,11 +6,16 @@ them; error messages name the variable, never its value.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
+import re
+import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from qumo_agents import guard_spec
 
 AGENTS_DIR = Path(__file__).resolve().parent.parent
 REPO_ROOT = AGENTS_DIR.parent
@@ -132,6 +137,39 @@ class Settings:
         return dict(self.raw.get(name, {}))
 
 
+_LOOPBACK = guard_spec.MODEL_KEY["plain_http_loopback"]
+_LOOPBACK_NETS = tuple(ipaddress.ip_network(n) for n in _LOOPBACK["networks"])
+# Four decimal octets without leading zeros: `127.1`, `0x7f.0.0.1` and `2130706433` are not
+# guessed at, and `127.0.0.1.attacker.example` is a name.
+_DOTTED_QUAD = re.compile(r"(?:0|[1-9][0-9]{0,2})(?:\.(?:0|[1-9][0-9]{0,2})){3}")
+
+
+def is_loopback_host(host: str) -> bool:
+    """Whether `host` (of a URL, without brackets) is this machine: `localhost`, a name ending
+    in `.localhost`, a literal address in 127.0.0.0/8, or `::1` (the rule of the Mojo
+    harness, net/url.mojo `is_loopback_host`; the lists are in agents/spec/guard_rules.json)."""
+    h = host.lower()
+    if h in _LOOPBACK["names"] or any(h.endswith(s) and len(h) > len(s) for s in _LOOPBACK["name_suffixes"]):
+        return True
+    if not (_DOTTED_QUAD.fullmatch(h) or ":" in h):
+        return False
+    try:
+        ip = ipaddress.ip_address(h)
+    except ValueError:
+        return False
+    return any(ip.version == net.version and ip in net for net in _LOOPBACK_NETS)
+
+
+def check_key_url(base_url: str, key_env: str, key: str | None) -> None:
+    """Refuse to send a key in clear text: a plain `http` URL carries one only to this
+    machine (local model servers). Without a key nothing secret is sent and any URL passes."""
+    parts = urllib.parse.urlsplit(base_url)
+    if not key or parts.scheme != "http" or is_loopback_host(parts.hostname or ""):
+        return
+    raise ConfigError(f"refusing to send {key_env} to http://{parts.hostname or ''} over plain http: use an "
+                      "https base_url (plain http carries the key only to localhost, 127.0.0.0/8 or [::1])")
+
+
 def openrouter_chat_model(settings: Settings, model: str):
     """A LangChain chat model that talks to OpenRouter's OpenAI-compatible API."""
     from langchain_openai import ChatOpenAI
@@ -141,9 +179,11 @@ def openrouter_chat_model(settings: Settings, model: str):
     key = os.environ.get(env)
     if not key:
         raise ConfigError(f"set {env} to use the openrouter back end (or pick --backend claude-code / codex)")
+    base_url = cfg.get("base_url", "https://openrouter.ai/api/v1")
+    check_key_url(base_url, env, key)
     return ChatOpenAI(
         model=model,
-        base_url=cfg.get("base_url", "https://openrouter.ai/api/v1"),
+        base_url=base_url,
         api_key=key,
         default_headers=cfg.get("headers", {}),
         timeout=cfg.get("timeout", 300),
@@ -158,15 +198,19 @@ def local_chat_model(settings: Settings, model: str):
     The key, if the server wants one, comes only from QUMO_AGENTS_LOCAL_API_KEY. The file
     cannot name the variable: base_url is in the same file, so a changed agents.json could
     otherwise send another service's key to a host of its choosing. An explicit placeholder
-    also keeps the client from reading OPENAI_API_KEY on its own.
+    also keeps the client from reading OPENAI_API_KEY on its own. When a key is set, a plain
+    http URL must be this machine (check_key_url).
     """
     from langchain_openai import ChatOpenAI
 
     cfg = settings.section("local")
+    base_url = local_base_url(settings)
+    key = os.environ.get(LOCAL_KEY_ENV)
+    check_key_url(base_url, LOCAL_KEY_ENV, key)  # a keyless server on the local network still works
     return ChatOpenAI(
         model=model,
-        base_url=local_base_url(settings),
-        api_key=os.environ.get(LOCAL_KEY_ENV) or "not-needed",
+        base_url=base_url,
+        api_key=key or "not-needed",
         timeout=cfg.get("timeout", 600),
         max_retries=cfg.get("max_retries", 1),
     )

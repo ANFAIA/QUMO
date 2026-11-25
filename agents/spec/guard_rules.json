@@ -306,6 +306,11 @@
    "too_many_redirects": [
     "too many redirects"
    ]
+  },
+  "model_key": {
+   "plain_http": [
+    "over plain http"
+   ]
   }
  },
  "path_fixture": {
@@ -568,6 +573,24 @@
   {"id": "env-56", "rule": "cli_scrub_env", "input": {"section": "codex", "name": "OPENAI_API_KEY"}, "expect": "allowed", "harnesses": ["python"], "difference": "the Mojo harness has no CLI back ends"},
   {"id": "env-57", "rule": "cli_scrub_env", "input": {"section": "codex", "name": "CODEX_HOME"}, "expect": "allowed", "harnesses": ["python"], "difference": "the Mojo harness has no CLI back ends"},
   {"id": "env-58", "rule": "cli_scrub_env", "input": {"section": "codex", "name": "ANTHROPIC_API_KEY"}, "expect": "refused", "harnesses": ["python"], "difference": "the Mojo harness has no CLI back ends"},
-  {"id": "env-59", "rule": "cli_scrub_env", "input": {"section": "codex", "name": "AWS_SECRET_ACCESS_KEY"}, "expect": "refused", "harnesses": ["python"], "difference": "the Mojo harness has no CLI back ends"}
+  {"id": "env-59", "rule": "cli_scrub_env", "input": {"section": "codex", "name": "AWS_SECRET_ACCESS_KEY"}, "expect": "refused", "harnesses": ["python"], "difference": "the Mojo harness has no CLI back ends"},
+  {"id": "model-key-01", "rule": "model_key", "input": {"base_url": "https://openrouter.ai/api/v1", "key": true}, "expect": "allowed"},
+  {"id": "model-key-02", "rule": "model_key", "input": {"base_url": "http://localhost:11434/v1", "key": true}, "expect": "allowed"},
+  {"id": "model-key-03", "rule": "model_key", "input": {"base_url": "http://127.0.0.1:8080/v1", "key": true}, "expect": "allowed"},
+  {"id": "model-key-04", "rule": "model_key", "input": {"base_url": "http://[::1]:8080/v1", "key": true}, "expect": "allowed"},
+  {"id": "model-key-05", "rule": "model_key", "input": {"base_url": "http://api.localhost:8000/v1", "key": true}, "expect": "allowed"},
+  {"id": "model-key-06", "rule": "model_key", "input": {"base_url": "http://127.8.9.10/v1", "key": true}, "expect": "allowed"},
+  {"id": "model-key-07", "rule": "model_key", "input": {"base_url": "http://LOCALHOST:1234/v1", "key": true}, "expect": "allowed"},
+  {"id": "model-key-08", "rule": "model_key", "input": {"base_url": "http://openrouter.ai/api/v1", "key": true}, "expect": "refused", "reason": "plain_http"},
+  {"id": "model-key-09", "rule": "model_key", "input": {"base_url": "http://192.168.1.20:11434/v1", "key": true}, "expect": "refused", "reason": "plain_http"},
+  {"id": "model-key-10", "rule": "model_key", "input": {"base_url": "http://127.0.0.1.attacker.example/v1", "key": true}, "expect": "refused", "reason": "plain_http"},
+  {"id": "model-key-11", "rule": "model_key", "input": {"base_url": "http://localhost.attacker.example/v1", "key": true}, "expect": "refused", "reason": "plain_http"},
+  {"id": "model-key-12", "rule": "model_key", "input": {"base_url": "http://127.1/v1", "key": true}, "expect": "refused", "reason": "plain_http"},
+  {"id": "model-key-13", "rule": "model_key", "input": {"base_url": "http://0x7f.0.0.1/v1", "key": true}, "expect": "refused", "reason": "plain_http"},
+  {"id": "model-key-14", "rule": "model_key", "input": {"base_url": "http://2130706433/v1", "key": true}, "expect": "refused", "reason": "plain_http"},
+  {"id": "model-key-15", "rule": "model_key", "input": {"base_url": "http://10.0.0.7:8000/v1", "key": true}, "expect": "refused", "reason": "plain_http"},
+  {"id": "model-key-16", "rule": "model_key", "input": {"base_url": "http://[::ffff:127.0.0.1]:8080/v1", "key": true}, "expect": "refused", "reason": "plain_http"},
+  {"id": "model-key-17", "rule": "model_key", "input": {"base_url": "http://0127.0.0.1/v1", "key": true}, "expect": "refused", "reason": "plain_http"},
+  {"id": "model-key-18", "rule": "model_key", "input": {"base_url": "http://192.168.1.20:11434/v1", "key": false}, "expect": "allowed", "harnesses": ["python"], "difference": "the Mojo harness always needs a key variable; the Python local back end may run without one, and then nothing secret is sent"}
  ]
 }
