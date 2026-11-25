@@ -3,7 +3,9 @@ and the URL rules of the research GETs. Pure: nothing here resolves a name or op
 
 The address lists were written by agents/.venv's Python 3.12.13 with
 `ipaddress.ip_address(x).is_global` (an IPv4-mapped IPv6 address judged as its IPv4 address,
-as `_public_host` in qumo_agents/tools/research.py does).
+as `_public_host` in qumo_agents/tools/research.py does), then moved for the three additions
+of agents/spec/guard_rules.json: NAT64 judged as its IPv4 address, IPv4-compatible and
+multicast addresses not global.
 """
 
 from std.testing import assert_equal, assert_true, assert_false
@@ -20,7 +22,7 @@ def test_addresses() raises:
         "1.1.1.1", "8.8.8.8", "9.255.255.255", "11.0.0.0", "100.63.255.255", "100.128.0.0", "126.255.255.255",
         "128.0.0.0", "169.253.255.255", "169.255.0.0", "172.15.255.255", "172.32.0.0", "192.0.0.9",
         "192.0.0.10", "192.0.1.0", "192.0.3.0", "192.167.255.255", "192.169.0.0", "198.17.255.255",
-        "198.20.0.0", "198.51.101.0", "203.0.114.0", "223.255.255.255", "224.0.0.1", "239.255.255.255",
+        "198.20.0.0", "198.51.101.0", "203.0.114.0", "223.255.255.255",
         "140.82.112.3", "151.101.0.223",
     ]
     var other4: List[String] = [
@@ -28,12 +30,12 @@ def test_addresses() raises:
         "100.127.255.255", "127.0.0.1", "127.255.255.255", "169.254.0.1", "169.254.169.254", "172.16.0.1",
         "172.31.255.255", "192.0.0.1", "192.0.0.8", "192.0.0.11", "192.0.0.170", "192.0.2.1", "192.168.0.1",
         "192.168.255.255", "198.18.0.1", "198.19.255.255", "198.51.100.7", "203.0.113.9", "240.0.0.1",
-        "255.255.255.255",
+        "255.255.255.255", "224.0.0.1", "239.255.255.255",
     ]
     var global6: List[String] = [
-        "::2", "::ffff:8.8.8.8", "::127.0.0.1", "64:ff9b::7f00:1", "64:ff9b:2::1", "100:0:0:1::1", "2001:1::1",
+        "::ffff:8.8.8.8", "64:ff9b::808:808", "64:ff9b:2::1", "100:0:0:1::1", "2001:1::1",
         "2001:1::2", "2001:3::1", "2001:4:112::1", "2001:20::1", "2001:2f::1", "2001:30::1", "2001:3f::1",
-        "2001:200::1", "2001:db9::1", "2003::1", "3fff:1000::1", "4000::1", "fe00::1", "fec0::1", "ff02::1",
+        "2001:200::1", "2001:db9::1", "2003::1", "3fff:1000::1", "4000::1", "fe00::1", "fec0::1",
         "2606:4700:4700::1111", "2a04:4e42::223", "1:2:3:4:5:6:7:8", "1:2:3:4:5:6:1.2.3.4",
     ]
     var other6: List[String] = [
@@ -41,6 +43,9 @@ def test_addresses() raises:
         "::ffff:7f00:1", "64:ff9b:1::1", "100::1", "2001::1", "2001:1::3", "2001:4:113::1", "2001:40::1",
         "2001:1ff:ffff::1", "2001:db8::1", "2002::1", "2002:7f00:1::1", "3fff::1", "3fff:fff::1", "fc00::1",
         "fd00::1", "fdff:ffff::1", "fe80::1", "febf::1", "fe80::1%en0",
+        # not `is_global` of CPython: NAT64 judged by its IPv4 address, IPv4-compatible, multicast
+        "::2", "::127.0.0.1", "::8.8.8.8", "64:ff9b::7f00:1", "64:ff9b::a9fe:a9fe", "ff02::1", "ff0e::1",
+        "::ffff:224.0.0.1",
     ]
     for a in global4:
         assert_true(ipv4_is_global(parse_ipv4_literal(a)), a)
@@ -57,7 +62,7 @@ def test_addresses() raises:
         assert_false(ipv6_is_global(parse_ipv6_literal(a)), a)
         assert_equal(literal_is_global(a), 0, a)
     assert_equal(len(global4) + len(other4), 54)
-    assert_equal(len(global6) + len(other6), 51)
+    assert_equal(len(global6) + len(other6), 56)
     assert_false(ipv4_is_global(-1))
     assert_false(ipv4_is_global(1 << 32))
     assert_false(ipv6_is_global(List[UInt8]()))

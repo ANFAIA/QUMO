@@ -8,8 +8,12 @@ checked after resolution, in `tcp_connect(..., public_only=True)`: the connectio
 when any address the name resolves to is not global, and the socket then connects to those
 same addresses (one `getaddrinfo` call, so there is no second lookup to rebind).
 
-"Global" is `ipaddress.ip_address(x).is_global` of CPython 3.12.13, with an IPv4-mapped IPv6
-address judged as its IPv4 address. Everything here is pure (no libc, no network).
+"Global" is `ipaddress.ip_address(x).is_global` of CPython 3.12.13, with three additions
+that both harnesses share (agents/spec/guard_rules.json, `lists.research`): an IPv6 address
+that embeds an IPv4 address is judged as that address (IPv4-mapped `::ffff:a.b.c.d`, and the
+NAT64 prefix `64:ff9b::/96`, so `64:ff9b::7f00:1` is 127.0.0.1); IPv4-compatible addresses
+(`::a.b.c.d`, the whole of `::/96`) are refused; multicast (`224.0.0.0/4`, `ff00::/8`) is
+refused. Everything here is pure (no libc, no network).
 
 Refusals are raised as `QA-E104: refused URL: <text>`, where `<text>` is the message of the
 `ValueError` Python raises for the same URL.
@@ -37,8 +41,10 @@ def _in4(v: Int, net: Int, bits: Int) -> Bool:
 
 
 def ipv4_is_global(v: Int) -> Bool:
-    """`IPv4Address(v).is_global` for the 32-bit value `v`."""
+    """`IPv4Address(v).is_global` for the 32-bit value `v`, multicast excepted (refused)."""
     if v < 0 or v > 0xFFFFFFFF:
+        return False
+    if _in4(v, _v4(224, 0, 0, 0), 4):            # multicast
         return False
     if v == _v4(192, 0, 0, 9) or v == _v4(192, 0, 0, 10):
         return True
@@ -76,8 +82,9 @@ def _in6(g: List[Int], net: List[Int], bits: Int) -> Bool:
 
 
 def ipv6_is_global(b: List[UInt8]) -> Bool:
-    """`IPv6Address(b).is_global` for the 16 bytes `b`; an IPv4-mapped address
-    (`::ffff:a.b.c.d`) is judged as `a.b.c.d`."""
+    """`IPv6Address(b).is_global` for the 16 bytes `b`, except that an IPv4-mapped
+    (`::ffff:a.b.c.d`) or NAT64 (`64:ff9b::a.b.c.d`) address is judged as `a.b.c.d`, and
+    IPv4-compatible (`::/96`) and multicast (`ff00::/8`) addresses are not global."""
     if len(b) != 16:
         return False
     var g = List[Int](capacity=8)
@@ -85,6 +92,12 @@ def ipv6_is_global(b: List[UInt8]) -> Bool:
         g.append((Int(b[2 * i]) << 8) | Int(b[2 * i + 1]))
     if g[0] == 0 and g[1] == 0 and g[2] == 0 and g[3] == 0 and g[4] == 0 and g[5] == 0xFFFF:
         return ipv4_is_global((g[6] << 16) | g[7])
+    if g[0] == 0x64 and g[1] == 0xFF9B and g[2] == 0 and g[3] == 0 and g[4] == 0 and g[5] == 0:
+        return ipv4_is_global((g[6] << 16) | g[7])   # NAT64: the address it translates to
+    if g[0] == 0 and g[1] == 0 and g[2] == 0 and g[3] == 0 and g[4] == 0 and g[5] == 0:
+        return False                                 # ::/96, IPv4-compatible (and ::, ::1)
+    if (g[0] >> 8) == 0xFF:
+        return False                                 # multicast
     # The exceptions inside 2001::/23.
     if g[0] == 0x2001 and g[1] == 1 and g[2] == 0 and g[3] == 0 and g[4] == 0 and g[5] == 0 and g[6] == 0 and (g[7] == 1 or g[7] == 2):
         return True
