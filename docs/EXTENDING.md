@@ -262,17 +262,35 @@ This example pass is for illustration: the built-in `cancel` already removes H H
 
 ### A pass with a name in text pipelines (core edit)
 
-To make `my_pass` usable in a pipeline string, from the CLI and from the MCP tool, edit `qumo/compiler/pass_manager.mojo`:
+To make `my_pass` usable in a pipeline string, from the CLI and from the MCP tool, edit `qumo/compiler/pass_manager.mojo` in three places:
 
 1. `struct PassId`: add a constant and increase `NUM`.
-2. `pass_name`: the canonical name.
-3. `pass_description`: one line; `qumo describe passes` and the MCP server print it.
-4. `pass_id_from_name`: the name and any aliases. This is the only place where text becomes an id.
-5. `_validate_args`: if the pass takes arguments, reject bad ones here (QM-E602).
-6. `_apply`: the branch that runs the pass on the circuit and returns the note shown in the report.
-7. Optionally `preset_pipeline`, if levels 0 to 3 should use it.
+2. `pass_decl`: one block that declares the pass. Nothing else has to be told its name or its arguments.
+3. `_apply`: the branch that runs the pass on the circuit and returns the note shown in the report. It reads arguments from `a` (a `PassArgs`), never from the text.
 
-Also: `tests/test_ai_transpiler.mojo` asserts the value of `PassId.NUM`; `qumo/compiler/program_compile.mojo` lists the passes that change layouts and needs the new id if yours does; add a state-vector test in `tests/test_compiler.mojo` and a row in [COMPILER.md](COMPILER.md). This procedure was read from the source, not exercised for this page.
+```mojo
+    elif id == PassId.MY_PASS:
+        d.named("my_pass", "mypass|my_alias",                 # canonical name, aliases
+                "what it does, in one line")                   # shown by `qumo describe passes`
+        d.int_arg("window", "32", "gates looked back", ArgForm.KEY_OR_BARE)   # my_pass(window=8) or my_pass(8)
+        d.choice_arg("mode", "fast|exact", "fast", "what each mode costs")     # my_pass(mode=exact)
+        d.flag_arg("strict", "off", "raise instead of keeping the original")   # 0|1|true|false|on|off
+```
+
+```mojo
+    if id == PassId.MY_PASS:
+        return "changed " + String(my_pass(c, a.get_int("window"), a.get_text("mode") == "exact", a.get_flag("strict")))
+```
+
+The declaration gives, with no further edit: the name and alias lookup of `parse_pipeline`, the description in `describe_passes()` and `qumo_describe`, the check of the arguments (QM-E602 for an unknown key or a bad value, with a hint that lists the arguments), the defaults, and the pass's rows in [PASSES.md](PASSES.md). The builders are `int_arg` (with `lo` / `hi`), `float_arg`, `flag_arg`, `choice_arg`, `text_arg` and `list_arg` (a gate list, angle bounds or a nested pipeline); the accessors are `get_int`, `get_float`, `get_flag`, `get_text`, `get_list`, `given` and `position`. An accessor raises if the argument is not declared or is declared with another kind, so the check and the pass cannot read an argument differently. Two fields of the declaration matter to other code: set `d.relabels = True` if the pass renames qubits for the passes after it (`program_compile.mojo` asks `pass_relabels`), and `d.block_kind` if it resynthesises collected blocks of a `BlockKind`.
+
+Then:
+
+- `QUMO_UPDATE_DOCS=1 .venv/bin/mojo run -I . tests/test_mcp.mojo` regenerates `docs/PASSES.md` (the same run checks it).
+- `.venv/bin/mojo run -I . tests/test_pass_table.mojo` checks the table (`check_pass_table`: every id declared, no name taken twice, defaults valid), that every declared argument is accepted and read back, and that every id has a branch in `_apply` (it runs each pass once; `_apply` raises QM-E600 for an id without a branch). `tests/test_ai_transpiler.mojo` asserts the value of `PassId.NUM`, and the list of names in `test_pass_table.mojo` asserts that none was added or lost: update both.
+- Add a state-vector test in `tests/test_compiler.mojo`, a row in the table of [COMPILER.md](COMPILER.md), and the pass to `preset_pipeline` if levels 0 to 3 should use it.
+
+The snippet above is not compiled by the docs tests.
 
 ## 4. A decoder
 

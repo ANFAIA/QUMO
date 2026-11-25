@@ -41,12 +41,12 @@ from qumo.compiler.blockalg import SubGraph, BlockKind
 comptime MODEL_FORMAT_SYNTH = "qumo.rlsynth.v0"
 comptime MODEL_FORMAT_ROUTE = "qumo.rlroute.v0"
 
-# kind codes (synthesis kinds mirror blockalg.BlockKind)
-comptime MODEL_KIND_CLIFFORD = 0
-comptime MODEL_KIND_LINEAR = 1
-comptime MODEL_KIND_PERM = 2
-comptime MODEL_KIND_PAULI = 3
-comptime MODEL_KIND_ROUTING = 4
+# kind codes of a model manifest: the block kinds, then routing
+comptime MODEL_KIND_CLIFFORD = BlockKind.CLIFFORD
+comptime MODEL_KIND_LINEAR = BlockKind.LINEAR
+comptime MODEL_KIND_PERM = BlockKind.PERM
+comptime MODEL_KIND_PAULI = BlockKind.PAULI
+comptime MODEL_KIND_ROUTING = BlockKind.NUM
 
 
 def model_kind_code(kind: String) -> Int:
