@@ -76,7 +76,7 @@ machine-readable summary.
 
 | Pass | What it does | Inspired by |
 |---|---|---|
-| `remove_identities` | drop gates within 1e-12 process infidelity of the identity (rz(0), rx(4π), cp(1e-9), ...); phase kept | Qiskit `RemoveIdentityEquivalent` |
+| `remove_identities` | drop gates equal to the identity to 1e-14 (rz(0), rx(4π), cp(2π), float residue of a cancelled pair); phase kept. Tight on purpose: it sees one gate at a time, so a looser bound drops many small rotations that add up | Qiskit `RemoveIdentityEquivalent` |
 | `cancel(window)` | commutation-aware inverse-pair cancellation over a per-wire linked list (O(n·window)) | Qiskit `InverseCancellation` / `CommutativeInverseCancellation`, TKET `RemoveRedundancies` |
 | `merge` | adjacent same-axis rotations (rz rz, t t→s, rzz rzz, cp cp, cz·cp), symbolic params merge by `Param.try_add` | Qiskit `Optimize1qGates`, TKET |
 | `commute(window)` | merge/cancel rotations *through* commuting gates (rz through cx controls / cz / diagonals, rx through cx targets) | Qiskit `CommutativeCancellation` |
@@ -227,9 +227,13 @@ two-qubit gates, so it stays out of O0-O3. On the Feynman circuits against
   at level 2 used to change `sx rz(1) p(2^63-1) sx rz(1) p(2^63-1)`. The verifier of
   programs found it. Output changes only for such angles. The offset of a symbolic
   angle reduces the same way; a huge coefficient on a symbol stays a float limit.
-* **`transpile` drops small rotations:** a rotation below about 2e-6 is within the
-  1e-12 infidelity of `remove_identities` and goes, so many such gates can add up to
-  more than each one. Program blocks compile in exact mode instead, below.
+* **Small rotations are kept:** `remove_identities` (first pass of every preset) drops a
+  gate only when it is the identity to 1e-14. It used to drop any rotation below about
+  2e-6 (1e-12 infidelity) one gate at a time, so `h; 300000 x rz(1.9e-6); h`, which is
+  `rz(0.57)`, compiled to an empty circuit at O1 to O3. Now those rotations stay and
+  merge. Rotations between 1e-14 and 2e-6 (for example `rx(1e-9)`) are no longer removed
+  on their own, so a circuit that held many of them keeps them; the same tolerance
+  applies to Program blocks.
 * Past 2^22 quarter turns an angle is not Clifford (`QUARTER_TURN_LIMIT`), in
   `Instruction.is_clifford` and in the helpers that read a count of quarter turns.
 
