@@ -52,7 +52,7 @@ def git_sandbox(work: String) raises -> String:
     var sandbox = join_path(work, "sandbox")
     make_dirs(sandbox)
     _ = run([git, "init", "-q", "-b", "agents/flow-test", sandbox], work)
-    _ = run([git, "-C", sandbox, "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+    _ = run([git, "-C", sandbox, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false",
              "commit", "-q", "--allow-empty", "-m", "init"], work)
     return realpath_strict(sandbox)
 

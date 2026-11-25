@@ -61,6 +61,12 @@ small codes.
 | `five_qubit_code()` | [[5,1,3]] | perfect code (non-CSS) |
 | `surface_code(d)` | [[d^2,1,d]] | adapter: checks read from `qumo.qec.codes.surface_code_memory` |
 | `repetition_code(d)` | [[d,1,1]] | adapter over `repetition_code_memory` (bit-flip distance d) |
+| `helix_code()` / `helix_10_2_3_code()` | [[20,2,6]] / [[10,2,3]] | arXiv:2609.03194 Table I, definition only (see Helix below) |
+| `identity_code(k)` | [[k,k,1]] | trivial code with no redundancy (Guppy FT `_identity_code`) |
+
+`code_by_name(name)` takes `steane`, `five_qubit`, `css_422`, `noncss_422`, `helix`
+(or `helix_20_2_6`), `helix_10_2_3`, `iceberg_<k>`, `surface_<d>`, `repetition_<d>` and
+`identity_<k>`; another name is `QM-E722`.
 
 Pauli labels use the Guppy FT / Stim convention: character i is physical qubit i.
 
@@ -79,6 +85,12 @@ var steane = SteaneBuilder()
     .build(3)
 var ice = IcebergBuilder(4).build(2)             # two [[6,4,2]] blocks = 8 logical qubits
 ```
+
+`build(n)` is the number of logical blocks the allocator may use, and the comparator
+circuit needs many more than the program's own qubits (its angle register, workspace
+and magic states are logical qubits too). One `rz(0.7)` with
+`.with_rz("comparator", 0.1, 16, 2)` raises `QM-E725` at `build(3)` and at `build(8)` and
+encodes at `build(12)`; `examples/ft/magic_t_and_comparator_rz.mojo` uses `build(16)`.
 
 | | Steane [[7,1,3]] | Iceberg [[k+2,k,2]] |
 |---|---|---|
@@ -118,6 +130,8 @@ layout (X_i = X_t X_i, Z_i = Z_b Z_i):
 | Z except I at i | RZZ(t, d_i) | + |
 | X except Z at i | RYY(b, d_i) | - |
 | Z except X at i | RYY(t, d_i) | - |
+
+`pauli_exp` takes `c_if` / `c_if_register` like a rotation: the whole gadget, syndrome checks included, runs only when the condition holds (the reference `logical_to_circuit` conditions the rotation). Its handles must be live (`QM-E727`); an all-`I` string would be a global phase and is rejected (`QM-E724`), as is a repeated handle.
 
 guppyft has the operations and no Iceberg gadgets, so there is nothing to compare
 with: `valid_clifford_implementation` verifies each at theta = pi/2 for k = 2, 4, 6.
@@ -173,6 +187,18 @@ Classical-only qubits of the computational circuit (touched only by reset,
 X - possibly conditioned - and measure, e.g. a lane computing an OR) are not
 encoded at all: `compile` folds them into `CSET` classical assignments.
 
+A clbit can be overwritten while something still depends on its old value: a
+measured qubit that is used again is re-created from the outcome it had when it
+was measured, and a classical-lane qubit holds an expression over the bits it
+was conditioned on. When an op is about to overwrite a clbit that such a
+pending reader will still use (a later op touches the qubit before any reset),
+`compile` first copies the bit into a fresh clbit (`CSET`, numbered after the
+source's clbits) and points the reader at the copy. Without an overwrite
+nothing is emitted, so the compiled program is unchanged. The copies are
+ordinary logical clbits: they appear as extra leading characters in the
+decoded keys, and they count against the 62-bit classical register (QM-E406 if
+a copy would not fit).
+
 ## Rz synthesis (`qumo.ft.rz`)
 
 | Path | When | Cost |
@@ -227,7 +253,8 @@ which would need automorphism gates, fold-transversal S and a non-matching decod
   plus random seeds) each expected generator has expectation exactly +1.
 * `valid_magic_state_preparation(impl, code, theta)` (state vector,
   post-selected flags): stabilizers +1 and logical Bloch vector
-  (cos theta, sin theta, 0).
+  (cos theta, sin theta, 0). This one is defined in `qumo.ft.gadgets`, not in
+  `qumo.ft.verify` (import it from there); it takes codes with k = 1 (`QM-E723` otherwise).
 * `fault_tolerant_state_preparation(semantic, impl, code, num_ancillas, t, model, max_fault_sets)`
   (`qumo.ft.faults`): the exact t-fault-tolerance check of Definition 1 of Schmid and Wille,
   [arXiv:2611.25107](https://arxiv.org/abs/2611.25107). Every set F of at most t faults
@@ -257,7 +284,7 @@ noise (`NoiseParams`, lanes excluded) and returns `LogicalCounts` after
 post-selection. `logical_to_circuit(lp)` gives the semantics of a logical
 program as an unencoded circuit, `reference_counts` samples the source
 circuit, `error_rate_sweep` compares logical and physical error rates.
-`qumo.ft.tools.resource_report_json` combines encoder statistics with
+`qumo.ai.ft_tools.resource_report_json` combines encoder statistics with
 `qumo.exec.resources.estimate_resources` of the physical circuit.
 
 Measured with `examples/ft/logical_error_sweep.mojo` (3-qubit deterministic

@@ -15,6 +15,7 @@
   ".env": "KEY=1 TODO\n",
   "config/secret.mojo": "TODO secret\n",
   "config/Credentials.txt": "TODO\n",
+  "secrets/a.txt": "TODO in a secret-looking directory\n",
   "keys/id_rsa": "TODO\n",
   "server.PEM": "TODO\n",
   ".venv/x": "v\n",
@@ -563,6 +564,34 @@
   {
    "tool": "read_file",
    "args": {
+    "path": "secrets/a.txt"
+   },
+   "python": "error: secrets/a.txt is not readable by agents"
+  },
+  {
+   "tool": "read_file",
+   "args": {
+    "path": "src/../secrets/a.txt"
+   },
+   "python": "error: src/../secrets/a.txt is not readable by agents"
+  },
+  {
+   "tool": "read_file",
+   "args": {
+    "path": "Secrets/a.txt"
+   },
+   "python": "error: Secrets/a.txt is not readable by agents"
+  },
+  {
+   "tool": "read_file",
+   "args": {
+    "path": "secrets/../README.md"
+   },
+   "python": "1\tline1\n2\tline2"
+  },
+  {
+   "tool": "read_file",
+   "args": {
     "path": "src/link_in.mojo"
    },
    "python": "1\tdef main():\n2\t    print('hello')  \n3\t# TODO fix"
@@ -620,7 +649,7 @@
   {
    "tool": "list_files",
    "args": {},
-   "python": ".env\nREADME.md\nUpper/MiXed.MOJO\na/b\na/c/d.mojo\na-b/e.mojo\na.b\nbad_utf8.mojo\nbig.txt\nconfig/Credentials.txt\nconfig/secret.mojo\nkeys/id_rsa\nlink_out.mojo\nlong_line.mojo\nmany/f000.txt\nmany/f001.txt\nmany/f002.txt\nmany/f003.txt\nmany/f004.txt\nmany/f005.txt\nmany/f006.txt\nmany/f007.txt\nmany/f008.txt\nmany/f009.txt\nmany/f010.txt\nmany/f011.txt\nmany/f012.txt\nmany/f013.txt\nmany/f014.txt\nmany/f015.txt\nmany/f016.txt\nmany/f017.txt\nmany/f018.txt\nmany/f019.txt\nmany/f020.txt\nmany/f021.txt\nmany/f022.txt\nmany/f023.txt\nmany/f024.txt\nmany/f025.txt\nmany/f026.txt\nmany/f027.txt\nmany/f028.txt\nmany/f029.txt\nmany/f030.txt\nmany/f031.txt\nmany/f032.txt\nmany/f033.txt\nmany/f034.txt\nmany/f035.txt\nmany/f036.txt\nmany/f037.txt\nmany/f038.txt\nmany/f039.txt\nmany/f040.txt\nmany/f041.txt\nmany/f042.txt\nmany/f043.txt\nmany/f044.txt\nmany/f045.txt\nmany/f046.txt\nmany/f047.txt\nmany/f048.txt\nmany/f049.txt\nmany/f050.txt\nmany/f051.txt\nmany/f052.txt\nmany/f053.txt\nmany/f054.txt\nmany/f055.txt\nmany/f056.txt\nmany/f057.txt\nmany/f058.txt\nmany/f059.txt\nmany/f060.txt\nmany/f061.txt\nmany/f062.txt\nmany/f063.txt\nmany/f064.txt\nmany/f065.txt\nmany/f066.txt\nmany/f067.txt\nmany/f068.txt\nmany/f069.txt\nmany/f070.txt\nmany/f071.txt\nmany/f072.txt\nmany/f073.txt\nmany/f074.txt\nmany/f075.txt\nmany/f076.txt\nmany/f077.txt\nmany/f078.txt\nmany/f079.txt\nmany/f080.txt\nmany/f081.txt\nmany/f082.txt\nmany/f083.txt\nmany/f084.txt\nmany/f085.txt\nmany/f086.txt\nmany/f087.txt\nmany/f088.txt\nmany/f089.txt\nmany/f090.txt\nmany/f091.txt\nmany/f092.txt\nmany/f093.txt\nmany/f094.txt\nmany/f095.txt\nmany/f096.txt\nmany/f097.txt\nmany/f098.txt\nmany/f099.txt\nmany/f100.txt\nmany/f101.txt\nmany/f102.txt\nmany/f103.txt\nmany/f104.txt\nmany/f105.txt\nmany/f106.txt\nmany/f107.txt\nmany/f108.txt\nmany/f109.txt\nmany/f110.txt\nmany/f111.txt\nmany/f112.txt\nmany/f113.txt\nmany/f114.txt\nmany/f115.txt\nmany/f116.txt\nmany/f117.txt\nmany/f118.txt\nmany/f119.txt\nmany/f120.txt\nmany/f121.txt\nmany/f122.txt\nmany/f123.txt\nmany/f124.txt\nmany/f125.txt\nmany/f126.txt\nmany/f127.txt\nmany/f128.txt\nmany/f129.txt\nmany/f130.txt\nmany/f131.txt\nmany/f132.txt\nmany/f133.txt\nmany/f134.txt\nmany/f135.txt\nmany/f136.txt\nmany/f137.txt\nmany/f138.txt\nmany/f139.txt\nmany/f140.txt\nmany/f141.txt\nmany/f142.txt\nmany/f143.txt\nmany/f144.txt\nmany/f145.txt\nmany/f146.txt\nmany/f147.txt\nmany/f148.txt\nmany/f149.txt\nmany/f150.txt\nmany/f151.txt\nmany/f152.txt\nmany/f153.txt\nmany/f154.txt\nmany/f155.txt\nmany/f156.txt\nmany/f157.txt\nmany/f158.txt\nmany/f159.txt\nmany/f160.txt\nmany/f161.txt\nmany/f162.txt\nmany/f163.txt\nmany/f164.txt\nmany/f165.txt\nmany/f166.txt\nmany/f167.txt\nmany/f168.txt\nmany/f169.txt\nmany/f170.txt\nmany/f171.txt\nmany/f172.txt\nmany/f173.txt\nmany/f174.txt\nmany/f175.txt\nmany/f176.txt\nmany/f177.txt\nmany/f178.txt\nmany/f179.txt\nmany/f180.txt\nmany/f181.txt\nmany/f182.txt\nmany/f183.txt\nmany/f184.txt\nmany/f185.txt\nmany/f186.txt\nmany/f187.txt\nmany/f188.txt\nmany/f189.txt\nmany/f190.txt\nmany/f191.txt\nmany/f192.txt\nmany/f193.txt\nmany/f194.txt\nmany/f195.txt\nmany/f196.txt\nmany/f197.txt\nmany/f198.txt\nmany/f199.txt\nmany/f200.txt\nmany/f201.txt\nmany/f202.txt\nmany/f203.txt\nmany/f204.txt\nmany/f205.txt\nmany/f206.txt\nmany/f207.txt\nmany/f208.txt\nmany/f209.txt\nmany/f210.txt\nmany/f211.txt\nmany/f212.txt\nmany/f213.txt\nmany/f214.txt\nmany/f215.txt\nmany/f216.txt\nmany/f217.txt\nmany/f218.txt\nmany/f219.txt\nmany/f220.txt\nmany/f221.txt\nmany/f222.txt\nmany/f223.txt\nmany/f224.txt\nmany/f225.txt\nmany/f226.txt\nmany/f227.txt\nmany/f228.txt\nmany/f229.txt\nmany/f230.txt\nmany/f231.txt\nmany/f232.txt\nmany/f233.txt\nmany/f234.txt\nmany/f235.txt\nmany/f236.txt\nmany/f237.txt\nmany/f238.txt\nmany/f239.txt\nmany/f240.txt\nmany/f241.txt\nmany/f242.txt\nmany/f243.txt\nmany/f244.txt\nmany/f245.txt\nmany/f246.txt\nmany/f247.txt\nmany/f248.txt\nmany/f249.txt\nmany/f250.txt\nmany/f251.txt\nmany/f252.txt\nmany/f253.txt\nmany/f254.txt\nmany/f255.txt\nmany/f256.txt\nmany/f257.txt\nmany/f258.txt\nmany/f259.txt\nmany/f260.txt\nmany/f261.txt\nmany/f262.txt\nmany/f263.txt\nmany/f264.txt\nmany/f265.txt\nmany/f266.txt\nmany/f267.txt\nmany/f268.txt\nmany/f269.txt\nmany/f270.txt\nmany/f271.txt\nmany/f272.txt\nmany/f273.txt\nmany/f274.txt\nmany/f275.txt\nmany/f276.txt\nmany/f277.txt\nmany/f278.txt\nmany/f279.txt\nmany/f280.txt\nmany/f281.txt\nmany/f282.txt\nmany/f283.txt\nmany/f284.txt\nmany/f285.txt\n... truncated"
+   "python": "README.md\nUpper/MiXed.MOJO\na/b\na/c/d.mojo\na-b/e.mojo\na.b\nbad_utf8.mojo\nbig.txt\nlong_line.mojo\nmany/f000.txt\nmany/f001.txt\nmany/f002.txt\nmany/f003.txt\nmany/f004.txt\nmany/f005.txt\nmany/f006.txt\nmany/f007.txt\nmany/f008.txt\nmany/f009.txt\nmany/f010.txt\nmany/f011.txt\nmany/f012.txt\nmany/f013.txt\nmany/f014.txt\nmany/f015.txt\nmany/f016.txt\nmany/f017.txt\nmany/f018.txt\nmany/f019.txt\nmany/f020.txt\nmany/f021.txt\nmany/f022.txt\nmany/f023.txt\nmany/f024.txt\nmany/f025.txt\nmany/f026.txt\nmany/f027.txt\nmany/f028.txt\nmany/f029.txt\nmany/f030.txt\nmany/f031.txt\nmany/f032.txt\nmany/f033.txt\nmany/f034.txt\nmany/f035.txt\nmany/f036.txt\nmany/f037.txt\nmany/f038.txt\nmany/f039.txt\nmany/f040.txt\nmany/f041.txt\nmany/f042.txt\nmany/f043.txt\nmany/f044.txt\nmany/f045.txt\nmany/f046.txt\nmany/f047.txt\nmany/f048.txt\nmany/f049.txt\nmany/f050.txt\nmany/f051.txt\nmany/f052.txt\nmany/f053.txt\nmany/f054.txt\nmany/f055.txt\nmany/f056.txt\nmany/f057.txt\nmany/f058.txt\nmany/f059.txt\nmany/f060.txt\nmany/f061.txt\nmany/f062.txt\nmany/f063.txt\nmany/f064.txt\nmany/f065.txt\nmany/f066.txt\nmany/f067.txt\nmany/f068.txt\nmany/f069.txt\nmany/f070.txt\nmany/f071.txt\nmany/f072.txt\nmany/f073.txt\nmany/f074.txt\nmany/f075.txt\nmany/f076.txt\nmany/f077.txt\nmany/f078.txt\nmany/f079.txt\nmany/f080.txt\nmany/f081.txt\nmany/f082.txt\nmany/f083.txt\nmany/f084.txt\nmany/f085.txt\nmany/f086.txt\nmany/f087.txt\nmany/f088.txt\nmany/f089.txt\nmany/f090.txt\nmany/f091.txt\nmany/f092.txt\nmany/f093.txt\nmany/f094.txt\nmany/f095.txt\nmany/f096.txt\nmany/f097.txt\nmany/f098.txt\nmany/f099.txt\nmany/f100.txt\nmany/f101.txt\nmany/f102.txt\nmany/f103.txt\nmany/f104.txt\nmany/f105.txt\nmany/f106.txt\nmany/f107.txt\nmany/f108.txt\nmany/f109.txt\nmany/f110.txt\nmany/f111.txt\nmany/f112.txt\nmany/f113.txt\nmany/f114.txt\nmany/f115.txt\nmany/f116.txt\nmany/f117.txt\nmany/f118.txt\nmany/f119.txt\nmany/f120.txt\nmany/f121.txt\nmany/f122.txt\nmany/f123.txt\nmany/f124.txt\nmany/f125.txt\nmany/f126.txt\nmany/f127.txt\nmany/f128.txt\nmany/f129.txt\nmany/f130.txt\nmany/f131.txt\nmany/f132.txt\nmany/f133.txt\nmany/f134.txt\nmany/f135.txt\nmany/f136.txt\nmany/f137.txt\nmany/f138.txt\nmany/f139.txt\nmany/f140.txt\nmany/f141.txt\nmany/f142.txt\nmany/f143.txt\nmany/f144.txt\nmany/f145.txt\nmany/f146.txt\nmany/f147.txt\nmany/f148.txt\nmany/f149.txt\nmany/f150.txt\nmany/f151.txt\nmany/f152.txt\nmany/f153.txt\nmany/f154.txt\nmany/f155.txt\nmany/f156.txt\nmany/f157.txt\nmany/f158.txt\nmany/f159.txt\nmany/f160.txt\nmany/f161.txt\nmany/f162.txt\nmany/f163.txt\nmany/f164.txt\nmany/f165.txt\nmany/f166.txt\nmany/f167.txt\nmany/f168.txt\nmany/f169.txt\nmany/f170.txt\nmany/f171.txt\nmany/f172.txt\nmany/f173.txt\nmany/f174.txt\nmany/f175.txt\nmany/f176.txt\nmany/f177.txt\nmany/f178.txt\nmany/f179.txt\nmany/f180.txt\nmany/f181.txt\nmany/f182.txt\nmany/f183.txt\nmany/f184.txt\nmany/f185.txt\nmany/f186.txt\nmany/f187.txt\nmany/f188.txt\nmany/f189.txt\nmany/f190.txt\nmany/f191.txt\nmany/f192.txt\nmany/f193.txt\nmany/f194.txt\nmany/f195.txt\nmany/f196.txt\nmany/f197.txt\nmany/f198.txt\nmany/f199.txt\nmany/f200.txt\nmany/f201.txt\nmany/f202.txt\nmany/f203.txt\nmany/f204.txt\nmany/f205.txt\nmany/f206.txt\nmany/f207.txt\nmany/f208.txt\nmany/f209.txt\nmany/f210.txt\nmany/f211.txt\nmany/f212.txt\nmany/f213.txt\nmany/f214.txt\nmany/f215.txt\nmany/f216.txt\nmany/f217.txt\nmany/f218.txt\nmany/f219.txt\nmany/f220.txt\nmany/f221.txt\nmany/f222.txt\nmany/f223.txt\nmany/f224.txt\nmany/f225.txt\nmany/f226.txt\nmany/f227.txt\nmany/f228.txt\nmany/f229.txt\nmany/f230.txt\nmany/f231.txt\nmany/f232.txt\nmany/f233.txt\nmany/f234.txt\nmany/f235.txt\nmany/f236.txt\nmany/f237.txt\nmany/f238.txt\nmany/f239.txt\nmany/f240.txt\nmany/f241.txt\nmany/f242.txt\nmany/f243.txt\nmany/f244.txt\nmany/f245.txt\nmany/f246.txt\nmany/f247.txt\nmany/f248.txt\nmany/f249.txt\nmany/f250.txt\nmany/f251.txt\nmany/f252.txt\nmany/f253.txt\nmany/f254.txt\nmany/f255.txt\nmany/f256.txt\nmany/f257.txt\nmany/f258.txt\nmany/f259.txt\nmany/f260.txt\nmany/f261.txt\nmany/f262.txt\nmany/f263.txt\nmany/f264.txt\nmany/f265.txt\nmany/f266.txt\nmany/f267.txt\nmany/f268.txt\nmany/f269.txt\nmany/f270.txt\nmany/f271.txt\nmany/f272.txt\nmany/f273.txt\nmany/f274.txt\nmany/f275.txt\nmany/f276.txt\nmany/f277.txt\nmany/f278.txt\nmany/f279.txt\nmany/f280.txt\nmany/f281.txt\nmany/f282.txt\nmany/f283.txt\nmany/f284.txt\nmany/f285.txt\nmany/f286.txt\nmany/f287.txt\nmany/f288.txt\nmany/f289.txt\nmany/f290.txt\n... truncated"
   },
   {
    "tool": "list_files",
@@ -635,7 +664,7 @@
     "path": ".",
     "pattern": "*.mojo"
    },
-   "python": "a/c/d.mojo\na-b/e.mojo\nbad_utf8.mojo\nconfig/secret.mojo\nlink_out.mojo\nlong_line.mojo\nsrc/a.mojo\nsrc/link_in.mojo\ntests/test_x.mojo"
+   "python": "a/c/d.mojo\na-b/e.mojo\nbad_utf8.mojo\nlong_line.mojo\nsrc/a.mojo\nsrc/link_in.mojo\ntests/test_x.mojo"
   },
   {
    "tool": "list_files",
@@ -689,13 +718,43 @@
    "python": "error: ../ is outside <ROOT>"
   },
   {
+   "tool": "list_files",
+   "args": {
+    "path": "secrets"
+   },
+   "python": "error: secrets is not readable by agents"
+  },
+  {
+   "tool": "list_files",
+   "args": {
+    "path": "config"
+   },
+   "python": ""
+  },
+  {
+   "tool": "search_code",
+   "args": {
+    "regex": "TODO",
+    "path": "src/../secrets",
+    "glob": "*"
+   },
+   "python": "error: src/../secrets is not readable by agents"
+  },
+  {
+   "tool": "search_code",
+   "args": {
+    "regex": "TODO",
+    "path": "config",
+    "glob": "*"
+   },
+   "python": "no matches"
+  },
+  {
    "tool": "search_code",
    "args": {
     "regex": "TODO"
    },
-   "python": "a/c/d.mojo:1: TODO deep éé\na-b/e.mojo:1: TODO dash\nbad_utf8.mojo:1: TODO �\nconfig/secret.mojo:1: TODO secret\nlink_out.mojo:1: TODO outside\nlong_line.mojo:1: TODO xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nsrc/a.mojo:3: # TODO fix\nsrc/link_in.mojo:3: # TODO fix\ntests/test_x.mojo:1: def test(): # TODO",
-   "mojo": "a/c/d.mojo:1: TODO deep éé\na-b/e.mojo:1: TODO dash\nbad_utf8.mojo:1: TODO �\nlong_line.mojo:1: TODO xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nsrc/a.mojo:3: # TODO fix\nsrc/link_in.mojo:3: # TODO fix\ntests/test_x.mojo:1: def test(): # TODO",
-   "why": "search_code skips secret-looking names (X5); search_code skips symlinks resolving outside the root (X5)"
+   "python": "a/c/d.mojo:1: TODO deep éé\na-b/e.mojo:1: TODO dash\nbad_utf8.mojo:1: TODO �\nlong_line.mojo:1: TODO xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nsrc/a.mojo:3: # TODO fix\nsrc/link_in.mojo:3: # TODO fix\ntests/test_x.mojo:1: def test(): # TODO"
   },
   {
    "tool": "search_code",
@@ -719,9 +778,7 @@
     "regex": "(?i)todo",
     "glob": "*"
    },
-   "python": ".env:1: KEY=1 TODO\nUpper/MiXed.MOJO:1: TODO upper\na/c/d.mojo:1: TODO deep éé\na-b/e.mojo:1: TODO dash\nbad_utf8.mojo:1: TODO �\nconfig/Credentials.txt:1: TODO\nconfig/secret.mojo:1: TODO secret\nkeys/id_rsa:1: TODO\nlink_out.mojo:1: TODO outside\nlong_line.mojo:1: TODO xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nserver.PEM:1: TODO\nsrc/a.mojo:3: # TODO fix\nsrc/link_in.mojo:3: # TODO fix\ntests/test_x.mojo:1: def test(): # TODO",
-   "mojo": "Upper/MiXed.MOJO:1: TODO upper\na/c/d.mojo:1: TODO deep éé\na-b/e.mojo:1: TODO dash\nbad_utf8.mojo:1: TODO �\nlong_line.mojo:1: TODO xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nsrc/a.mojo:3: # TODO fix\nsrc/link_in.mojo:3: # TODO fix\ntests/test_x.mojo:1: def test(): # TODO",
-   "why": "search_code skips secret-looking names (X5); search_code skips symlinks resolving outside the root (X5)"
+   "python": "Upper/MiXed.MOJO:1: TODO upper\na/c/d.mojo:1: TODO deep éé\na-b/e.mojo:1: TODO dash\nbad_utf8.mojo:1: TODO �\nlong_line.mojo:1: TODO xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nsrc/a.mojo:3: # TODO fix\nsrc/link_in.mojo:3: # TODO fix\ntests/test_x.mojo:1: def test(): # TODO"
   },
   {
    "tool": "search_code",
@@ -777,9 +834,7 @@
     "regex": "TODO",
     "glob": "*.txt"
    },
-   "python": "config/Credentials.txt:1: TODO",
-   "mojo": "no matches",
-   "why": "search_code skips secret-looking names (X5); search_code skips symlinks resolving outside the root (X5)"
+   "python": "no matches"
   },
   {
    "tool": "write_file",
@@ -933,7 +988,7 @@
      "é"
     ]
    },
-   "python": "error: [Errno 2] No such file or directory: 'build/qumo'",
+   "python": "refused: build/qumo subcommands allowed here: convert describe draw emulate expect help info run statevector transpile validate version vqe",
    "mojo": "refused: arguments may only hold path-like characters",
    "why": "arguments are ASCII only (X5; Python's \\w is Unicode)"
   },
@@ -945,7 +1000,7 @@
      "x\n"
     ]
    },
-   "python": "error: [Errno 2] No such file or directory: 'build/qumo'",
+   "python": "refused: build/qumo subcommands allowed here: convert describe draw emulate expect help info run statevector transpile validate version vqe",
    "mojo": "refused: arguments may only hold path-like characters",
    "why": "a trailing newline is refused (X5; Python's $ accepts it)"
   },
@@ -958,9 +1013,7 @@
      "--output=x"
     ]
    },
-   "python": "refused: git options allowed here: -- --cached --name-only --name-status --staged --stat",
-   "mojo": "refused: arguments may only hold path-like characters",
-   "why": "git diff --output is refused (X5)"
+   "python": "refused: git options allowed here: -- --cached --name-only --name-status --staged --stat"
   },
   {
    "tool": "run_check",
@@ -973,9 +1026,127 @@
      "b"
     ]
    },
-   "python": "refused: git options allowed here: -- --cached --name-only --name-status --staged --stat",
-   "mojo": "refused: arguments may only hold path-like characters",
-   "why": "git diff --no-index is refused (X5)"
+   "python": "refused: git options allowed here: -- --cached --name-only --name-status --staged --stat"
+  },
+  {
+   "tool": "run_check",
+   "args": {
+    "argv": [
+     "git",
+     "diff",
+     "/etc/hosts",
+     "/dev/null"
+    ]
+   },
+   "python": "refused: absolute paths are not allowed"
+  },
+  {
+   "tool": "run_check",
+   "args": {
+    "argv": [
+     "git",
+     "status",
+     "--short",
+     "--output=x"
+    ]
+   },
+   "python": "refused: git options allowed here: -- --cached --name-only --name-status --staged --stat"
+  },
+  {
+   "tool": "run_check",
+   "args": {
+    "argv": [
+     "build/qumo",
+     "convert",
+     "a.qasm",
+     "-o",
+     "../README.md"
+    ]
+   },
+   "python": "refused: arguments may only hold path-like characters"
+  },
+  {
+   "tool": "run_check",
+   "args": {
+    "argv": [
+     "build/qumo",
+     "convert",
+     "a.qasm",
+     "--output=../README.md"
+    ]
+   },
+   "python": "refused: arguments may only hold path-like characters"
+  },
+  {
+   "tool": "run_check",
+   "args": {
+    "argv": [
+     "build/qumo",
+     "validate",
+     ".env"
+    ]
+   },
+   "python": "refused: .env is not readable by agents"
+  },
+  {
+   "tool": "run_check",
+   "args": {
+    "argv": [
+     "build/qumo",
+     "validate",
+     "/etc/hosts"
+    ]
+   },
+   "python": "refused: absolute paths are not allowed"
+  },
+  {
+   "tool": "run_check",
+   "args": {
+    "argv": [
+     "build/qumo",
+     "tool",
+     "list"
+    ]
+   },
+   "python": "refused: build/qumo subcommands allowed here: convert describe draw emulate expect help info run statevector transpile validate version vqe"
+  },
+  {
+   "tool": "run_check",
+   "args": {
+    "argv": [
+     "build/qumo",
+     "run",
+     "src/a.py",
+     "--bogus"
+    ]
+   },
+   "python": "refused: build/qumo option --bogus is not allowed here"
+  },
+  {
+   "tool": "run_check",
+   "args": {
+    "argv": [
+     "build/qumo",
+     "convert",
+     "src/a.py",
+     "-o",
+     "../escape.qasm"
+    ]
+   },
+   "python": "refused: arguments may only hold path-like characters"
+  },
+  {
+   "tool": "run_check",
+   "args": {
+    "argv": [
+     "build/qumo",
+     "convert",
+     "src/a.py",
+     "-o",
+     ".env"
+    ]
+   },
+   "python": "refused: .env is not readable by agents"
   }
  ]
 }

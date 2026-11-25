@@ -49,10 +49,10 @@ from qumo.algorithms.library import append_pauli_rotation, h2_ansatz
 from qumo.algorithms.hamiltonians import h2_sto3g, ground_energy, H2_EXACT_ENERGY, H2_HF_ENERGY
 from qumo.algorithms.gradients import Grad
 from qumo.algorithms.variational import vqe
-from qumo.compiler.target import Target
+from qumo.device.target import Target
 from qumo.compiler.pass_manager import compile_spec
 from qumo.exec.primitives import EstimatorPub, run_estimator
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.testing.checks import CheckLog
 
 comptime SHOTS = 4000
@@ -181,7 +181,15 @@ def main() raises:
     print("measurement circuits: naive", naive, "(one per non-identity term) -> QWC groups", len(groups))
     var obs = List[PauliSum]()
     obs.append(h.copy())
-    var precision = 1.0 / sqrt(Float64(SHOTS) - 0.5)  # run_estimator: shots = int(1/precision^2) + 1
+    # run_estimator: shots = ceil(sum over groups of (sum |coeff|)^2 / precision^2)
+    var l1_sq = 0.0
+    for gi in range(len(groups)):
+        var l1 = 0.0
+        for ti in groups[gi]:
+            if h.terms[ti].x != 0 or h.terms[ti].z != 0:
+                l1 += abs(h.terms[ti].coeff)
+        l1_sq += l1 * l1
+    var precision = sqrt(l1_sq / (Float64(SHOTS) - 0.5))
     var est = run_estimator(EstimatorPub(compiled_opt.copy(), obs, List[List[Float64]](), precision, 11))
     var e_shots = est.evs[0][0]
     var sd = est.stds[0][0]

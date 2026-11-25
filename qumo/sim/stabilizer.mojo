@@ -34,7 +34,7 @@ from qumo.ir.gates import Op, op_name, op_arity, op_is_unitary, op_is_noise
 from qumo.ir.circuit import Circuit, Instruction, QUARTER_TURN_LIMIT, check_shots
 from qumo.ir.param import Param
 from qumo.ir.pauli import PauliTerm
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.sim.runner import SampleResult
 
 comptime WPtr = MutPointer[UInt64, MutAnyOrigin]

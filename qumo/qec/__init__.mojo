@@ -5,8 +5,8 @@
     qumo.qec.dem_compare      gather_dem, compare_dem: exact DEM comparison by symptom class (DEMVal oracle)
     qumo.qec.decoders         MatchingGraph, UnionFindDecoder, MwpmDecoder, LookupTableDecoder
     qumo.qec.experiments      Sinter-style memory experiments and threshold sweeps
-    qumo.qec.characterization noise models from calibration, RB, T1/Ramsey, readout mitigation
+    qumo.qec.characterization re-export of qumo.noise.characterization (kept for one release)
 
-Simulation back-ends live in qumo.sim.stabilizer (tableau) and qumo.sim.frame
+The noise model, RB and readout mitigation live in qumo.noise. Simulation back-ends live in qumo.sim.stabilizer (tableau) and qumo.sim.frame
 (bit-packed Pauli frames). See docs/QEC.md.
 """

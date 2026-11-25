@@ -37,7 +37,8 @@ from std.runtime import parallelism_level
 from max.algorithm import parallelize
 from qumo.ir.pauli import PauliTerm, PauliSum
 from qumo.sim.statevector import StateVector, run_chunks, PAR_MIN_ITEMS
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
+from qumo.sim.runner import check_statevector_size
 from qumo.algorithms.linalg import (
     sv_dot, sv_norm, sv_zero, sv_assign, sv_scale, sv_axpy, sv_mul_minus_i,
     jacobi_eigh, tridiag_lowest,
@@ -171,10 +172,14 @@ struct Graph(Copyable, Writable, Sized):
                 s += e.w
         return s
 
-    def max_cut(self) raises -> Tuple[Float64, Int]:
-        """Brute-force maximum cut (value, assignment) - reference for approximation ratios."""
+    def check_max_cut_size(self) raises:
+        """QM-E807 when brute-force `max_cut()` cannot run (more than 26 nodes)."""
         if self.num_nodes > 26:
             raise Error("QM-E807: brute-force max_cut() limited to 26 nodes, graph has " + String(self.num_nodes) + ". Hint: use QAOA/heuristics for larger graphs.")
+
+    def max_cut(self) raises -> Tuple[Float64, Int]:
+        """Brute-force maximum cut (value, assignment) - reference for approximation ratios."""
+        self.check_max_cut_size()
         var best = -1.0
         var arg = 0
         # node n-1 fixed to 0 (cut symmetry) halves the search
@@ -382,6 +387,7 @@ struct PauliOperator(Copyable):
 
     def __init__(out self, h: PauliSum, num_qubits: Int) raises:
         check_fits(h, num_qubits)
+        check_statevector_size(num_qubits)  # the 2^n diagonal below
         self.num_qubits = num_qubits
         self.off = List[PauliTerm]()
         self.has_diag = False

@@ -23,7 +23,7 @@ example-meta: {"framework": "qiskit", "tier": "fast", "timeout": 120, "requires"
 from std.math import pi
 from qumo.ir.circuit import Circuit
 from qumo.ir.gates import Op
-from qumo.compiler.target import Target, parse_target
+from qumo.device.target import Target, parse_target
 from qumo.compiler.pass_manager import transpile, preset_pipeline
 from qumo.exec.emulate import emulate
 from qumo.sim.runner import evolve

@@ -1,9 +1,13 @@
 """Agent tools for compilation, resource estimation, variational algorithms,
 QEC experiments and device-explicit simulation (CPU / GPU).
 
+They are the tools over `qumo.exec`, `qumo.compiler`, `qumo.qec` and the
+variational algorithms. The file is in `qumo/ai` (it was `qumo/exec/tools.mojo`)
+so that `exec` does not import `ai`.
+
 Registered in `qumo.ai.registry.full_registry()`, so they appear in MCP
 `tools/list`, `qumo tool <name> '<json>'` and the capabilities document.
-Targets are vendor-neutral one-line specs (`qumo.compiler.target.parse_target`)
+Targets are vendor-neutral one-line specs (`qumo.device.target.parse_target`)
 or explicit coupling edges + basis names.
 """
 
@@ -18,7 +22,7 @@ from qumo.ai.tools import (
     ToolRegistry, ToolResult, ToolContext, tool_ok, arg_circuit, arg_int, arg_max_iterations, arg_program,
     arg_program_params, arg_required, arg_params, write_program_outputs, write_warnings,
 )
-from qumo.ai.describe import write_program_json
+from qumo.ir.json import write_program_json
 from qumo.ir.gates import op_from_name
 from qumo.exec.emulate import emulate
 from qumo.sim.density import density_evolve
@@ -28,7 +32,7 @@ from qumo.qec.lint import missing_detectors
 from qumo.sim.runner import SampleResult
 from qumo.exec.dispatch import sample_on
 from qumo.gpu.device import query_gpu, GPU_MIN_QUBITS, parse_gpu_precision
-from qumo.compiler.target import Target, parse_target
+from qumo.device.target import Target, parse_target
 from qumo.compiler.pass_manager import transpile, compile_spec, transpile_ai, CompileResult
 from qumo.compiler.program_compile import ProgramCompileResult, compile_program, compile_spec_program
 from qumo.sim.program_runner import is_clifford_program, sample_program
@@ -202,9 +206,16 @@ def _resources_tool(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
     return tool_ok(w.finish())
 
 
+def _check_width(n: Int, max_qubits: Int, what: String) raises:
+    """QM-E930 before any 2^n allocation (same message as `_check_qubits` in qumo.ai.tools)."""
+    if n > max_qubits:
+        raise Error("QM-E930: " + what + " has " + String(n) + " qubits; dense state-vector simulation is limited to max_qubits=" + String(max_qubits) + " (needs " + String(Float64(1 << min(n, 62)) * 16.0 / 1073741824.0) + " GiB). Hint: raise 'max_qubits' if you have the memory, or reduce the problem.")
+
+
 def _vqe_tool(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
     var h = parse_pauli_sum(arg_required(args, "hamiltonian", "Pauli sum string").as_string())
-    var n = max(h.num_qubits(), args.get_int("num_qubits", 0))
+    var n = max(h.num_qubits(), arg_int(args, "num_qubits", 0, 0, 1 << 20))
+    _check_width(n, arg_int(args, "max_qubits", 24, 1, 40), "ansatz")
     var layers = arg_int(args, "layers", 2, 1, 50)
     var ent = args.get_string("entanglement", "linear")
     var ansatz = hardware_efficient_ansatz(n, layers, ent)
@@ -234,6 +245,8 @@ def _vqe_tool(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
 
 def _qaoa_tool(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
     var g = Graph.parse(arg_required(args, "graph", "edge list like '0-1 1-2 2-0:0.5'").as_string())
+    _check_width(g.num_nodes, arg_int(args, "max_qubits", 24, 1, 40), "graph")
+    g.check_max_cut_size()  # brute-force reference runs after the optimisation: fail first
     var p = arg_int(args, "p", 1, 1, 20)
     var seed = arg_int(args, "seed", 7, 0, 1 << 62)
     var shots = arg_int(args, "shots", 1024, 1, 1000000)
@@ -516,13 +529,13 @@ def register_exec_tools(mut reg: ToolRegistry):
     reg.add_read_only(
         "qumo_vqe", "Variational eigensolver",
         "Find the ground-state energy of a Pauli-sum Hamiltonian (e.g. '-1.05*II + 0.39*ZI - 0.39*IZ - 0.01*ZZ + 0.18*XX') with a hardware-efficient ansatz, exact adjoint gradients and BFGS/Adam/SPSA/Nelder-Mead. Deterministic for a seed.",
-        "{\"type\":\"object\",\"properties\":{\"hamiltonian\":{\"type\":\"string\"},\"num_qubits\":{\"type\":\"integer\"},\"layers\":{\"type\":\"integer\",\"default\":2},\"entanglement\":{\"type\":\"string\",\"enum\":[\"linear\",\"circular\",\"full\",\"none\"],\"default\":\"linear\"},\"optimizer\":{\"type\":\"string\",\"enum\":[\"bfgs\",\"adam\",\"gd\",\"spsa\",\"nelder-mead\"],\"default\":\"bfgs\"},\"gradient\":{\"type\":\"string\",\"enum\":[\"adjoint\",\"parameter-shift\",\"finite-diff\"],\"default\":\"adjoint\"},\"maxiter\":{\"type\":\"integer\",\"default\":200},\"seed\":{\"type\":\"integer\",\"default\":7}},\"required\":[\"hamiltonian\"],\"additionalProperties\":false}",
+        "{\"type\":\"object\",\"properties\":{\"hamiltonian\":{\"type\":\"string\"},\"num_qubits\":{\"type\":\"integer\"},\"max_qubits\":{\"type\":\"integer\",\"default\":24,\"description\":\"Safety limit for dense simulation (16*2^n bytes)\"},\"layers\":{\"type\":\"integer\",\"default\":2},\"entanglement\":{\"type\":\"string\",\"enum\":[\"linear\",\"circular\",\"full\",\"none\"],\"default\":\"linear\"},\"optimizer\":{\"type\":\"string\",\"enum\":[\"bfgs\",\"adam\",\"gd\",\"spsa\",\"nelder-mead\"],\"default\":\"bfgs\"},\"gradient\":{\"type\":\"string\",\"enum\":[\"adjoint\",\"parameter-shift\",\"finite-diff\"],\"default\":\"adjoint\"},\"maxiter\":{\"type\":\"integer\",\"default\":200},\"seed\":{\"type\":\"integer\",\"default\":7}},\"required\":[\"hamiltonian\"],\"additionalProperties\":false}",
         _vqe_tool,
     )
     reg.add_read_only(
         "qumo_qaoa_maxcut", "QAOA MaxCut",
         "Solve MaxCut with depth-p QAOA on a graph given as an edge list '0-1 1-2 2-3:0.5' (optional :weight). Returns expected cut, brute-force optimum, approximation ratio, best sampled bitstring and optimal angles.",
-        "{\"type\":\"object\",\"properties\":{\"graph\":{\"type\":\"string\"},\"p\":{\"type\":\"integer\",\"default\":1},\"shots\":{\"type\":\"integer\",\"default\":1024},\"seed\":{\"type\":\"integer\",\"default\":7}},\"required\":[\"graph\"],\"additionalProperties\":false}",
+        "{\"type\":\"object\",\"properties\":{\"graph\":{\"type\":\"string\"},\"p\":{\"type\":\"integer\",\"default\":1},\"shots\":{\"type\":\"integer\",\"default\":1024},\"seed\":{\"type\":\"integer\",\"default\":7},\"max_qubits\":{\"type\":\"integer\",\"default\":24,\"description\":\"Safety limit for dense simulation (16*2^n bytes)\"}},\"required\":[\"graph\"],\"additionalProperties\":false}",
         _qaoa_tool,
     )
     reg.add_read_only(
@@ -570,6 +583,6 @@ def register_exec_tools(mut reg: ToolRegistry):
     reg.add_read_only(
         "qumo_run_device", "Run circuit on a device",
         "Like qumo_run_qasm but with an explicit simulator device (vendor-neutral: NVIDIA CUDA, AMD ROCm or Apple Metal through MAX). 'auto' (default) = qumo_run_qasm's dispatch: noisy Clifford circuits without feed-forward -> CPU Pauli frames, other wide/noisy/dynamic Clifford circuits -> stabilizer tableau, static non-Clifford circuits with >= " + String(GPU_MIN_QUBITS) + " qubits -> GPU state vector when this build has GPU support (-D QUMO_GPU) and a usable device (CPU on any GPU failure), everything else -> CPU state vector. 'cpu' = the same choice restricted to CPU simulators. 'gpu' = Clifford circuits without parameters or classical feed-forward (noise, mid-circuit measurement and reset allowed) -> GPU Pauli frames ('gpu:pauli_frame'); other static, noiseless circuits -> GPU state vector in 'precision' ('gpu:statevector:fp32' or 'gpu:statevector:fp64'); dynamic or noisy non-Clifford circuits, builds without -D QUMO_GPU, or no usable device -> run on the CPU as with 'cpu' plus warning QM-W020 giving the reason. 'precision' (GPU state vector only): 'auto' (default: QUMO_GPU_PRECISION when set, else the build default, fp32 on every GPU as in CUDA-Q), 'fp32', or 'fp64' (NVIDIA/AMD; error QM-E472 on Apple GPUs, which have no fp64); CPU simulators are fp64 (warning QM-W021 when a requested precision did not apply). Returns counts, 'method' (the simulator that ran), 'device_used', 'precision_used' and structured 'warnings'.",
-        "{\"type\":\"object\",\"properties\":{" + _CIRC + "," + _PROG + ",\"max_iterations\":{\"type\":\"integer\",\"minimum\":1,\"default\":65536,\"description\":\"Loop back-edges allowed per shot; past it the run stops with QM-E480\"},\"shots\":{\"type\":\"integer\",\"minimum\":1,\"default\":1024},\"seed\":{\"type\":\"integer\",\"minimum\":0,\"default\":1234},\"params\":{\"description\":\"Values for 'input float' parameters: array in declaration order or object name->value\"},\"device\":{\"type\":\"string\",\"enum\":[\"auto\",\"cpu\",\"gpu\"],\"default\":\"auto\"},\"precision\":{\"type\":\"string\",\"enum\":[\"auto\",\"fp32\",\"fp64\"],\"default\":\"auto\",\"description\":\"GPU state-vector precision: auto = QUMO_GPU_PRECISION or the build default (fp32)\"},\"max_qubits\":{\"type\":\"integer\",\"default\":30}},\"additionalProperties\":false}",
+        "{\"type\":\"object\",\"properties\":{" + _CIRC + "," + _PROG + ",\"max_iterations\":{\"type\":\"integer\",\"minimum\":1,\"default\":65536,\"description\":\"Loop back-edges allowed per shot; past it the run stops with QM-E480. The MCP server accepts at most 1000000\"},\"shots\":{\"type\":\"integer\",\"minimum\":1,\"default\":1024},\"seed\":{\"type\":\"integer\",\"minimum\":0,\"default\":1234},\"params\":{\"description\":\"Values for 'input float' parameters: array in declaration order or object name->value\"},\"device\":{\"type\":\"string\",\"enum\":[\"auto\",\"cpu\",\"gpu\"],\"default\":\"auto\"},\"precision\":{\"type\":\"string\",\"enum\":[\"auto\",\"fp32\",\"fp64\"],\"default\":\"auto\",\"description\":\"GPU state-vector precision: auto = QUMO_GPU_PRECISION or the build default (fp32)\"},\"max_qubits\":{\"type\":\"integer\",\"default\":30}},\"additionalProperties\":false}",
         _run_device_tool,
     )

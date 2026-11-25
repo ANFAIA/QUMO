@@ -253,7 +253,7 @@ def _count_op(c: Circuit, k: Int) -> Int:
 
 def test_noise_model_arity3() raises:
     """Noise model and 3-qubit gates. apply_noise_model has no gate-error rule
-    for them, so it must reject them (QM-E738) whenever the model has gate
+    for them, so it must reject them (QM-E739) whenever the model has gate
     error, and keep them (idle channels only) when it has none."""
     var ccx = Circuit(3, 0, "ccx")
     ccx.ccx(0, 1, 2)
@@ -272,9 +272,9 @@ def test_noise_model_arity3() raises:
         except e:
             raised = True
             var m = String(e)
-            assert_true(m.startswith("QM-E738"), "error code QM-E738: " + m)
+            assert_true(m.startswith("QM-E739"), "error code QM-E739: " + m)
             assert_true(m.find("Hint:") >= 0, "error has hint: " + m)
-        assert_true(raised, "3-qubit gate with 2q gate error must raise QM-E738")
+        assert_true(raised, "3-qubit gate with 2q gate error must raise QM-E739")
 
     # 1q gate error alone also counts as gate error.
     var nm1 = NoiseModel.uniform(3, 100.0, 80.0, 1e-3, 0.0, 0.0, 0.0, 0.3, 0.0)
@@ -283,8 +283,8 @@ def test_noise_model_arity3() raises:
         _ = apply_noise_model(ccx, nm1)
     except e:
         raised1 = True
-        assert_true(String(e).startswith("QM-E738"))
-    assert_true(raised1, "3-qubit gate with 1q gate error must raise QM-E738")
+        assert_true(String(e).startswith("QM-E739"))
+    assert_true(raised1, "3-qubit gate with 1q gate error must raise QM-E739")
 
     # A per-edge 2q error on any edge also counts.
     var nme = NoiseModel(3)
@@ -294,7 +294,7 @@ def test_noise_model_arity3() raises:
         _ = apply_noise_model(ccx, nme)
     except e:
         raisede = True
-    assert_true(raisede, "per-edge gate error must raise QM-E738 for a 3-qubit gate")
+    assert_true(raisede, "per-edge gate error must raise QM-E739 for a 3-qubit gate")
 
     # Zero gate error everywhere: accepted, gate kept, no gate error inserted.
     var zero = NoiseModel.uniform(3, 100.0, 80.0, 0.0, 0.0, 0.0, 0.0, 0.3, 0.0)

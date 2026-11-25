@@ -21,7 +21,7 @@ from qumo.ir.program import MAX_NESTING
 from qumo.qec.codes import CodeCircuit, NoiseParams
 from qumo.qec.dem import DetectorErrorModel, DemError, _xor_sorted, _split
 from qumo.sim.frame import DetectorSamples, BATCH, FW
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 
 comptime _MAX_INSTRUCTIONS = 50_000_000  # circuit lines after unrolling
 comptime _MAX_DEM_INSTRUCTIONS = 2_000_000  # DEM lines after unrolling: about 1 GB at a million mechanisms

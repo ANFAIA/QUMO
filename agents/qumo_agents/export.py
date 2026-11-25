@@ -44,6 +44,7 @@ def specs_json() -> dict:
             "subagents": list(spec.subagents),
             "writes_code": spec.writes_code,
             "generated_tools": "all" if spec.generated_tools is None else list(spec.generated_tools),
+            "untrusted_subagents": list(spec.untrusted_subagents),
         }
     return {"schema": "qumo.agent_specs.v1", "agents": specs}
 

@@ -34,7 +34,13 @@ build/qumo transpile examples/foundations/bell.qasm --pipeline 'cancel,fuse1q,ro
 Run `.venv/bin/mojo run -I . examples/compilation/compile_demo.mojo` for a tour and
 `.venv/bin/mojo run -I . tests/test_compiler.mojo` for the statevector-verified tests.
 
-## Targets (`target.mojo`)
+## Targets (`qumo.device.target`)
+
+`Target`, `parse_target` and `parse_basis` are defined in `qumo/device/target.mojo`
+(`from qumo.device.target import Target, parse_target`, or `from qumo import ...`):
+the simulators, the noise model and the execution layer use a target without
+importing the compiler. `qumo.compiler.target` still imports the same names for one
+release.
 
 A `Target` is plain data (Qiskit `Target` / Braket device properties /
 PennyLane TOML capabilities): `num_qubits`, undirected coupling `edges`,
@@ -69,14 +75,22 @@ arg      := word | key "=" value | item          # fixpoint(...) nests pipelines
 ```
 
 Example: `remove_identities,elide_swaps,fixpoint(cancel,commute,fuse1q,max=4),route(sabre,layout=auto,trials=20,swap_trials=20),kak,basis,cancel,commute,fuse1q,check`.
+Spaces around `=` are allowed in every pass (`cancel(window = 4)`), and when an
+argument is written twice the last one counts (`cancel(1,2)` uses 2). An unknown
+argument or a bad value is QM-E602 when the pipeline is parsed, with a hint that
+lists the pass's arguments.
 `PassManager(spec).canonical()` prints the normalised spec; `describe_passes()`
-is a JSON catalog. Each pass yields a `PassReport` (gates / 2q / depth before
+is a JSON catalog. Every pass is declared once, in `pass_decl` (its name,
+aliases, description and arguments); the argument check, the hints of QM-E602
+and the values a pass reads all come from that table, and so does
+[PASSES.md](PASSES.md), the generated reference of every name, alias and
+argument with its values and default. Each pass yields a `PassReport` (gates / 2q / depth before
 and after, wall time in µs, note); `CompileResult.to_json()` is the
 machine-readable summary.
 
 | Pass | What it does | Inspired by |
 |---|---|---|
-| `remove_identities` | drop gates within 1e-12 process infidelity of the identity (rz(0), rx(4π), cp(1e-9), ...); phase kept | Qiskit `RemoveIdentityEquivalent` |
+| `remove_identities` | drop gates equal to the identity to 1e-14 (rz(0), rx(4π), cp(2π), float residue of a cancelled pair); phase kept. Tight on purpose: it sees one gate at a time, so a looser bound drops many small rotations that add up | Qiskit `RemoveIdentityEquivalent` |
 | `cancel(window)` | commutation-aware inverse-pair cancellation over a per-wire linked list (O(n·window)) | Qiskit `InverseCancellation` / `CommutativeInverseCancellation`, TKET `RemoveRedundancies` |
 | `merge` | adjacent same-axis rotations (rz rz, t t→s, rzz rzz, cp cp, cz·cp), symbolic params merge by `Param.try_add` | Qiskit `Optimize1qGates`, TKET |
 | `commute(window)` | merge/cancel rotations *through* commuting gates (rz through cx controls / cz / diagonals, rx through cx targets) | Qiskit `CommutativeCancellation` |
@@ -84,7 +98,7 @@ machine-readable summary.
 | `eject_z` | push Z rotations through Z-type wires, swaps, Pauli-Z frames through CX targets, into U gates | Cirq `eject_z` (virtual Z) |
 | `phase_fold` | phase-polynomial folding of diagonal rotations on equal parities (T-count), RZZ folds too | TKET / PyZX phase folding, T-par |
 | `wrap_angles(gate[min:max])` | bring constant angles into the target's bounds with Pauli corrections; not in presets unless the target has bounds | Qiskit `WrapAngles`, IBM `FoldRzzAngle` |
-| `post_layout(call_limit)` | rename physical qubits to the best embedding under the calibration; not in presets unless the target is calibrated | Qiskit `VF2PostLayout` |
+| `post_layout(call_limit=N)` | rename physical qubits to the best embedding under the calibration; not in presets unless the target is calibrated | Qiskit `VF2PostLayout` |
 | `pauli_simp` | Pauli-gadget resynthesis: a bit-packed stabiliser tableau pulls every rotation back to the input frame (`U = C_total . prod exp(-i t P_k)`), identical commuting Paulis merge, gadgets are re-emitted as basis change + CX chain + rz with each chain reusing the previous chain's prefix (ladders cancel between consecutive terms), commuting gadgets are reordered greedily; kept only when it beats the original after cancel/commute/KAK | TKET `PauliSimp`, Qiskit Pauli-network synthesis |
 | `elide_swaps` | delete SWAPs by relabelling (folded into `final_layout`); only trailing swaps once routed | Qiskit `ElidePermutations` |
 | `unroll3q` | ccx / ccz / cswap → 1q + cx | Qiskit `Unroll3qOrMore` |
@@ -101,7 +115,10 @@ machine-readable summary.
 `route` keys: `layout=auto|sabre|dense|trivial|random|vf2`, `seed`, `trials`,
 `iterations`, `swap_trials`, `lookahead` (extended-set size), `weight`,
 `decay`, `heuristic=auto|extended|layer`, `vf2_steps`, `valve`, `star=on|off`,
-`absorb` / `absorb_alt` (score factor for absorbable swaps; 1.0 / 0.9).
+`absorb` / `absorb_alt` (score factor for absorbable swaps; 1.0 / 0.9),
+`mirror=on|off|free|auto` and `mirror_gain` (mirror-gate routing),
+`commute=on|off|auto` (commutation-aware routing DAG). The complete list with
+defaults is in [PASSES.md](PASSES.md#route).
 AI routing keys (docs/AI_TRANSPILER.md): `policy=off|auto|<model id>` (off by
 default; otherwise the learned-policy layout + routing runs after SABRE on the
 same circuit, seeded with SABRE's layout, and replaces it only when its
@@ -227,9 +244,13 @@ two-qubit gates, so it stays out of O0-O3. On the Feynman circuits against
   at level 2 used to change `sx rz(1) p(2^63-1) sx rz(1) p(2^63-1)`. The verifier of
   programs found it. Output changes only for such angles. The offset of a symbolic
   angle reduces the same way; a huge coefficient on a symbol stays a float limit.
-* **`transpile` drops small rotations:** a rotation below about 2e-6 is within the
-  1e-12 infidelity of `remove_identities` and goes, so many such gates can add up to
-  more than each one. Program blocks compile in exact mode instead, below.
+* **Small rotations are kept:** `remove_identities` (first pass of every preset) drops a
+  gate only when it is the identity to 1e-14. It used to drop any rotation below about
+  2e-6 (1e-12 infidelity) one gate at a time, so `h; 300000 x rz(1.9e-6); h`, which is
+  `rz(0.57)`, compiled to an empty circuit at O1 to O3. Now those rotations stay and
+  merge. Rotations between 1e-14 and 2e-6 (for example `rx(1e-9)`) are no longer removed
+  on their own, so a circuit that held many of them keeps them; the same tolerance
+  applies to Program blocks.
 * Past 2^22 quarter turns an angle is not Clifford (`QUARTER_TURN_LIMIT`), in
   `Instruction.is_clifford` and in the helpers that read a count of quarter turns.
 

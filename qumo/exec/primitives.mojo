@@ -14,7 +14,7 @@ Parameter sets of one PUB run in parallel when circuits are small (the state
 vector kernels are already multithreaded for large ones).
 """
 
-from std.math import sqrt
+from std.math import sqrt, ceil
 from std.time import perf_counter_ns
 from std.runtime import parallelism_level
 from max.algorithm import parallelize
@@ -23,8 +23,7 @@ from qumo.ir.circuit import Circuit, check_finite_values
 from qumo.ir.gates import Op
 from qumo.ir.pauli import PauliSum, PauliTerm
 from qumo.sim.statevector import StateVector
-from qumo.sim.runner import evolve, evolve_into, sample, SampleResult
-from qumo.sim.rng import Rng
+from qumo.sim.runner import evolve, evolve_into, sample, SampleResult, check_statevector_size, check_pure_state_circuit
 
 comptime PAR_SETS_MAX_QUBITS = 14
 
@@ -36,7 +35,7 @@ struct EstimatorPub(Copyable):
     var circuit: Circuit
     var observables: List[PauliSum]
     var parameter_sets: List[List[Float64]]  # empty => one set with no params
-    var precision: Float64  # 0 => exact; else target standard error
+    var precision: Float64  # 0 => exact; else the standard error to stay under (see _shots_for_precision)
     var seed: UInt64
 
     def __init__(out self, circuit: Circuit, observables: List[PauliSum],
@@ -95,54 +94,86 @@ def _check_params(c: Circuit, params: List[Float64]) raises:
         raise Error("QM-E101: PUB parameter set has " + String(len(params)) + " values but circuit has " + String(c.num_params()) + " parameters " + c.param_names_str() + ".")
 
 
-def _basis_rotation(term_x: UInt64, term_z: UInt64, n: Int) -> Circuit:
-    """Rotate so a QWC group's Paulis become Z: X -> H, Y -> Sdg H."""
-    var c = Circuit(n)
+def qwc_setting(circuit: Circuit, h: PauliSum, grp: List[Int], mut base: Int) -> Circuit:
+    """The circuit that measures one QWC group of `h`: the basis rotation, then every
+    qubit q into clbit `base + q`. A circuit whose measurements are all terminal
+    loses them (base = 0). A dynamic one (reset, mid-circuit measurement, classical
+    control) keeps every operation and gets the new bits after its own."""
+    var n = circuit.num_qubits
+    var gx: UInt64 = 0
+    var gy: UInt64 = 0
+    for ti in grp:
+        gx |= h.terms[ti].x
+        gy |= h.terms[ti].x & h.terms[ti].z  # Y marker
+    var m: Circuit
+    if circuit.is_dynamic():
+        m = circuit.copy()
+        base = circuit.num_clbits
+    else:
+        m = circuit.empty_like()
+        for g in circuit.ops:
+            if g.kind != Op.MEASURE:
+                m.append(g)
+        m.num_clbits = 0
+        base = 0
     for q in range(n):
         var b = UInt64(1) << UInt64(q)
-        if (term_x & b) != 0:
-            if (term_z & b) != 0:
-                c.sdg(q)
-            c.h(q)
-    return c^
+        if (gx & b) != 0:
+            if (gy & b) != 0:
+                m.sdg(q)
+            m.h(q)
+    for q in range(n):
+        m.measure(q, base + q)
+    return m^
+
+
+def qwc_group_stats(res: SampleResult, h: PauliSum, grp: List[Int], base: Int) -> Tuple[Float64, Float64]:
+    """(mean, variance of the mean) of sum_t coeff_t <P_t> over the group's non-identity
+    terms. All terms are read from the SAME shots, so the variance is that of the
+    per-shot weighted sum, not the sum of the per-term variances: they are correlated
+    (Z0 - Z1 on a Bell pair is 0 on every shot)."""
+    var shots = len(res.memory)
+    var s1 = 0.0
+    var s2 = 0.0
+    for o in res.memory:
+        var v = 0.0
+        for ti in grp:
+            var t = h.terms[ti]
+            var support = Int(t.x | t.z)
+            if support == 0:
+                continue
+            v += -t.coeff if pop_parity((o >> base) & support) else t.coeff
+        s1 += v
+        s2 += v * v
+    var mean = s1 / Float64(shots)
+    var var1 = max(0.0, s2 / Float64(shots) - mean * mean)
+    return (mean, var1 / Float64(shots))
 
 
 def _estimate_shots(circuit: Circuit, h: PauliSum, params: List[Float64], shots: Int,
                     seed: UInt64, mut ev: Float64, mut std: Float64) raises:
-    """Hardware-faithful estimation: one measurement setting per QWC group."""
-    var n = circuit.num_qubits
-    var base = StateVector(n)
-    evolve_into(base, circuit, params)
+    """Hardware-faithful estimation: one measurement setting per QWC group, sampled
+    with the real sampler, so reset, noise and mid-circuit measurement count."""
     var groups = h.group_qwc()
-    var rng = Rng(seed)
     ev = 0.0
     var var_total = 0.0
     for gi in range(len(groups)):
         ref g = groups[gi]
-        # union basis for the group
-        var gx: UInt64 = 0
-        var gz: UInt64 = 0
-        for ti in g:
-            gx |= h.terms[ti].x
-            gz |= h.terms[ti].z & h.terms[ti].x  # Y marker
-        var sv = base.copy()
-        var rot = _basis_rotation(gx, gz, n)
-        evolve_into(sv, rot, List[Float64]())
-        var grng = rng.split(gi)
-        var outs = sv.sample(shots, grng)
+        var has_support = False
         for ti in g:
             var t = h.terms[ti]
-            var support = Int(t.x | t.z)
-            if support == 0:
+            if (t.x | t.z) == 0:
                 ev += t.coeff
-                continue
-            var s = 0.0
-            for o in outs:
-                s += -1.0 if (pop_parity(o & support)) else 1.0
-            var mean = s / Float64(shots)
-            ev += t.coeff * mean
-            var var1 = max(0.0, 1.0 - mean * mean)
-            var_total += t.coeff * t.coeff * var1 / Float64(shots)
+            else:
+                has_support = True
+        if not has_support:
+            continue
+        var base = 0
+        var m = qwc_setting(circuit, h, g, base)
+        var res = sample(m, shots, seed + UInt64(gi) * 1000003, params)
+        var st = qwc_group_stats(res, h, g, base)
+        ev += st[0]
+        var_total += st[1]
     std = sqrt(var_total)
 
 
@@ -156,16 +187,54 @@ def pop_parity(x: Int) -> Bool:
     return p == 1
 
 
+comptime MAX_ESTIMATOR_SHOTS = 10_000_000
+
+
+def _shots_for_precision(observables: List[PauliSum], precision: Float64) raises -> Int:
+    """Shots per measurement setting so that every observable's standard error is at
+    most `precision`. A group's per-shot value is bounded by L = sum |coeff| of its
+    non-identity terms, so its variance is at most L^2 / shots, and the observable's
+    standard error is at most sqrt(sum_g L_g^2 / shots). Hence
+    shots = ceil(max over observables of sum_g L_g^2 / precision^2) (at least 1).
+    It is a bound, the reported std is usually smaller. QM-E913 past
+    MAX_ESTIMATOR_SHOTS."""
+    if not (precision > 0.0 and precision < Float64.MAX):
+        raise Error("QM-E913: argument 'precision' = " + String(precision) + " is out of range. Hint: pass a finite standard error > 0, or 0 for the exact value.")
+    var worst = 0.0
+    for o in range(len(observables)):
+        var groups = observables[o].group_qwc()
+        var total = 0.0
+        for gi in range(len(groups)):
+            var l1 = 0.0
+            for ti in groups[gi]:
+                var t = observables[o].terms[ti]
+                if (t.x | t.z) != 0:
+                    l1 += abs(t.coeff)
+            total += l1 * l1
+        worst = max(worst, total)
+    var need = ceil(worst / (precision * precision))
+    if need > Float64(MAX_ESTIMATOR_SHOTS):
+        raise Error("QM-E913: precision " + String(precision) + " needs " + String(need) + " shots per setting for these observables (limit " + String(MAX_ESTIMATOR_SHOTS) + "). Hint: raise precision, scale the observable down, or use precision=0 for the exact value.")
+    return max(1, Int(need))
+
+
 def run_estimator(pub: EstimatorPub) raises -> EstimatorResult:
     """Run one Estimator PUB (all parameter sets x all observables)."""
     pub.circuit.validate()
+    check_statevector_size(pub.circuit.num_qubits)
     var nsets = pub.num_sets()
     var nobs = len(pub.observables)
     var exact = pub.precision <= 0.0
+    if exact:
+        # The shot path samples every operation, so only the exact path drops them.
+        check_pure_state_circuit(pub.circuit, "run_estimator()")
     var res = EstimatorResult(nsets, nobs, "statevector:exact" if exact else "statevector:shots+qwc")
+    for o in range(nobs):
+        if pub.observables[o].num_qubits() > pub.circuit.num_qubits:
+            raise Error("QM-E405: observable " + String(o) + " acts on qubit " + String(pub.observables[o].num_qubits() - 1) + " but the circuit has " + String(pub.circuit.num_qubits) + " qubits. Hint: check Pauli indices (0-based, qubit 0 = least significant).")
     var shots = 0
     if not exact:
-        shots = Int(1.0 / (pub.precision * pub.precision)) + 1
+        shots = _shots_for_precision(pub.observables, pub.precision)
         res.shots_per_set = shots
     for s in range(nsets):
         if len(pub.parameter_sets) > 0:

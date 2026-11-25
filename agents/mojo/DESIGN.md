@@ -51,7 +51,7 @@ written for this port). Implementers copy from the appendices, not from the repo
 | Id | Decision |
 |---|---|
 | D1 | Port what QUMO gets from deepagents with its call shape: virtual file tools, eviction to `/large_tool_results/` (strictly more than 80,000 code points), human-message eviction, parallel-mutation guard, `task` with general-purpose and named subagents (nested, isolated), summarization with its thresholds, prompt/argument truncation, dangling-call patching, unsupported content. No `write_todos`, no prompt caching. Texts byte-for-byte with MIT attribution. |
-| D2 | Deliberate fixes: (a) one `read_file`/`write_file`/`edit_file` per name, routed by path, accepting both argument vocabularies; (b) child processes never inherit secrets; (c) redirects: max 10, never https to http, drop `Authorization` across hosts; (d) mutation guard keys on `file_path` or `path`; (e) all-malformed turns get error results and continue; (f) limits count code points. |
+| D2 | Deliberate fixes: (a) one `read_file`/`write_file`/`edit_file` per name, routed by path, accepting both argument vocabularies; (b) child processes never inherit secrets; (c) redirects: max 10 (3 for research GETs, which also check every target, section 2.8.4), never https to http, drop `Authorization` across hosts; (d) mutation guard keys on `file_path` or `path`; (e) all-malformed turns get error results and continue; (f) limits count code points. |
 | D3 | Parity: OpenRouter wire format exactly as Python sends it (B3), reasoning discarded (B4), lenient argument parsing (B2), MCP results as text-part arrays (B6), inputSchema transform (B7), response-error handling (B5), openai retry policy (A6), 300 s per-operation model timeouts (A5), urllib-like research GETs. |
 | D4 | Fully native runtime: libc `posix_spawn` with file actions, chdir action, explicit envp, `waitpid`, process-group kill; `mkdtemp`; `time`/`localtime_r`/`strftime`; sockets; OpenSSL 3 via `OwnedDLHandle` with strict peer and hostname verification (no `X509_STRICT`), TLS >= 1.2, SNI; POSIX ERE via `regcomp`; `fnmatch`; HTTP/1.1 client; SSE reader for MCP streamable HTTP. |
 | D5 | All ten agents run natively; every Python tool is ported with its safety rules and caps; the Python export grows to cover what Mojo needs; Python stays the single source for the nine agents. |
@@ -76,7 +76,7 @@ written for this port). Implementers copy from the appendices, not from the repo
 | X2 | When one turn has two or more `task` calls and `--parallel N` > 1 (default 4), the subagents run concurrently as child processes (`qumo-agent subagent`, JSON over stdin/stdout); otherwise inline. | Python runs them concurrently; orchestrator fan-out would otherwise be sequential. |
 | X3 | QUMO's MCP server is used through one persistent stdio session per process, restarted after a failure, instead of a new process and session per call (Python, [critic C1]). No `tools/list` after `tools/call` and no `outputSchema` validation. | Speed (the current Mojo port does the same); QUMO's server is stateless per call (checked by `test_tools_qumo_mcp`, 8.2). |
 | X4 | Local tools never crash the run: Python exceptions outside the tools' own `try` (unknown `module` in `search_arxiv`/`module_watchlist`, `OSError` in `write_report`, unreadable files in `search_code`, undecodable `run_check` output) become `error: ...` results. | [gaps "Python behaviour to fix" 4], [critic B8]. |
-| X5 | `search_code` skips secret-named files and symlinks resolving outside the root; `run_check` refuses `git diff --output*`/`--no-index` and arguments ending in a newline, kills the whole process group on timeout, and decodes output lossily. | [gaps §2], [critic D2]. |
+| X5 | `list_files` and `search_code` skip files with a secret-looking name in any path component and symlinks resolving outside the root or to such a name (repo.py `_walkable`); `run_check` refuses `git diff --output*`/`--no-index` and arguments ending in a newline, kills the whole process group on timeout, and decodes output lossily. | [gaps §2], [critic D2]. |
 | X6 | `sdk_releases` reads up to 16 MiB (other research GETs keep 400,000 bytes). | Python's 400,000-byte cap truncates qiskit/stim/pytket JSON and the tool always fails [gaps §2]. |
 | X7 | `github_release_notes` accepts ASCII `[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+` only. | Python's Unicode `\w` lets non-ASCII through and then crashes in `http.client`. |
 | X8 | The virtual file system is text-only: `read_file` of an image/audio/video/PDF/PPT extension returns UnsupportedContent's placeholder text instead of a base64 block. | Text-only models; same text deepagents uses for unsupported media [ctx §12]. |
@@ -594,7 +594,8 @@ comptime CONF_TOOL = 3      # a generated tool binary (toolsmith_test, calls, re
 struct Confinement(Copyable):
     var profile: Int               # CONF_*
     var write_dirs: List[String]   # realpaths of the only subtrees the child may write (plus /dev/null)
-    var read_allow: List[String]   # CONF_TOOL: the only subtrees readable below `home`
+    var read_allow: List[String]   # with `write_dirs`, the only subtrees readable below `home`
+    var list_dirs: List[String]    # CONF_CHECK/CONF_BUILD: directories below `home` whose entries may be listed (not read)
     var home: String               # realpath of $HOME of this process ("" when unset)
     var cpu_s: Int                 # RLIMIT_CPU soft and hard, 0 = unchanged
     var fsize_bytes: Int           # RLIMIT_FSIZE soft and hard, 0 = unchanged
@@ -603,7 +604,8 @@ struct Confinement(Copyable):
 def confinement_from_json(text: String) raises -> Confinement
 def sandbox_kind(self_binary: String) -> String         # "sandbox-exec" | "landlock" | "none"; probes once, callers cache it
 def macos_profile(c: Confinement) raises -> String       # SBPL text; raises QA-E163 for a path with a control character
-def sensitive_home_paths(home: String) -> List[String]   # denied for reads under CONF_CHECK and CONF_BUILD
+def home_read_rules(c: Confinement) -> Tuple[List[String], List[String], List[String]]   # CONF_CHECK/CONF_BUILD: (subtrees, listable dirs, ancestors) allowed back below `home`
+def venv_read_paths(venv: String) -> List[String]        # realpath of a virtualenv, the links from <venv>/bin/python to its interpreter, the interpreter's prefix
 def modular_lib_dir(repo_root: String) raises -> String  # realpath of <repo_root>/.venv/lib/python3.*/site-packages/modular/lib
 def confine(spec: SpawnSpec, c: Confinement, self_binary: String) raises -> SpawnSpec   # wraps spec in the trampoline
 def confine_main(args: List[String]) -> Int              # body of `qumo-agent __confine CONF_JSON PATH ARGV...`; returns only on failure
@@ -627,25 +629,35 @@ def confine_main(args: List[String]) -> Int              # body of `qumo-agent _
     `unshare(CLONE_NEWUSER | CLONE_NEWNET)` (the new network namespace has only a down
     loopback, so no network), `prctl(PR_SET_NO_NEW_PRIVS, 1)`, a Landlock ruleset handling every
     file-system right of the running ABI (>= 1) with `LANDLOCK_RULE_PATH_BENEATH` rules: read and
-    execute on `/` (`CONF_CHECK`, `CONF_BUILD`) or only on `/usr /lib /lib64 /bin /etc /proc
-    /sys/devices/system/cpu` plus `read_allow` (`CONF_TOOL`); all rights on `write_dirs` and
+    execute on `/usr /lib /lib64 /bin /etc /proc /sys/devices/system/cpu` plus `read_allow`
+    (`CONF_TOOL`), or (`CONF_CHECK`, `CONF_BUILD`) on every entry of `/` and of each ancestor of
+    `home` except the next ancestor and `home` itself (Landlock has no deny rule, so "everything
+    outside `home`" is spelled out; symbolic links are skipped; `/` when `home` is empty) plus
+    `read_allow`, and `READ_DIR` alone on `list_dirs` (a Landlock rule covers the subtree, so on
+    Linux the names below a listable directory are visible, not the file contents); all rights on `write_dirs` and
     `/dev/null`; `landlock_restrict_self`; then `execve(PATH, ARGV, environ)`. The parent trampoline waits and
     ends with the child's exit code, or with the signal that killed it (`wait_and_mirror`).
   Any failure prints `QA-E163: OS confinement failed: <detail>` on stderr and exits 125.
 - `macos_profile`: `(version 1)(allow default)(deny network*)(deny file-write*)(allow
   file-write* (literal "/dev/null") (subpath "<w>")...)`; `CONF_TOOL` adds `(deny
   process-fork)(deny file-read* (subpath "<home>"))(allow file-read* (subpath "<r>")...)`;
-  `CONF_CHECK` and `CONF_BUILD` add `(deny file-read* (subpath "<p>")...)` for
-  `sensitive_home_paths(home)` = the named credential stores and shell files (`.ssh .aws .azure
-  .gnupg .config .docker .kube .netrc .git-credentials .pypirc .npmrc .zsh_history .bash_history
-  .codex .claude .claude.json .gemini .hf-cli .huggingface .qiskit .cache .cargo .gitconfig .zshrc
-  .zprofile .zshenv .profile .bashrc .bash_profile Library/Keychains Library/Application Support
-  Library/Cookies Library/Safari Library/Mail Library/Messages Library/Containers Library/Group
-  Containers`) plus every other existing top-level dot entry of `home` except the toolchain
-  locations `.local .modular .pixi .pyenv .rustup .CFUserTextEncoding` (deny by default for the
-  places CLIs keep tokens), followed by `(allow file-read* ...)` for the `write_dirs` and
-  `read_allow` entries below `home` (the caller passes the main checkout and its `.venv`; the last
-  rule wins).
+  `CONF_CHECK` and `CONF_BUILD` add, when `home` is not empty, `(deny file-read* (subpath
+  "<home>"))(allow file-read* (subpath "<s>")... (literal "<d>")...)(allow file-read-metadata
+  (literal "<home>") (regex #"^<a>/[^/]+$")...)` from `home_read_rules(c)`: `$HOME` is denied by
+  default and only what the caller names is allowed back (the last rule wins). `<s>` are the
+  `write_dirs` and `read_allow` entries strictly below `home`, `<d>` the `list_dirs` entries
+  (the directory can be listed, its files cannot be read), `<a>` every directory from `home`
+  down to the parent of one of those, and the `list_dirs`: the child may stat those
+  directories and their direct entries, because Python and pytest stat files beside each
+  parent directory and stop on `EPERM`; it cannot list them or read anything there. An entry
+  equal to `home` or above it is ignored. Callers pass: `run_check`, the main checkout's
+  `.git` and `build` and `venv_read_paths` of `.venv` and `bench/.venv` (the sandbox itself
+  is a write dir); the hermetic build, `<repo_root>/qumo`, `<repo_root>/agents/mojo` and
+  `venv_read_paths(<repo_root>/.venv)`, with `list_dirs = [<repo_root>]` because the compiler
+  lists the `-I` directory. `venv_read_paths` is the virtualenv's realpath, each symbolic link
+  between `<venv>/bin/python` and the interpreter, and the interpreter's installation prefix
+  (uv keeps it in `~/.local/share/uv/python`). The rest of the main checkout (`.env`,
+  `agents/agents.local.json`, reports, sources) and of `$HOME` is not readable.
   Paths are realpaths (the sandbox matches resolved vnodes, so writes through the sandbox's
   `.venv`/`build` symlinks land outside `write_dirs` and are refused); `"` and `\` are escaped.
 - `sandbox_kind`: macOS: `/usr/bin/sandbox-exec` is executable. Linux: spawns
@@ -739,18 +751,33 @@ Pure Mojo (FIPS 180-4), so the manifest and eviction file names do not depend on
 #### 2.2.4 `util/redact.mojo`
 
 ```mojo
-def redact(s: String, secret: String) -> String   # moved verbatim from llm.mojo:205-233
+def redact(s: String, secret: String) -> String
 def secret_env_names(api_key_env: String) -> List[String]   # [api_key_env, "ALPHAXIV_API_KEY", "GITHUB_TOKEN"], duplicates removed
 def redact_all(s: String, env_names: List[String]) -> String
 ```
 
-`redact_all(s, names)` applies `redact(s, value)` for the current value of every variable in
-`names` that is set and non-empty (read with `getenv` at each call, never cached), then the
-existing `sk-`/`Bearer ` patterns of `redact`. Every component calls
+`redact(s, secret)` hides `secret` and its JSON-escaped form, then `sk-` followed by 8 or more
+key characters, and what follows `Bearer ` or `Basic ` in any letter case (8 or more of
+letters, digits and `_ - . ~ + / =`; after `Basic` only a value that looks like base64, not
+prose: a digit, `+ / =` or mixed case, or 20 bytes or more).
+
+Length rule for a known value: 8 bytes or more, hidden wherever it occurs; 4 to 7, only as a
+whole word (not next to a letter, digit, `_` or `-`); under 4, never. A very short value
+replaced everywhere would blank out pieces of ordinary words and mark every place where two or
+three common characters occur, which hides nothing; the cost is that a credential of 1 to 3
+characters, or one of 4 to 7 glued to other key characters, stays readable.
+
+`redact_all(s, names)` hides the current value (read with `getenv` at each call, never cached)
+of every variable in `names` and of every variable of the process whose name looks secret
+(`native/spawn.is_secret_env_name`: `*_API_KEY`, `*_TOKEN`, `*_SECRET`, `*_PASSWORD`,
+`*SECRET*`, `*PASSWORD*`), longest value first, each also JSON-escaped; then the patterns of
+`redact`. So the model key of every endpoint, the alphaXiv key (whatever `key_env` names it),
+`GITHUB_TOKEN` and an MCP `bearer_env` are covered without being listed. Every component calls
 `redact_all(text, secret_env_names(endpoint.api_key_env))` on every error text it produces from
 remote or child data (model HTTP errors, MCP HTTP and stdio errors, research `HTTPError`/
 `URLError` texts, subagent child errors) and on every stderr log line; `redact` alone is not
-used outside `redact_all`.
+used outside `redact_all`. Not covered: a JSON form that escapes `/` as `\/` or non-ASCII
+characters as `\uXXXX`, and the URL-encoded form (the harness sends keys in headers only).
 
 ### 2.3 `core/` (owner F)
 
@@ -1140,11 +1167,15 @@ at 64 KiB, at most 100 header lines. Body cap per `HttpOptions`.
 
 Redirects (D2c, [critic A8]): at most `max_redirects` (10) hops and at most 4 visits of one URL
 (urllib), else `QA-E104: redirect loop`. `https -> http` is always refused
-(`QA-E104: refusing redirect from https to http`). `Authorization` (and `Cookie`) are dropped
-when scheme, host or port change. `REDIRECT_URLLIB`: 301/302/303 turn POST into GET without a
+(`QA-E104: refusing redirect from https to http`). When scheme, host or port change, only the
+headers of `cross_origin_safe_header` (`Accept`, `Accept-Encoding`, `Accept-Language`,
+`Connection`, `Content-Type`, `User-Agent`) are sent on: `Authorization`, `Cookie`, `X-Api-Key`
+and every other caller header are dropped, and a request that still has a body (307/308) is
+refused (`QA-E104: refusing to send the request body to another origin (redirect from <origin>
+to <origin>)`). `REDIRECT_URLLIB`: 301/302/303 turn POST into GET without a
 body (urllib), 307/308 keep GET/HEAD; `REDIRECT_SAME_ORIGIN`: only 307/308 to the same origin,
 anything else is returned as the response; `REDIRECT_KEEP_METHOD`: only 307/308, method and
-body kept.
+body kept (same origin only, by the rule above).
 
 #### 2.4.6 `net/sse.mojo`
 
@@ -1202,8 +1233,11 @@ def parse_retry_after_s(header_names: List[String], header_values: List[String],
 - Construction checks `api_key_env` is a valid variable name and set
   (`QA-E140: set OPENROUTER_API_KEY to use the openrouter back end, or pass --replay FILE`).
   The key is read with `getenv` when each request is built and never stored, logged or
-  returned. `https` needs `tls`; plain `http` is allowed for a loopback host or when
-  `base_url` itself is `http://` (local model servers).
+  returned. `https` needs `tls`; plain `http` is allowed only when `base_url` itself is
+  `http://` and its host is loopback (local model servers; `net/url.mojo`
+  `is_loopback_host`: `localhost`, `*.localhost`, a literal IPv4 in 127.0.0.0/8, `::1`).
+  Any other `http://` base URL is refused at construction (`QA-E140: refusing to send
+  <KEY_ENV> to <origin> over plain http`), as `McpHttpSession` does for its bearer token.
 - POST `base_url + "/chat/completions"`, body `req.body_json()`, headers per section 1.5,
   `HttpOptions(connect=io=timeout_s*1000, max_body_bytes=64 MiB, truncate=False,
   REDIRECT_KEEP_METHOD, 10, allow_plain_http, accept_ragged_eof=False)`. A TLS-truncated
@@ -1969,11 +2003,12 @@ def report_slug(name: String, max_len: Int, fallback: String) -> String
 Exact behaviour and texts (`W/agents/qumo_agents/tools/repo.py`, [gaps §2]):
 
 - `is_secret_name(n)`: case-insensitive search for `^\.env`, `secret`, `credential`, `\.pem$`,
-  `\.key$`, `id_rsa` in the final name.
-- `resolve_repo_path`: (1) `normpath(path)`: any part in `skip_dirs` or a secret final name
+  `\.key$`, `id_rsa` in one name. It is applied to every path component (repo.py `_forbidden`:
+  `secrets/a.txt` and `ok/../secrets/a.txt` are refused like `.env`).
+- `resolve_repo_path`: (1) `normpath(path)`: any part in `skip_dirs` or secret-looking
   raises `<path> is not readable by agents`; (2) `p = resolve_nonstrict(join_path(root, path))`
   (an absolute `path` replaces `root`); `p != root` and `root` not a parent of `p` raises
-  `<path> is outside <root>`; (3) the parts of `p` relative to `root` and its name are checked
+  `<path> is outside <root>`; (3) the parts of `p` relative to `root` are checked
   again, and when `p` exists, also the parts of `realpath_strict(p)` relative to
   `realpath_strict(root)`. Every skip-directory comparison (these three and the
   `list_files`/`search_code` walk filters) is made after ASCII lower-casing both the part and
@@ -1987,13 +2022,15 @@ Exact behaviour and texts (`W/agents/qumo_agents/tools/repo.py`, [gaps §2]):
   `"\n... (<len(lines)> lines total)"` when `len(lines) > s-1+len(chunk)`. OS errors:
   `error: [Errno N] <strerror>: '<abs path>'`.
 - `tool_list_files`: resolve; walk without following directory symlinks, pruning `skip_dirs`
-  (same output, faster); entries sorted by path parts (pathlib order: compare part lists, not
-  strings); keep files (following symlinks) whose root-relative parts avoid `skip_dirs` and whose
-  name matches `fnmatch_py(name, pattern)`; `rel` joined with `\n`; at 300 entries append
+  and secret-looking directories (same output, faster); entries sorted by path parts (pathlib
+  order: compare part lists, not strings); keep files (following symlinks) whose root-relative
+  parts avoid `skip_dirs` and secret-looking names, that do not link outside the root or to
+  such a name (repo.py `_walkable`), and whose name matches `fnmatch_py(name, pattern)`; `rel` joined with `\n`; at 300 entries append
   `... truncated` and stop; `""` when nothing matches (Python prints an empty string).
 - `tool_search_code`: `py_regex_to_ere` (failure: `error: <message>`), resolve; files from the
   walk matching `pathlib_glob_match(rel_parts_below_base, glob)`, sorted as above; skipped:
-  `skip_dirs`, non-files, and (X5) secret names and symlinks resolving outside the root;
+  `skip_dirs`, non-files, and (X5) secret-looking names in any path component and symlinks
+  resolving outside the root or to such a name (`_walkable`, as `list_files`);
   unreadable files are skipped (X4); per line (`py_splitlines` after universal newlines) a match
   gives `f"{rel}:{i}: {cp_head(py_strip(line), 200)}"`; at 200 hits append `... truncated`;
   `no matches` when empty.
@@ -2017,7 +2054,8 @@ Exact behaviour and texts (`W/agents/qumo_agents/tools/repo.py`, [gaps §2]):
   and `MODULAR_CACHE_DIR=<repo_root>/build/agent-sandbox-cache` (also in `write_dirs`; created
   on first use), so `mojo run`, pytest or `build/qumo` launched from the sandbox cannot write
   the tool store, `build/qumo-agent`, the main checkout or anything outside the sandbox, cannot
-  read `sensitive_home_paths`, and have no network (6.8). `sandbox_kind == "none"` returns
+  read anything below `$HOME` except the sandbox, the main checkout's `.git` and `build`, and
+  the two virtualenvs with their interpreters (`read_allow`, 2.1.8), and have no network (6.8). `sandbox_kind == "none"` returns
   `refused: no OS sandbox on this machine; run_check inside a sandbox needs one. Hint: pass
   --allow-unsandboxed-tool-tests to run it unconfined` unless that flag was given. Without an
   open sandbox the command runs unconfined in the main checkout (parity).
@@ -2075,18 +2113,32 @@ def strip_html(raw: String) -> String
 Behaviour (`W/agents/qumo_agents/tools/research.py`, [gaps §2]); every result is
 `json.dumps(obj, indent=1, ensure_ascii=False)` (`py_json_dumps(..., False, 1)`):
 
-- `research_get`: only `https://` URLs, or URLs starting `http://export.arxiv.org/`, else
-  `ValueError: only https URLs are fetched`; headers `User-Agent: qumo-agents/0.1
-  (+https://github.com/ANFAIA/QUMO)` plus the given ones; `HttpOptions(30 s, 30 s, max_bytes,
-  truncate_at_max=True, REDIRECT_URLLIB, 10, allow_plain_http only for export.arxiv.org,
-  accept_ragged_eof=True)` (urllib parity, X15);
+- `research_get`: only `https://` URLs, else `ValueError: only https URLs are fetched`;
+  headers `User-Agent: qumo-agents/0.1 (+https://github.com/ANFAIA/QUMO)` plus the given
+  ones; `HttpOptions(30 s, 30 s, max_bytes, truncate_at_max=True, REDIRECT_URLLIB, 3,
+  allow_plain_http=False, accept_ragged_eof=True)` (urllib parity, X15), sent with
+  `HttpClient.request_guarded` and a `UrlGuard` (`net/guard.mojo`);
+- Outbound rules (`_check_url` and `_public_host` of `research.py`), applied to the URL and to
+  every redirect target before a connection is opened; each refusal is a `ValueError` with
+  Python's text: `only https URLs are fetched`; `only the default https port is fetched` (a
+  port other than 443); `<host> is not on the allow-list for this tool` (`search_arxiv`,
+  `sdk_releases` and `github_release_notes` call only `export.arxiv.org`, `pypi.org` and
+  `api.github.com`; `fetch_page` reads any public host); `<host> is not a public address` (an
+  IP literal in any spelling `getaddrinfo` reads, or a name with at least one resolved address,
+  that is not globally routable: loopback, private, link-local and metadata, CGNAT, the other
+  reserved ranges; "global" is `ipaddress.is_global` of CPython 3.12, an IPv4-mapped IPv6
+  address judged as its IPv4 address); `cannot resolve <host>`; `too many redirects` (more
+  than 3). `Authorization` is dropped on every redirect. A name is resolved once: the
+  addresses checked are the ones the socket connects to (`tcp_connect(..., public_only=True)`),
+  where Python resolves a second time to connect. `ResearchTools.plain_prefix` (empty outside
+  tests) exempts a loopback fixture server from these rules;
   non-2xx after redirects raises `HTTPError: HTTP Error <code>: <reason>`; network errors raise
   `URLError: <urlopen error <detail>>` or `TimeoutError: timed out`. These strings stand in for
   Python's `type(e).__name__: e`; they pass through `redact_all` (the GitHub token).
 - `search_arxiv`: unknown `module` gives `{"error": "unknown module '<m>'; choose one of ..."}`
   (X4); categories from the module (default `quant-ph`); terms `all:"<q>"` when the query has a
   space, else `all:<q>`; `q = "(<terms>) AND (<cat:A OR cat:B>)"`; URL
-  `http://export.arxiv.org/api/query?` + `urlencode(search_query, sortBy=submittedDate,
+  `https://export.arxiv.org/api/query?` + `urlencode(search_query, sortBy=submittedDate,
   sortOrder=descending, max_results=clamp(1..50))`; entries per Atom `entry`: `id` (id text after
   its last `/`), `title` (whitespace collapsed with `py_split_ws`), `published` (first 10),
   `authors` (first 6 `author/name`), `summary` (collapsed, first 900 code points), `url` (id
@@ -2102,8 +2154,8 @@ Behaviour (`W/agents/qumo_agents/tools/research.py`, [gaps §2]); every result i
   `{"error": "PyPI lookup failed for <pkg>: <Type>: <msg>"}`.
 - `github_release_notes`: `repo` must match `[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+` (X7) else
   `{"error": "repo must look like owner/name"}`; headers `Accept: application/vnd.github+json`
-  and, when `$GITHUB_TOKEN` is set, `Authorization: Bearer <token>` (dropped on cross-host
-  redirects, D2c); GET `https://api.github.com/repos/<repo>/releases?per_page=<clamp 1..10>`;
+  and, when `$GITHUB_TOKEN` is set, `Authorization: Bearer <token>` (dropped on every
+  redirect); GET `https://api.github.com/repos/<repo>/releases?per_page=<clamp 1..10>`;
   list of `{tag, date (published_at[:10] or ""), name, body (first 4000 code points or ""),
   url}`; errors `{"error": "GitHub lookup failed for <repo>: <Type>"}` (no message, on purpose).
 - `module_watchlist`: `{module, summary, sdks, arxiv_categories, arxiv_queries, mcp_tools,
@@ -2416,6 +2468,7 @@ text of this document. Everything else in section 2 holds as written.
 | `native/spawn` | `resolve_program(path, env, cwd)` (the absolute program a `SpawnSpec` will execute, PATH searched in the child's `env`); `exec_in_main(args)` is the `__exec-in DIR PATH ARG...` trampoline (`chdir` then `execve`) used where `posix_spawn_file_actions_addchdir_np` is missing. |
 | `native/libc` | A `CStr`/`CStrArray` is kept alive with `.keep()` after the C call (4.1 rule 3). Extra constants and `load_*`/`store_*` helpers for the layouts of 4.2; `c_open` and `c_readlink` wrappers. |
 | `net/url` | The parameter of `resolve_reference` is named `reference` (`ref` is a keyword in Mojo 1.2). |
+| `net/guard` | `UrlGuard.check`, `ipv4_is_global`, `ipv6_is_global`, `parse_ipv4_literal`, `parse_ipv6_literal`, `literal_is_global`: the outbound rules of the research GETs as pure functions (`test_net_guard`). |
 | `net/fdutil` | `now_ms`, `set_io_timeouts`, `set_cloexec`, `set_nosigpipe`, `poll_one`, `ip_literal_family`: socket helpers shared by `socket.mojo` and `tls.mojo`. |
 | `llm/client` | Retry constants public (`INITIAL_RETRY_DELAY_S`, `MAX_RETRY_DELAY_S`, `MAX_RETRY_AFTER_S`), `MAX_MODEL_BODY_BYTES`, `USER_AGENT`; error messages are clipped to `ERROR_MESSAGE_CODE_POINTS` before redaction. |
 | `mcp/protocol`, `mcp/results` | `tools_list_params_json(cursor)`, `call_params_json(name, args_json)`, `block_text(block)`, `MCP_CLIENT_NAME`/`MCP_CLIENT_VERSION`, `MCP_EMPTY_ERROR_TEXT` (the text of an `isError` result with no content). |
@@ -2434,7 +2487,7 @@ text of this document. Everything else in section 2 holds as written.
 | `tools/qumo_mcp` | `default_qumo_bin(root)`: `$QUMO_BIN`, else `<root>/build/qumo`. |
 | `tools/catalog` | `TOOLSMITH_GROUP` and `toolsmith_tool_names()` (the four `toolsmith_*` names, in wire order). |
 | `tools/config` | `SPECS_SCHEMA`, `MODULES_SCHEMA`, `TOOLS_SCHEMA`, `AGENTS_SCHEMA` (the export files are checked against them) and `EXPORT_HINT`. |
-| `tools/repo` | `run_check_refusal(argv, allowed)` and the refusal texts `REFUSED_NO_SANDBOX`, `REFUSED_ARGS`, `REFUSED_UNSANDBOXED`; caps `MAX_LIST_ENTRIES`, `MAX_SEARCH_HITS`, `CHECK_MAX_BYTES`, `CHECK_FSIZE_BYTES`. |
+| `tools/repo` | `run_check_refusal(argv, allowed, root, sandbox, skip_dirs)` and the refusal texts `REFUSED_NO_SANDBOX`, `REFUSED_ARGS`, `REFUSED_UNSANDBOXED`; caps `MAX_LIST_ENTRIES`, `MAX_SEARCH_HITS`, `CHECK_MAX_BYTES`, `CHECK_FSIZE_BYTES`. |
 | `tools/research` | `py_net_error(e)` (urllib-style messages), `error_json`, `research_get_prefixed`, `pypi_info_json`, `is_github_repo`, `github_releases_json`; the golden tests call them without a network. |
 | `toolsmith/manifest` | `MANIFEST_FILE`, `DEFAULT_TOOL_TIMEOUT_S`, `DEFAULT_MAX_OUTPUT_BYTES`, `empty_manifest(store)`, `tool_entry_from_json`, `build_record_from_value`, `display_name`, `is_inside(path, root)`. |
 | `toolsmith/generated` | `generated_suffix(entry)` (B.3), `entry_timeout_s`, `entry_max_output_bytes`, the message-cap bounds, `HINT_REVIEW`, `HINT_UNSANDBOXED`. |
@@ -2916,13 +2969,13 @@ agent with `offset`/`limit`, as the stubs instruct (the critic A1 bug is fixed);
 | `grep` | default `max_count` 1000 | 80,000 body |
 | repository `read_file` | `_resolve` (skip dirs, secret names, inside root after symlinks); `max_lines` 1..2000 | 60,000 + footer |
 | `list_files` | same path rules; skip dirs pruned | 300 entries |
-| `search_code` | same path rules; secret names and outside-root symlinks skipped (X5); POSIX ERE subset | 200 hits, 200 per line |
-| `run_check` | allow-list prefixes; ASCII path-like arguments, no `..`, no trailing newline, no `git diff --output*`/`--no-index` (X5); minimal env without secrets (D2b); cwd = sandbox or repo; process group killed on timeout; inside a sandbox: `CONF_CHECK` confinement (writes only to the sandbox, a per-call temp dir and the sandbox build cache; no network; no reads of `sensitive_home_paths`) | timeout 10..1800 s; output tail 12,000; 4 MiB bytes per stream kept |
+| `search_code` | same path rules; secret-looking names (any path component) and outside-root symlinks skipped, as in `list_files` (X5); POSIX ERE subset | 200 hits, 200 per line |
+| `run_check` | allow-list prefixes; ASCII path-like arguments, no `..`, no trailing newline, no `git diff --output*`/`--no-index` (X5); minimal env without secrets (D2b); cwd = sandbox or repo; process group killed on timeout; inside a sandbox: `CONF_CHECK` confinement (writes only to the sandbox, a per-call temp dir and the sandbox build cache; no network; no reads below `$HOME` except `read_allow`, 6.8) | timeout 10..1800 s; output tail 12,000; 4 MiB bytes per stream kept |
 | repository paths | skip directories compared case-insensitively (X14) | - |
 | `write_report` | only `agents/reports/` of the main repository; ASCII slug | slug 80 |
 | `open_sandbox` | once per process tree; new branch from HEAD; nothing committed or pushed | stderr tail 500 |
 | sandbox `write_file`/`edit_file` | only inside the open sandbox, `_resolve` rules | - |
-| research GETs | `https` only (plus `http://export.arxiv.org/`); redirects per D2c; no retries; `Accept-Encoding: identity`; 30 s per operation | 400,000 bytes (PyPI 16 MiB, X6) |
+| research GETs | `https` only, port 443, public addresses only, the API tools on their three hosts; at most 3 redirects, each target checked (section 2.8.4); no retries; `Accept-Encoding: identity`; 30 s per operation | 400,000 bytes (PyPI 16 MiB, X6) |
 | `fetch_page` | text is data | 20,000 |
 | `search_arxiv` | `max_results` 1..50 | summary 900; 6 authors |
 | `github_release_notes` | ASCII `owner/name`; token only to api.github.com and dropped across hosts | `count` 1..10; body 4,000 |
@@ -3152,18 +3205,19 @@ pytest, `examples/run_examples.py`, `build/qumo` with sandbox inputs, `git`). Ea
 | Profile | Used by | Writes | Reads | Network | Other |
 |---|---|---|---|---|---|
 | `CONF_TOOL` | `toolsmith_test`, generated-tool calls and `tools/list`, review re-test | the per-call temp dir, `/dev/null` | everything outside `$HOME`; under `$HOME` only `modular_lib_dir(repo_root)` (the binary's `LC_RPATH`/`RUNPATH` libraries) | denied | `(deny process-fork)` on macOS; `RLIMIT_CPU = 4 * timeout_s + 10`, `RLIMIT_FSIZE = 64 MiB` |
-| `CONF_BUILD` | `toolsmith_build`, review rebuild | the build temp dir, the build cache dir | all except `sensitive_home_paths` | denied | `RLIMIT_FSIZE = 1 GiB` |
-| `CONF_CHECK` | `run_check` with cwd = sandbox | the sandbox (realpath), a per-call temp dir (`TMPDIR`), `build/agent-sandbox-cache` | all except `sensitive_home_paths` | denied | `RLIMIT_FSIZE = 1 GiB` |
+| `CONF_BUILD` | `toolsmith_build`, review rebuild | the build temp dir, the build cache dir | everything outside `$HOME`; under `$HOME` only `<repo_root>/qumo`, `<repo_root>/agents/mojo`, `venv_read_paths(<repo_root>/.venv)` and the listing of `<repo_root>` | denied | `RLIMIT_FSIZE = 1 GiB` |
+| `CONF_CHECK` | `run_check` with cwd = sandbox | the sandbox (realpath), a per-call temp dir (`TMPDIR`), `build/agent-sandbox-cache` | everything outside `$HOME`; under `$HOME` only the write dirs, the main checkout's `.git` and `build`, and `venv_read_paths` of `.venv` and `bench/.venv` | denied | `RLIMIT_FSIZE = 1 GiB` |
 
 Consequences: no confined process can write `<store>/manifest.json`, a store binary,
 `build/qumo-agent`, the main checkout or anything else outside its write list, so it cannot
 mark a tool reviewed, swap a reviewed binary or run a privileged `qumo-agent tools review`
-that persists anything; it cannot exfiltrate over the network. Residual exposure: `CONF_CHECK`
-and `CONF_BUILD` can still read files under `$HOME` that are neither a top-level dot entry nor on
-the named `Library` list (the repository lives there; ordinary documents), and their output
-reaches the model; on Linux, Landlock is an allow-list, so reads are allowed
-on `/` for those two profiles and `sensitive_home_paths` are not denied there (documented in
-risk 10.1.8). Without any OS sandbox (`sandbox_kind == "none"`), confined runs are refused unless
+that persists anything; it cannot exfiltrate over the network. Residual exposure: a `CONF_CHECK`
+run reads the main checkout's `.git` (history, `config`) and `build`, and both profiles read
+everything outside `$HOME`; a child can learn whether a name exists directly inside `$HOME` or
+a directory between `$HOME` and an allowed path (stat only), and the hermetic build can list
+`<repo_root>`. Commands that need other files below `$HOME` fail under confinement: `git`
+when `~/.gitconfig` exists, a Python package that reads `~/.config`. The Linux rules are
+compile-checked only, not run (risk 10.1.8). Without any OS sandbox (`sandbox_kind == "none"`), confined runs are refused unless
 a human passes `--allow-unsandboxed-tool-tests` on the command line (it is never accepted from
 the environment, the specs or a tool argument).
 
@@ -3288,12 +3342,12 @@ retyped). Goldens are committed; regenerating them needs `agents/.venv`.
 |---|---|---|
 | F | `test_native_lint` | `external_call` only in `native/libc.mojo`; no `std.subprocess`, `std.os.process`, `/bin/sh`, `curl`, `mktemp`, `date ` in `qumo_agent/`; every file with ported text has the MIT header |
 | F | `test_native_spawn` | argv regression (`/bin/echo ab lit` prints `ab lit`); explicit env (`/usr/bin/env` prints exactly the given entries; empty env prints nothing); cwd (`/bin/pwd`); stdin/stdout pipes (`/bin/cat`); `run_capture` timeout kills within 1 s; process-group kill reaches a grandchild (`/bin/sh -c 'sleep 30 & echo $!; wait'`); writing to a dead child raises `QA-E160` instead of killing the test (SIGPIPE ignored); `minimal_child_env()` drops `X_API_KEY`, `GITHUB_TOKEN`, `MY_SECRET` set with `setenv`; `mcp_server_env()` has only the six names; `harness_child_env("OPENROUTER_API_KEY")` keeps the listed keys and `QUMO_*` names and drops `AWS_SECRET_ACCESS_KEY`, `X_API_KEY`; a child writing 1 MiB to a piped stderr before its stdout line does not block `read_line`, and `stderr_tail()` holds its last 64 KiB; `which` |
-| F | `test_native_sandbox` | `macos_profile` text for each profile (escaping, realpaths); `confine` argv shape; on a machine with a sandbox: a confined `/usr/bin/touch` outside `write_dirs` fails and inside succeeds, `CONF_TOOL` cannot read a file under `$HOME` outside `read_allow` nor connect to `127.0.0.1:<listener>`, a reference Mojo binary copied to a temp dir runs under `CONF_TOOL`, `RLIMIT_CPU` kills a busy loop; `sandbox_kind` probe; `__confine` failure exits 125 with `QA-E163` |
+| F | `test_native_sandbox` | `macos_profile` text for each profile (escaping, realpaths, `$HOME` denied by default with the named paths allowed back); `venv_read_paths`; `confine` argv shape; on a machine with a sandbox: a confined `/usr/bin/touch` outside `write_dirs` fails and inside succeeds, `CONF_CHECK` and `CONF_BUILD` with a fake `$HOME` cannot read or list `code/other/.env`, `Documents`, a checkout's `.env` or a dot directory but can read a `read_allow` subtree and list a `list_dirs` directory (macOS), `CONF_TOOL` cannot read a file under `$HOME` outside `read_allow` nor connect to `127.0.0.1:<listener>`, a reference Mojo binary copied to a temp dir runs under `CONF_TOOL`, `RLIMIT_CPU` kills a busy loop; `sandbox_kind` probe; `__confine` failure exits 125 with `QA-E163` |
 | F | `test_native_clock`, `test_native_fs`, `test_native_rand` | `utc_iso` with and without microseconds; local date formats; `http_date_to_unix` (3 forms); `normpath`/`resolve_nonstrict`/`join_path` against Python vectors; `walk` with a symlinked directory not followed; `make_temp_dir` mode 0700; atomic write; uuid4 version and variant bits |
 | F | `test_native_regex`, `test_native_fnmatch` | translation table (2.1.5) incl. refusals; search on platform constants; `fnmatch_py` (`[^a]`, `\`, dot files); `wc_glob_match` vectors from deepagents (`*.py` matches `src/app/main.py`, `src/**/*.py`, `/*.py` top-level only, `**` not into `.github`, `.github/**/*.yml`, `*.{yml,yaml}`, `..` refused); `pathlib_glob_match` |
 | F | `test_util_pyfmt`, `test_util_jsonx`, `test_util_sha256`, `test_util_redact` | `pyfmt.json` vectors; lenient parse with a raw newline and tab inside strings; B2 table (empty, null, `[]`, `0`, object, `[1]`, `5`, `"x"`, invalid; the truthy non-objects give `arguments must be a JSON object`, X13); NIST SHA-256 vectors (`""`, `"abc"`, one million `a`); `redact_all` removes the values of three set variables in JSON bodies and plain text, ignores unset ones |
 | F | `test_core_messages`, `test_core_replay` | wire JSON of each role (assistant `content: null` with calls, `name`, `arguments` re-serialized with `", "`/`": "` and `é` kept, invalid calls after valid ones with raw text, tool parts array); `parse_chat_response` B4 (reasoning dropped), B5 (error body, missing/null/empty choices), list content; `is_context_overflow` markers (400/413/422 with each marker; 503 with `exceeds the context window` true, 503 with `prompt is too long` false); `error_http_status` of E101/E102 texts; replay routing by `at`, error lines, exhaustion message, request log directory |
-| N | `test_net_url`, `test_net_http_framing`, `test_net_redirects`, `test_net_sse` | URL parse/resolve; `quote`/`quote_plus`/`urlencode` (the arXiv example in [gaps §2] byte-exact); framing over a `CannedStream` (chunked with extensions and trailers, Content-Length, close-delimited, 1xx, HEAD/204/304, truncation, a close-delimited body on a scripted ragged-EOF stream refused unless `accept_ragged_eof`, header caps, injection refused); D2c table (https to http refused, Authorization dropped on host/port/scheme change, 10 hops, 4 visits); SSE splits at every byte offset, CR/LF/CRLF, comments, multi-line data, id/retry, BOM |
+| N | `test_net_url`, `test_net_http_framing`, `test_net_redirects`, `test_net_sse` | URL parse/resolve; `quote`/`quote_plus`/`urlencode` (the arXiv example in [gaps §2] byte-exact); framing over a `CannedStream` (chunked with extensions and trailers, Content-Length, close-delimited, 1xx, HEAD/204/304, truncation, a close-delimited body on a scripted ragged-EOF stream refused unless `accept_ragged_eof`, header caps, injection refused); D2c table (https to http refused, only the safe headers kept and a request body refused on host/port/scheme change, 10 hops, 4 visits); SSE splits at every byte offset, CR/LF/CRLF, comments, multi-line data, id/retry, BOM |
 | N | `test_net_tls_local` | with a per-run CA and leaves made by `openssl` 3 (`req -x509 ... ec P-256`, leaf SAN `DNS:localhost,IP:127.0.0.1`, second leaf `DNS:other.test`) and `openssl s_server -accept 127.0.0.1:<port> -WWW` in a temp dir: GET a fixture file with `TlsContext(ca)`; default store gives verify error 20; `SSL_CERT_FILE=ca.pem` with the production constructor succeeds; `other.test` leaf gives 62; IP literal with IP SAN succeeds, without gives 64; killing the server mid-body gives a truncation error for a Content-Length body and, without `accept_ragged_eof`, for a close-delimited body (`s_server -WWW` sends no Content-Length); a `TcpListener` that never accepts makes the handshake time out in 1.5 s ± 0.5 |
 | N | `test_net_http_fixture`, `test_llm_client` | through `http_fixture_server`: plain GET/POST with every framing; redirect chains; the model client against `http://127.0.0.1:<port>/api/v1`: request headers and body, 429 with `retry-after-ms` retried, 500 twice then 200 (2 retries), 500 three times gives `QA-E101` after 3 attempts, `x-should-retry: false`, `retry-after: 200` not retried, 400 `context_length_exceeded` gives `QA-E102` at once, 200 with `error` gives `QA-E103`, the key echoed by the server is redacted; `retry_delay_ms` table with fixed randomness |
 | M | `test_mcp_protocol` | tools page parsing with `nextCursor`; call results to outcomes (B6: two text parts, error with empty content, success with empty content, image block placeholder); `transform_input_schema` (B7: `$ref`/`$defs` inlined and dropped, top `title` and `description` popped, nested `title` keys removed, a property named `title` kept, lists untouched, `$schema` and `additionalProperties` kept) |
@@ -3305,7 +3359,7 @@ retyped). Goldens are committed; regenerating them needs `agents/.venv`.
 | H | `test_harness_loop` | `wire_S1..S6` structural equality; D2e (all-invalid turn continues; mixed turn order: assistant, invalid errors, valid results); unknown tool text lists `execute` after `grep`; mutation guard for `file_path` and `path` (D2d), and for a V0 agent `notes.md` and `/notes.md` in one turn (same key, second refused); `execute` text; recursion: limit 25 gives 12 model calls then `QA-E110`, limit 200 gives 100; limit 24 with the final answer on call 12 gives `QA-E110` (R3), on call 11 it completes; a general-purpose subagent has no R3 step; answer and final-text rules |
 | H | `test_harness_subagents` | task listing (GP first, ancestors removed); unknown type text; isolation (child request has only system + description); final text skips trailing empty AI messages; file merge (child writes merged, child deletions not propagated, later call wins); inline path vs `run_subagents` (FakeEnv sees one batch of 2 when `parallel_limit` = 4); `replay_at` paths; failure gives `QA-E120` |
 | T | `test_tools_config`, `test_tools_catalog` | registry, `model_for` order, ancestors filtering, toolsmith prompt = preamble + role, stale-export message; guided descriptions byte-identical (the old `fixtures/guided_descriptions.json`); per-agent wire names equal Python's first request (`tests/fixtures/tools/wire_tool_names.json`, written by T's dev-time `tests/fixtures/tools/gen_wire_names.py` with the `r9-native-harness/capture.py` technique: `build_agent` with a fake model, tool names of the first request; equal to `capture_all.json` today) with a fake MCP list in server order |
-| T | `test_tools_repo` | `_resolve` vectors (`../`, `.env`, `.venv`, `build`, absolute outside, symlink escaping, and X14's `.GIT/config`, `Build/x`, `.Venv/x` refused); `read_file` format, footer and caps on a fixture with `\r\n`, `\f`, U+2028; `list_files` order (parts order: `a/b` before `a.b`) and 300 cap; `search_code` regex, glob, secret-name skip; `run_check` refusal texts byte-exact, ARG checks incl. trailing newline and `--output=x`, minimal env (allow-list injected with `/usr/bin/env`), timeout and group kill (allow-list injected with `/bin/sleep`), `git status --short` in a temp repo, universal newlines per stream (allow-list injected with `/usr/bin/printf 'a\r\nb\rc'` gives `a\nb\nc`), with a sandbox open a confined write outside the sandbox fails (allow-list injected with `/usr/bin/touch`); `write_report` path and slug; `open_sandbox` in a temp git repo (branch, worktree, symlinks, second call); sandbox write/edit texts |
+| T | `test_tools_repo` | `_resolve` vectors (`../`, `.env`, `.venv`, `build`, absolute outside, symlink escaping, and X14's `.GIT/config`, `Build/x`, `.Venv/x` refused); `read_file` format, footer and caps on a fixture with `\r\n`, `\f`, U+2028; `list_files` order (parts order: `a/b` before `a.b`) and 300 cap; `search_code` regex, glob, secret-name skip; a secret-looking directory (`secrets/a.txt`, `ok/../secrets/a.txt`) refused by `read_file`, the sandbox write/edit and `run_check build/qumo`, and hidden from `list_files` and `search_code` with symlinks to it; `run_check` refusal texts byte-exact, ARG checks incl. trailing newline and `--output=x`, minimal env (allow-list injected with `/usr/bin/env`), timeout and group kill (allow-list injected with `/bin/sleep`), `git status --short` in a temp repo, universal newlines per stream (allow-list injected with `/usr/bin/printf 'a\r\nb\rc'` gives `a\nb\nc`), with a sandbox open a confined write outside the sandbox fails (allow-list injected with `/usr/bin/touch`); `write_report` path and slug; `open_sandbox` in a temp git repo (branch, worktree, symlinks, second call); sandbox write/edit texts |
 | T | `test_tools_research`, `test_tools_atom_html` | Atom fixture (namespaced feed with CDATA and entities) gives the same JSON as Python's `search_arxiv_raw` (golden); PyPI and GitHub fixtures give Python's JSON (goldens, key order starting with `package`), including the 16 MiB path; `strip_html` equals Python's regex pipeline on 8 HTML fixtures; URL building; network paths through the fixture server |
 | T | `test_tools_qumo_mcp`, `test_tools_alphaxiv` | 24 tools for qumo-operator with guided descriptions; Bell circuit through `qumo_run_qasm`; session restart after killing the server; the same call sequence gives identical results through one persistent session and through a fresh session per call (X3); alphaXiv emulated over SSE: only the 5 read tools, description composition, one session per call with `DELETE` |
 | T | `agents/tests/test_agents.py` (Python) | export fresh (`export.stale()` covers the new files); `tools.json` descriptions equal `convert_to_openai_tool`; `modules.json` round trip; `generated_tools` values |
@@ -3433,7 +3487,7 @@ Makefile changes (I): `test-agents-mojo` builds `build/qumo-agent` and
 | 5 | Concurrency differs: tools of one turn run sequentially; only `task` fans out (processes). Wall time can exceed Python for turns with several slow network tools. | Results are identical by construction (X1); a later version can fan out other slow tools to children the same way. |
 | 6 | Persistent QUMO MCP session (X3) could diverge from Python if the server ever keeps state between calls. | Test 8.2 compares results of the same call sequence with a fresh session per call. |
 | 7 | Subagent children cost a process start and a fresh QUMO MCP server each. | Small next to model latency; `--parallel 1` falls back to inline. |
-| 8 | Model-written code runs before any human review: `toolsmith_test` runs the binary the agent just built, `toolsmith_build` runs the compiler over agent-written source, and `run_check` inside a sandbox runs agent-written files (`mojo run`, pytest). Unconfined, that code could rewrite the manifest (`reviewed: true`), run `tools review`, replace store binaries or `build/qumo-agent`, read dotfiles and use the network. Reviewed tools also run with the user's privileges. | K5/6.8: the toolsmith has no `run_check`; every such run is confined (`sandbox-exec` on macOS, user+network namespaces and Landlock on Linux) with writes limited to temp dirs (and the sandbox for `run_check`), no network, no fork for tools, CPU/file-size rlimits; hermetic builds against the main checkout; review rebuilds the binary from the displayed source; private hashed copies are executed. Residual: on a machine without either sandbox, unreviewed code runs only with the human flag `--allow-unsandboxed-tool-tests` and reviewed tools run unconfined; `CONF_CHECK`/`CONF_BUILD` can read ordinary files under `$HOME` that are not top-level dot entries or the named `Library` directories (and on Linux the sensitive ones too) and return them to the model; `sandbox-exec` is deprecated by Apple and could disappear (then `sandbox_kind` is `none`). |
+| 8 | Model-written code runs before any human review: `toolsmith_test` runs the binary the agent just built, `toolsmith_build` runs the compiler over agent-written source, and `run_check` inside a sandbox runs agent-written files (`mojo run`, pytest). Unconfined, that code could rewrite the manifest (`reviewed: true`), run `tools review`, replace store binaries or `build/qumo-agent`, read dotfiles and use the network. Reviewed tools also run with the user's privileges. | K5/6.8: the toolsmith has no `run_check`; every such run is confined (`sandbox-exec` on macOS, user+network namespaces and Landlock on Linux) with writes limited to temp dirs (and the sandbox for `run_check`), no network, no fork for tools, CPU/file-size rlimits; hermetic builds against the main checkout; review rebuilds the binary from the displayed source; private hashed copies are executed. Residual: on a machine without either sandbox, unreviewed code runs only with the human flag `--allow-unsandboxed-tool-tests` and reviewed tools run unconfined; `CONF_CHECK`/`CONF_BUILD` read nothing below `$HOME` except what the caller names (6.8), but everything outside it, and a `run_check` reads the main checkout's `.git` and `build`; the Linux rules for this are compile-checked only; `sandbox-exec` is deprecated by Apple and could disappear (then `sandbox_kind` is `none`). |
 | 9 | Recursion limit 9999 for subagents allows very long, costly runs (parity). | Stats on stderr; a cost cap is an open question. |
 | 10 | Mojo dialect drift (1.2 pinned) and the "one FFI signature per symbol" rule: a std module could bind a libc symbol differently. | Harness no longer uses `std.os.process`/`std.subprocess`; lint test; the guide is pinned. |
 | 11 | The token heuristic must count tools as Python's `tool_call_schema` form, which differs from the wire form for every tool (property `title`s of pydantic tools, raw MCP `inputSchema`). | `ToolSpec.count_json` (2.7.6) from the export's `count_parameters`, the golden `COUNT_PARAMETERS` and the raw MCP schemas; `token_counts.json` includes tools. Remaining gap: a QUMO MCP or alphaXiv server whose `tool.description` differs from the guided wire description in Python (not observed); bounded and harmless at 170,000. |
@@ -4249,7 +4303,7 @@ router decides "given" from the original arguments (before `validate_args` fills
 | E101 | `model request failed: HTTP <status> <reason>: <message>` |
 | E102 | `context overflow: HTTP <status>: <message>`, or A.12's recovery text |
 | E103 | `model returned an error: <json>`, `Response missing 'choices' key: dict_keys([...])`, `Received response with null value for 'choices'. ...`, `response has no choices` |
-| E104 | `<host>: <dns/connect/TLS/timeout detail>`, `refusing redirect from https to http`, `redirect loop`, `header injection refused`, `response body larger than <n> bytes`, `body truncated (<n> bytes missing)`, `body truncated (TLS connection closed without close_notify)` |
+| E104 | `<host>: <dns/connect/TLS/timeout detail>`, `refusing redirect from https to http`, `redirect loop`, `refused URL: <reason>` (research GETs, section 2.8.4), `header injection refused`, `response body larger than <n> bytes`, `body truncated (<n> bytes missing)`, `body truncated (TLS connection closed without close_notify)` |
 | E105 | `OpenSSL 3 not found (tried: ...). Hint: ...`, `<lib> (<version>) lacks <symbol>`, `no CA certificates found. Hint: set SSL_CERT_FILE` |
 | E110 | A.9 `RECURSION_LIMIT` |
 | E120 | `subagent <type> failed: <error>`, `subagent <type> failed: exit <code>`, `subagent <type> failed: result larger than 268435456 bytes`, `subagent <type> failed: malformed result: <text>` |
@@ -4722,7 +4776,7 @@ the QUMO code or a probe before deciding. One line per objection.
 | 8 | Subagent and `serve` children inherit the full environment despite D2b (minor) | Accepted: flagged as K4 (0.3); `harness_child_env(api_key_env)` with the exact allow-list (2.1.2, 1.1, 2.10, B.7). |
 | 9 | `mutation_key` for V0 relative paths is ambiguous (minor) | Accepted: the key follows the routing decision, so V0 `notes.md` and `/notes.md` both give `vfs:/notes.md` (2.7.4); test added. |
 | 10 | Per-agent filtering of generated tools has no owner (minor) | Accepted: one process-wide `GeneratedTools` with every loadable tool and `specs_for(allow_all, names)`; `AppEnv` passes the filtered list, and `tool_node_names()` refuses other names (2.9, 2.10, 2.8.2, 6.7). |
-| 11 | Unreviewed model-written code runs with the user's privileges; the review gate can be bypassed (blocking) | Accepted: verified that the toolsmith had `check`, that the allow-list holds `.venv/bin/mojo run -I .`, and (probe) that `sandbox-exec` confines a Mojo binary on this Mac. Flagged as K5; `check` removed from the toolsmith (6.1, 5.1); `native/sandbox.mojo` with `CONF_TOOL`/`CONF_BUILD`/`CONF_CHECK` through a native `__confine` trampoline (2.1.8, 6.8); `run_check` confined whenever its cwd is the sandbox (2.8.3); `--allow-unsandboxed-tool-tests` as the only escape (7.1); `tools review --yes` needs `isatty(0)` (6.6); risk 10.1.8 rewritten. Partly modified: `RLIMIT_NPROC` is not used (it counts all of the user's processes, and threads on Linux, so it would break the Mojo runtime or the user's session); forks are denied by the macOS profile instead. The Linux profile cannot deny reads of `sensitive_home_paths` for `CONF_CHECK`/`CONF_BUILD` (Landlock is an allow-list and those runs must read the repository under `$HOME`); recorded as residual risk. |
+| 11 | Unreviewed model-written code runs with the user's privileges; the review gate can be bypassed (blocking) | Accepted: verified that the toolsmith had `check`, that the allow-list holds `.venv/bin/mojo run -I .`, and (probe) that `sandbox-exec` confines a Mojo binary on this Mac. Flagged as K5; `check` removed from the toolsmith (6.1, 5.1); `native/sandbox.mojo` with `CONF_TOOL`/`CONF_BUILD`/`CONF_CHECK` through a native `__confine` trampoline (2.1.8, 6.8); `run_check` confined whenever its cwd is the sandbox (2.8.3); `--allow-unsandboxed-tool-tests` as the only escape (7.1); `tools review --yes` needs `isatty(0)` (6.6); risk 10.1.8 rewritten. Partly modified: `RLIMIT_NPROC` is not used (it counts all of the user's processes, and threads on Linux, so it would break the Mojo runtime or the user's session); forks are denied by the macOS profile instead. The Linux profile cannot deny reads of the sensitive paths under `$HOME` for `CONF_CHECK`/`CONF_BUILD` (Landlock is an allow-list and those runs must read the repository under `$HOME`); recorded as residual risk. Superseded on 2026-11-25: both systems now deny `$HOME` by default for those profiles and allow the named paths (2.1.8, 6.8). |
 | 12 | The reviewed source is not guaranteed to be the compiled source (blocking) | Accepted: hermetic `toolsmith_build` (only `tool.mojo`, main-checkout include paths, never `-I <sandbox>`), a `BuildRecord` with `source_sha256`/`sdk_sha256`/`binary_sha256`, publish refuses changed source or cases (6.3, 6.4, 2.9), and `tools review` rebuilds and re-tests from the displayed source and replaces the binary (6.6). Modified on one point: review does not refuse when `sdk_sha256` differs from the current SDK; it reports the difference, and since the binary is rebuilt against the current SDK and the cases re-run, the reviewed binary always matches the current SDK, so refusing would add nothing. |
 | 13 | Unvalidated `version` is a path-traversal write outside the store; `tools remove` trusts `dir` (major) | Accepted: `valid_tool_version`, `entry_dir`, `check_entry_shape` (realpath inside the store, no `..`, no leading `/`, `dir` equals the derived value) in publish, load, verify and every `tools` command; `tools remove` never deletes a malformed entry's directory (2.9, 6.4, 6.6, B.4). |
 | 14 | Case-sensitive skip-directory checks expose `.GIT/config` etc. on macOS (major) | Accepted: X14, ASCII case folding in `resolve_repo_path` (plus a realpath-based check) and in the `list_files`/`search_code` walk filters (2.8.3, 5.4); test vectors added. |

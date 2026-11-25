@@ -1,7 +1,7 @@
 """QUMO compiler: targets, text-spec pass manager and exact optimisation passes.
 
 Modules:
-  target        Target (coupling graph, basis, errors, durations), presets, parse_target
+  target        re-export of qumo.device.target (Target, presets, parse_target), kept for one release
   pass_manager  PassManager / text pipelines / preset levels O0-O3 / transpile
   optimize      remove_identities, cancel, merge, commute, fuse1q, eject_z, elide_swaps
   phase_fold    phase-polynomial T-count reduction
@@ -11,6 +11,8 @@ Modules:
   routing       VF2 exact layout + LightSABRE routing
   synth         basis-aware single-qubit synthesis
   common        gate sets, commutation rules, wire lists
+
+`Target` itself is defined in qumo.device.target.
 
 See docs/COMPILER.md.
 """

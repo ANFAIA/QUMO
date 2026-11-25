@@ -26,7 +26,7 @@ What is here, and where it lives (import from there for anything else):
   `evolve`, `statevector` (the same function as `evolve`, under the name the CLI
   uses), `expectation` (`qumo.sim.runner`), with the result types `SampleResult`
   and `StateVector`;
-* compile - `Target`, `parse_target` (`qumo.compiler.target`), `transpile`
+* compile - `Target`, `parse_target` (`qumo.device.target`), `transpile`
   (`qumo.compiler.pass_manager`) and its result type `CompileResult`.
 
 It is a list of re-exports (plus the one-line `statevector` alias): no code
@@ -46,7 +46,7 @@ from qumo.ir.qasm import parse_qasm, to_qasm
 from qumo.sim.statevector import StateVector
 from qumo.sim.runner import SampleResult, sample, evolve, expectation
 from qumo.exec.dispatch import sample_auto
-from qumo.compiler.target import Target, parse_target
+from qumo.device.target import Target, parse_target
 from qumo.compiler.pass_manager import CompileResult, transpile
 
 

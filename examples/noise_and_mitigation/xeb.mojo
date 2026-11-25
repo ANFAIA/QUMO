@@ -20,7 +20,7 @@ QUMO, same placement: sqrt(iSWAP) = RXX(-pi/4) RYY(-pi/4); PhasedXZ(x, z, a) =
 Z^z Z^a X^x Z^-a = RZ(pi (a + z)) RX(pi x) RZ(-pi a) up to a global phase;
 `depolarize1(5e-3)` on both qubits after every moment; noisy circuits are
 sampled with per-shot Pauli trajectories (`sample`), ideal probabilities come
-from `evolve`, and `fit_decay(..., fixed_b=0)` (qumo/qec/characterization.mojo)
+from `evolve`, and `fit_decay(..., fixed_b=0)` (qumo/noise/characterization.mojo)
 fits A r^depth. The 120 (depth, circuit) pairs run in parallel threads.
 
 Checks:
@@ -38,8 +38,8 @@ from std.time import perf_counter_ns
 from max.algorithm import parallelize
 from qumo.ir.circuit import Circuit
 from qumo.sim.runner import evolve, sample
-from qumo.sim.rng import Rng
-from qumo.qec.characterization import fit_decay
+from qumo.core.rng import Rng
+from qumo.noise.characterization import fit_decay
 from qumo.testing.checks import CheckLog
 
 comptime E_PAULI = 5e-3

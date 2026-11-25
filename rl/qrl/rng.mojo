@@ -1,5 +1,5 @@
 # Copyright 2026 The QUMO Authors. Licensed under the Apache License, Version 2.0 (see LICENSE).
-# Copied from QUMO qumo/sim/rng.mojo (the stream is bit exact: fixtures and determinism depend on it) so that qrl imports nothing from `qumo.*`; keep the two in step
+# Copied from QUMO qumo/core/rng.mojo (the stream is bit exact: fixtures and determinism depend on it) so that qrl imports nothing from `qumo.*`; keep the two in step
 # (rl/qumo_bridge/tests/test_bridge_parity.mojo checks the parts the model formats and the fixtures depend on).
 """Deterministic, splittable PRNG (xoshiro256** seeded by SplitMix64).
 

@@ -20,7 +20,7 @@ Error codes: QM-E831 (shape mismatch), QM-E834 (missing or malformed file).
 from std.math import pi, sqrt, cos, sin, floor, ceil
 from std.os.path import exists
 
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.core.json import parse_json, JsonValue
 
 

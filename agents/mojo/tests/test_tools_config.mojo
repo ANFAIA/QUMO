@@ -158,9 +158,9 @@ def test_real_export() raises:
 
     var c = LocalToolsCatalog(".")
     # len(json.dumps(...)) of the token counter's form (count_parameters) and of the wire form,
-    # as printed by Python: read_file 433/371, run_check 579/540, search_code 418/366.
-    var want_count: List[Int] = [433, 579, 418]
-    var want_wire: List[Int] = [371, 540, 366]
+    # as printed by Python: read_file 433/371, run_check 831/792, search_code 418/366.
+    var want_count: List[Int] = [433, 831, 418]
+    var want_wire: List[Int] = [371, 792, 366]
     var tools: List[String] = ["read_file", "run_check", "search_code"]
     for i in range(3):
         var s = c.spec(tools[i])
@@ -169,7 +169,7 @@ def test_real_export() raises:
         assert_equal(len(py_json_dumps(parse_json(s.count_json), True, -1).as_bytes()), want_count[i], tools[i])
         var wire = parse_json(s.wire_json()).get("function")
         assert_equal(len(py_json_dumps(wire, True, -1).as_bytes()), want_wire[i], tools[i])
-    assert_equal(c.spec("run_check").description, "Run one allow-listed command (no shell) in the sandbox if open, else in the\n    repository: `.venv/bin/mojo run -I . tests/test_x.mojo`, `bench/.venv/bin/python\n    examples/run_examples.py --only <file>`, the plugin pytest, `build/qumo ...`,\n    `git diff`, `git status --short`. Returns exit code and the output tail.")
+    assert_equal(c.spec("run_check").description, "Run one allow-listed command (no shell) in the sandbox if open, else in the\n    repository: `.venv/bin/mojo run -I . tests/test_x.mojo`, `bench/.venv/bin/python\n    examples/run_examples.py --only <file>`, the plugin pytest, `build/qumo ...`,\n    `git diff`, `git status --short`. `build/qumo` takes the run, statevector, expect, transpile,\n    emulate, validate, info, draw, convert, vqe and describe subcommands; its file arguments follow\n    the read_file rules, and -o/--output needs an open sandbox and a path inside it.\n    Returns exit code and the output tail.")
     var research = c.group("research")
     assert_equal(len(research), 5)
     assert_equal(research[4], "fetch_page")

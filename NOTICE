@@ -53,10 +53,10 @@ models/ai_transpiler; docs/AI_TRANSPILER.md):
   rl/tests/fixtures are outputs of those packages obtained offline; they carry
   no code. None of these packages is required to train, run or test QUMO.
   qrl carries copies of a few QUMO modules (qumo/core/json.mojo,
-  qumo/sim/rng.mojo, the opcode table of qumo/ir/gates.mojo, the reader half of
+  qumo/core/rng.mojo, the opcode table of qumo/ir/gates.mojo, the reader half of
   qumo/compiler/policy.mojo and the environment dynamics of
   qumo/compiler/policy_synth.mojo, the heavy-hex builder of
-  qumo/compiler/target.mojo) so that it does not import QUMO; they are QUMO's
+  qumo/device/target.mojo) so that it does not import QUMO; they are QUMO's
   own code under the same license and say so in their headers.
 - Method references: D. Kremer et al., "Practical and efficient quantum
   circuit synthesis and transpiling with Reinforcement Learning",

@@ -675,7 +675,41 @@ def test_errors() raises:
         assert_equal(codes[i], expected[i])
 
 
+def test_oversize_width_is_refused() raises:
+    """A width past MAX_SV_QUBITS raises QM-E404 before any 2^n allocation (no abort)."""
+    var h = parse_pauli_sum("Z0")
+    var big = hardware_efficient_ansatz(46, 1)
+    var hit = False
+    try:
+        _ = PauliOperator(h, 46)
+    except e:
+        hit = String(e).startswith("QM-E404")
+    assert_true(hit, "PauliOperator(46)")
+    hit = False
+    try:
+        _ = ExpectationEngine(big, h)
+    except e:
+        hit = String(e).startswith("QM-E404")
+    assert_true(hit, "ExpectationEngine(46)")
+    hit = False
+    try:
+        _ = vqe(big, h)
+    except e:
+        hit = String(e).startswith("QM-E404")
+    assert_true(hit, "vqe(46)")
+    hit = False
+    try:
+        _ = qaoa_maxcut(Graph.parse("0-45"))
+    except e:
+        hit = String(e).startswith("QM-E807")
+    assert_true(hit, "qaoa_maxcut(46 nodes)")
+    # the largest allowed width is not refused by the check (small stand-in: 3 qubits runs)
+    _ = ExpectationEngine(hardware_efficient_ansatz(3, 1), h)
+    print("  oversize width refused")
+
+
 def main() raises:
+    test_oversize_width_is_refused()
     test_ghz_qft()
     test_dicke()
     test_grover()

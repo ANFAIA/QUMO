@@ -325,6 +325,10 @@ struct PyCircuit(Movable, Writable):
         return Self._get(py_self)[].c.has_noise()
 
     @staticmethod
+    def without_noise(py_self: PythonObject) raises -> PythonObject:
+        return PythonObject(alloc=PyCircuit(Self._get(py_self)[].c.without_noise()))
+
+    @staticmethod
     def is_clifford(py_self: PythonObject) raises -> PythonObject:
         return Self._get(py_self)[].c.is_clifford()
 
@@ -611,7 +615,7 @@ def py_hamiltonian_circuit(labels: PythonObject, coeffs: PythonObject, time: Pyt
     return _wrap(hamiltonian_circuit_from_labels(ls, cs, Float64(py=time)))
 
 
-comptime QUMO_VERSION = "0.1.0"
+comptime QUMO_VERSION = "0.2.0"
 
 
 def py_version() raises -> PythonObject:
@@ -2167,7 +2171,7 @@ def PyInit_qumo_py() abi("C") -> PythonObject:
     try:
         var m = PythonModuleBuilder("qumo_py")
         _ = (
-            m.add_type[PyCircuit]("Circuit")
+            m.add_type[PyCircuit]("qumo_py.Circuit")
             .def_method[PyCircuit.num_qubits]("num_qubits", docstring="num_qubits() -> int\n\nNumber of qubits.")
             .def_method[PyCircuit.num_clbits]("num_clbits", docstring="num_clbits() -> int\n\nNumber of classical bits.")
             .def_method[PyCircuit.size]("size", docstring="size() -> int\n\nNumber of unitary gates (no measurements, resets, barriers or noise).")
@@ -2189,6 +2193,7 @@ def PyInit_qumo_py() abi("C") -> PythonObject:
             .def_method[PyCircuit.num_2q_gates]("num_2q_gates", docstring="num_2q_gates() -> int\n\nNumber of two-qubit gates.")
             .def_method[PyCircuit.t_count]("t_count", docstring="t_count() -> int\n\nNumber of T and Tdg gates.")
             .def_method[PyCircuit.parameter_names]("parameter_names", docstring="parameter_names() -> list\n\nNames of the symbolic parameters, in the order bind() takes their values.")
+            .def_method[PyCircuit.without_noise]("without_noise", docstring="without_noise() -> Circuit\n\nA copy with every noise channel removed (the ideal circuit).")
             .def_method[PyCircuit.has_noise]("has_noise", docstring="has_noise() -> bool\n\nTrue when the circuit holds a noise channel.")
             .def_method[PyCircuit.is_clifford]("is_clifford", docstring="is_clifford() -> bool\n\nTrue when every gate is Clifford (rotations by multiples of pi/2 count).")
             .def_method[PyCircuit.is_dynamic]("is_dynamic", docstring="is_dynamic() -> bool\n\nTrue with classical conditions, resets or gates after a measurement.")
@@ -2197,7 +2202,7 @@ def PyInit_qumo_py() abi("C") -> PythonObject:
             .def_method[PyCircuit.extend_packed]("extend_packed", docstring="extend_packed(ops_addr, num_ops, params_addr, num_params, new_parameters) -> int\n\nAppend many instructions in one call, read from two C buffers (the `qumo` package builds them; array('q') and array('d') give the addresses through buffer_info()). Returns the new instruction count.\n\nops: 5 int64 per instruction: kind, q0, q1, q2, aux. kind comes from op_table(); unused qubits are -1; aux is the classical bit of a measure. kind -1 conditions the previous instruction on classical bit q0 having value q1.\nparams: 3 float64 per gate angle, in order: offset, parameter index (-1 = a constant, the value is `offset`), coeff; the angle is coeff * parameter + offset.\nnew_parameters: names to declare before appending.\nErrors: QM-E001 qubit out of range, QM-E913 malformed buffers.")
         )
         _ = (
-            m.add_type[PyProgram]("Program")
+            m.add_type[PyProgram]("qumo_py.Program")
             .def_method[PyProgram.num_qubits]("num_qubits", docstring="num_qubits() -> int")
             .def_method[PyProgram.num_clbits]("num_clbits", docstring="num_clbits() -> int")
             .def_method[PyProgram.num_parameters]("num_parameters", docstring="num_parameters() -> int\n\nNumber of `input` declarations.")
@@ -2287,7 +2292,7 @@ def PyInit_qumo_py() abi("C") -> PythonObject:
         m.def_function[py_qbraid_result_counts]("qbraid_result_counts", docstring="qbraid_result_counts(job_qrn) -> dict\n\nmeasurementCounts of a completed gate-model job.")
         m.def_function[py_qbraid_cancel]("qbraid_cancel", docstring="qbraid_cancel(job_qrn) -> None\n\nCancel a qBraid job.")
         _ = (
-            m.add_type[PyQecMemory]("QecMemory")
+            m.add_type[PyQecMemory]("qumo_py.QecMemory")
             .def_method[PyQecMemory.info]("info", docstring="info() -> dict\n\ncode, basis, distance, rounds, num_qubits, num_detectors, num_observables, dem_errors, p.")
             .def_method[PyQecMemory.dem_text]("dem_text", docstring="dem_text() -> str\n\nGraph-like detector error model in Stim DEM text (what the matching decoders use).")
             .def_method[PyQecMemory.stim_text]("stim_text", docstring="stim_text() -> str\n\nThe memory circuit as Stim text.")
@@ -2302,7 +2307,7 @@ def PyInit_qumo_py() abi("C") -> PythonObject:
         m.def_function[py_schedule]("schedule", docstring="schedule(jobs, devices, cost_weight=0.0) -> dict\n\nHEFT plan of quantum jobs over a device pool, without running them.")
         m.def_function[py_qec_memory]("qec_memory", docstring="qec_memory(code, distance, rounds, p) -> QecMemory\n\nMemory experiment for streaming: 'surface_z' | 'surface_x' | 'repetition' under uniform circuit noise p.")
         m.def_function[py_op_table]("op_table", docstring="op_table() -> dict\n\n{gate name: (kind, arity, num_params)} for every instruction; `kind` is what Circuit.extend_packed takes.")
-        m.def_function[py_statevector]("statevector", docstring="statevector(circuit, params=[]) -> numpy.ndarray\n\nFinal state as a complex128 array of 2^n amplitudes; amplitude i has qubit q in bit q of i. Measurements, resets and noise are skipped. The simulator's state is written once into the array (no Python lists). Needs NumPy. Limit 32 qubits (QM-E404).")
+        m.def_function[py_statevector]("statevector", docstring="statevector(circuit, params=[]) -> numpy.ndarray\n\nFinal state as a complex128 array of 2^n amplitudes; amplitude i has qubit q in bit q of i. Terminal measurements are skipped; resets and mid-circuit measurements raise QM-E416. The simulator's state is written once into the array (no Python lists). Needs NumPy. Limit 32 qubits (QM-E404).")
         m.def_function[py_probabilities]("probabilities", docstring="probabilities(circuit, params=[]) -> numpy.ndarray\n\nfloat64 array of 2^n outcome probabilities. A circuit with noise goes through the density matrix (limit 15 qubits).")
         m.def_function[py_emulate]("emulate", docstring="emulate(circuit, spec, shots, seed, compile, level) -> (counts, method, num_qubits, estimated_fidelity, target)\n\nSample `circuit` under the noise of the target `spec` (e.g. 'grid:2x2/sc_cz'), as `qumo emulate` does. compile=True transpiles first. Errors: QM-E615 when the circuit does not fit the target and compile is False.")
         m.def_function[py_parse_target]("parse_target", docstring="parse_target(spec) -> dict\n\nA one-line target, as the CLI takes it: '<topology>:<size>[/<basis>]', e.g. 'grid:2x2/sc_cz', 'line:20', 'heavy_hex:5/rz,sx,x,ecr', 'trapped_ion:11'. Returns name, modality, num_qubits, all_to_all, edges, basis. Errors: QM-E611.")
@@ -2326,6 +2331,14 @@ def PyInit_qumo_py() abi("C") -> PythonObject:
         m.def_function[py_memory_experiment]("memory_experiment", docstring="memory_experiment(code, distance, rounds, p, shots, decoder, seed, max_errors) -> dict\n\nQEC memory experiment: sampling and decoding fused natively over all cores, no per-shot data in Python. code: 'surface_z' | 'surface_x' | 'repetition'; rounds < 1 = distance; decoder: 'mwpm' | 'mwpm_correlated' | 'mwpm_dense' | 'uf' | 'lookup'; max_errors > 0 stops early. Returns shots, errors, logical_error_rate, std_error, wilson, per_round_error_rate, seconds, ...")
         m.def_function[py_threshold_sweep]("threshold_sweep", docstring="threshold_sweep(code, distances, ps, shots, decoder, seed, max_errors, rounds) -> dict\n\nGrid of memory experiments. Lists of len(distances) * len(ps) values, distance-major: shots, errors, logical_error_rate, std_error, wilson_lo, wilson_hi, per_round_error_rate, seconds, rounds.")
         var mod = m.finalize()
+        # A type is registered under "qumo_py.<Name>" so that CPython records its module
+        # (a bare name gives "builtin type <Name> has no __module__ attribute", an error
+        # under -W error); the module attribute is then renamed to the bare name.
+        var builtins = Python.import_module("builtins")
+        for name in ["Circuit", "Program", "QecMemory"]:
+            var dotted = String("qumo_py.") + name
+            _ = builtins.setattr(mod, name, builtins.getattr(mod, dotted))
+            _ = builtins.delattr(mod, dotted)
         _restore_host_environment()
         return mod
     except e:

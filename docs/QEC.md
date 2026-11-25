@@ -14,7 +14,7 @@ qumo.qec.codes ──► Circuit (+coords) ──► qumo.qec.dem ──► Dete
      │                 └──► qumo.sim.frame       (bit-packed Pauli frames: 512 shots / SIMD op)
      │                                │
      └──────────► qumo.qec.experiments (fused parallel sample+decode, Sinter-style stopping)
-qumo.qec.characterization: NoiseModel(T1,T2,gates,readout) → apply_noise_model → any of the above
+qumo.noise.characterization: NoiseModel(T1,T2,gates,readout) → apply_noise_model → any of the above
 ```
 
 Run the tests / examples / benchmarks:
@@ -45,7 +45,7 @@ bench/.venv/bin/python bench/bench_qec.py --part B --tp-shots 30000 --reps 5   #
 | Dense exact MWPM (APSP table, Edmonds blossom) | PyMatching v0, van Rantwijk's mwmatching | `MwpmDecoder`, `BlossomMatcher` |
 | Decoder plug-in interface, batch decode | CUDA-Q QEC `decoder` API | `trait Decoder` |
 | Fused sample+decode, `max_errors` early stop, Wilson intervals, CSV/JSON tables | Sinter | `qumo/qec/experiments.mojo` |
-| Noise model from calibration (T1/T2/gate/readout), RB, T1/Ramsey, readout mitigation | Qibocal, Cirq experiments, Qiskit Experiments / Aer `NoiseModel.from_backend` | `qumo/qec/characterization.mojo` |
+| Noise model from calibration (T1/T2/gate/readout), RB, T1/Ramsey, readout mitigation | Qibocal, Cirq experiments, Qiskit Experiments / Aer `NoiseModel.from_backend` | `qumo/noise/characterization.mojo` |
 | Stim text export (`QUBIT_COORDS`, `DETECTOR(x,y,t)`, `rec[-k]`) for Crumble/Sinter cross-checks | Stim | `to_stim()` |
 
 ## Simulators
@@ -188,6 +188,16 @@ trait Decoder(Copyable, Deinitable):
   errors and decomposition pieces, weight log((1−p)/p); undecomposed
   hyperedges are decomposed against existing edges or dropped (counted).
   `graphlike_distance()` = fewest graph-like errors forming a logical.
+  DEM import (`parse_dem`) keeps Stim's `^` pieces; `graph_pieces`
+  (`qumo/qec/decoders.mojo`) is the one rule for them, shared by
+  `MatchingGraph`, `graphlike_dem` and the correlated decoder. A piece with no
+  detector only carries an observable flip (`error(0.1) D0 ^ L0`): its
+  observable mask is XORed into the adjacent piece (previous, else next) and
+  the empty piece disappears; a mechanism with no detector at all is
+  undetectable and is skipped (`num_undetectable` counts those with an
+  observable). A piece with more than two detectors is not graph-like: it is
+  decomposed against the existing edges like an undecomposed hyperedge, or
+  dropped and counted in `num_dropped` if that fails.
 * `UnionFindDecoder`: weighted cluster growth on integer edge lengths (32 per
   nat), event-driven growth step, union by size, boundary vertex grounds
   clusters, peeling on a BFS spanning forest rooted at the boundary.
@@ -300,7 +310,11 @@ print(threshold_sweep("surface_z", [3, 5, 7], [0.003, 0.006, 0.01], 200_000, "mw
 
 Decoder names (`canonical_decoder_name`): `mwpm` (= sparse blossom, the
 default; aliases `matching`, `pymatching`), `sparse_blossom`, `mwpm_dense`
-(APSP + dense blossom `MwpmDecoder`), `uf`, `lookup`.
+(APSP + dense blossom `MwpmDecoder`), `mwpm_correlated` (aliases `correlated`,
+`pymatching-correlated`; see Correlated matching below), `uf` (aliases
+`union_find`, `unionfind`), `lookup`. A decoder object's `name()` is the name of
+its implementation, not of the registry entry: `sparse_blossom` for `mwpm`,
+`union_find` for `uf`, and `mwpm_dense`, `mwpm_correlated`, `lookup` as written.
 
 `sample_and_decode(prog, decoder, shots, seed, max_errors)` is the fused
 loop: each worker propagates a 512-shot frame batch, extracts fired detectors
@@ -310,7 +324,12 @@ stops after the first wave reaching `max_errors` (deterministic). Results:
 `ExperimentResult` with `logical_error_rate()`, `std_error()`,
 `wilson_interval()`, `per_round_error_rate()`, `csv_row()`, `to_json()`.
 
-## Characterization (`qumo.qec.characterization`)
+## Characterization (`qumo.noise.characterization`)
+
+This code is in the package `qumo.noise` (it is used below QEC, by the simulators'
+callers, the algorithms and the execution layer). `qumo.qec.characterization` and
+`qumo.qec.mthree` still import the same names for one release; new code should use
+`qumo.noise.characterization` and `qumo.noise.mthree`.
 
 * `NoiseModel` (per-qubit T1, T2, readout P(1|0)/P(0|1), 1q gate error; 2q
   error; gate/measure/reset durations). `apply_noise_model(circuit, model)`:
@@ -322,7 +341,7 @@ stops after the first wave reaching `max_errors` (deterministic). Results:
     is handled by mitigation).
   * gates of arity 3 (CCX, CSWAP, CCZ) have no gate-error rule: when the model
     has any gate error (1q, 2q or per-edge), `apply_noise_model` rejects them
-    with QM-E738; decompose them into 1q and 2q gates first
+    with QM-E739; decompose them into 1q and 2q gates first
     (`qumo.compiler.basis.unroll_3q`). With zero gate error they pass, with idle
     noise only.
 * `randomized_benchmarking_1q(lengths, num_sequences, shots, seed,
@@ -431,7 +450,7 @@ QUMO's are. Errors touching an already decided round are removed from later wind
 
 ## Readout mitigation past 24 qubits
 
-`qumo.qec.mthree.mitigate_counts_m3(counts, cal, hamming=3)` is M3: the assignment
+`qumo.noise.mthree.mitigate_counts_m3(counts, cal, hamming=3)` is M3: the assignment
 matrix restricted to observed strings within a Hamming distance, renormalised, solved
 by preconditioned BiCGSTAB. It has no 2^n allocation; 40 qubits and 1116 strings run
 in a test, and quasi-probabilities match `mthree` 3.0 to 5e-9 at 12 and 30 qubits.
@@ -482,12 +501,20 @@ struct NeuralDecoder(Decoder):
 | QM-E704 | Unsupported feed-forward for frame simulation / Stim export (only X/Y/Z conditioned on one measured clbit) | use `sample_stabilizer()` |
 | QM-E705 | Size limit (clbits > 62 for integer counts, > 64 observables, > 64 detectors for lookup, > 24 qubits for dense mitigation) | use bit-packed outputs / another decoder |
 | QM-E706 | Invalid code parameters (name, distance, rounds, basis) | `surface_z`, `surface_x`, `repetition`; d ≥ 2, rounds ≥ 1 |
-| QM-E707 | Unknown decoder name | `mwpm` (sparse blossom), `sparse_blossom`, `mwpm_dense`, `uf`, `lookup`, or pass a `Decoder` to `sample_and_decode` |
+| QM-E707 | Unknown decoder name | `mwpm` (sparse blossom), `sparse_blossom`, `mwpm_dense`, `mwpm_correlated`, `uf`, `lookup`, or pass a `Decoder` to `sample_and_decode` |
 | QM-E708 | Reserved: decoding failure (decoders currently count isolated defects in `failures` instead of raising) | check DEM connectivity |
-| QM-E709 | Invalid calibration / noise model (T2 > 2·T1, probabilities out of range, singular confusion matrix, empty counts) | check units and calibration data |
+| QM-E709 | Invalid calibration / noise model (T2 > 2·T1; a readout or one-qubit gate error outside [0, 0.5]; a two-qubit gate error outside [0, 0.75]; a circuit wider than the model; singular confusion matrix; empty counts; M3 solve that does not converge) | check units and calibration data |
 | QM-E710 | Fit failure (fewer than 3 points, RB inverse not found) | more lengths / delays |
 | QM-E711 | Noise probability outside [0, 1] | e.g. `NoiseParams.uniform(0.001)` |
 | QM-E712 | Internal invariant violation in sparse blossom (never raised per shot; counted in `SparseBlossomDecoder.anomalies`, must stay 0) | report the syndrome; decode it with `mwpm_dense` meanwhile |
+| QM-E713 | Stabilizer tableau too large: the limit is 262144 qubits (about n²/2 bytes, 32 GiB) | split the circuit, or drop the wires no operation uses |
+| QM-E731 | Correlated matching (`mwpm_correlated`) got an error probability above 0.5 | use plain `mwpm` for this detector error model |
+| QM-E732 | Invalid `PAULI_CHANNEL_2` or correlated error: wrong number of probabilities or letters | 15 probabilities in Stim's order; one Pauli letter per qubit |
+| QM-E733 | `ELSE_CORRELATED_ERROR` has no detector error model | sample it with the Pauli-frame simulator |
+| QM-E734 | Stim circuit text could not be parsed or uses an instruction that is not imported | see Stim interoperability above |
+| QM-E735 | Stim detector error model text could not be parsed (the message has the line), or a probability above 1 | Stim's format: `error(p) D0 D1 ^ D2 L0`, `detector`, `logical_observable`, `shift_detectors`, `repeat` |
+| QM-E736 | Invalid sliding-window setup: `step <= 0`, `window < step`, `(rounds - window) % step != 0` when `window < rounds`, no detector rounds, a decoder count that differs from the window count, or more than 63 observables | `0 < step <= window` and `(rounds - window) % step == 0`; `window >= rounds` is allowed and is the plain decoder |
+| QM-E737 | `missing_detectors` needs a Clifford circuit with at most 20000 measurements | bind parameters and remove non-Clifford gates |
 
 ## Benchmarks
 

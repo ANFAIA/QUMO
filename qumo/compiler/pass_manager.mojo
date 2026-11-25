@@ -13,8 +13,10 @@ Grammar:   pipeline := item ((","|";") item)*
 
 Design (best-of synthesis): Qiskit's PassManager + preset levels O0-O3,
 TKET's predicates (the `check` pass verifies basis + connectivity and fails
-loudly), Cirq's "optimizers as plain functions". Dynamic dispatch is a switch
-over pass ids (no trait objects), each pass reports gates / 2q / depth before
+loudly), Cirq's "optimizers as plain functions". A pass is declared once, in
+`pass_decl` (names, aliases, description, arguments); dynamic dispatch is a
+switch over pass ids in `_apply` (no trait objects), which reads arguments
+only through `PassArgs`. Each pass reports gates / 2q / depth before
 and after plus wall time, and errors are stable `QM-E6xx` codes with a
 `Hint:` listing valid choices (with a did-you-mean suggestion) so agents can
 self-correct. `CompileResult.to_json()` is the machine-readable summary.
@@ -23,9 +25,9 @@ self-correct. `CompileResult.to_json()` is the machine-readable summary.
 from std.time import perf_counter_ns
 from qumo.ir.gates import Op, op_name, op_arity, op_is_unitary
 from qumo.ir.circuit import Circuit, Instruction
-from qumo.compiler.common import fmt_num, basis_str, reduce_large_angles, wrap_angle, TWO_PI
+from qumo.compiler.common import fmt_num, basis_str, reduce_large_angles, wrap_angle, TWO_PI, BlockKind
 from qumo.ir.gateset import GateSet
-from qumo.compiler.target import Target, parse_basis, parse_angle_bound
+from qumo.device.target import Target, parse_basis, parse_angle_bound
 from qumo.compiler.optimize import (
     remove_identities, cancel_inverses, merge_rotations, commute_rotations,
     fuse_1q, eject_z, elide_swaps,
@@ -44,6 +46,8 @@ from qumo.compiler.layout_fidelity import post_layout
 
 
 struct PassId:
+    """Ids of the passes. A pass is declared once, in `pass_decl`: its names,
+    description and arguments. `_apply` holds the branch that runs it."""
     comptime REMOVE_IDENTITIES = 0
     comptime CANCEL = 1
     comptime MERGE = 2
@@ -60,7 +64,7 @@ struct PassId:
     comptime ELIDE_SWAPS = 13
     comptime PAULI_SIMP = 14
     # AI-transpiler block resynthesis (docs/AI_TRANSPILER.md); the block kind
-    # of each pass is `PassId.<pass> - PassId.CLIFFORD_SYNTH` (= BlockKind).
+    # of each is `PassDecl.block_kind`, not a difference of ids
     comptime CLIFFORD_SYNTH = 15
     comptime LINEAR_SYNTH = 16
     comptime PERM_SYNTH = 17
@@ -70,87 +74,491 @@ struct PassId:
     comptime NUM = 21
 
 
+# ----------------------------------------------------------------------------
+# The pass table: one declaration per pass (`pass_decl`). Name and alias
+# lookup, the descriptions, the argument check of `parse_pipeline`, its hints
+# and the values `_apply` reads (`PassArgs`) all come from it.
+# ----------------------------------------------------------------------------
+struct ArgKind:
+    comptime INT = 0
+    comptime FLOAT = 1
+    comptime FLAG = 2  # 0|1|true|false|on|off, plus the words in `choices`
+    comptime CHOICE = 3  # one of `choices`
+    comptime TEXT = 4  # free text: a model id, a directory
+    # list kinds: every argument that is not a declared key, in order
+    comptime GATES = 5  # gate list or basis preset
+    comptime BOUNDS = 6  # gate[min:max]
+    comptime PASSES = 7  # nested pipeline items
+
+
+struct ArgForm:
+    comptime KEY = 0  # written key=value
+    comptime KEY_OR_BARE = 1  # key=value, or the value alone
+    comptime BARE = 2  # the value alone
+
+
+comptime _NO_LO = -(1 << 62)
+comptime _NO_HI = 1 << 62
+comptime _FLAG_WORDS = "0|1|true|false|on|off"
+
+
+def arg_kind_name(kind: Int) -> String:
+    if kind == ArgKind.INT: return "int"
+    if kind == ArgKind.FLOAT: return "float"
+    if kind == ArgKind.FLAG: return "flag"
+    if kind == ArgKind.CHOICE: return "choice"
+    if kind == ArgKind.TEXT: return "text"
+    if kind == ArgKind.GATES: return "gates"
+    if kind == ArgKind.BOUNDS: return "bounds"
+    if kind == ArgKind.PASSES: return "passes"
+    return "unknown"
+
+
+struct ArgDecl(Copyable):
+    """One declared argument of a pass."""
+
+    var name: String
+    var kind: Int  # ArgKind
+    var form: Int  # ArgForm
+    var default: String  # the value when it is not written; "" = none, or set at run time (see `help`)
+    var choices: String  # "a|b|c": the values of a CHOICE, the extra words of a FLAG
+    var lo: Int  # INT: smallest value (_NO_LO = no limit)
+    var hi: Int  # INT: largest value (_NO_HI = no limit)
+    var required: Bool  # TEXT: not empty; list kinds: at least one item
+    var code: String  # error code of a bad value
+    var over_code: String  # INT: error code of a value above `hi` ("" = `code`)
+    var over_hint: String  # and its hint
+    var help: String
+
+    def __init__(out self, name: String, kind: Int, form: Int, default: String, choices: String, help: String):
+        self.name = name
+        self.kind = kind
+        self.form = form
+        self.default = default
+        self.choices = choices
+        self.lo = _NO_LO
+        self.hi = _NO_HI
+        self.required = False
+        self.code = "QM-E602"
+        self.over_code = ""
+        self.over_hint = ""
+        self.help = help
+
+    def is_list(self) -> Bool:
+        return self.kind >= ArgKind.GATES
+
+    def values(self) -> String:
+        """What may be written for it: "a|b|c", "N", "X", "<text>"."""
+        if self.kind == ArgKind.INT:
+            if self.lo != _NO_LO and self.hi != _NO_HI:
+                return String(self.lo) + ".." + String(self.hi)
+            return "N"
+        if self.kind == ArgKind.FLOAT:
+            return "X"
+        if self.kind == ArgKind.FLAG:
+            return ("on|off|" + self.choices) if self.choices.byte_length() > 0 else String("on|off")
+        if self.kind == ArgKind.CHOICE:
+            return self.choices
+        if self.kind == ArgKind.TEXT:
+            return "<" + self.name + ">"
+        if self.kind == ArgKind.GATES:
+            return "gate list or basis preset"
+        if self.kind == ArgKind.BOUNDS:
+            return "gate[min:max]"
+        return "pass"
+
+    def usage(self) -> String:
+        """How it is written, with its default: "trials=N (default 4)"."""
+        var s: String
+        if self.is_list():
+            s = self.values() + ("..." if self.kind != ArgKind.GATES else "")
+            if self.help.byte_length() > 0:
+                s += " (" + self.help + ")"
+        elif self.form == ArgForm.BARE:
+            s = self.values()
+        elif self.form == ArgForm.KEY_OR_BARE:
+            s = "[" + self.name + "=]" + self.values()
+        else:
+            s = self.name + "=" + self.values()
+        if self.default.byte_length() > 0:
+            s += " (default " + self.default + ")"
+        return s
+
+    def example(self, pn: String) -> String:
+        """A valid use, for hints: "route(trials=4)"."""
+        var v = self.default
+        if v.byte_length() == 0:
+            if self.kind == ArgKind.INT:
+                v = String(self.lo) if self.lo != _NO_LO else String("4")
+            elif self.kind == ArgKind.FLOAT:
+                v = "0.5"
+            elif self.kind == ArgKind.FLAG:
+                v = "off"
+            elif self.kind == ArgKind.CHOICE:
+                v = _choice_list(self.choices)[0]
+            elif self.kind == ArgKind.GATES:
+                v = "rz,sx,x,cz"
+            elif self.kind == ArgKind.BOUNDS:
+                v = "rzz[0:pi/2]"
+            elif self.kind == ArgKind.PASSES:
+                v = "cancel,commute,fuse1q"
+            else:
+                v = "<" + self.name + ">"
+        if self.form == ArgForm.KEY:
+            return pn + "(" + self.name + "=" + v + ")"
+        return pn + "(" + v + ")"
+
+
+def _choice_list(choices: String) -> List[String]:
+    var out = List[String]()
+    for part in choices.split("|"):
+        out.append(String(part))
+    return out^
+
+
+def _in_choices(choices: String, v: String) -> Bool:
+    """Is `v` one of the words of "a|b|c"?"""
+    var n = v.byte_length()
+    if n == 0 or v.find("|") >= 0:
+        return False
+    var total = choices.byte_length()
+    var at = choices.find(v)
+    while at >= 0:
+        var cb = choices.as_bytes()
+        var left = at == 0 or Int(cb[at - 1]) == ord("|")
+        var right = at + n == total or Int(cb[at + n]) == ord("|")
+        if left and right:
+            return True
+        at = choices.find(v, at + 1)
+    return False
+
+
+struct PassDecl(Copyable):
+    """The declaration of a pass: what `pass_decl` returns."""
+
+    var id: Int
+    var name: String  # canonical name ("" = no pass has this id)
+    var aliases: String  # "a|b|c": other names accepted in a pipeline
+    var summary: String  # one line, without the arguments
+    var args: List[ArgDecl]
+    var block_kind: Int  # BlockKind of a collect-and-resynthesise pass, else -1
+    var relabels: Bool  # renames qubits for the passes after it (it changes the layouts)
+    var names_only: Bool  # `args` was not filled (name lookups skip that work)
+
+    def __init__(out self, id: Int, names_only: Bool):
+        self.id = id
+        self.name = String()
+        self.aliases = String()
+        self.summary = String()
+        self.args = List[ArgDecl]()
+        self.block_kind = -1
+        self.relabels = False
+        self.names_only = names_only
+
+    def named(mut self, name: String, aliases: String, summary: String):
+        self.name = name
+        self.aliases = aliases
+        self.summary = summary
+
+    # --- arguments (each call declares one) ---
+    def _add(mut self, var a: ArgDecl):
+        if len(self.args) == 0:
+            self.args.reserve(8)
+        self.args.append(a^)
+
+    def int_arg(mut self, name: String, default: String, help: String, form: Int = ArgForm.KEY,
+                lo: Int = _NO_LO, hi: Int = _NO_HI, over_code: String = "", over_hint: String = ""):
+        if self.names_only:
+            return
+        var a = ArgDecl(name, ArgKind.INT, form, default, "", help)
+        a.lo = lo
+        a.hi = hi
+        a.over_code = over_code
+        a.over_hint = over_hint
+        self._add(a^)
+
+    def float_arg(mut self, name: String, default: String, help: String):
+        if self.names_only:
+            return
+        self._add(ArgDecl(name, ArgKind.FLOAT, ArgForm.KEY, default, "", help))
+
+    def flag_arg(mut self, name: String, default: String, help: String, extra: String = ""):
+        if self.names_only:
+            return
+        self._add(ArgDecl(name, ArgKind.FLAG, ArgForm.KEY, default, extra, help))
+
+    def choice_arg(mut self, name: String, choices: String, default: String, help: String,
+                   form: Int = ArgForm.KEY, code: String = "QM-E602"):
+        if self.names_only:
+            return
+        var a = ArgDecl(name, ArgKind.CHOICE, form, default, choices, help)
+        a.code = code
+        self._add(a^)
+
+    def text_arg(mut self, name: String, default: String, help: String, required: Bool = False,
+                 code: String = "QM-E602"):
+        if self.names_only:
+            return
+        var a = ArgDecl(name, ArgKind.TEXT, ArgForm.KEY, default, "", help)
+        a.required = required
+        a.code = code
+        self._add(a^)
+
+    def list_arg(mut self, name: String, kind: Int, help: String, required: Bool = False):
+        if self.names_only:
+            return
+        var a = ArgDecl(name, kind, ArgForm.BARE, "", "", help)
+        a.required = required
+        self._add(a^)
+
+    # --- lookups ---
+    def arg_index(self, name: String) -> Int:
+        for i in range(len(self.args)):
+            if self.args[i].name == name:
+                return i
+        return -1
+
+    def keyed_index(self, key: String) -> Int:
+        """The argument written `key=value`, or -1."""
+        for i in range(len(self.args)):
+            if self.args[i].form != ArgForm.BARE and self.args[i].name == key:
+                return i
+        return -1
+
+    def bare_index(self) -> Int:
+        """The argument a word without a key belongs to, or -1."""
+        for i in range(len(self.args)):
+            if self.args[i].form != ArgForm.KEY:
+                return i
+        return -1
+
+    def list_index(self) -> Int:
+        for i in range(len(self.args)):
+            if self.args[i].is_list():
+                return i
+        return -1
+
+    def usage(self) -> String:
+        """Every argument as it is written, comma separated ("" = takes none)."""
+        var s = String()
+        for i in range(len(self.args)):
+            if i > 0:
+                s += ", "
+            s += self.args[i].usage()
+        return s
+
+    def alias_list(self) -> List[String]:
+        if self.aliases.byte_length() == 0:
+            return List[String]()
+        return _choice_list(self.aliases)
+
+
+def _synth_args(mut d: PassDecl, max_qubits: String, min_block: String):
+    """Arguments of clifford_synth / linear_synth / perm_synth / pauli_network
+    (the defaults are the IBM collector defaults: `SynthOptions.default`)."""
+    d.choice_arg("method", "auto|exact|astar|greedy|policy", "auto", "how a block is resynthesised; list policy models with describe", ArgForm.KEY_OR_BARE, "QM-E616")
+    d.int_arg("max_qubits", max_qubits, "widest block collected", lo=1, hi=64, over_code="QM-E618",
+              over_hint="lower max_qubits or use method=greedy")
+    d.int_arg("min_block", min_block, "fewest gates of a collected block", lo=0)
+    d.choice_arg("direction", "forward|backward|both", "both", "collection sweeps")
+    d.flag_arg("commute", "1", "commutation-aware collection")
+    d.int_arg("reps", "10", "sweeps at most", lo=1)
+    d.text_arg("model", "auto", "auto|off|<model id>; list models with describe", required=True, code="QM-E616")
+    d.int_arg("beams", "8", "beam width of the policy search", lo=1)
+    d.int_arg("searches", "4", "policy searches per block", lo=1)
+    d.choice_arg("metric", "cost_depth|cost", "cost_depth", "what makes a replacement cheaper: 2q cost then 2q depth, or 2q cost only")
+    d.flag_arg("strict", "0", "raise QM-E619 instead of keeping a block whose proposal fails verification")
+    d.int_arg("budget", "0", "search node cap (0 = the method's own)", lo=0)
+    d.text_arg("model_dir", "", "model directory, searched first")
+    d.int_arg("seed", "", "default: the compile seed")
+
+
+def pass_decl(id: Int, names_only: Bool = False) -> PassDecl:
+    """THE pass table: the declaration of pass `id` (`name == ""` when no pass
+    has that id). To add a pass: a `PassId`, a block here, a branch in `_apply`."""
+    var d = PassDecl(id, names_only)
+    if id == PassId.REMOVE_IDENTITIES:
+        d.named("remove_identities", "remove_identity|rmid|identities",
+                "drop gates within 1e-12 process infidelity of the identity (phase tracked)")
+    elif id == PassId.CANCEL:
+        d.named("cancel", "cancellation|inverse_cancel|cancel_inverses",
+                "commutation-aware inverse-pair cancellation")
+        d.int_arg("window", "32", "gates looked back along a wire", ArgForm.KEY_OR_BARE)
+    elif id == PassId.MERGE:
+        d.named("merge", "merge_rotations",
+                "merge adjacent same-axis rotations (rz rz, t t -> s, rzz rzz, cp cp)")
+    elif id == PassId.COMMUTE:
+        d.named("commute", "commutation|commute_rotations",
+                "merge/cancel rotations through commuting gates")
+        d.int_arg("window", "32", "gates looked back along a wire", ArgForm.KEY_OR_BARE)
+    elif id == PassId.FUSE1Q:
+        d.named("fuse1q", "fuse|fuse_1q|optimize1q",
+                "fuse 1q runs and resynthesise over the basis")
+        d.list_arg("gates", ArgKind.GATES, "default: the target basis")
+    elif id == PassId.PHASE_FOLD:
+        d.named("phase_fold", "phase_folding|phasefold",
+                "phase-polynomial folding of diagonal rotations on equal parities (T-count)")
+    elif id == PassId.EJECT_Z:
+        d.named("eject_z", "ejectz|virtual_z",
+                "push Z rotations through commuting gates to the end (virtual Z)")
+    elif id == PassId.UNROLL3Q:
+        d.named("unroll3q", "unroll_3q|decompose3q",
+                "decompose ccx/ccz/cswap into 1q + cx")
+    elif id == PassId.ROUTE:
+        d.named("route", "routing|sabre",
+                "VF2 exact layout, else SabreLayout trials + LightSABRE routing (star pre-routing portfolio)")
+        d.relabels = True
+        d.choice_arg("method", "sabre|lightsabre", "", "the routing method (one, under two names)", ArgForm.BARE)
+        d.choice_arg("layout", "auto|sabre|dense|trivial|random|vf2", "auto", "initial layout")
+        d.int_arg("seed", "", "default: the compile seed")
+        d.int_arg("trials", "4", "layout trials")
+        d.int_arg("iterations", "2", "forward/backward refinements of a layout trial")
+        d.int_arg("lookahead", "20", "extended-set size")
+        d.float_arg("weight", "0.5", "weight of the extended set")
+        d.float_arg("decay", "0.001", "decay added to a qubit each time it is swapped")
+        d.int_arg("vf2_steps", "20000", "step budget of the exact layout search")
+        d.int_arg("valve", "0", "swaps without progress before the release valve (0 = 10 * num_qubits)")
+        d.flag_arg("star", "on", "star pre-routing as a candidate")
+        d.choice_arg("heuristic", "auto|extended|layer", "auto", "swap score (auto: trials alternate)")
+        d.int_arg("swap_trials", "1", "routing seeds tried on the chosen layout (best kept)")
+        d.float_arg("absorb", "1.0", "score factor for swaps KAK can absorb (< 1 favours them)")
+        d.float_arg("absorb_alt", "0.9", "that factor on every other swap trial")
+        d.flag_arg("mirror", "auto", "mirror-gate routing: apply swaps absorbed by the gate just executed on the pair (free: also the ones that cost nothing; auto: decided per circuit)", "free|auto")
+        d.float_arg("mirror_gain", "1.0", "heuristic gain a 1-CX mirror must reach")
+        d.flag_arg("commute", "auto", "commutation-aware routing DAG (auto: decided per circuit)", "auto")
+        d.text_arg("policy", "off", "off|auto|<model id>: learned-policy layout + routing after SABRE, kept only when verified and cheaper", required=True, code="QM-E616")
+        d.int_arg("ai_level", "2", "effort of the learned router", lo=1, hi=3)
+        d.choice_arg("layout_mode", "optimize|improve|keep", "optimize", "what the learned router does with the SABRE layout")
+        d.text_arg("model_dir", "", "model directory, searched first")
+    elif id == PassId.BASIS:
+        d.named("basis", "translate|basis_translate|rebase",
+                "translate into a basis")
+        d.list_arg("gates", ArgKind.GATES, "default: the target basis")
+    elif id == PassId.FIXPOINT:
+        d.named("fixpoint", "fix|repeat|loop",
+                "repeat the inner pipeline until gates/2q/depth stop improving")
+        d.list_arg("passes", ArgKind.PASSES, "the inner pipeline", required=True)
+        d.int_arg("max", "10", "iterations at most")
+    elif id == PassId.CHECK:
+        d.named("check", "verify|predicate",
+                "predicate: fail with QM-E615 unless every gate is in the target basis and on a coupling edge")
+    elif id == PassId.KAK:
+        d.named("kak", "consolidate|consolidate_blocks|2q_synth",
+                "consolidate 2q blocks and resynthesise with KAK (<= 3 cx) when cheaper")
+    elif id == PassId.ELIDE_SWAPS:
+        d.named("elide_swaps", "elide|elide_permutations",
+                "remove swap gates by relabelling (folded into final_layout); only trailing swaps once routed")
+        d.relabels = True
+    elif id == PassId.PAULI_SIMP:
+        d.named("pauli_simp", "paulisimp|pauli|gadgets",
+                "Pauli-gadget resynthesis (Clifford tableau extraction, identical-Pauli merging, ladder-sharing chains); kept only when it saves 2q gates")
+        d.choice_arg("objective", "2q|t", "2q", "t keeps the result on fewer T / non-Clifford rotations instead (FT track, may cost 2q gates, not in O0-O3)")
+    elif id == PassId.CLIFFORD_SYNTH:
+        d.named("clifford_synth", "ai_clifford|clifford_synthesis",
+                "collect Clifford blocks (h,s,sdg,sx,x,y,z,cx,cy,cz,swap; <= 9 qubits) and resynthesise them topology-aware (exact search, greedy or learned policy); a block is replaced only when verified equal by tableau and cheaper (2q cost, then 2q depth)")
+        d.block_kind = BlockKind.CLIFFORD
+        _synth_args(d, "9", "2")
+    elif id == PassId.LINEAR_SYNTH:
+        d.named("linear_synth", "ai_linear|ai_linear_function|linear_function_synth",
+                "collect linear-function blocks (cx,swap; <= 9 qubits) and resynthesise them on the coupling subgraph; replaced only when verified equal by GF(2) matrix and cheaper")
+        d.block_kind = BlockKind.LINEAR
+        _synth_args(d, "9", "4")
+    elif id == PassId.PERM_SYNTH:
+        d.named("perm_synth", "ai_permutation|permutation_synth",
+                "collect SWAP networks (<= 12 qubits) and resynthesise the permutation by token swapping (exact A* for small blocks, greedy or learned policy); replaced only when verified equal and cheaper")
+        d.block_kind = BlockKind.PERM
+        _synth_args(d, "12", "4")
+    elif id == PassId.PAULI_NETWORK:
+        d.named("pauli_network", "ai_pauli_network|pauli_network_synth",
+                "collect Pauli-rotation networks (Clifford + rx/ry/rz/rzz/rxx/ryy; <= 6 qubits) and resynthesise rotations + Clifford tail topology-aware; replaced only when verified equal (unitary) and cheaper")
+        d.block_kind = BlockKind.PAULI
+        _synth_args(d, "6", "4")
+    elif id == PassId.WRAP_ANGLES:
+        d.named("wrap_angles", "wrap|fold_angles",
+                "bring constant angles into the target's angle bounds (spec gate[min:max]) with Pauli corrections, exact up to the tracked global phase")
+        d.list_arg("bounds", ArgKind.BOUNDS, "a bound added for this pass")
+    elif id == PassId.POST_LAYOUT:
+        d.named("post_layout", "vf2_post_layout|noise_layout",
+                "rename physical qubits to the embedding with the best estimated fidelity under the target calibration (never lowers it; no effect on uniform targets)")
+        d.relabels = True
+        d.int_arg("call_limit", "200000", "search steps at most", ArgForm.KEY_OR_BARE)
+    return d^
+
+
+def pass_table() -> List[PassDecl]:
+    var out = List[PassDecl](capacity=PassId.NUM)
+    for i in range(PassId.NUM):
+        out.append(pass_decl(i))
+    return out^
+
+
+# The lookups below run for every pass of every compilation, so they read the
+# table when the module is compiled (`comptime for` unrolls over the ids and
+# each declaration folds to the one field asked for).
 def pass_name(id: Int) -> String:
-    if id == PassId.REMOVE_IDENTITIES: return "remove_identities"
-    if id == PassId.CANCEL: return "cancel"
-    if id == PassId.MERGE: return "merge"
-    if id == PassId.COMMUTE: return "commute"
-    if id == PassId.FUSE1Q: return "fuse1q"
-    if id == PassId.PHASE_FOLD: return "phase_fold"
-    if id == PassId.EJECT_Z: return "eject_z"
-    if id == PassId.UNROLL3Q: return "unroll3q"
-    if id == PassId.ROUTE: return "route"
-    if id == PassId.BASIS: return "basis"
-    if id == PassId.FIXPOINT: return "fixpoint"
-    if id == PassId.CHECK: return "check"
-    if id == PassId.KAK: return "kak"
-    if id == PassId.ELIDE_SWAPS: return "elide_swaps"
-    if id == PassId.PAULI_SIMP: return "pauli_simp"
-    if id == PassId.CLIFFORD_SYNTH: return "clifford_synth"
-    if id == PassId.LINEAR_SYNTH: return "linear_synth"
-    if id == PassId.PERM_SYNTH: return "perm_synth"
-    if id == PassId.PAULI_NETWORK: return "pauli_network"
-    if id == PassId.WRAP_ANGLES: return "wrap_angles"
-    if id == PassId.POST_LAYOUT: return "post_layout"
+    comptime for i in range(PassId.NUM):
+        comptime name = pass_decl(i, True).name
+        if id == i:
+            return name
     return "unknown"
 
 
 def pass_description(id: Int) -> String:
-    if id == PassId.REMOVE_IDENTITIES: return "drop gates within 1e-12 process infidelity of the identity (phase tracked)"
-    if id == PassId.CANCEL: return "commutation-aware inverse-pair cancellation; arg: window (default 32)"
-    if id == PassId.MERGE: return "merge adjacent same-axis rotations (rz rz, t t -> s, rzz rzz, cp cp)"
-    if id == PassId.COMMUTE: return "merge/cancel rotations through commuting gates; arg: window (default 32)"
-    if id == PassId.FUSE1Q: return "fuse 1q runs and resynthesise over the basis; arg: basis (default: target basis)"
-    if id == PassId.PHASE_FOLD: return "phase-polynomial folding of diagonal rotations on equal parities (T-count)"
-    if id == PassId.EJECT_Z: return "push Z rotations through commuting gates to the end (virtual Z)"
-    if id == PassId.UNROLL3Q: return "decompose ccx/ccz/cswap into 1q + cx"
-    if id == PassId.ROUTE: return "VF2 exact layout, else SabreLayout trials + LightSABRE routing (star pre-routing portfolio); args: sabre, layout=auto|sabre|dense|trivial|random|vf2, seed, trials, iterations, swap_trials, lookahead, weight, decay, heuristic=auto|extended|layer, vf2_steps, valve, star=on|off"
-    if id == PassId.BASIS: return "translate into a basis; args: gate list or preset (default: target basis)"
-    if id == PassId.FIXPOINT: return "repeat the inner pipeline until gates/2q/depth stop improving; args: passes..., max=N"
-    if id == PassId.CHECK: return "predicate: fail with QM-E615 unless every gate is in the target basis and on a coupling edge"
-    if id == PassId.KAK: return "consolidate 2q blocks and resynthesise with KAK (<= 3 cx) when cheaper"
-    if id == PassId.ELIDE_SWAPS: return "remove swap gates by relabelling (folded into final_layout); only trailing swaps once routed"
-    if id == PassId.PAULI_SIMP: return "Pauli-gadget resynthesis (Clifford tableau extraction, identical-Pauli merging, ladder-sharing chains); kept only when it saves 2q gates; objective=t keeps it on fewer T / non-Clifford rotations instead (FT track, may cost 2q gates, not in O0-O3)"
-    if id == PassId.CLIFFORD_SYNTH: return "collect Clifford blocks (h,s,sdg,sx,x,y,z,cx,cy,cz,swap; <= 9 qubits) and resynthesise them topology-aware (exact search, greedy or learned policy); a block is replaced only when verified equal by tableau and cheaper (2q cost, then 2q depth); " + _SYNTH_ARGS_DOC
-    if id == PassId.LINEAR_SYNTH: return "collect linear-function blocks (cx,swap; <= 9 qubits) and resynthesise them on the coupling subgraph; replaced only when verified equal by GF(2) matrix and cheaper; " + _SYNTH_ARGS_DOC
-    if id == PassId.PERM_SYNTH: return "collect SWAP networks (<= 12 qubits) and resynthesise the permutation by token swapping (exact A* for small blocks, greedy or learned policy); replaced only when verified equal and cheaper; " + _SYNTH_ARGS_DOC
-    if id == PassId.PAULI_NETWORK: return "collect Pauli-rotation networks (Clifford + rx/ry/rz/rzz/rxx/ryy; <= 6 qubits) and resynthesise rotations + Clifford tail topology-aware; replaced only when verified equal (unitary) and cheaper; " + _SYNTH_ARGS_DOC
-    if id == PassId.WRAP_ANGLES: return "bring constant angles into the target's angle bounds (spec gate[min:max]) with Pauli corrections, exact up to the tracked global phase; arg: gate[min:max] adds a bound for this pass"
-    if id == PassId.POST_LAYOUT: return "rename physical qubits to the embedding with the best estimated fidelity under the target calibration (never lowers it; no effect on uniform targets); arg: call_limit"
-    return ""
+    """One line: what the pass does, then its arguments as they are written."""
+    var d = pass_decl(id)
+    if len(d.args) == 0:
+        return d.summary
+    return d.summary + "; args: " + d.usage()
 
 
-comptime _SYNTH_ARGS_DOC = "args: method=auto|exact|astar|greedy|policy, max_qubits, min_block, direction=forward|backward|both, commute=0|1, reps, model=auto|off|<id>, beams, searches, metric=cost_depth|cost, strict=0|1, budget, model_dir, seed"
+def pass_aliases(id: Int) -> List[String]:
+    return pass_decl(id, True).alias_list()
+
+
+def pass_block_kind(id: Int) -> Int:
+    """BlockKind a collect-and-resynthesise pass works on, -1 for the others."""
+    comptime for i in range(PassId.NUM):
+        comptime kind = pass_decl(i, True).block_kind
+        if id == i:
+            return kind
+    return -1
 
 
 def is_synth_pass(id: Int) -> Bool:
-    """True for the four collect-and-resynthesise passes (ids 15..18)."""
-    return id >= PassId.CLIFFORD_SYNTH and id <= PassId.PAULI_NETWORK
+    """True for the collect-and-resynthesise passes."""
+    return pass_block_kind(id) >= 0
+
+
+def synth_pass_of_kind(kind: Int) -> Int:
+    """Id of the pass that resynthesises blocks of `kind`, or -1."""
+    comptime for i in range(PassId.NUM):
+        comptime k = pass_decl(i, True).block_kind
+        if kind == k:
+            return i
+    return -1
+
+
+def pass_relabels(id: Int) -> Bool:
+    """Does the pass rename qubits for what follows it (route, elide_swaps, post_layout)?"""
+    comptime for i in range(PassId.NUM):
+        comptime relabels = pass_decl(i, True).relabels
+        if id == i:
+            return relabels
+    return False
 
 
 def pass_id_from_name(name: String) -> Int:
+    """Id of a canonical name or an alias (case-insensitive), or -1."""
     var s = String(name.strip()).lower()
-    if s == "remove_identities" or s == "remove_identity" or s == "rmid" or s == "identities": return PassId.REMOVE_IDENTITIES
-    if s == "cancel" or s == "cancellation" or s == "inverse_cancel" or s == "cancel_inverses": return PassId.CANCEL
-    if s == "merge" or s == "merge_rotations": return PassId.MERGE
-    if s == "commute" or s == "commutation" or s == "commute_rotations": return PassId.COMMUTE
-    if s == "fuse1q" or s == "fuse" or s == "fuse_1q" or s == "optimize1q": return PassId.FUSE1Q
-    if s == "phase_fold" or s == "phase_folding" or s == "phasefold": return PassId.PHASE_FOLD
-    if s == "eject_z" or s == "ejectz" or s == "virtual_z": return PassId.EJECT_Z
-    if s == "unroll3q" or s == "unroll_3q" or s == "decompose3q": return PassId.UNROLL3Q
-    if s == "route" or s == "routing" or s == "sabre": return PassId.ROUTE
-    if s == "basis" or s == "translate" or s == "basis_translate" or s == "rebase": return PassId.BASIS
-    if s == "fixpoint" or s == "fix" or s == "repeat" or s == "loop": return PassId.FIXPOINT
-    if s == "check" or s == "verify" or s == "predicate": return PassId.CHECK
-    if s == "kak" or s == "consolidate" or s == "consolidate_blocks" or s == "2q_synth": return PassId.KAK
-    if s == "elide_swaps" or s == "elide" or s == "elide_permutations": return PassId.ELIDE_SWAPS
-    if s == "pauli_simp" or s == "paulisimp" or s == "pauli" or s == "gadgets": return PassId.PAULI_SIMP
-    if s == "clifford_synth" or s == "ai_clifford" or s == "clifford_synthesis": return PassId.CLIFFORD_SYNTH
-    if s == "linear_synth" or s == "ai_linear" or s == "ai_linear_function" or s == "linear_function_synth": return PassId.LINEAR_SYNTH
-    if s == "perm_synth" or s == "ai_permutation" or s == "permutation_synth": return PassId.PERM_SYNTH
-    if s == "pauli_network" or s == "ai_pauli_network" or s == "pauli_network_synth": return PassId.PAULI_NETWORK
-    if s == "wrap_angles" or s == "wrap" or s == "fold_angles": return PassId.WRAP_ANGLES
-    if s == "post_layout" or s == "vf2_post_layout" or s == "noise_layout": return PassId.POST_LAYOUT
+    # canonical names first
+    comptime for i in range(PassId.NUM):
+        comptime canonical = pass_decl(i, True).name
+        if s == canonical:
+            return i
+    comptime for i in range(PassId.NUM):
+        comptime aliases = pass_decl(i, True).aliases
+        if _in_choices(aliases, s):
+            return i
     return -1
 
 
@@ -171,6 +579,59 @@ def describe_passes() -> String:
             s += ","
         s += "{\"name\":\"" + pass_name(i) + "\",\"description\":\"" + pass_description(i) + "\"}"
     return s + "]"
+
+
+def check_pass_table() raises:
+    """Raise unless the table is whole: every id has a declaration, no name or
+    alias is taken twice, every argument can be told from the others when it
+    is written, every default is a value its own check accepts, and the
+    synthesis passes cover the block kinds one to one. (`_apply` raises for an
+    id without a branch; tests/test_pass_table.mojo runs every pass once.)"""
+    var seen = List[String]()
+    for i in range(PassId.NUM):
+        var d = pass_decl(i)
+        var where = "pass id " + String(i)
+        if d.id != i or d.name.byte_length() == 0 or d.summary.byte_length() == 0:
+            raise Error("QM-E600: " + where + " has no declaration in pass_decl. Hint: add its block to pass_decl.")
+        if pass_decl(i, True).name != d.name:
+            raise Error("QM-E600: " + where + " is named differently with and without its arguments.")
+        var names = d.alias_list()
+        names.append(d.name)
+        for n in names:
+            if n != String(n.strip()).lower() or n.byte_length() == 0:
+                raise Error("QM-E600: name '" + n + "' of " + where + " must be lower case, without spaces.")
+            for s in seen:
+                if s == n:
+                    raise Error("QM-E600: name '" + n + "' is declared twice (" + where + "). Hint: a name or alias belongs to one pass.")
+            seen.append(n)
+        var bare = 0
+        var lists = 0
+        for k in range(len(d.args)):
+            ref a = d.args[k]
+            var arg = "argument '" + a.name + "' of pass '" + d.name + "'"
+            if d.arg_index(a.name) != k:
+                raise Error("QM-E602: " + arg + " is declared twice.")
+            if a.form != ArgForm.KEY:
+                bare += 1
+            if a.is_list():
+                lists += 1
+            elif a.default.byte_length() > 0:
+                _check_value(d.name, a, a.default)
+            if a.kind == ArgKind.CHOICE and a.choices.byte_length() == 0:
+                raise Error("QM-E602: " + arg + " has no choices.")
+        if bare > 1 or lists > 1:
+            raise Error("QM-E602: pass '" + d.name + "' declares more than one argument written without a key. Hint: a bare word must belong to one argument.")
+    for kind in range(BlockKind.NUM):
+        var n = 0
+        for i in range(PassId.NUM):
+            if pass_block_kind(i) == kind:
+                n += 1
+        if n != 1:
+            raise Error("QM-E600: block kind " + String(kind) + " has " + String(n) + " passes. Hint: one synthesis pass per BlockKind.")
+    for i in range(PassId.NUM):
+        var k = pass_block_kind(i)
+        if k >= BlockKind.NUM:
+            raise Error("QM-E600: pass '" + pass_name(i) + "' has block kind " + String(k) + ", past BlockKind.NUM.")
 
 
 def _edit_distance(a: String, b: String) -> Int:
@@ -269,157 +730,195 @@ def _is_float(s: String) -> Bool:
         return False
 
 
-def _validate_args(id: Int, args: List[String]) raises:
-    var pn = pass_name(id)
-    if id == PassId.CANCEL or id == PassId.COMMUTE:
-        for a in args:
-            var v = a
-            if a.startswith("window="):
-                v = String(a[byte=7:])
-            if not _is_int(v):
-                raise Error("QM-E602: bad argument '" + a + "' for pass '" + pn + "'. Hint: use an integer window, e.g. " + pn + "(64).")
-        return
-    if id == PassId.PAULI_SIMP:
-        for a in args:
-            if a != "objective=t" and a != "objective=2q":
-                raise Error("QM-E602: bad argument '" + a + "' for pass 'pauli_simp'. Hint: objective=2q (default) or objective=t.")
-        return
-    if id == PassId.POST_LAYOUT:
-        for a in args:
-            var v = a
-            if a.startswith("call_limit="):
-                v = String(a[byte=11:])
-            if not _is_int(v):
-                raise Error("QM-E602: bad argument '" + a + "' for pass 'post_layout'. Hint: use an integer, e.g. post_layout(call_limit=100000).")
-        return
-    if id == PassId.WRAP_ANGLES:
-        for a in args:
-            if a.find("[") < 0 or a.find("]") < 0:
-                raise Error("QM-E602: bad argument '" + a + "' for pass 'wrap_angles'. Hint: use gate[min:max], e.g. wrap_angles(rzz[0:pi/2]).")
-        return
-    if id == PassId.FUSE1Q or id == PassId.BASIS:
-        if len(args) > 0:
-            var s = String()
-            for i in range(len(args)):
-                if i > 0:
-                    s += ","
-                s += args[i]
-            _ = parse_basis(s)
-        return
-    if id == PassId.ROUTE:
-        for a in args:
-            var eq = a.find("=")
-            if eq < 0:
-                if a != "sabre" and a != "lightsabre":
-                    raise Error("QM-E602: unknown routing method '" + a + "'. Hint: use route(sabre) with optional key=value args: layout, seed, trials, iterations, lookahead, weight, decay, vf2_steps.")
-                continue
-            var key = String(a[byte=0:eq].strip())
-            var val = String(a[byte=eq + 1:].strip())
-            if key == "layout":
-                if val != "auto" and val != "sabre" and val != "dense" and val != "trivial" and val != "random" and val != "vf2":
-                    raise Error("QM-E602: unknown layout '" + val + "'. Hint: layout=auto|sabre|dense|trivial|random|vf2.")
-            elif key == "heuristic":
-                if val != "layer" and val != "extended" and val != "auto":
-                    raise Error("QM-E602: route heuristic must be 'auto', 'layer' or 'extended', got '" + val + "'. Hint: route(sabre,heuristic=auto).")
-            elif key == "star" or key == "mirror" or key == "commute":
-                if val != "0" and val != "1" and val != "true" and val != "false" and val != "on" and val != "off" and not (key == "mirror" and (val == "auto" or val == "free")) and not (key == "commute" and val == "auto"):
-                    raise Error("QM-E602: route argument '" + key + "' must be on/off" + ("/free/auto" if key == "mirror" else ("/auto" if key == "commute" else "")) + ", got '" + val + "'. Hint: route(sabre," + key + "=off).")
-            elif key == "seed" or key == "trials" or key == "iterations" or key == "lookahead" or key == "vf2_steps" or key == "valve" or key == "swap_trials":
-                if not _is_int(val):
-                    raise Error("QM-E602: route argument '" + key + "' needs an integer, got '" + val + "'. Hint: e.g. route(sabre," + key + "=4).")
-            elif key == "weight" or key == "decay" or key == "absorb" or key == "absorb_alt" or key == "mirror_gain":
-                if not _is_float(val):
-                    raise Error("QM-E602: route argument '" + key + "' needs a number, got '" + val + "'. Hint: e.g. route(sabre," + key + "=0.5).")
-            elif key == "policy":
-                if val.byte_length() == 0:
-                    raise Error("QM-E616: empty routing policy name. Hint: policy=off|auto|<model id>; list models with describe.")
-            elif key == "ai_level":
-                if not _is_int(val) or Int(val) < 1 or Int(val) > 3:
-                    raise Error("QM-E602: route argument 'ai_level' must be 1, 2 or 3, got '" + val + "'. Hint: route(sabre,policy=auto,ai_level=2).")
-            elif key == "layout_mode":
-                if val != "optimize" and val != "improve" and val != "keep":
-                    raise Error("QM-E602: route argument 'layout_mode' must be optimize, improve or keep, got '" + val + "'. Hint: route(sabre,policy=auto,layout_mode=optimize).")
-            elif key == "model_dir":
-                pass
-            else:
-                raise Error("QM-E602: unknown route argument '" + key + "'. Hint: valid keys are layout, seed, trials, iterations, lookahead, weight, decay, vf2_steps, valve, star, heuristic, swap_trials, absorb, absorb_alt, mirror, mirror_gain, commute, policy, ai_level, layout_mode, model_dir.")
-        return
-    if is_synth_pass(id):
-        _validate_synth_args(pn, args)
-        return
-    if id == PassId.FIXPOINT:
-        var inner = String()
-        var cnt = 0
-        for a in args:
-            if a.startswith("max="):
-                if not _is_int(String(a[byte=4:])):
-                    raise Error("QM-E602: fixpoint max needs an integer, got '" + a + "'. Hint: fixpoint(cancel,merge,max=10).")
-                continue
-            if cnt > 0:
-                inner += ","
-            inner += a
-            cnt += 1
-        if cnt == 0:
-            raise Error("QM-E602: fixpoint() needs at least one inner pass. Hint: fixpoint(cancel,commute,fuse1q).")
-        _ = parse_pipeline(inner)
-        return
-    if len(args) > 0:
-        raise Error("QM-E602: pass '" + pn + "' takes no arguments, got '" + args[0] + "'. Hint: write just '" + pn + "'.")
-
-
-def _is_method(v: String) -> Bool:
-    return v == "auto" or v == "exact" or v == "astar" or v == "greedy" or v == "policy"
-
-
 def _is_bool_word(v: String) -> Bool:
-    return v == "0" or v == "1" or v == "true" or v == "false" or v == "on" or v == "off"
+    return _in_choices(_FLAG_WORDS, v)
 
 
-def _bool_word(v: String) -> Bool:
-    return v == "1" or v == "true" or v == "on"
+def _arg_key_end(a: String) -> Int:
+    """Byte index of the '=' that ends the key of `key=value`, or -1 for an
+    argument without a key. An '=' after '(' or '[' is inside a nested item."""
+    var bs = a.as_bytes()
+    for i in range(len(bs)):
+        var ch = Int(bs[i])
+        if ch == ord("="):
+            return i
+        if ch == ord("(") or ch == ord("["):
+            return -1
+    return -1
 
 
-def _validate_synth_args(pn: String, args: List[String]) raises:
-    """Arguments of clifford_synth / linear_synth / perm_synth / pauli_network."""
-    comptime KEYS = "method, max_qubits, min_block, direction, commute, reps, model, beams, searches, metric, strict, budget, model_dir, seed"
-    for a in args:
-        var eq = a.find("=")
-        if eq < 0:
-            # a bare word is the method: linear_synth(greedy)
-            if not _is_method(a):
-                raise Error("QM-E616: unknown synthesis method '" + a + "' for pass '" + pn + "'. Hint: method=auto|exact|astar|greedy|policy; list models with describe.")
-            continue
-        var key = String(a[byte=0:eq].strip())
-        var val = String(a[byte=eq + 1:].strip())
-        if key == "method":
-            if not _is_method(val):
-                raise Error("QM-E616: unknown synthesis method '" + val + "' for pass '" + pn + "'. Hint: method=auto|exact|astar|greedy|policy; list models with describe.")
-        elif key == "max_qubits" or key == "min_block" or key == "reps" or key == "beams" or key == "searches" or key == "budget" or key == "seed":
-            if not _is_int(val):
-                raise Error("QM-E602: " + pn + " argument '" + key + "' needs an integer, got '" + val + "'. Hint: e.g. " + pn + "(" + key + "=4).")
-            var iv = Int(val)
-            if (key == "max_qubits" or key == "reps" or key == "beams" or key == "searches") and iv < 1:
-                raise Error("QM-E602: " + pn + " argument '" + key + "' must be >= 1, got " + val + ". Hint: e.g. " + pn + "(" + key + "=4).")
-            if (key == "min_block" or key == "budget") and iv < 0:
-                raise Error("QM-E602: " + pn + " argument '" + key + "' must be >= 0, got " + val + ". Hint: e.g. " + pn + "(" + key + "=4).")
-            if key == "max_qubits" and iv > 64:
-                raise Error("QM-E618: " + pn + " max_qubits=" + val + " is above the 64-qubit block limit. Hint: lower max_qubits or use method=greedy.")
-        elif key == "direction":
-            if val != "forward" and val != "backward" and val != "both":
-                raise Error("QM-E602: " + pn + " direction must be forward, backward or both, got '" + val + "'. Hint: " + pn + "(direction=both).")
-        elif key == "commute" or key == "strict":
-            if not _is_bool_word(val):
-                raise Error("QM-E602: " + pn + " argument '" + key + "' must be 0/1 (on/off), got '" + val + "'. Hint: " + pn + "(" + key + "=1).")
-        elif key == "metric":
-            if val != "cost_depth" and val != "cost":
-                raise Error("QM-E602: " + pn + " metric must be cost_depth or cost, got '" + val + "'. Hint: " + pn + "(metric=cost_depth).")
-        elif key == "model":
-            if val.byte_length() == 0:
-                raise Error("QM-E616: empty model name for pass '" + pn + "'. Hint: model=auto|off|<model id>; list models with describe.")
-        elif key == "model_dir":
-            pass
-        else:
-            raise Error("QM-E602: unknown " + pn + " argument '" + key + "'. Hint: valid keys are " + KEYS + ".")
+def _join_args(items: List[String]) -> String:
+    var s = String()
+    for i in range(len(items)):
+        if i > 0:
+            s += ","
+        s += items[i]
+    return s
+
+
+def _check_value(pn: String, a: ArgDecl, v: String) raises:
+    """Raise unless `v` is a value of argument `a` of pass `pn` (not for list kinds)."""
+    var what = pn + " argument '" + a.name + "'"
+    if a.kind == ArgKind.INT:
+        if not _is_int(v):
+            raise Error(a.code + ": " + what + " needs an integer, got '" + v + "'. Hint: e.g. " + a.example(pn) + ".")
+        var iv = Int(v)
+        if iv > a.hi and a.over_code.byte_length() > 0:
+            raise Error(a.over_code + ": " + pn + " " + a.name + "=" + v + " is above the limit of " + String(a.hi) + ". Hint: " + a.over_hint + ".")
+        if iv < a.lo or iv > a.hi:
+            var bound = (">= " + String(a.lo)) if a.hi == _NO_HI else (("<= " + String(a.hi)) if a.lo == _NO_LO else (String(a.lo) + ".." + String(a.hi)))
+            raise Error(a.code + ": " + what + " must be " + bound + ", got " + v + ". Hint: e.g. " + a.example(pn) + ".")
+    elif a.kind == ArgKind.FLOAT:
+        if not _is_float(v):
+            raise Error(a.code + ": " + what + " needs a number, got '" + v + "'. Hint: e.g. " + a.example(pn) + ".")
+    elif a.kind == ArgKind.FLAG:
+        if not _is_bool_word(v) and not _in_choices(a.choices, v):
+            raise Error(a.code + ": " + what + " must be one of " + _FLAG_WORDS + ("|" + a.choices if a.choices.byte_length() > 0 else "") + ", got '" + v + "'. Hint: e.g. " + a.example(pn) + ".")
+    elif a.kind == ArgKind.CHOICE:
+        if not _in_choices(a.choices, v):
+            raise Error(a.code + ": unknown " + a.name + " '" + v + "' for pass '" + pn + "'. Hint: " + a.usage() + "; " + a.help + ".")
+    elif a.kind == ArgKind.TEXT:
+        if a.required and v.byte_length() == 0:
+            raise Error(a.code + ": empty " + a.name + " for pass '" + pn + "'. Hint: " + a.name + "=" + a.help + ".")
+
+
+struct PassArgs(Movable):
+    """The arguments of one pass, bound to its declaration. This is the only
+    reader of argument text: `parse_pipeline` checks with `validate`, and
+    `_apply` takes every value from `get_int` / `get_float` / `get_flag` /
+    `get_text` / `get_list`, so what is accepted is what runs. When an
+    argument is written twice the last one counts."""
+
+    var decl: PassDecl
+    var raw: List[String]
+    var slot: List[Int]  # per written argument: its index in decl.args, -1 = none
+    var value: List[String]  # per written argument: its value (the text after "key=")
+
+    def __init__(out self, id: Int, args: List[String]):
+        self.decl = pass_decl(id)
+        self.raw = args.copy()
+        self.slot = List[Int](capacity=len(args))
+        self.value = List[String](capacity=len(args))
+        for a in args:
+            var s: Int
+            var v = a
+            var eq = _arg_key_end(a)
+            if eq < 0:
+                s = self.decl.bare_index()
+            else:
+                s = self.decl.keyed_index(String(a[byte=0:eq].strip()))
+                if s >= 0:
+                    v = String(a[byte=eq + 1:].strip())
+                else:
+                    # not a key of this pass: an item of its list, which has its own check
+                    s = self.decl.list_index()
+            self.slot.append(s)
+            self.value.append(v)
+
+    def validate(self) raises:
+        """Raise QM-E602 (or the code the argument declares) for an argument
+        the pass does not have or a value it does not take."""
+        var pn = self.decl.name
+        for i in range(len(self.raw)):
+            var s = self.slot[i]
+            if s < 0:
+                if len(self.decl.args) == 0:
+                    raise Error("QM-E602: pass '" + pn + "' takes no arguments, got '" + self.raw[i] + "'. Hint: write just '" + pn + "'.")
+                var eq = _arg_key_end(self.raw[i])
+                if eq >= 0:
+                    raise Error("QM-E602: unknown " + pn + " argument '" + String(self.raw[i][byte=0:eq].strip()) + "'. Hint: the arguments of " + pn + " are " + self.decl.usage() + ".")
+                raise Error("QM-E602: bad argument '" + self.raw[i] + "' for pass '" + pn + "'. Hint: the arguments of " + pn + " are " + self.decl.usage() + ".")
+            if not self.decl.args[s].is_list():
+                _check_value(pn, self.decl.args[s], self.value[i])
+        for s in range(len(self.decl.args)):
+            ref a = self.decl.args[s]
+            if not a.is_list():
+                continue
+            var items = self._items(s)
+            if len(items) == 0:
+                if a.required:
+                    raise Error("QM-E602: " + pn + "() needs at least one " + a.values() + ". Hint: e.g. " + a.example(pn) + ".")
+                continue
+            if a.kind == ArgKind.GATES:
+                _ = parse_basis(_join_args(items))
+            elif a.kind == ArgKind.BOUNDS:
+                var scratch = Target.all_to_all(1)
+                for it in items:
+                    if it.find("[") < 0 or it.find("]") < 0:
+                        raise Error("QM-E602: bad argument '" + it + "' for pass '" + pn + "'. Hint: use gate[min:max], e.g. " + a.example(pn) + ".")
+                    parse_angle_bound(it, scratch)
+            elif a.kind == ArgKind.PASSES:
+                _ = parse_pipeline(_join_args(items))
+
+    def _index(self, name: String, kind_a: Int, kind_b: Int = -1, kind_c: Int = -1) raises -> Int:
+        var s = self.decl.arg_index(name)
+        if s < 0:
+            raise Error("QM-E602: pass '" + self.decl.name + "' reads an argument '" + name + "' it does not declare. Hint: declare it in pass_decl.")
+        var k = self.decl.args[s].kind
+        if k != kind_a and k != kind_b and k != kind_c:
+            raise Error("QM-E602: argument '" + name + "' of pass '" + self.decl.name + "' is declared as " + arg_kind_name(k) + " and read as " + arg_kind_name(kind_a) + ". Hint: read it with the accessor of its kind.")
+        return s
+
+    def _last(self, s: Int) -> Int:
+        var at = -1
+        for i in range(len(self.slot)):
+            if self.slot[i] == s:
+                at = i
+        return at
+
+    def _scalar(self, s: Int) raises -> String:
+        var at = self._last(s)
+        if at >= 0:
+            return self.value[at]
+        ref a = self.decl.args[s]
+        if a.default.byte_length() == 0 and a.kind != ArgKind.TEXT:
+            raise Error("QM-E602: argument '" + a.name + "' of pass '" + self.decl.name + "' has no default. Hint: test given() before reading it.")
+        return a.default
+
+    def _items(self, s: Int) -> List[String]:
+        var out = List[String]()
+        for i in range(len(self.slot)):
+            if self.slot[i] == s:
+                out.append(self.value[i])
+        return out^
+
+    def position(self, name: String) raises -> Int:
+        """Where the argument was written last (index among the arguments), -1 if it was not."""
+        var s = self.decl.arg_index(name)
+        if s < 0:
+            raise Error("QM-E602: pass '" + self.decl.name + "' reads an argument '" + name + "' it does not declare. Hint: declare it in pass_decl.")
+        return self._last(s)
+
+    def given(self, name: String) raises -> Bool:
+        return self.position(name) >= 0
+
+    def get_int(self, name: String) raises -> Int:
+        return Int(self._scalar(self._index(name, ArgKind.INT)))
+
+    def get_float(self, name: String) raises -> Float64:
+        return Float64(self._scalar(self._index(name, ArgKind.FLOAT)))
+
+    def get_flag(self, name: String) raises -> Bool:
+        """False for 0 / false / off; true for the other words the flag takes."""
+        var v = self._scalar(self._index(name, ArgKind.FLAG))
+        return v != "0" and v != "false" and v != "off"
+
+    def get_text(self, name: String) raises -> String:
+        """The word of a choice or a text argument (or of a flag, for its extra words)."""
+        return self._scalar(self._index(name, ArgKind.CHOICE, ArgKind.TEXT, ArgKind.FLAG))
+
+    def get_list(self, name: String) raises -> List[String]:
+        """The items of a list argument, in the order written."""
+        return self._items(self._index(name, ArgKind.GATES, ArgKind.BOUNDS, ArgKind.PASSES))
+
+
+def nested_pipeline(p: PassSpec) raises -> String:
+    """The inner pipeline of a pass that holds one (fixpoint), else ""."""
+    var d = pass_decl(p.id)
+    var s = d.list_index()
+    if s < 0 or d.args[s].kind != ArgKind.PASSES:
+        return ""
+    return _join_args(PassArgs(p.id, p.args).get_list(d.args[s].name))
 
 
 def parse_pipeline(spec: String) raises -> List[PassSpec]:
@@ -441,7 +940,7 @@ def parse_pipeline(spec: String) raises -> List[PassSpec]:
         var id = pass_id_from_name(name)
         if id < 0:
             raise Error("QM-E600: unknown pass '" + name + "' in pipeline." + _suggest(String(name.lower())) + " Hint: valid passes are " + valid_pass_names() + ".")
-        _validate_args(id, args)
+        PassArgs(id, args).validate()
         out.append(PassSpec(id, args^))
     return out^
 
@@ -627,7 +1126,7 @@ struct _State(Movable):
     var seed: Int
     var routed: Bool
     var exact: Bool  # a block of a Program: see GateSet.exact
-    # running totals of the AI synthesis passes, per block kind (0..3):
+    # running totals of the AI synthesis passes, per BlockKind:
     # blocks, proposed, verified, replaced, saved 2q cost, rejected
     var synth_totals: List[Int]
 
@@ -640,7 +1139,7 @@ struct _State(Movable):
         self.dropped = False
         self.seed = seed
         self.routed = False
-        self.synth_totals = List[Int](length=4 * 6, fill=0)
+        self.synth_totals = List[Int](length=BlockKind.NUM * 6, fill=0)
 
 
 def _compose(prev: List[Int], route: List[Int]) -> List[Int]:
@@ -653,23 +1152,10 @@ def _compose(prev: List[Int], route: List[Int]) -> List[Int]:
     return out^
 
 
-def _gs_from_args(args: List[String], c: Circuit, target: Target) raises -> GateSet:
-    if len(args) == 0:
+def _gs_from_args(gates: List[String], c: Circuit, target: Target) raises -> GateSet:
+    if len(gates) == 0:
         return working_gate_set(c, target)
-    var s = String()
-    for i in range(len(args)):
-        if i > 0:
-            s += ","
-        s += args[i]
-    return GateSet(parse_basis(s))
-
-
-def _int_arg(args: List[String], default: Int) raises -> Int:
-    for a in args:
-        if a.startswith("window="):
-            return Int(String(a[byte=7:]))
-        return Int(a)
-    return default
+    return GateSet(parse_basis(_join_args(gates)))
 
 
 def working_gate_set(c: Circuit, target: Target) -> GateSet:
@@ -686,43 +1172,35 @@ def working_gate_set(c: Circuit, target: Target) -> GateSet:
 
 def route_options(args: List[String], seed: Int, mut aopts: AIRouteOptions, mut star: Bool) raises -> RouteOptions:
     """Options of a `route(...)` pass: the routing ones, and what is not routing
-    proper, the learned router in `aopts` and star pre-routing in `star`."""
+    proper, the learned router in `aopts` and star pre-routing in `star`.
+    Every value, written or default, comes from the pass table."""
+    var a = PassArgs(PassId.ROUTE, args)
     var opts = RouteOptions()
-    opts.seed = seed
-    aopts.policy = "off"
-    for a in args:
-        var eq = a.find("=")
-        if eq < 0:
-            continue
-        var key = String(a[byte=0:eq].strip())
-        var val = String(a[byte=eq + 1:].strip())
-        if key == "layout": opts.layout = val
-        elif key == "seed": opts.seed = Int(val)
-        elif key == "trials": opts.trials = Int(val)
-        elif key == "iterations": opts.iterations = Int(val)
-        elif key == "lookahead": opts.lookahead = Int(val)
-        elif key == "weight": opts.weight = Float64(val)
-        elif key == "decay": opts.decay = Float64(val)
-        elif key == "vf2_steps": opts.vf2_steps = Int(val)
-        elif key == "valve": opts.valve = Int(val)
-        elif key == "star": star = val != "0" and val != "false" and val != "off"
-        elif key == "heuristic": opts.heuristic = val
-        elif key == "swap_trials": opts.swap_trials = Int(val)
-        elif key == "absorb": opts.absorb = Float64(val)
-        elif key == "absorb_alt": opts.absorb_alt = Float64(val)
-        elif key == "mirror":
-            opts.mirror_auto = val == "auto"
-            opts.mirror = val != "0" and val != "false" and val != "off"
-            if val == "free":
-                opts.mirror_gain = 1e9
-        elif key == "mirror_gain": opts.mirror_gain = Float64(val)
-        elif key == "commute":
-            opts.commute_auto = val == "auto"
-            opts.commute = val != "0" and val != "false" and val != "off"
-        elif key == "policy": aopts.policy = val
-        elif key == "ai_level": aopts.level = Int(val)
-        elif key == "layout_mode": aopts.layout_mode = val
-        elif key == "model_dir": aopts.model_dir = val
+    opts.layout = a.get_text("layout")
+    opts.seed = a.get_int("seed") if a.given("seed") else seed
+    opts.trials = a.get_int("trials")
+    opts.iterations = a.get_int("iterations")
+    opts.lookahead = a.get_int("lookahead")
+    opts.weight = a.get_float("weight")
+    opts.decay = a.get_float("decay")
+    opts.vf2_steps = a.get_int("vf2_steps")
+    opts.valve = a.get_int("valve")
+    star = a.get_flag("star")
+    opts.heuristic = a.get_text("heuristic")
+    opts.swap_trials = a.get_int("swap_trials")
+    opts.absorb = a.get_float("absorb")
+    opts.absorb_alt = a.get_float("absorb_alt")
+    opts.mirror_auto = a.get_text("mirror") == "auto"
+    opts.mirror = a.get_flag("mirror")
+    opts.mirror_gain = a.get_float("mirror_gain")
+    if a.get_text("mirror") == "free" and a.position("mirror") > a.position("mirror_gain"):
+        opts.mirror_gain = 1e9  # unless a mirror_gain is written after it
+    opts.commute_auto = a.get_text("commute") == "auto"
+    opts.commute = a.get_flag("commute")
+    aopts.policy = a.get_text("policy")
+    aopts.level = a.get_int("ai_level")
+    aopts.layout_mode = a.get_text("layout_mode")
+    aopts.model_dir = a.get_text("model_dir")
     aopts.seed = opts.seed
     return opts^
 
@@ -730,18 +1208,19 @@ def route_options(args: List[String], seed: Int, mut aopts: AIRouteOptions, mut 
 def _apply(p: PassSpec, mut c: Circuit, target: Target, mut st: _State) raises -> String:
     """Run one pass in place; returns a short note."""
     var id = p.id
+    var a = PassArgs(id, p.args)
     var gs = working_gate_set(c, target)
     gs.exact = st.exact
     if id == PassId.REMOVE_IDENTITIES:
         return "removed " + String(remove_identities(c, st.exact))
     if id == PassId.CANCEL:
-        return "cancelled " + String(cancel_inverses(c, gs, _int_arg(p.args, 32))) + " pairs"
+        return "cancelled " + String(cancel_inverses(c, gs, a.get_int("window"))) + " pairs"
     if id == PassId.MERGE:
         return "merged " + String(merge_rotations(c, gs))
     if id == PassId.COMMUTE:
-        return "merged " + String(commute_rotations(c, gs, _int_arg(p.args, 32)))
+        return "merged " + String(commute_rotations(c, gs, a.get_int("window")))
     if id == PassId.FUSE1Q:
-        var g2 = _gs_from_args(p.args, c, target)
+        var g2 = _gs_from_args(a.get_list("gates"), c, target)
         g2.exact = st.exact
         return "saved " + String(fuse_1q(c, g2)) + " 1q gates " + String(g2)
     if id == PassId.PHASE_FOLD:
@@ -754,8 +1233,9 @@ def _apply(p: PassSpec, mut c: Circuit, target: Target, mut st: _State) raises -
         return "unrolled " + String(unroll_3q(c)) + " 3q gates"
     if id == PassId.BASIS:
         var g2 = GateSet(target.basis)
-        if len(p.args) > 0:
-            g2 = _gs_from_args(p.args, c, target)
+        var gates = a.get_list("gates")
+        if len(gates) > 0:
+            g2 = _gs_from_args(gates, c, target)
         g2.exact = st.exact
         var dropped = False
         var r = translate_to_basis(c, g2, dropped)
@@ -843,12 +1323,12 @@ def _apply(p: PassSpec, mut c: Circuit, target: Target, mut st: _State) raises -
             var dropped = False
             _ = translate_to_basis(c, gs, dropped)
         return "resynthesised " + String(blocks) + " blocks, 2q cost -" + String(saved)
-    if is_synth_pass(id):
+    if a.decl.block_kind >= 0:
         var opts = synth_options_from_args(id, p.args, st.seed)
         var stats = SynthStats()
         var physical = st.routed and not target.full
         var saved = resynthesize_blocks(c, target, physical, opts, stats)
-        var k = (id - PassId.CLIFFORD_SYNTH) * 6
+        var k = a.decl.block_kind * 6
         st.synth_totals[k] += stats.blocks
         st.synth_totals[k + 1] += stats.proposed
         st.synth_totals[k + 2] += stats.verified
@@ -857,9 +1337,7 @@ def _apply(p: PassSpec, mut c: Circuit, target: Target, mut st: _State) raises -
         st.synth_totals[k + 5] += stats.rejected_not_equal
         return _synth_note(stats, saved, physical)
     if id == PassId.PAULI_SIMP:
-        var objective_t = False
-        for a in p.args:
-            objective_t = objective_t or a == "objective=t"
+        var objective_t = a.get_text("objective") == "t"
         var pgs = GateSet(target.basis)
         pgs.exact = st.exact
         var saved = pauli_resynthesize(c, 64, pgs, objective_t)
@@ -875,8 +1353,8 @@ def _apply(p: PassSpec, mut c: Circuit, target: Target, mut st: _State) raises -
         return "elided " + String(k) + " swaps" + (" (trailing only)" if trailing else "")
     if id == PassId.WRAP_ANGLES:
         var bounded = target.copy()
-        for a in p.args:
-            parse_angle_bound(a, bounded)
+        for b in a.get_list("bounds"):
+            parse_angle_bound(b, bounded)
         var changed = wrap_angles(c, bounded)
         var g2 = GateSet(target.basis)
         g2.exact = st.exact
@@ -887,7 +1365,7 @@ def _apply(p: PassSpec, mut c: Circuit, target: Target, mut st: _State) raises -
         return "wrapped " + String(changed) + " angles"
     if id == PassId.POST_LAYOUT:
         var wm = List[Int]()
-        var gain = post_layout(c, target, wm, _int_arg(p.args, 200000))
+        var gain = post_layout(c, target, wm, a.get_int("call_limit"))
         if gain > 0.0:
             st.init = _compose(st.init, wm)
             st.final = _compose(st.final, wm)
@@ -897,35 +1375,29 @@ def _apply(p: PassSpec, mut c: Circuit, target: Target, mut st: _State) raises -
         if err.byte_length() > 0:
             raise Error("QM-E615: compiled circuit does not conform to target '" + target.name + "': " + err + ". Hint: add 'route' and 'basis' passes before 'check' (or use a preset level).")
         return "conforms to " + target.name
-    return ""
+    raise Error("QM-E600: pass '" + pass_name(id) + "' (id " + String(id) + ") has no branch in _apply. Hint: add the branch that runs it.")
 
 
 def synth_options_from_args(id: Int, args: List[String], seed: Int) raises -> SynthOptions:
-    """SynthOptions for a synthesis pass: the per-kind defaults (IBM collector
-    defaults) overridden by the pass arguments (already validated)."""
-    var opts = SynthOptions.default(id - PassId.CLIFFORD_SYNTH)
-    opts.seed = seed
-    for a in args:
-        var eq = a.find("=")
-        if eq < 0:
-            opts.method = a
-            continue
-        var key = String(a[byte=0:eq].strip())
-        var val = String(a[byte=eq + 1:].strip())
-        if key == "method": opts.method = val
-        elif key == "max_qubits": opts.max_qubits = Int(val)
-        elif key == "min_block": opts.min_block = Int(val)
-        elif key == "direction": opts.direction = val
-        elif key == "commute": opts.commute = _bool_word(val)
-        elif key == "reps": opts.reps = Int(val)
-        elif key == "model": opts.model = val
-        elif key == "beams": opts.beams = Int(val)
-        elif key == "searches": opts.searches = Int(val)
-        elif key == "metric": opts.metric = val
-        elif key == "strict": opts.strict = _bool_word(val)
-        elif key == "budget": opts.budget = Int(val)
-        elif key == "model_dir": opts.model_dir = val
-        elif key == "seed": opts.seed = Int(val)
+    """SynthOptions of a synthesis pass. Every value, written or default,
+    comes from the pass table (the defaults are the IBM collector defaults,
+    as `SynthOptions.default`)."""
+    var a = PassArgs(id, args)
+    var opts = SynthOptions(a.decl.block_kind)
+    opts.method = a.get_text("method")
+    opts.max_qubits = a.get_int("max_qubits")
+    opts.min_block = a.get_int("min_block")
+    opts.direction = a.get_text("direction")
+    opts.commute = a.get_flag("commute")
+    opts.reps = a.get_int("reps")
+    opts.model = a.get_text("model")
+    opts.beams = a.get_int("beams")
+    opts.searches = a.get_int("searches")
+    opts.metric = a.get_text("metric")
+    opts.strict = a.get_flag("strict")
+    opts.budget = a.get_int("budget")
+    opts.model_dir = a.get_text("model_dir")
+    opts.seed = a.get_int("seed") if a.given("seed") else seed
     return opts^
 
 
@@ -950,11 +1422,12 @@ def _synth_totals_note(inner: List[PassSpec], before: List[Int], after: List[Int
     """Synthesis statistics accumulated inside a fixpoint ("" when it holds
     no synthesis pass, so heuristic presets keep their notes)."""
     var s = String()
-    for kind in range(4):
-        var nm = pass_name(PassId.CLIFFORD_SYNTH + kind)
+    for kind in range(BlockKind.NUM):
+        var sid = synth_pass_of_kind(kind)
+        var nm = pass_name(sid)
         var present = False
         for p in inner:
-            if p.id == PassId.CLIFFORD_SYNTH + kind:
+            if p.id == sid:
                 present = True
         if not present:
             continue
@@ -1062,18 +1535,9 @@ def _run_list(passes: List[PassSpec], mut c: Circuit, target: Target, mut st: _S
         var start = perf_counter_ns()
         var note: String
         if p.id == PassId.FIXPOINT:
-            var inner_txt = String()
-            var max_it = 10
-            var cnt = 0
-            for a in p.args:
-                if a.startswith("max="):
-                    max_it = Int(String(a[byte=4:]))
-                    continue
-                if cnt > 0:
-                    inner_txt += ","
-                inner_txt += a
-                cnt += 1
-            var inner = parse_pipeline(inner_txt)
+            var fa = PassArgs(p.id, p.args)
+            var max_it = fa.get_int("max")
+            var inner = parse_pipeline(_join_args(fa.get_list("passes")))
             var deltas = List[Int](length=len(inner), fill=0)
             var totals0 = st.synth_totals.copy()
             var it = 0

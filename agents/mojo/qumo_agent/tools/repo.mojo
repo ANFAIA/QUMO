@@ -2,7 +2,7 @@
 `agents/qumo_agents/tools/repo.py` with the same texts.
 
 * Reading is confined to the repository, or the open sandbox (no .git, .venv, build, other
-  skip directories, nor secret-looking names), after symlinks are resolved. Skip directories
+  skip directories, nor secret-looking names, in any path component), after symlinks are resolved. Skip directories
   are compared case-insensitively (X14), so `.GIT/config` cannot reach `.git` on macOS.
 * Writing goes to agents/reports/ of the main repository, or into a sandbox git worktree that
   the agent opens with open_sandbox on a fresh branch. The main checkout is never written.
@@ -38,7 +38,7 @@ from qumo_agent.native.fs import (
     write_text,
 )
 from qumo_agent.native.regex import PosixRegex, py_regex_to_ere
-from qumo_agent.native.sandbox import CONF_CHECK, Confinement, confine
+from qumo_agent.native.sandbox import CONF_CHECK, Confinement, confine, venv_read_paths
 from qumo_agent.native.spawn import STDIO_NULL, STDIO_PIPE, SpawnSpec, minimal_child_env, run_capture
 from qumo_agent.util.pyfmt import cp_head, cp_len, cp_tail, py_json_dumps_string, py_splitlines, py_strip, universal_newlines
 
@@ -125,10 +125,11 @@ def _name(path: String) -> String:
     return ps[len(ps) - 1]
 
 
-def _any_skipped(parts: List[String], skip_lower: List[String]) -> Bool:
-    """set(parts) & SKIP_DIRS, both sides ASCII lower-cased (X14)."""
+def _forbidden(parts: List[String], skip_lower: List[String]) -> Bool:
+    """repo.py _forbidden: any path component is a skip directory (ASCII lower-cased, X14) or
+    a secret-looking name. The one rule behind resolve_repo_path, list_files and search_code."""
     for p in parts:
-        if _in(skip_lower, _ascii_lower(p)):
+        if _in(skip_lower, _ascii_lower(p)) or is_secret_name(p):
             return True
     return False
 
@@ -216,13 +217,13 @@ def resolve_repo_path(path: String, root: String, skip_dirs: List[String]) raise
     # The path as written first, so a forbidden directory is refused by its own rule even
     # when it is a symlink that resolves outside the repository (.venv often is).
     var lexical = normpath(path)
-    if _any_skipped(_parts(lexical), skip) or is_secret_name(_name(lexical)):
+    if _forbidden(_parts(lexical), skip):
         raise Error(refused)
     var p = resolve_nonstrict(join_path(root, path))
     var rel = _relative_parts(p, root)
     if not rel:
         raise Error(path + " is outside " + root)
-    if _any_skipped(rel.value(), skip) or is_secret_name(_name(p)):
+    if _forbidden(rel.value(), skip):
         raise Error(refused)
     if exists(p):
         var rp = realpath_strict(p)
@@ -230,18 +231,33 @@ def resolve_repo_path(path: String, root: String, skip_dirs: List[String]) raise
         var rrel = _relative_parts(rp, rr)
         if not rrel:
             raise Error(path + " is outside " + root)
-        if _any_skipped(rrel.value(), skip) or is_secret_name(_name(rp)):
+        if _forbidden(rrel.value(), skip):
             raise Error(refused)
     return p^
 
 
-def _inside_real_root(p: String, real_root: String) -> Bool:
-    try:
-        if _relative_parts(realpath_strict(p), real_root):
-            return True
+def _walkable(rel: String, root: String, real_root: String, skip_lower: List[String]) -> Bool:
+    """repo.py _walkable, for a regular file found by the walk: nothing forbidden in its
+    root-relative path, and a symlink must not leave the root or reach a forbidden name."""
+    if _forbidden(_parts(rel), skip_lower):
         return False
+    var p = root + "/" + rel
+    if not is_symlink(p):
+        return True   # the walk enters no symlinked directory, so the path is already real
+    try:
+        var real = _relative_parts(realpath_strict(p), real_root)
+        if not real:
+            return False
+        return not _forbidden(real.value(), skip_lower)
     except:
         return False
+
+
+def _real_root(root: String) -> String:
+    try:
+        return realpath_strict(root)
+    except:
+        return root
 
 
 # --------------------------------------------------------------------------- read_file
@@ -345,8 +361,8 @@ def _sort_paths(mut items: List[String]):
 
 def _collect_files(dir: String, rel: String, skip_lower: List[String], mut out: List[String]):
     """Root-relative paths of the regular files (following file symlinks) below `dir`,
-    without entering symlinked directories or skip directories (their files would be
-    filtered out anyway). Unreadable directories are skipped, as rglob does."""
+    without entering symlinked directories, skip directories or secret-looking directories
+    (their files would be filtered out anyway). Unreadable directories are skipped, as rglob does."""
     var names: List[String]
     try:
         names = list_dir(dir)
@@ -356,7 +372,7 @@ def _collect_files(dir: String, rel: String, skip_lower: List[String], mut out: 
         var p = dir + "/" + name
         var r = name if rel.byte_length() == 0 else rel + "/" + name
         if is_dir(p):
-            if is_symlink(p) or _in(skip_lower, _ascii_lower(name)):
+            if is_symlink(p) or _in(skip_lower, _ascii_lower(name)) or is_secret_name(name):
                 continue
             _collect_files(p, r, skip_lower, out)
         elif is_file(p):
@@ -385,10 +401,10 @@ def tool_list_files(st: RepoState, path: String, pattern: String) -> String:
     except e:
         return "error: " + _strip_code(String(e))
     var skip = _lower_set(st.skip_dirs)
+    var real_root = _real_root(root)
     var out = List[String]()
     for rel in _walk_files(base, root, skip):
-        var parts = _parts(rel)
-        if _any_skipped(parts, skip) or not fnmatch_py(parts[len(parts) - 1], pattern):
+        if not fnmatch_py(_name(rel), pattern) or not _walkable(rel, root, real_root, skip):
             continue
         out.append(rel)
         if len(out) >= MAX_LIST_ENTRIES:
@@ -415,11 +431,7 @@ def tool_search_code(st: RepoState, regex: String, path: String, glob: String) -
         base = resolve_repo_path(path, root, st.skip_dirs)
     except e:
         return "error: " + _strip_code(String(e))
-    var real_root: String
-    try:
-        real_root = realpath_strict(root)
-    except:
-        real_root = root
+    var real_root = _real_root(root)
     var skip = _lower_set(st.skip_dirs)
     var base_rel = _relative_parts(base, root)
     var below = 0
@@ -427,21 +439,17 @@ def tool_search_code(st: RepoState, regex: String, path: String, glob: String) -
         below = len(base_rel.value())
     var hits = List[String]()
     for rel in _walk_files(base, root, skip):
-        var parts = _parts(rel)
-        if _any_skipped(parts, skip):
+        # X5: secret-looking names (any component) and symlinks leaving the root are never
+        # searched.
+        if not _walkable(rel, root, real_root, skip):
             continue
+        var parts = _parts(rel)
         var under_base = List[String]()
         for k in range(below, len(parts)):
             under_base.append(parts[k])
         if not pathlib_glob_match(under_base, glob):
             continue
-        var name = parts[len(parts) - 1]
         var p = root + "/" + rel
-        # X5: secret-looking files and symlinks leaving the root are never searched.
-        if is_secret_name(name):
-            continue
-        if is_symlink(p) and not _inside_real_root(p, real_root):
-            continue
         var lines: List[String]
         try:
             lines = _read_lines(p)
@@ -473,7 +481,81 @@ def _arg_ok(a: String) -> Bool:
     return a.find("..") < 0
 
 
-def _allowed(argv: List[String], allowed: List[List[String]]) -> Bool:
+comptime REFUSED_ABSOLUTE = "refused: absolute paths are not allowed"
+comptime REFUSED_GIT_OPTIONS = "refused: git options allowed here: -- --cached --name-only --name-status --staged --stat"
+comptime REFUSED_QUMO_SUBCOMMANDS = "refused: build/qumo subcommands allowed here: convert describe draw emulate expect help info run statevector transpile validate version vqe"
+comptime REFUSED_QUMO_OUTPUT = "refused: build/qumo output options write a file; open_sandbox first (the main checkout is read-only for agents)"
+
+
+def _git_flags() -> List[String]:
+    """repo.py GIT_FLAGS."""
+    return ["--stat", "--name-only", "--name-status", "--cached", "--staged", "--"]
+
+
+def _qumo_subcommands() -> List[String]:
+    """repo.py QUMO_SUBCOMMANDS (`tool` and `mcp` are left out: they call any tool)."""
+    return ["run", "statevector", "expect", "transpile", "emulate", "validate", "info", "draw",
+            "convert", "vqe", "describe", "version", "help"]
+
+
+def _qumo_options() -> List[String]:
+    """repo.py QUMO_OPTIONS."""
+    return ["--shots", "--seed", "--params", "--max-qubits", "--max-iterations", "--device", "--precision",
+            "--json", "--pretty", "--max-amplitudes", "--observable", "--target", "--level", "--basis",
+            "--pipeline", "--qasm", "--compile", "--no-compile", "--width", "--unicode", "--to",
+            "--instructions", "--layers", "--entanglement", "--optimizer", "--gradient", "--maxiter",
+            "--qubits", "-h", "--help"]
+
+
+def _qumo_refusal(args: List[String], root: String, sandbox: String, skip_dirs: List[String]) -> String:
+    """repo.py _qumo_refusal: `args` are the arguments after `build/qumo`. Every file argument
+    passes resolve_repo_path (the read_file rule); an output option needs an open sandbox and a
+    path inside it."""
+    if len(args) == 0 or not _in(_qumo_subcommands(), args[0]):
+        return REFUSED_QUMO_SUBCOMMANDS
+    var i = 1
+    while i < len(args):
+        var a = args[i]
+        i += 1
+        if a.startswith("-") and a != "-":
+            var name = a
+            var value = String()
+            var has_eq = False
+            var eq = a.find("=")
+            if eq >= 0:
+                name = String(a[byte=0:eq])
+                value = String(a[byte=eq + 1:])
+                has_eq = True
+            if name == "-o" or name == "--output":
+                if not has_eq:
+                    if i < len(args):
+                        value = args[i]
+                    i += 1
+                if sandbox.byte_length() == 0:
+                    return REFUSED_QUMO_OUTPUT
+                if value.byte_length() == 0:
+                    return "refused: " + name + " needs a path"
+                try:
+                    _ = resolve_repo_path(value, sandbox, skip_dirs)
+                except e:
+                    return "refused: " + _strip_code(String(e))
+                continue
+            if not _in(_qumo_options(), name):
+                return "refused: build/qumo option " + name + " is not allowed here"
+            if not has_eq:
+                continue
+            a = value
+        if a == "-":
+            continue
+        try:
+            _ = resolve_repo_path(a, root, skip_dirs)
+        except e:
+            return "refused: " + _strip_code(String(e))
+    return String()
+
+
+def _matched_prefix_len(argv: List[String], allowed: List[List[String]]) -> Int:
+    """The length of the first allow-list entry that argv starts with, or -1."""
     for prefix in allowed:
         if len(argv) < len(prefix):
             continue
@@ -483,13 +565,15 @@ def _allowed(argv: List[String], allowed: List[List[String]]) -> Bool:
                 same = False
                 break
         if same:
-            return True
-    return False
+            return len(prefix)
+    return -1
 
 
-def run_check_refusal(argv: List[String], allowed: List[List[String]]) -> String:
-    """The refusal text for argv, or "" when it may run (repo.py run_check + X5)."""
-    if not _allowed(argv, allowed):
+def run_check_refusal(argv: List[String], allowed: List[List[String]], root: String, sandbox: String, skip_dirs: List[String]) -> String:
+    """The refusal text for argv, or "" when it may run (repo.py run_check + X5). `root` is
+    the open sandbox, else the repository; `sandbox` is "" until open_sandbox."""
+    var matched = _matched_prefix_len(argv, allowed)
+    if matched < 0:
         var listed = List[String]()
         for p in allowed:
             listed.append(String(" ").join(p))
@@ -497,10 +581,25 @@ def run_check_refusal(argv: List[String], allowed: List[List[String]]) -> String
     for a in argv:
         if not _arg_ok(a):
             return REFUSED_ARGS
-    if len(argv) >= 2 and argv[0] == "git" and argv[1] == "diff":
-        for i in range(2, len(argv)):
-            if argv[i].startswith("--output") or argv[i] == "--no-index":
-                return REFUSED_ARGS
+    # No absolute path, bare or as an option value. The allow-list entry itself is not an
+    # argument (the shipped entries are relative; tests inject absolute interpreters).
+    for i in range(matched, len(argv)):
+        if argv[i].startswith("/") or argv[i].find("=/") >= 0:
+            return REFUSED_ABSOLUTE
+    if argv[0] == "build/qumo":
+        var rest = List[String]()
+        for i in range(1, len(argv)):
+            rest.append(argv[i])
+        var why = _qumo_refusal(rest, root, sandbox, skip_dirs)
+        if why.byte_length() > 0:
+            return why
+    if argv[0] == "git" and len(argv) >= 2:
+        # `git diff` reads any two files with --no-index and writes one with --output.
+        var first = 2 if argv[1] == "diff" else 3
+        var flags = _git_flags()
+        for i in range(first, len(argv)):
+            if argv[i].startswith("-") and not _in(flags, argv[i]):
+                return REFUSED_GIT_OPTIONS
     return String()
 
 
@@ -515,7 +614,7 @@ def _env_with(var env: List[String], name: String, value: String) -> List[String
 
 
 def tool_run_check(st: RepoState, argv: List[String], timeout_s: Int) -> String:
-    var refusal = run_check_refusal(argv, st.allowed)
+    var refusal = run_check_refusal(argv, st.allowed, st.root(), st.sandbox, st.skip_dirs)
     if refusal.byte_length() > 0:
         return refusal
     var confined = st.sandbox.byte_length() > 0
@@ -542,13 +641,20 @@ def tool_run_check(st: RepoState, argv: List[String], timeout_s: Int) -> String:
                         home = realpath_strict(h)
                     except:
                         home = h
+                # Below $HOME the check reads the sandbox (a write dir) and what its
+                # links and git need in the main checkout: `.git`, `build` and the two
+                # virtualenvs with their interpreters. Nothing else, so not the main
+                # checkout's sources, `.env` or `agents/agents.local.json`.
                 var read_allow = List[String]()
-                for rp in [st.repo_root, st.repo_root + "/.venv"]:
+                for rp in [st.repo_root + "/.git", st.repo_root + "/build"]:
                     try:
                         read_allow.append(realpath_strict(rp))
                     except:
                         pass
-                var c = Confinement(CONF_CHECK, write_dirs^, read_allow^, home, 0, CHECK_FSIZE_BYTES)
+                for venv in [st.repo_root + "/.venv", st.repo_root + "/bench/.venv"]:
+                    for rp in venv_read_paths(venv):
+                        read_allow.append(rp)
+                var c = Confinement(CONF_CHECK, write_dirs^, read_allow^, List[String](), home, 0, CHECK_FSIZE_BYTES)
                 spec = confine(spec, c, st.self_binary)
         except e:
             if tmp.byte_length() > 0:

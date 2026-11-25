@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -60,6 +61,11 @@ def _wants_alphaxiv(spec: AgentSpec) -> bool:
     return "research" in spec.tool_groups and alphaxiv.available()
 
 
+# `build/qumo` subcommands with no output-file option (see `qumo <command> --help`).
+QUMO_READ_ONLY_SUBCOMMANDS = ("run", "statevector", "expect", "emulate", "validate", "info", "draw",
+                              "vqe", "describe")
+
+
 def _mcp_config_file(spec: AgentSpec) -> Path:
     servers = {}
     if spec.uses_mcp:
@@ -81,10 +87,15 @@ def claude_code_command(spec: AgentSpec, task: str, settings: Settings, mcp_conf
         allowed += ["WebSearch", "WebFetch"]
     if "check" in spec.tool_groups or spec.writes_code:
         # git diff is allowed in fixed forms only: `git diff --output=<path>` writes a file
-        # anywhere, so a prefix rule would hand a read-only agent a write.
+        # anywhere, so a prefix rule would hand a read-only agent a write. The same goes for
+        # `build/qumo convert|transpile ... -o <path>`: a bare `build/qumo:*` rule is not
+        # allowed. Claude Code rules match prefixes only, so the subcommands that cannot write
+        # a file are listed one by one (convert and transpile are not; the qumo MCP server
+        # offers both without a file output).
         allowed += ["Bash(.venv/bin/mojo run:*)", "Bash(bench/.venv/bin/python examples/run_examples.py:*)",
                     "Bash(git diff)", "Bash(git diff --stat)", "Bash(git diff HEAD)", "Bash(git diff --stat HEAD)",
-                    "Bash(git status)", "Bash(git status --short)", "Bash(build/qumo:*)"]
+                    "Bash(git status)", "Bash(git status --short)"]
+        allowed += [f"Bash(build/qumo {sub}:*)" for sub in QUMO_READ_ONLY_SUBCOMMANDS]
     # Claude Code grants file writes through Edit rules; a Write(path) rule is not honoured
     # in print mode, and the report write is then denied. Markdown only: an agent that may
     # also run `mojo run` must not be able to write a program into the report folder.
@@ -168,6 +179,12 @@ def claude_code_env(settings: Settings, environ: dict[str, str] | None = None) -
     when it is not. `"claude_code": {"auth": "subscription"}` removes the key from the child's
     environment, so a key exported in the shell for other tools does not turn a subscription
     run into a metered one. "inherit" (the default) passes the environment through unchanged.
+
+    `"claude_code": {"env": "scrub"}` also removes credential-looking variables of other
+    services (`scrub_env`). The `ANTHROPIC_` and `CLAUDE_` ones stay and the subscription login
+    is not an environment variable (home directory config or keychain). It is not the default
+    because it has not been tried against the real CLI login, and a Bedrock or Vertex setup
+    needs its AWS_ or GOOGLE_ variables.
     """
     env = dict(os.environ if environ is None else environ)
     auth = settings.section("claude_code").get("auth", "inherit")
@@ -176,6 +193,39 @@ def claude_code_env(settings: Settings, environ: dict[str, str] | None = None) -
             env.pop(name, None)
     elif auth != "inherit":
         raise RuntimeError(f'claude_code.auth must be "subscription" or "inherit", got {auth!r}')
+    return _apply_env_mode(env, settings, "claude_code")
+
+
+# Variables that look like credentials (the same idea as the deepagents back end's check env,
+# without AUTH and SESSION: SSH_AUTH_SOCK and the terminal session ids are not secrets).
+CLI_SECRET_ENV = re.compile(r"TOKEN|SECRET|KEY|PASSWORD|CREDENTIAL|COOKIE", re.I)
+# What each CLI itself reads to sign in or choose its provider is kept when scrubbing.
+# ALPHAXIV_ stays too: the MCP config of both CLIs refers to ALPHAXIV_API_KEY by name.
+CLI_OWN_ENV = {"claude_code": ("ANTHROPIC_", "CLAUDE_", "ALPHAXIV_"), "codex": ("OPENAI_", "CODEX_", "ALPHAXIV_")}
+
+
+def scrub_env(env: dict[str, str], section: str) -> dict[str, str]:
+    """`env` without credential-looking variables of other services (OPENROUTER_API_KEY,
+    GITHUB_TOKEN, cloud and quantum-vendor tokens, ...); the CLI's own prefixes stay. Git
+    configuration injected through the environment is dropped as a group (see repo.py)."""
+    own = CLI_OWN_ENV[section]
+    return {k: v for k, v in env.items()
+            if not repo.GIT_INJECTED_ENV.match(k) and (k.startswith(own) or not CLI_SECRET_ENV.search(k))}
+
+
+def codex_env(settings: Settings, environ: dict[str, str] | None = None) -> dict[str, str]:
+    """The environment of the `codex` child process: unchanged ("inherit", the default) or
+    `"codex": {"env": "scrub"}` without credentials of other services."""
+    env = dict(os.environ if environ is None else environ)
+    return _apply_env_mode(env, settings, "codex")
+
+
+def _apply_env_mode(env: dict[str, str], settings: Settings, section: str) -> dict[str, str]:
+    mode = settings.section(section).get("env", "inherit")
+    if mode == "scrub":
+        return scrub_env(env, section)
+    if mode != "inherit":
+        raise RuntimeError(f'{section}.env must be "inherit" or "scrub", got {mode!r}')
     return env
 
 
@@ -204,7 +254,8 @@ def run_cli_backend(backend: str, spec: AgentSpec, task: str, settings: Settings
                 mcp.unlink(missing_ok=True)
     else:
         cmd = codex_command(spec, task, settings, workdir, model)
-        r = subprocess.run(cmd, cwd=workdir, capture_output=True, text=True, timeout=timeout_s)
+        r = subprocess.run(cmd, cwd=workdir, capture_output=True, text=True, timeout=timeout_s,
+                           env=codex_env(settings))
     if r.returncode != 0:
         raise RuntimeError(f"{exe} exited {r.returncode}: {r.stderr.strip()[-2000:]}")
     return r.stdout

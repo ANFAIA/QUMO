@@ -41,15 +41,14 @@ returns that order; `resynth.mojo` splices with it).
 from qumo.ir.circuit import Circuit, Instruction
 from qumo.ir.gates import Op, op_arity, op_is_unitary
 from qumo.compiler.common import (
-    is_plain_gate, is_bound, is_all_wire_op, wire_axis, AX_OTHER, AX_ANY,
+    is_plain_gate, is_bound, is_all_wire_op, wire_axis, AX_OTHER, AX_ANY, BlockKind,
 )
 
-# Block kinds (mirror of blockalg.BlockKind; kept local so this module does
-# not depend on the synthesizers).
-comptime KIND_CLIFFORD = 0
-comptime KIND_LINEAR = 1
-comptime KIND_PERM = 2
-comptime KIND_PAULI = 3
+# Block kinds: the names this module and resynth use for common.BlockKind.
+comptime KIND_CLIFFORD = BlockKind.CLIFFORD
+comptime KIND_LINEAR = BlockKind.LINEAR
+comptime KIND_PERM = BlockKind.PERM
+comptime KIND_PAULI = BlockKind.PAULI
 
 comptime _RUN_CAP = 32  # max gates of one same-axis run per wire (edge bound)
 

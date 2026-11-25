@@ -67,7 +67,7 @@ from std.memory import bitcast
 from std.bit import pop_count
 from qumo.ir.circuit import Circuit, Instruction, QUARTER_TURN_LIMIT
 from qumo.ir.gates import Op, op_arity, matrix_2q
-from qumo.compiler.target import Target
+from qumo.device.target import Target
 from qumo.compiler.common import is_plain_gate, is_bound, inst_matrix_1q
 from qumo.ir.gateset import GateSet
 from qumo.compiler.kak import cx_cost
@@ -82,7 +82,7 @@ from qumo.compiler.block_synth import synth_perm, synth_linear, synth_clifford, 
 from qumo.compiler.policy import model_search_dirs
 from qumo.compiler.policy_synth import PolicySession
 from qumo.sim.stabilizer import TableauSimulator
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from max.algorithm import parallelize
 
 # Verifier width limits per kind (QM-E618 above them).

@@ -9,10 +9,12 @@ return a JSON object (`structured`), so CLI `--json` output, MCP
 Errors never escape: `ToolRegistry.call` converts any raised `QM-Exxx`
 error into an `isError` result carrying the structured `Diagnostic`.
 
-Extending (other QUMO modules)
-------------------------------
+Extending (tools over another QUMO module)
+------------------------------------------
+The handlers live in `qumo/ai` (`exec_tools`, `algorithm_tools`, `ft_tools`):
+`ai` is the top package, the module the tool wraps does not import it.
 ```mojo
-# qumo/compiler/tools.mojo
+# qumo/ai/compiler_tools.mojo
 from qumo.ai.tools import ToolRegistry, ToolResult, ToolContext, tool_ok, arg_circuit
 from qumo.core.json import JsonValue
 def _transpile(args: JsonValue, ctx: ToolContext) raises -> ToolResult: ...
@@ -21,7 +23,7 @@ def register_compiler_tools(mut reg: ToolRegistry):
                       "{\\"type\\":\\"object\\", ...}", _transpile)
     # a tool that writes a file or submits a job: reg.add(..., ToolHints(False, False, False, True))
 ```
-then add one line to `default_registry()` below. Every registered tool
+then add one line to `full_registry()` in `qumo/ai/registry.mojo`. Every registered tool
 appears automatically in MCP `tools/list`, `qumo tool <name> '<json>'`,
 `qumo tool list` and `describe capabilities`.
 """
@@ -45,10 +47,10 @@ from qumo.ai.diagnostics import (
 )
 from qumo.ai.describe import (
     QUMO_VERSION, describe_gates_json, describe_gate_json, describe_errors_json,
-    describe_errors_markdown, describe_error_json, describe_capabilities_json, write_circuit_json,
-    write_circuit_summary, circuit_from_json, describe_passes_json, describe_models_json,
-    program_from_json, write_program_json,
+    describe_errors_markdown, describe_error_json, describe_capabilities_json,
+    write_circuit_summary, describe_passes_json, describe_models_json,
 )
+from qumo.ir.json import write_circuit_json, circuit_from_json, program_from_json, write_program_json
 
 
 # ---------------------------------------------------------------------------
@@ -243,12 +245,10 @@ struct ToolRegistry(Movable):
 
 
 def default_registry() -> ToolRegistry:
-    """Core tools + (one line per module) tools contributed by other modules."""
+    """Core tools only. The tools over other modules (`exec_tools`, `algorithm_tools`,
+    `ft_tools`) are added by `qumo.ai.registry.full_registry()`."""
     var reg = ToolRegistry()
     register_core_tools(reg)
-    # register_compiler_tools(reg)    # qumo.compiler.tools  (transpile, optimize)
-    # register_qec_tools(reg)         # qumo.qec.tools       (memory experiments, decoding)
-    # register_algorithm_tools(reg)   # qumo.algorithms.tools (vqe, qaoa, resource estimation)
     return reg^
 
 
@@ -997,12 +997,12 @@ def register_core_tools(mut reg: ToolRegistry):
     reg.add_read_only(
         "qumo_run_qasm", "Run circuit (sample)",
         "Simulate an OpenQASM 2/3 circuit or program and return measurement counts (Qiskit-style bitstrings, leftmost = highest bit). Deterministic for a given seed. Circuits without measurements are measured on all qubits. Supports mid-circuit measurement, reset, feed-forward and '#pragma qumo' noise (per-shot trajectories), and while, break, continue and classical variables, shot by shot: those results add 'iterations' (back-edges per shot) and 'outputs' (declared output variables).",
-        "{\"type\":\"object\",\"properties\":{" + _QASM_PROP + "," + _CIRCUIT_PROP + "," + _PROGRAM_PROP + ",\"shots\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":10000000,\"default\":1024},\"seed\":{\"type\":\"integer\",\"minimum\":0,\"default\":1234}," + _PARAMS_PROP + ",\"max_qubits\":{\"type\":\"integer\",\"default\":28,\"description\":\"Safety limit for dense simulation (16*2^n bytes)\"},\"max_iterations\":{\"type\":\"integer\",\"minimum\":1,\"default\":65536,\"description\":\"Loop back-edges allowed per shot; past it the run stops with QM-E480\"}},\"additionalProperties\":false}",
+        "{\"type\":\"object\",\"properties\":{" + _QASM_PROP + "," + _CIRCUIT_PROP + "," + _PROGRAM_PROP + ",\"shots\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":10000000,\"default\":1024},\"seed\":{\"type\":\"integer\",\"minimum\":0,\"default\":1234}," + _PARAMS_PROP + ",\"max_qubits\":{\"type\":\"integer\",\"default\":28,\"description\":\"Safety limit for dense simulation (16*2^n bytes)\"},\"max_iterations\":{\"type\":\"integer\",\"minimum\":1,\"default\":65536,\"description\":\"Loop back-edges allowed per shot; past it the run stops with QM-E480. The MCP server accepts at most 1000000\"}},\"additionalProperties\":false}",
         _run_qasm,
     )
     reg.add_read_only(
         "qumo_statevector", "Final state vector",
-        "Return the exact final state vector (amplitudes with probability > threshold, sorted by basis index) of a unitary circuit. Measurements and resets are ignored; classically-conditioned gates are rejected (QM-E401), and so is a program with runtime control flow (QM-E585).",
+        "Return the exact final state vector (amplitudes with probability > threshold, sorted by basis index) of a unitary circuit. Terminal measurements are ignored; a reset, a noise channel or a mid-circuit measurement is rejected (QM-E416); classically-conditioned gates are rejected (QM-E401), and so is a program with runtime control flow (QM-E585).",
         "{\"type\":\"object\",\"properties\":{" + _QASM_PROP + "," + _CIRCUIT_PROP + "," + _PROGRAM_PROP + "," + _PARAMS_PROP + ",\"max_amplitudes\":{\"type\":\"integer\",\"default\":64,\"minimum\":1},\"threshold\":{\"type\":\"number\",\"default\":1e-12},\"max_qubits\":{\"type\":\"integer\",\"default\":24}},\"additionalProperties\":false}",
         _statevector,
     )

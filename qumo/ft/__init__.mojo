@@ -12,7 +12,8 @@
     qumo.ft.implement  implement_ops: allocator, factories, QEC policy, frame, decoding
     qumo.ft.rz         Clifford+T Rz synthesis and the comparator RUS Rz (run-time angles)
     qumo.ft.emulate    emulation with noise, logical semantics, error-rate sweeps
-    qumo.ft.tools      JSON + MCP tools (qumo_ft_codes, qumo_ft_encode, qumo_ft_verify)
+    qumo.ai.ft_tools   JSON + MCP tools (qumo_ft_codes, qumo_ft_encode, qumo_ft_verify);
+                       in `qumo/ai`, so that `qumo.ft` does not import `qumo.ai`
 
 See docs/FT.md. Guppy FT: https://github.com/Quantinuum/guppyft (Apache-2.0).
 """

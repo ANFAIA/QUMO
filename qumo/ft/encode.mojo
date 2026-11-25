@@ -91,6 +91,59 @@ struct _Compiler(Movable):
         elif self.cur_kind == 2:
             self.lp.c_if_register(self.cur_bits, self.cur_vals)
 
+    def needed_later(self, i: Int, q: Int) -> Bool:
+        """Does an op after #i read the value qubit q carries now (its re-creation
+        from a measurement, or its classical-lane value)? A reset or the end of
+        the program discards it."""
+        for j in range(i + 1, len(self.src.ops)):
+            var g = self.src.ops[j]
+            if g.kind == Op.BARRIER or g.kind == Op.TICK or op_is_annotation(g.kind):
+                continue
+            for a in range(op_arity(g.kind)):
+                if g.qubit(a) == q:
+                    return g.kind != Op.RESET
+        return False
+
+    def snapshot_before_write(mut self, i: Int, c: Int) raises:
+        """Op #i is about to overwrite clbit c. Every pending reader of c's current
+        value (a measured qubit that will be used again, a classical-lane value that
+        mentions c) is moved to a fresh private clbit holding that value, so that
+        reading it later gives the value from when it was defined, as in the source
+        circuit. Nothing is emitted when no such reader exists."""
+        var snap = -1
+        for q in range(len(self.measured)):
+            var uses = False
+            if self.classical[q]:
+                for t in self.cval[q].terms:
+                    for b in t.bits():
+                        if b == c:
+                            uses = True
+            elif self.measured[q] == c:
+                uses = True
+            if not uses or not self.needed_later(i, q):
+                continue
+            if snap < 0:
+                snap = self.lp.num_clbits
+                if snap >= 62:
+                    raise Error("QM-E406: reusing a measured qubit or a classical value after clbit " + String(c) + " is overwritten needs a private copy of the bit, and the sampler packs classical registers into 62 bits (the program would need " + String(snap + 1) + "). Hint: write the later measurements to fresh clbits, or measure fewer bits.")
+                self.lp.set_bit(snap, XorExpr.bit(c))
+            if self.classical[q]:
+                var e = XorExpr()
+                for t in self.cval[q].terms:
+                    var bits = t.bits()
+                    var hit = False
+                    for k in range(len(bits)):
+                        if bits[k] == c:
+                            bits[k] = snap
+                            hit = True
+                    if hit:
+                        e.terms.append(CTerm.minterm(bits, t.vals()))
+                    else:
+                        e.terms.append(t.copy())
+                self.cval[q] = e^
+            else:
+                self.measured[q] = snap
+
     def q(mut self, cq: Int) raises -> Int:
         """Live logical handle of computational qubit cq (allocated on demand)."""
         if self.handle[cq] < 0:
@@ -408,7 +461,8 @@ def compile(arch: Architecture, circuit: Circuit) raises -> LogicalProgram:
     var cmp = _Compiler(arch, src)
     cmp.classical = _classical_qubits(src)
     cmp.lp.num_clbits = src.num_clbits
-    for g in src.ops:
+    for i in range(len(src.ops)):
+        var g = src.ops[i]
         var k = g.kind
         if k == Op.BARRIER or k == Op.TICK:
             cmp.lp.barrier()
@@ -449,12 +503,14 @@ def compile(arch: Architecture, circuit: Circuit) raises -> LogicalProgram:
             elif k == Op.MEASURE:
                 if g.cond >= 0:
                     raise Error("QM-E726: conditioned measurement of a classical qubit. Hint: measure unconditionally.")
+                cmp.snapshot_before_write(i, g.clbit)
                 cmp.lp.set_bit(g.clbit, cmp.cval[q])
             continue
         if k == Op.MEASURE:
             if g.cond >= 0:
                 raise Error("QM-E726: classically-conditioned measurements are not supported by the encoder. Hint: measure unconditionally and condition the following gates.")
             var h = cmp.q(g.q0)
+            cmp.snapshot_before_write(i, g.clbit)
             cmp.lp.measure(h, g.clbit)
             cmp.handle[g.q0] = -1
             cmp.measured[g.q0] = g.clbit

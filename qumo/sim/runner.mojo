@@ -14,7 +14,7 @@ from std.collections import Dict
 from std.bit import pop_count
 
 from qumo.ir.gates import (
-    Op, M2, M4, matrix_1q, matrix_2q, op_arity, op_is_unitary, op_is_noise,
+    Op, M2, M4, matrix_1q, matrix_2q, op_arity, op_is_unitary, op_is_noise, op_name,
     op_is_controlled_1q, op_base_1q,
 )
 from qumo.ir.circuit import Circuit, Instruction, check_finite_values, check_shots
@@ -24,7 +24,7 @@ from qumo.sim.statevector import (
     StateVector, FPtr, LOGW, k1_range, kdiag_range, kx_range, kc1_range, kcx_range,
     kcphase_range, krzz_range, kswap_range, k2_range, kscale_range,
 )
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from max.algorithm import parallelize
 
 
@@ -925,8 +925,41 @@ def check_statevector_size(n: Int) raises:
         raise Error("QM-E404: state vector for " + String(n) + " qubits needs 2^" + String(n) + " x 16 bytes; limit is " + String(MAX_SV_QUBITS) + " qubits. Hint: Clifford circuits run on the stabilizer simulator; otherwise reduce qubits or use hardware.")
 
 
+def check_pure_state_circuit(circuit: Circuit, who: String) raises:
+    """Refuse circuits a pure state vector cannot represent (QM-E416).
+
+    `evolve`/`expectation` return one state, so RESET, noise channels and
+    measurements followed by more gates have no single answer; dropping them
+    would return a wrong number. Terminal measurements, barriers, ticks,
+    detectors and observables are ignored. Conditioned gates are left to
+    build_plan (QM-E401).
+    """
+    var measured = List[Bool](length=circuit.num_qubits, fill=False)
+    for i in range(len(circuit.ops)):
+        ref g = circuit.ops[i]
+        var k = g.kind
+        var what = String("")
+        if k == Op.RESET:
+            what = "a reset"
+        elif op_is_noise(k):
+            what = "the noise channel '" + op_name(k) + "'"
+        elif k == Op.MEASURE:
+            if g.q0 >= 0 and g.q0 < circuit.num_qubits:
+                measured[g.q0] = True
+            continue
+        elif op_is_unitary(k) and g.cond < 0:
+            for j in range(op_arity(k)):
+                var q = g.qubit(j)
+                if q >= 0 and q < circuit.num_qubits and measured[q]:
+                    what = "a gate on qubit " + String(q) + " after it was measured (mid-circuit measurement)"
+                    break
+        if what.byte_length() > 0:
+            raise Error("QM-E416: " + who + " cannot take a circuit with " + what + " (instruction #" + String(i) + "): it returns one pure state and would silently drop it. Hint: use sample() for measurements, resets and noise (trajectories), the density-matrix simulator for exact noisy expectations, or remove the instruction.")
+
+
 def evolve(circuit: Circuit, params: List[Float64] = List[Float64]()) raises -> StateVector:
     circuit.validate()
+    check_pure_state_circuit(circuit, "evolve()/expectation()")
     check_statevector_size(circuit.num_qubits)
     if len(params) != circuit.num_params():
         raise Error("QM-E101: circuit has " + String(circuit.num_params()) + " parameters " + circuit.param_names_str() + " but " + String(len(params)) + " values were given.")

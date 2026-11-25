@@ -21,10 +21,10 @@ from std.collections import Dict
 from qumo.ir.circuit import Circuit
 from qumo.ir.pauli import parse_pauli_sum
 from qumo.sim.runner import evolve, sample, SampleResult
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.algorithms.mitigation import trex_expectation
-from qumo.qec.characterization import ReadoutCalibration
-from qumo.qec.mthree import mitigate_counts_m3
+from qumo.noise.characterization import ReadoutCalibration
+from qumo.noise.mthree import mitigate_counts_m3
 from qumo.testing.checks import CheckLog
 
 

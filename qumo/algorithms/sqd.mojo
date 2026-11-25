@@ -28,13 +28,12 @@ from std.math import sqrt, ceil
 from std.bit import pop_count
 
 from qumo.ir.pauli import PauliSum
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.sim.statevector import run_chunks
 from qumo.algorithms.hamiltonians import check_fits
 from qumo.algorithms.linalg import jacobi_eigh
 
 comptime SQD_MAX_STATES = 1 << 21
-comptime _IDX_BITS = 21
 
 
 struct SubspaceGroundState(Movable, Writable):
@@ -80,24 +79,29 @@ struct _Ell(Movable):
     def __init__(out self, h: PauliSum, states: List[Int], num_qubits: Int) raises:
         var m = len(states)
         self.m = m
-        # sorted lookup table: key * 2^21 + caller index
-        var packed = List[Int](capacity=m)
+        # sorted lookup table: caller indices ordered by state value. The state
+        # is compared whole, never packed with its index (a state can use 48 bits).
         var lim = 1 << num_qubits
+        var rank = List[Int](capacity=m)
         for i in range(m):
             var s = states[i]
             if s < 0 or s >= lim:
                 raise Error("QM-E802: basis state " + String(s) + " is outside [0, 2^" + String(num_qubits) + ").")
-            packed.append((s << _IDX_BITS) | i)
-        sort(packed)
+            rank.append(i)
+
+        def before(a: Int, b: Int) {imm states} -> Bool:
+            return states[a] < states[b]
+
+        sort(Span(rank), before)
         var keys = List[Int](capacity=m)
         var pos = List[Int](capacity=m)
         for k in range(m):
-            var s = packed[k] >> _IDX_BITS
+            var s = states[rank[k]]
             if k > 0 and s == keys[k - 1]:
                 raise Error("QM-E802: basis state " + String(s) + " is listed twice. Hint: de-duplicate the sampled bitstrings first.")
             keys.append(s)
-            pos.append(packed[k] & ((1 << _IDX_BITS) - 1))
-        _ = packed^
+            pos.append(rank[k])
+        _ = rank^
         # group terms by X mask (diagonal terms -> one slot)
         var gx = List[Int]()
         var gstart = List[Int]()

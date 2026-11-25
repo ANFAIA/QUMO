@@ -90,8 +90,10 @@ exists for experiments and marks the tool description "NOT reviewed".
 
 **Confinement.** Model-written code is never run unconfined. On macOS the build, the tests, the
 `run_check` commands inside a sandbox and every call of a generated tool run under
-`sandbox-exec` (no network, writes only to their own temporary directory, no reads of the
-home directory beyond the Mojo runtime, no fork); generated tools also get an empty
+`sandbox-exec` (no network, writes only to their own temporary directory or the sandbox, and
+no reads of the home directory beyond what each one needs: the Mojo runtime for a tool; the
+SDK sources and the toolchain for a build; the sandbox, the checkout's `.git` and `build` and
+the virtualenvs for `run_check`); generated tools also cannot fork and get an empty
 environment, a timeout and capped output. Linux uses Landlock and is
 documented in DESIGN.md 6.8. On a machine with no OS sandbox, building and testing are
 refused unless a human passes `--allow-unsandboxed-tool-tests`. `doctor` reports which

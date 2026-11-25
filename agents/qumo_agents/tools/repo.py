@@ -20,6 +20,7 @@ from pathlib import Path
 
 from langchain_core.tools import tool
 
+from qumo_agents import untrusted
 from qumo_agents.config import REPO_ROOT, REPORTS_DIR
 
 SKIP_DIRS = {".git", ".venv", "build", "node_modules", "__pycache__", ".worktrees", ".pixi", "models"}
@@ -31,17 +32,34 @@ SANDBOX_ROOT = REPO_ROOT / ".worktrees"
 _state = {"sandbox": None}  # Path of the sandbox worktree opened in this process
 
 
+def _forbidden(parts) -> bool:
+    """True when any path component is a skipped directory or a secret-looking name.
+    The one rule behind _resolve, list_files and search_code, so they cannot drift."""
+    return any(part in SKIP_DIRS or SECRET_NAMES.search(part) for part in parts)
+
+
+def _walkable(p: Path, root: Path) -> bool:
+    """A file found while walking: regular, with nothing forbidden in its root-relative
+    path or in where it really points (a symlink must not leave the root or reach a secret)."""
+    try:
+        if _forbidden(p.relative_to(root).parts) or not p.is_file():
+            return False
+        real = p.resolve()
+        return real == root.resolve() or not _forbidden(real.relative_to(root.resolve()).parts)
+    except (OSError, ValueError):
+        return False
+
+
 def _resolve(path: str, root: Path) -> Path:
     # The path as written is checked first, so a forbidden directory is refused by its own
     # rule even when it is a symlink that resolves outside the repository (.venv often is).
     lexical = Path(os.path.normpath(path))
-    if set(lexical.parts) & SKIP_DIRS or SECRET_NAMES.search(lexical.name):
+    if _forbidden(lexical.parts):
         raise ValueError(f"{path} is not readable by agents")
     p = (root / path).resolve()
     if p != root and root not in p.parents:
         raise ValueError(f"{path} is outside {root}")
-    parts = set(p.relative_to(root).parts)
-    if parts & SKIP_DIRS or SECRET_NAMES.search(p.name):
+    if _forbidden(p.relative_to(root).parts):
         raise ValueError(f"{path} is not readable by agents")
     return p
 
@@ -61,7 +79,12 @@ def read_file(path: str, start_line: int = 1, max_lines: int = 400) -> str:
         return f"error: {e}"
     chunk = lines[max(0, start_line - 1): start_line - 1 + max(1, min(max_lines, 2000))]
     out = "\n".join(f"{start_line + i}\t{line}" for i, line in enumerate(chunk))
-    return out[:MAX_READ] + (f"\n... ({len(lines)} lines total)" if len(lines) > start_line - 1 + len(chunk) else "")
+    out = out[:MAX_READ] + (f"\n... ({len(lines)} lines total)" if len(lines) > start_line - 1 + len(chunk) else "")
+    # Reports are written by agents that read web pages: a reader gets them labelled. (A
+    # sandbox copy was wrapped when it was made.)
+    if p.parent == REPORTS_DIR.resolve():
+        out = untrusted.wrap(out, f"report {p.name}", untrusted.MAX_REPORT_CHARS)
+    return out
 
 
 @tool
@@ -74,9 +97,9 @@ def list_files(path: str = ".", pattern: str = "*") -> str:
         return f"error: {e}"
     out = []
     for p in sorted(base.rglob("*")):
-        rel = p.relative_to(_root())
-        if set(rel.parts) & SKIP_DIRS or not p.is_file() or not fnmatch.fnmatch(p.name, pattern):
+        if not fnmatch.fnmatch(p.name, pattern) or not _walkable(p, _root()):
             continue
+        rel = p.relative_to(_root())
         out.append(str(rel))
         if len(out) >= 300:
             out.append("... truncated")
@@ -95,9 +118,9 @@ def search_code(regex: str, path: str = ".", glob: str = "*.mojo") -> str:
         return f"error: {e}"
     hits = []
     for p in sorted(base.rglob(glob)):
-        rel = p.relative_to(_root())
-        if set(rel.parts) & SKIP_DIRS or not p.is_file():
+        if not _walkable(p, _root()):
             continue
+        rel = p.relative_to(_root())
         for i, line in enumerate(p.read_text(errors="replace").splitlines(), 1):
             if rx.search(line):
                 hits.append(f"{rel}:{i}: {line.strip()[:200]}")
@@ -118,12 +141,75 @@ ALLOWED = [
 ]
 ARG_OK = re.compile(r"^[\w./:=,@+-]+$")
 GIT_FLAGS = frozenset({"--stat", "--name-only", "--name-status", "--cached", "--staged", "--"})
+# `build/qumo` takes subcommands and options from these lists only. `tool` and `mcp` are left
+# out (they call any registered tool). Output options write a file, so they are refused unless
+# a sandbox is open and the path resolves inside it.
+QUMO_SUBCOMMANDS = frozenset({"run", "statevector", "expect", "transpile", "emulate", "validate", "info",
+                              "draw", "convert", "vqe", "describe", "version", "help"})
+QUMO_OUTPUT_OPTIONS = frozenset({"-o", "--output"})
+QUMO_OPTIONS = frozenset({
+    "--shots", "--seed", "--params", "--max-qubits", "--max-iterations", "--device", "--precision",
+    "--json", "--pretty", "--max-amplitudes", "--observable", "--target", "--level", "--basis",
+    "--pipeline", "--qasm", "--compile", "--no-compile", "--width", "--unicode", "--to",
+    "--instructions", "--layers", "--entanglement", "--optimizer", "--gradient", "--maxiter",
+    "--qubits", "-h", "--help"})
 # Checks run code the agent may have written, so they do not inherit credentials.
 SECRET_ENV = re.compile(r"TOKEN|SECRET|KEY|PASSWORD|CREDENTIAL|AUTH|COOKIE|SESSION", re.I)
 
 
+# Git configuration passed through the environment comes as a group (GIT_CONFIG_COUNT with
+# GIT_CONFIG_KEY_n / GIT_CONFIG_VALUE_n, or GIT_CONFIG_PARAMETERS). The secret pattern removes
+# the KEY_n names only, and git then stops with "missing config key GIT_CONFIG_KEY_0"; the
+# values can also carry credentials (http.extraheader). The whole group is dropped.
+GIT_INJECTED_ENV = re.compile(r"GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+|PARAMETERS)\Z")
+
+
 def _check_env() -> dict[str, str]:
-    return {k: v for k, v in os.environ.items() if not SECRET_ENV.search(k)}
+    return {k: v for k, v in os.environ.items()
+            if not SECRET_ENV.search(k) and not GIT_INJECTED_ENV.match(k)}
+
+
+def _qumo_refusal(args: list[str]) -> str:
+    """Why `build/qumo <args>` is refused, or "" when it may run.
+
+    Every file argument passes the same rule as read_file (`_resolve`: inside the root, no
+    skipped directory, no secret-looking name), so `validate .env` is refused, and an output
+    option is accepted only with an open sandbox and a path inside it."""
+    if not args or args[0] not in QUMO_SUBCOMMANDS:
+        return "refused: build/qumo subcommands allowed here: " + " ".join(sorted(QUMO_SUBCOMMANDS))
+    sandbox = _state["sandbox"]
+    i = 1
+    while i < len(args):
+        a = args[i]
+        i += 1
+        if a.startswith("-") and a != "-":
+            name, eq, value = a.partition("=")
+            if name in QUMO_OUTPUT_OPTIONS:
+                if not eq:
+                    value = args[i] if i < len(args) else ""
+                    i += 1
+                if sandbox is None:
+                    return ("refused: build/qumo output options write a file; open_sandbox first "
+                            "(the main checkout is read-only for agents)")
+                if not value:
+                    return f"refused: {name} needs a path"
+                try:
+                    _resolve(value, sandbox)
+                except ValueError as e:
+                    return f"refused: {e}"
+                continue
+            if name not in QUMO_OPTIONS:
+                return f"refused: build/qumo option {name} is not allowed here"
+            if not eq:
+                continue
+            a = value  # an `--opt=value` value is checked like a positional argument
+        if a == "-":
+            continue
+        try:
+            _resolve(a, _root())
+        except ValueError as e:
+            return f"refused: {e}"
+    return ""
 
 
 @tool
@@ -131,7 +217,10 @@ def run_check(argv: list[str], timeout_s: int = 600) -> str:
     """Run one allow-listed command (no shell) in the sandbox if open, else in the
     repository: `.venv/bin/mojo run -I . tests/test_x.mojo`, `bench/.venv/bin/python
     examples/run_examples.py --only <file>`, the plugin pytest, `build/qumo ...`,
-    `git diff`, `git status --short`. Returns exit code and the output tail."""
+    `git diff`, `git status --short`. `build/qumo` takes the run, statevector, expect, transpile,
+    emulate, validate, info, draw, convert, vqe and describe subcommands; its file arguments follow
+    the read_file rules, and -o/--output needs an open sandbox and a path inside it.
+    Returns exit code and the output tail."""
     if not any(argv[:len(prefix)] == prefix for _, prefix in ALLOWED):
         return "refused: not on the allow-list. Allowed: " + "; ".join(" ".join(p) for _, p in ALLOWED)
     if any(not ARG_OK.match(a) or ".." in a for a in argv):
@@ -139,6 +228,10 @@ def run_check(argv: list[str], timeout_s: int = 600) -> str:
     # Paths stay inside the working tree: no absolute path, bare or as an option value.
     if any(a.startswith("/") or "=/" in a for a in argv):
         return "refused: absolute paths are not allowed"
+    if argv[0] == "build/qumo":
+        why = _qumo_refusal(argv[1:])
+        if why:
+            return why
     if argv[0] == "git":
         # `git diff` reads any two files with --no-index and writes one with --output.
         extra = argv[2:] if argv[1] == "diff" else argv[3:]
@@ -195,7 +288,10 @@ def open_sandbox(topic: str) -> str:
             continue
         if not dst.exists() and not dst.is_symlink():
             dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(src, dst)
+            # Reports can hold text fetched from the web: the coding agent in the sandbox reads
+            # a bounded copy inside the untrusted-data wrapper, not the raw file.
+            text = src.read_text(errors="replace")
+            dst.write_text(untrusted.wrap(text, f"report {src.name}", untrusted.MAX_REPORT_CHARS))
     _state["sandbox"] = path
     return json.dumps({"sandbox": str(path), "branch": branch})
 

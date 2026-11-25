@@ -8,7 +8,7 @@ How to add your own gate, noise channel, compiler pass, decoder or device target
 | Noise channel | yes: `KrausChannel` in Mojo, `#pragma qumo kraus1` / `kraus2` in OpenQASM | not needed |
 | Compiler pass | yes: a Mojo function `Circuit -> Circuit`, called between built-in pipelines | no: the pass names are a closed table in `qumo/compiler/pass_manager.mojo` |
 | Decoder | yes: a struct with the `Decoder` trait, run with `sample_and_decode` | no: the decoder names are a closed table in `qumo/qec/experiments.mojo` |
-| Target | yes: targets are data (edges, basis, error rates) | yes for data; a new one-line topology keyword means editing `qumo/compiler/target.mojo` |
+| Target | yes: targets are data (edges, basis, error rates) | yes for data; a new one-line topology keyword means editing `qumo/device/target.mojo` |
 
 There is no plugin loader: QUMO does not discover passes or decoders at run time. Mojo compiles everything ahead of time, so "from your own code" means your Mojo file imports `qumo` and is compiled with `-I .`.
 
@@ -55,6 +55,8 @@ q2: ----------------+----M>c2--
 ```
 
 The drawing shows the expanded gates: QUMO's circuit is flat, so a user gate does not survive as a named box. The OpenQASM 3 modifiers work on user gates: `ctrl @ entangle(pi) q[0], q[1], q[2];`, `inv @ entangle(pi/2) q[1], q[2];` and `pow(2) @ entangle(pi/2) q[1], q[2];` were all run. Gate definitions may call other user gates (up to 64 levels deep); recursion and subroutines (`def`) are not supported.
+
+A definition may reuse the name and signature of a built-in gate. QUMO compares its body with the built-in unitary (up to global phase, up to 4 qubits): if they are equal the built-in gate is used, which is what makes files written by `to_qasm` and `to_qasm2` load back unchanged; if they differ, or cannot be compared, your definition is used as written and the warning QM-W056 says so. `gate h a { x a; } h q[0];` is an X. Pick another name unless you mean to replace the built-in gate.
 
 ### In Mojo
 
@@ -209,7 +211,7 @@ A pass is any function from a circuit to an equivalent circuit. You cannot give 
 ```mojo
 from qumo.ir.circuit import Circuit
 from qumo.ir.gates import Op
-from qumo.compiler.target import parse_target
+from qumo.device.target import parse_target
 from qumo.compiler.pass_manager import compile_spec
 
 
@@ -262,17 +264,35 @@ This example pass is for illustration: the built-in `cancel` already removes H H
 
 ### A pass with a name in text pipelines (core edit)
 
-To make `my_pass` usable in a pipeline string, from the CLI and from the MCP tool, edit `qumo/compiler/pass_manager.mojo`:
+To make `my_pass` usable in a pipeline string, from the CLI and from the MCP tool, edit `qumo/compiler/pass_manager.mojo` in three places:
 
 1. `struct PassId`: add a constant and increase `NUM`.
-2. `pass_name`: the canonical name.
-3. `pass_description`: one line; `qumo describe passes` and the MCP server print it.
-4. `pass_id_from_name`: the name and any aliases. This is the only place where text becomes an id.
-5. `_validate_args`: if the pass takes arguments, reject bad ones here (QM-E602).
-6. `_apply`: the branch that runs the pass on the circuit and returns the note shown in the report.
-7. Optionally `preset_pipeline`, if levels 0 to 3 should use it.
+2. `pass_decl`: one block that declares the pass. Nothing else has to be told its name or its arguments.
+3. `_apply`: the branch that runs the pass on the circuit and returns the note shown in the report. It reads arguments from `a` (a `PassArgs`), never from the text.
 
-Also: `tests/test_ai_transpiler.mojo` asserts the value of `PassId.NUM`; `qumo/compiler/program_compile.mojo` lists the passes that change layouts and needs the new id if yours does; add a state-vector test in `tests/test_compiler.mojo` and a row in [COMPILER.md](COMPILER.md). This procedure was read from the source, not exercised for this page.
+```mojo
+    elif id == PassId.MY_PASS:
+        d.named("my_pass", "mypass|my_alias",                 # canonical name, aliases
+                "what it does, in one line")                   # shown by `qumo describe passes`
+        d.int_arg("window", "32", "gates looked back", ArgForm.KEY_OR_BARE)   # my_pass(window=8) or my_pass(8)
+        d.choice_arg("mode", "fast|exact", "fast", "what each mode costs")     # my_pass(mode=exact)
+        d.flag_arg("strict", "off", "raise instead of keeping the original")   # 0|1|true|false|on|off
+```
+
+```mojo
+    if id == PassId.MY_PASS:
+        return "changed " + String(my_pass(c, a.get_int("window"), a.get_text("mode") == "exact", a.get_flag("strict")))
+```
+
+The declaration gives, with no further edit: the name and alias lookup of `parse_pipeline`, the description in `describe_passes()` and `qumo_describe`, the check of the arguments (QM-E602 for an unknown key or a bad value, with a hint that lists the arguments), the defaults, and the pass's rows in [PASSES.md](PASSES.md). The builders are `int_arg` (with `lo` / `hi`), `float_arg`, `flag_arg`, `choice_arg`, `text_arg` and `list_arg` (a gate list, angle bounds or a nested pipeline); the accessors are `get_int`, `get_float`, `get_flag`, `get_text`, `get_list`, `given` and `position`. An accessor raises if the argument is not declared or is declared with another kind, so the check and the pass cannot read an argument differently. Two fields of the declaration matter to other code: set `d.relabels = True` if the pass renames qubits for the passes after it (`program_compile.mojo` asks `pass_relabels`), and `d.block_kind` if it resynthesises collected blocks of a `BlockKind`.
+
+Then:
+
+- `QUMO_UPDATE_DOCS=1 .venv/bin/mojo run -I . tests/test_mcp.mojo` regenerates `docs/PASSES.md` (the same run checks it).
+- `.venv/bin/mojo run -I . tests/test_pass_table.mojo` checks the table (`check_pass_table`: every id declared, no name taken twice, defaults valid), that every declared argument is accepted and read back, and that every id has a branch in `_apply` (it runs each pass once; `_apply` raises QM-E600 for an id without a branch). `tests/test_ai_transpiler.mojo` asserts the value of `PassId.NUM`, and the list of names in `test_pass_table.mojo` asserts that none was added or lost: update both.
+- Add a state-vector test in `tests/test_compiler.mojo`, a row in the table of [COMPILER.md](COMPILER.md), and the pass to `preset_pipeline` if levels 0 to 3 should use it.
+
+The snippet above is not compiled by the docs tests.
 
 ## 4. A decoder
 
@@ -321,7 +341,7 @@ Notes:
 
 1. `canonical_decoder_name`: add the name and its aliases.
 2. `make_decoder_and_run`: add the branch that builds your decoder from the `DetectorErrorModel` and calls `sample_and_decode`. Update the hint of error QM-E707 in the same function.
-3. The text of QM-E707 in `qumo/ai/diagnostics.mojo` and the decoder list in the `qumo_qec_memory` tool description (`qumo/exec/tools.mojo`), so that agents see the new name. Regenerate [ERRORS.md](ERRORS.md) afterwards (it is generated from the catalogue).
+3. The text of QM-E707 in `qumo/ai/diagnostics.mojo` and the decoder list in the `qumo_qec_memory` tool description (`qumo/ai/exec_tools.mojo`), so that agents see the new name. Regenerate [ERRORS.md](ERRORS.md) afterwards (it is generated from the catalogue).
 
 This procedure was read from the source, not exercised for this page.
 
@@ -331,7 +351,7 @@ A target is data: number of qubits, coupling edges, basis gates and, optionally,
 
 ```mojo
 from qumo.ir.circuit import Circuit
-from qumo.compiler.target import Target
+from qumo.device.target import Target
 from qumo.compiler.pass_manager import transpile
 from qumo.exec.emulate import emulate
 
@@ -379,7 +399,7 @@ From Python, `qumo.transpile(c, coupling_map=[(0, 1), (1, 2), (1, 3)], basis=["r
 
 ### A new one-line keyword (core edit)
 
-`parse_target("grid:4x4/sc_cz")` understands a fixed list of topology words (`line`, `ring`, `grid`, `torus`, `tree`, `heavy_hex`, `all_to_all`, and the modality presets). To add a word, add a constructor to `struct Target` and a branch in `_parse_target`, both in `qumo/compiler/target.mojo`, and extend the QM-E611 hint. Keep presets named by modality or topology, not by vendor: QUMO has no vendor default by design.
+`parse_target("grid:4x4/sc_cz")` understands a fixed list of topology words (`line`, `ring`, `grid`, `torus`, `tree`, `heavy_hex`, `all_to_all`, and the modality presets). To add a word, add a constructor to `struct Target` and a branch in `_parse_target`, both in `qumo/device/target.mojo`, and extend the QM-E611 hint. Keep presets named by modality or topology, not by vendor: QUMO has no vendor default by design.
 
 A real device from a provider (IBM Quantum, Quantinuum, IonQ) comes in through the hardware plugins, which build the target from the provider's data: [HARDWARE_PLUGINS.md](HARDWARE_PLUGINS.md), section "Adding a provider".
 

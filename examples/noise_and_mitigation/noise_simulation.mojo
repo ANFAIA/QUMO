@@ -13,7 +13,7 @@ Bell circuit H(0), CNOT(0, 1) with BitFlip(0.1) on every gate: 1,000 shots gave
 QUMO has the same channels as IR instructions (`x_error`, `z_error`,
 `depolarize1`, `depolarize2`, `pauli_channel_1`), plus calibration-driven
 noise through `NoiseModel` + `apply_noise_model`
-(qumo/qec/characterization.mojo). Noisy circuits are sampled with state-vector
+(qumo/noise/characterization.mojo). Noisy circuits are sampled with state-vector
 trajectories (one Pauli draw per channel per shot). The exact reference here
 plays the role of Braket's density-matrix simulator: every channel is a
 Pauli mixture, each Pauli is propagated through the remaining Clifford gates
@@ -48,7 +48,7 @@ from qumo.ir.circuit import Circuit
 from qumo.ir.gates import Op, op_is_unitary, op_is_noise, op_arity
 from qumo.ir.pauli import PauliSum
 from qumo.sim.runner import sample
-from qumo.qec.characterization import NoiseModel, apply_noise_model
+from qumo.noise.characterization import NoiseModel, apply_noise_model
 from qumo.algorithms.library import ghz
 from qumo.algorithms.mitigation import sampled_expectation
 from qumo.testing.checks import CheckLog

@@ -173,7 +173,7 @@ decoder) were read from source, not exercised.
 |---|---|
 | A1 front door | Done (prelude, Python package) |
 | A2 surface consistency | Mostly done; default seeds not unified (item 7, owner decision) |
-| A3 dependency cycles | Mostly done (item 2): json moved to `qumo/core`, `sim` no longer imports `compiler`. One cycle remains: `exec/tools` and `ft/tools` import `qumo.ai`; moving them is an owner decision |
+| A3 dependency cycles | Mostly done (item 2): json moved to `qumo/core`, `sim` no longer imports `compiler`. The last cycle (`exec/tools` and `ft/tools` imported `qumo.ai`) is closed: both files moved to `qumo/ai` (`exec_tools.mojo`, `ft_tools.mojo`) |
 | A4 duplicated hardware layer | Plan written (`docs/HARDWARE_LAYER_PLAN.md`); not implemented (item 3, owner decision) |
 | A5 top-level layout | Done in the docs (item 4); directories not moved |
 | A6 distribution | Editable install done. Relocatable binary spiked and works; wheel not built: the licence needs confirmation (item 1) |
@@ -219,7 +219,7 @@ Ordered by value for the target audience.
 | Item | Result |
 |---|---|
 | 1 relocatable binary, wheel | Licence reviewed (from a summarised page: confirm the text verbatim). Spike: binary with `@loader_path/lib` runs from a directory outside the repo with the libraries loaded from the bundled folder. No wheel built. Licence term to check before any wheel: MAX may not be used as training data or input to any AI system (s1.4(4)) |
-| 2 move json to `qumo/core`, GateSet to `ir` | Done. `sim` no longer imports `compiler`. Remaining cycle: `exec/tools` and `ft/tools` import `qumo.ai` (owner decision) |
+| 2 move json to `qumo/core`, GateSet to `ir` | Done. `sim` no longer imports `compiler`. The remaining cycle is closed: `exec/tools` and `ft/tools` moved to `qumo/ai` |
 | 3 one hardware layer | Plan in `docs/HARDWARE_LAYER_PLAN.md`. No code changed: a parity test needs a definition of equivalence per provider |
 | 4 group research directories | Docs grouped; `training/` removed (held only a pointer README); `rl/` and `models/` not moved, because `rl/` must not be edited and many paths would change |
 | 5 re-measure benchmarks | Not run: machine load stayed above the idle threshold. Note: README says 2.5 to 4.7x against Aer; `docs/SIMULATION.md` table says 1.4 to 4.05x at 24 to 26 qubits. Reconcile when re-measuring |

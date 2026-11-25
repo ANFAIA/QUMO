@@ -19,7 +19,7 @@ from qumo.ir.circuit import Circuit, Instruction, check_finite_values, check_sho
 from qumo.ir.kraus import KrausChannel
 from qumo.ir.pauli import PauliSum
 from qumo.sim.statevector import StateVector
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.sim.runner import apply_instruction, gate_matrix_1q, SampleResult, terminal_measure_map
 
 comptime MAX_DM_QUBITS = 15

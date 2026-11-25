@@ -266,12 +266,12 @@ def error_ranges() -> List[ErrorRange]:
     _r(r, "QM-E7xx", "stabilizer", "Stabilizer simulation and QEC", "Stabilizer / Pauli-frame simulation and QEC (qumo.sim.stabilizer, qumo.sim.frame, qumo.qec)", 700, 799,
        "See [QEC.md](QEC.md).")
     _r(r, "QM-E8xx", "algorithms", "Algorithms", "Algorithms library (qumo.algorithms)", 800, 899)
-    _r(r, "QM-E9xx", "interface", "Interface", "JSON, MCP tools, CLI and device selection (qumo.ai, qumo.exec.tools, cli); QM-E999 = uncategorized", 900, 999)
+    _r(r, "QM-E9xx", "interface", "Interface", "JSON, MCP tools, CLI and device selection (qumo.ai, cli); QM-E999 = uncategorized", 900, 999)
     _r(r, "QM-E95x", "hardware", "Hardware plugins", "Hardware plugins (Python package plugins/hardware: IBM Quantum via Qiskit Runtime, Quantinuum via pytket/qnexus)", 950, 959,
        "Raised by the Python package `qumo_hardware`, not by the Mojo core. This block mirrors `CATALOG` in plugins/hardware/qumo_hardware/errors.py (tests/test_mcp.mojo checks that every code used there is listed here). See [HARDWARE_PLUGINS.md](HARDWARE_PLUGINS.md#error-codes); `python -m qumo_hardware errors --json` prints the plugin's own catalogue. Messages never contain credentials.")
     _r(r, "QM-E96x", "benchmark", "Benchmark harness", "Benchmark harness (bench/run_benchmarks.py, Python)", 960, 969,
        "Raised by the Python benchmark harness, not by the Mojo core. Reported in the result JSON (`suites.<name>.reason`) and on stderr; a suite failure never aborts the run. See [BENCHMARKING_ON_CLOUD_GPUS.md](BENCHMARKING_ON_CLOUD_GPUS.md).")
-    _r(r, "QM-W0xx", "warning", "Warnings", "Warnings: lint findings QM-W001..W019 (qumo.ai.diagnostics.lint), execution notes QM-W020..W049, OpenQASM parser warnings QM-W050..W053 and QM-W055, Program lint QM-W054", 0, 99)
+    _r(r, "QM-W0xx", "warning", "Warnings", "Warnings: lint findings QM-W001..W019 (qumo.ai.diagnostics.lint), execution notes QM-W020..W049, OpenQASM parser warnings QM-W050..W053, QM-W055 and QM-W056, Program lint QM-W054", 0, 99)
     return r^
 
 
@@ -326,8 +326,9 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E411", "simulation", "The density-matrix simulator cannot follow one classical branch: classical conditions, or sampling after a mid-circuit measurement.", "Use sample(), which runs per-shot trajectories.")
     _e(c, "QM-E412", "simulation", "Stabilizer branching exceeded its branch limit (2^20): too many non-Clifford gates on non-commuting Paulis.", "Reduce the number of non-Clifford gates, or use the state vector.")
     _e(c, "QM-E413", "simulation", "The stabilizer branching simulator has no decomposition for this gate.", "Translate the circuit to Clifford gates and rotations first.")
-    _e(c, "QM-E414", "simulation", "Invalid or unsupported Kraus channel: wrong shape, not trace preserving, or used on a simulator that needs Pauli noise.", "Pass matrices with sum K^dag K = identity; run them on density_evolve() or sample().")
+    _e(c, "QM-E414", "simulation", "Invalid or unsupported Kraus channel: wrong shape, not trace preserving, or used on a simulator that needs Pauli noise, or a noise instruction the simulator does not take (density matrix: PAULI_CHANNEL_2 and E; PTSBE: E).", "Pass matrices with sum K^dag K = identity; run them on density_evolve() or sample().")
     _e(c, "QM-E415", "simulation", "An angle perturbation cannot apply: the standard deviation or the offset is not finite, or the standard deviation is negative.", "Pass a finite offset and a standard deviation >= 0, e.g. gaussian_angle_perturbation(circuit, 0.01, seed).")
+    _e(c, "QM-E416", "simulation", "evolve()/expectation() (CPU and GPU) cannot take a circuit with a reset, a noise channel or a mid-circuit measurement: a pure state would silently drop it.", "Use sample() (trajectories) or the density-matrix simulator; terminal measurements are fine.")
     _e(c, "QM-E408", "simulation", "Invalid cache-block size for execute_plan_reordered (need 1 <= nb <= num_qubits).", "Use execute_plan(), or pass nb in [1, num_qubits].")
     _e(c, "QM-E480", "simulation", "A shot of a Program passed its budget of loop iterations (max_iterations, default 65536 back-edges per shot).", "The loop may never exit; raise max_iterations if it is only long.")
     _e(c, "QM-E481", "simulation", "Division or remainder by zero, or an integer power with a negative exponent, while a shot of a Program ran. The message gives the shot and line.", "Guard the divisor with an if.")
@@ -455,7 +456,7 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E736", "qec", "Invalid sliding-window setup: window, step, or missing detector round data.", "0 < step <= window <= rounds and (rounds - window) % step == 0; the DEM needs detector coordinates or an explicit round per detector.")
     _e(c, "QM-E737", "qec", "missing_detectors needs a Clifford circuit with at most 20000 measurements.", "Bind parameters and remove non-Clifford gates.")
     _e(c, "QM-E731", "qec", "Correlated matching needs error probabilities up to 0.5.", "Use plain 'mwpm' for this detector error model.")
-    _e(c, "QM-E738", "qec", "apply_noise_model got a unitary gate of arity 3 (CCX, CSWAP, CCZ) while the noise model has gate errors; a 3-qubit gate has no gate-error rule.", "Decompose it into 1- and 2-qubit gates first (qumo.compiler.basis.unroll_3q, or transpile to a target without CCX), then add noise.")
+    _e(c, "QM-E739", "qec", "apply_noise_model got a unitary gate of arity 3 (CCX, CSWAP, CCZ) while the noise model has gate errors; a 3-qubit gate has no gate-error rule.", "Decompose it into 1- and 2-qubit gates first (qumo.compiler.basis.unroll_3q, or transpile to a target without CCX), then add noise.")
     _e(c, "QM-E730", "ft", "A computational circuit given to encode() contains noise channels, QEC annotations or unbound symbolic parameters.", "Encode noiseless, QEC-agnostic, bound circuits; add noise with qumo.ft.emulate.add_noise; use the comparator circuit for run-time angles.")
     _e(c, "QM-E738", "ft", "Input outside the scope of the exact fault-tolerance check (qumo.ft.faults): non-CSS code or state, more than 64 qubits or measurements, a conditioned or unsupported operation, a random verification measurement, a state group too large, or more fault sets than max_fault_sets.", "Use a CSS code and a one-block preparation of reset, measure, H, S, SDG, X, Y, Z, CX, CZ whose verification measurements are deterministic; lower t or raise max_fault_sets.")
     # algorithms
@@ -544,6 +545,7 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-W053", "qasm", "OpenQASM box duration is ignored.", "QUMO circuits have no timing model; the box still keeps its gates together.")
     _e(c, "QM-W054", "qasm", "The body of a while loop cannot change its condition and has no break: the loop never runs, or runs until QM-E480.", "Assign a variable the condition reads, measure into a bit it reads, or add a break.")
     _e(c, "QM-W055", "qasm", "An integer division loses a remainder in a constant used as an angle or a float (float t = 3 / 4 * pi is 0), or a literal-only gate argument keeps real division where OpenQASM 3 and Qiskit truncate (rz(3/4*pi) is 3 pi / 4 here, 0 there).", "Write it in floats, such as 3.0 / 4, so that every tool reads the same value.")
+    _e(c, "QM-W056", "qasm", "An OpenQASM gate definition has the name and signature of a native gate but not its unitary (or cannot be compared with it), so the definition is used instead of the native gate.", "Rename the gate, or fix the body if you meant the built-in gate. The comparison covers unitary bodies of up to 4 qubits.")
     return c^
 
 

@@ -32,7 +32,7 @@ from qumo_agent.native.fs import (
     copy_file, exists, is_file, join_path, make_dirs, make_temp_dir, read_text_lossy,
     realpath_strict, remove_tree, resolve_nonstrict, write_text_atomic,
 )
-from qumo_agent.native.sandbox import Confinement, CONF_BUILD, CONF_TOOL, confine, modular_lib_dir
+from qumo_agent.native.sandbox import Confinement, CONF_BUILD, CONF_TOOL, confine, modular_lib_dir, venv_read_paths
 from qumo_agent.native.spawn import (
     SpawnSpec, STDIO_NULL, STDIO_PIPE, minimal_child_env, run_capture, which,
 )
@@ -375,14 +375,27 @@ def mojo_version(mojo_bin: String) -> String:
 # Hermetic build (6.4)
 # ---------------------------------------------------------------------------
 def _build_read_allow(repo_root: String) -> List[String]:
-    """Subtrees the compiler reads that must stay readable even below a denied $HOME
-    directory: the main checkout and its toolchain (`.venv` may be a symlink)."""
+    """The subtrees below $HOME the compiler reads: the two include trees of the main
+    checkout (`qumo`, `agents/mojo`) and the toolchain (`.venv` with its interpreter).
+    Not the rest of the checkout (`.env`, `agents/agents.local.json`, reports)."""
     var out = List[String]()
-    for p in [repo_root, join_path(repo_root, ".venv")]:
+    for p in [join_path(repo_root, "qumo"), join_path(repo_root, "agents/mojo")]:
         try:
             out.append(realpath_strict(p))
         except:
             pass
+    for p in venv_read_paths(join_path(repo_root, ".venv")):
+        out.append(p)
+    return out^
+
+
+def _build_list_dirs(repo_root: String) -> List[String]:
+    """`-I <repo_root>` makes the compiler list that directory to find `qumo`."""
+    var out = List[String]()
+    try:
+        out.append(realpath_strict(repo_root))
+    except:
+        pass
     return out^
 
 
@@ -412,7 +425,7 @@ def hermetic_build(repo_root: String, mojo_bin: String, source_path: String, nam
         env = _env_with(env, "MODULAR_CACHE_DIR", cache)
         var spec = SpawnSpec(mojo_bin, argv^, env^, tmp_real, STDIO_NULL, STDIO_PIPE, STDIO_PIPE, True)
         if self_binary.byte_length() > 0:
-            var conf = Confinement(CONF_BUILD, [tmp_real], _build_read_allow(repo_root), _home_realpath(), 0, BUILD_FSIZE_BYTES)
+            var conf = Confinement(CONF_BUILD, [tmp_real], _build_read_allow(repo_root), _build_list_dirs(repo_root), _home_realpath(), 0, BUILD_FSIZE_BYTES)
             spec = confine(spec, conf, self_binary)
         var t = _clamp(timeout_s, BUILD_TIMEOUT_MIN, BUILD_TIMEOUT_MAX)
         var res = run_capture(spec, t * 1000, CAPTURE_MAX_BYTES, String())
@@ -513,7 +526,7 @@ def _run_one_case(binary: String, name: String, c: ToolCase, timeout_s: Int, exp
             var conf = Optional[Confinement](None)
             var trampoline = String()
             if confined:
-                conf = Confinement(CONF_TOOL, [tmp_real], read_allow.copy(), _home_realpath(),
+                conf = Confinement(CONF_TOOL, [tmp_real], read_allow.copy(), List[String](), _home_realpath(),
                                    4 * timeout_s + 10, TOOL_FSIZE_BYTES)
                 trampoline = self_binary
             var params = StdioServerParams(copy, List[String](), List[String](), tmp_real,

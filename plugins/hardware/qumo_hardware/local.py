@@ -214,6 +214,8 @@ class LocalEmulatorProvider:
         self.seed = seed
         self.use_fractional_gates = use_fractional_gates  # forwarded to IBM fake backends
 
+    JOB_OPTIONS = ("use_fractional_gates",)  # read back from a job file
+
     def public_options(self) -> dict:
         return {"use_fractional_gates": self.use_fractional_gates} if self.use_fractional_gates else {}
 

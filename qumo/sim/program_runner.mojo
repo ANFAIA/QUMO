@@ -38,7 +38,7 @@ from qumo.ir.classical import BitReader, CTypeKind, CEval, CStore, angle_radians
 from qumo.ir.gates import Op, op_is_noise, op_is_pauli_noise, op_is_unitary
 from qumo.ir.program import Cfg, ForRangeField, Program, StmtKind, TermKind, check_program, slot_prefix
 from qumo.sim.branching import BranchingSimulator
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.sim.runner import (
     Fuser, KOp, PAR_SHOTS_MAX_QUBITS, SampleResult, build_plan, check_statevector_size, execute_plan,
     run_trajectory_ops, sample,

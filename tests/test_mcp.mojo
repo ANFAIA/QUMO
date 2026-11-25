@@ -10,7 +10,7 @@ from qumo.core.json import JsonWriter, JsonValue, parse_json, json_quote
 from qumo.ai.mcp import McpServer, handle_request
 from qumo.ai.tools import default_registry, ToolRegistry, ToolHints, ToolContext, ToolResult, tool_ok
 from qumo.ai.describe import (
-    describe_gates_json, describe_errors_json, describe_errors_markdown, describe_error_json,
+    describe_gates_json, describe_errors_json, describe_errors_markdown, describe_error_json, describe_passes_markdown,
     describe_capabilities_json, circuit_to_json, circuit_from_json, circuit_summary_json,
 )
 from qumo.ai.diagnostics import (
@@ -511,6 +511,17 @@ def test_errors_doc_in_sync() raises:
     assert_true(md.find("rzx") < 0)
 
 
+def test_passes_doc_in_sync() raises:
+    """The checked-in docs/PASSES.md equals the text generated from the pass table (QUMO_UPDATE_DOCS=1 rewrites it)."""
+    var md = describe_passes_markdown()
+    if getenv("QUMO_UPDATE_DOCS") == "1":
+        with open("docs/PASSES.md", "w") as f:
+            f.write(md)
+        print("docs/PASSES.md regenerated from pass_decl()")
+    var cur = _read("docs/PASSES.md")
+    assert_true(cur == md, "docs/PASSES.md is stale: regenerate it with QUMO_UPDATE_DOCS=1 .venv/bin/mojo run -I . tests/test_mcp.mojo")
+
+
 def test_every_raised_code_is_catalogued() raises:
     """A code used in qumo/, cli/, python/, the hardware plugins or the
     benchmark harness must be in error_catalog() (and thus in docs/ERRORS.md)."""
@@ -571,6 +582,31 @@ def test_ai_transpiler_tools() raises:
     print("  AI transpiler tools (qumo_transpile ai, describe passes/models) ok")
 
 
+def test_iteration_cap() raises:
+    var s = McpServer()
+    var spin = "OPENQASM 3.0; qubit[1] q; bit[1] c; while (true) { x q[0]; } c[0] = measure q[0];"
+    var bounded = "OPENQASM 3.0; qubit[1] q; bit[1] c; int i = 0; while (i < 10) { x q[0]; i = i + 1; } c[0] = measure q[0];"
+    var ping = "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"ping\"}"
+    for name in ["qumo_run_qasm", "qumo_run_device"]:
+        # above the server ceiling: refused before the program runs, not clamped
+        var big = tool(s, 200, name, "{\"qasm\":" + json_quote(spin) + ",\"shots\":1,\"max_iterations\":9000000000000000000}")
+        assert_true(big.get("isError").as_bool(), big.to_json())
+        assert_equal(big.get("structuredContent").get("error").get("code").as_string(), "QM-E913")
+        var txt = big.get("content").at(0).get("text").as_string()
+        assert_true(txt.find("max_iterations") >= 0 and txt.find("MCP server limit of 1000000") >= 0, txt)
+        var edge = tool(s, 201, name, "{\"qasm\":" + json_quote(spin) + ",\"shots\":1,\"max_iterations\":1000001}")
+        assert_equal(edge.get("structuredContent").get("error").get("code").as_string(), "QM-E913")
+        # at the ceiling: the endless loop ends with QM-E480, and the server still answers
+        var at = tool(s, 202, name, "{\"qasm\":" + json_quote(spin) + ",\"shots\":1,\"max_iterations\":1000000}")
+        assert_true(at.get("isError").as_bool(), at.to_json())
+        assert_equal(at.get("structuredContent").get("error").get("code").as_string(), "QM-E480")
+        assert_true(rpc(s, ping).get("result").is_object())
+        # a normal bounded loop still runs
+        var ok = tool(s, 203, name, "{\"qasm\":" + json_quote(bounded) + ",\"shots\":4,\"max_iterations\":100}")
+        assert_false(ok.get("isError").as_bool(), ok.to_json())
+    print("  server cap on max_iterations (QM-E913 above, QM-E480 at the cap) ok")
+
+
 def test_tier1_tools() raises:
     var s = McpServer()
     var q = json_quote(BELL)
@@ -587,6 +623,31 @@ def test_tier1_tools() raises:
     var t = tool(s, 206, "qumo_transpile", "{\"qasm\":" + q + ",\"target\":\"line:3/rz,sx,x,cz\",\"calibration\":{\"edge_errors\":[[0,1,0.05],[1,2,0.001]]}}")
     assert_true(t.to_json().find("post_layout") >= 0, "calibration reaches the pipeline: " + t.to_json())
     print("  tier 1 tools")
+
+
+def test_variational_tool_width_limits() raises:
+    """The qumo_vqe and qumo_qaoa_maxcut tools refuse a 2^n allocation before any work (QM-E930, QM-E807)."""
+    var s = McpServer()
+    var v = tool(s, 301, "qumo_vqe", "{\"hamiltonian\":\"Z0\",\"num_qubits\":46}")
+    assert_true(v.get("isError").as_bool(), v.to_json())
+    assert_equal(v.get("structuredContent").get("error").get("code").as_string(), "QM-E930")
+    var v2 = tool(s, 302, "qumo_vqe", "{\"hamiltonian\":\"Z45\"}")
+    assert_true(v2.get("isError").as_bool(), v2.to_json())
+    assert_equal(v2.get("structuredContent").get("error").get("code").as_string(), "QM-E930")
+    var v3 = tool(s, 303, "qumo_vqe", "{\"hamiltonian\":\"Z0\",\"num_qubits\":6,\"max_qubits\":4}")
+    assert_equal(v3.get("structuredContent").get("error").get("code").as_string(), "QM-E930")
+    var q = tool(s, 304, "qumo_qaoa_maxcut", "{\"graph\":\"0-45\"}")
+    assert_true(q.get("isError").as_bool(), q.to_json())
+    assert_equal(q.get("structuredContent").get("error").get("code").as_string(), "QM-E930")
+    # inside max_qubits but past the brute-force reference: refused before the optimisation
+    var q2 = tool(s, 305, "qumo_qaoa_maxcut", "{\"graph\":\"0-27\",\"max_qubits\":30}")
+    assert_equal(q2.get("structuredContent").get("error").get("code").as_string(), "QM-E807", q2.to_json())
+    # small cases still run
+    var ok = tool(s, 306, "qumo_vqe", "{\"hamiltonian\":\"-1.0*Z0\",\"layers\":1,\"maxiter\":20}")
+    assert_false(ok.get("isError").as_bool(), ok.to_json())
+    var ok2 = tool(s, 307, "qumo_qaoa_maxcut", "{\"graph\":\"0-1 1-2 2-0\",\"shots\":16}")
+    assert_false(ok2.get("isError").as_bool(), ok2.to_json())
+    print("  variational tool width limits")
 
 
 def _noop_tool(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
@@ -641,7 +702,10 @@ def main() raises:
     test_convert_qasm2_and_describe_markdown()
     test_exec_tools()
     test_errors_doc_in_sync()
+    test_passes_doc_in_sync()
     test_every_raised_code_is_catalogued()
     test_ai_transpiler_tools()
     test_tier1_tools()
+    test_variational_tool_width_limits()
+    test_iteration_cap()
     print("test_mcp OK")

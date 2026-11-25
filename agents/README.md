@@ -43,6 +43,16 @@ Environment (keys are read from the environment only, never written):
 | `QUMO_AGENTS_LOCAL_URL` | optional: base URL of the `local` back end (default `http://localhost:11434/v1`) |
 | `QUMO_AGENTS_LOCAL_API_KEY` | optional: key for a local server that asks for one; never read from `agents.json` |
 
+What a check command can do: `run_check` (and the same rule in the native harness) runs only
+allow-listed commands with path-like, relative arguments. `build/qumo` takes the `run`,
+`statevector`, `expect`, `transpile`, `emulate`, `validate`, `info`, `draw`, `convert`, `vqe` and
+`describe` subcommands; file arguments follow the `read_file` rules, and `-o` / `--output` works
+only inside an open sandbox. On the `claude-code` back end `convert` and `transpile` are not
+allowed (use the MCP tools). Checks on the API back ends and the Mojo harness do not see
+variables named like a token, key or secret; the Claude Code and Codex CLIs pass your whole
+environment unless `agents.local.json` sets `"claude_code": {"env": "scrub"}` or
+`"codex": {"env": "scrub"}` (see [docs/AGENTS.md](../docs/AGENTS.md), section 7).
+
 ## Use
 
 ```bash
@@ -80,12 +90,20 @@ shows what each agent would run on. Details: [docs/AGENTS.md](../docs/AGENTS.md)
 
 ## Safety
 
-* Read tools stay inside the repository and skip `.venv`, `build`, `.git` and secret-looking files.
+* Read tools stay inside the repository and skip `.venv`, `build`, `.git` and secret-looking files; reading, listing and searching all apply the same rule to every path component (a secret-named directory is skipped too), and symlinks that leave the repository are not followed.
 * Only `autoresearch` writes code, and only inside a sandbox git worktree on a new
   `agents/<topic>-<time>` branch. The main checkout is never written. A person reviews the branch.
 * Commands run from an allow-list, without a shell.
 * Papers, release notes and pages are data: the prompts tell the agents never to follow
   instructions found in them.
+* No agent fetches web pages and runs code. `registry.py` checks this at import, also through
+  delegation: an agent that reaches both (`autoresearch`, `orchestrator`) must declare each
+  subagent that reaches web fetch in `untrusted_subagents`, and the openrouter and local back
+  ends return those answers, and reports copied into a sandbox or read from `agents/reports/`,
+  cut to a size limit inside an `UNTRUSTED-DATA` block. This labels and bounds the text; it does
+  not stop a model from obeying it, and the Claude Code, Codex and Mojo back ends do not wrap.
+* `run_check` runs an allow-listed command without a shell and without credential-looking
+  environment variables, but not in a process confined from the file system or the network.
 * alphaXiv: only read tools are loaded; library, folder and follow tools are never exposed.
 
 ## Tests

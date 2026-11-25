@@ -228,7 +228,7 @@ def test_open_sandbox_copies_reports_but_not_symlinks(tmp_path, monkeypatch):
     (root / "agents" / ".gitignore").write_text("reports/*\n")
     (root / "f.txt").write_text("x")
     for cmd in (["git", "init", "-q"], ["git", "add", "f.txt", "agents/.gitignore"],
-                ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "init"]):
+                ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", "commit", "-qm", "init"]):
         subprocess.run(cmd, cwd=root, check=True)
     monkeypatch.setattr(repo, "REPO_ROOT", root)
     monkeypatch.setattr(repo, "SANDBOX_ROOT", tmp_path / "sandboxes")
@@ -428,7 +428,7 @@ def test_generated_tools_values():
         want = "all" if name in ("qumo-operator", "autoresearch") else []
         assert specs[name]["generated_tools"] == want, name
         assert list(specs[name]) == ["description", "tool_groups", "mcp_tools", "subagents", "writes_code",
-                                     "generated_tools"]
+                                     "generated_tools", "untrusted_subagents"]
     assert (export.PROMPTS_DIR / "preamble.md").read_text() == prompts_preamble()
 
 

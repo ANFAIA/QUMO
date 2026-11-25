@@ -8,6 +8,7 @@ from qumo.ir.circuit import Circuit
 from qumo.ir.gates import Op, op_name, op_num_params, op_arity
 from qumo.ir.param import Param
 from qumo.ir.kraus import amplitude_damping
+from qumo.ir.qasm2 import qasm2_gate_definition, qasm2_gate_name
 from qumo.ir.qasm import parse_qasm, parse_qasm_with_warnings, to_qasm, format_angle, tokenize_qasm
 from qumo.sim.statevector import StateVector
 from qumo.sim.runner import evolve, sample
@@ -146,6 +147,34 @@ measure b -> cb;
     # hardware qubits
     var hw = parse_qasm("OPENQASM 3; h $0; cx $0, $2;")
     assert_equal(hw.num_qubits, 3)
+
+
+def test_slice_bounds() raises:
+    # negative bounds count from the end, both ends inclusive
+    var a = parse_qasm("qubit[4] q; h q[0:-1];")
+    assert_equal(a.count(Op.H), 4, "q[0:-1] is the whole register")
+    for k in range(4):
+        assert_equal(a.ops[k].q0, k)
+    var b = parse_qasm("qubit[4] q; x q[-3:-1];")
+    assert_equal(b.count(Op.X), 3)
+    assert_equal(b.ops[0].q0, 1)
+    assert_equal(b.ops[2].q0, 3)
+    var c = parse_qasm("qubit[6] q; x q[0:2:5];")  # step 2: 0, 2, 4
+    assert_equal(c.count(Op.X), 3)
+    assert_equal(c.ops[2].q0, 4)
+    var d = parse_qasm("qubit[4] q; x q[3:-1:0];")  # negative step counts down
+    assert_equal(d.count(Op.X), 4)
+    assert_equal(d.ops[0].q0, 3)
+    assert_equal(d.ops[3].q0, 0)
+    # a range that selects nothing is an error, not a crash
+    expect_error("qubit[4] q; h q[2:1];", "QM-E521", "1:")
+    expect_error("qubit[4] q; cx q[2:1], q[0];", "QM-E521")
+    expect_error("qubit[4] q; bit[4] c; measure q[2:1] -> c[0];", "QM-E521")
+    expect_error("qubit[4] q; bit[4] c; measure q[0] -> c[3:2];", "QM-E521")
+    expect_error("qubit[4] q; reset q[2:1];", "QM-E521")
+    expect_error("qubit[4] q; barrier q[2:1];", "QM-E521")
+    expect_error("qubit[4] q; h q[0:4];", "QM-E521")
+    print("  slice bounds")
 
 
 def test_aliases_and_params() raises:
@@ -514,6 +543,110 @@ def test_emitted_definitions_are_exact() raises:
         assert_same_state(lhs, rhs, 1e-12)
 
 
+def _warned(w: List[String], code: String) -> Bool:
+    for x in w:
+        if x.find(code) >= 0:
+            return True
+    return False
+
+
+def _call_text(k: Int, name: String) -> String:
+    var s = name
+    if op_num_params(k) == 1:
+        s += "(0.731)"
+    var args = String()
+    for i in range(op_arity(k)):
+        args += (", " if i > 0 else " ") + "q[" + String(i) + "]"
+    return s + args + ";\n"
+
+
+def test_native_shadow_definition() raises:
+    """A `gate` definition named like a native gate is the native gate only when
+    its body has that unitary; otherwise the definition is used, with QM-W056."""
+    # a wrong body: the definition runs, not the native `h`
+    var w = List[String]()
+    var c = parse_qasm_with_warnings("OPENQASM 3.0;\nqubit[1] q;\ngate h a { x a; }\nh q[0];\n", w)
+    assert_equal(len(c.ops), 1)
+    assert_equal(c.ops[0].kind, Op.X, "wrong redefinition of h is inlined")
+    assert_true(_warned(w, "QM-W056"), "wrong redefinition warns")
+    # a wrong parametrised body
+    w = List[String]()
+    c = parse_qasm_with_warnings("OPENQASM 3.0;\nqubit[2] q;\ngate rzz(t) a, b { cx a, b; rz(2 * t) b; cx a, b; }\nrzz(0.5) q[0], q[1];\n", w)
+    assert_equal(len(c.ops), 3)
+    assert_equal(c.ops[0].kind, Op.CX, "wrong rzz is inlined")
+    assert_true(_warned(w, "QM-W056"), "wrong rzz warns")
+    # an earlier user gate in the body is part of the comparison: a correct y
+    w = List[String]()
+    c = parse_qasm_with_warnings("OPENQASM 3.0;\nqubit[1] q;\ngate foo a { y a; }\ngate y a { foo a; }\ny q[0];\n", w)
+    assert_equal(c.ops[0].kind, Op.Y, "y through foo")
+    assert_false(_warned(w, "QM-W056"), "y through foo is the native y")
+    # a native that is not a unitary (noise) cannot be compared: the definition is used
+    w = List[String]()
+    c = parse_qasm_with_warnings("OPENQASM 3.0;\nqubit[1] q;\ngate depolarize1(p) a { rx(p) a; }\ndepolarize1(0.1) q[0];\n", w)
+    assert_equal(c.ops[0].kind, Op.RX, "definition of a noise gate name is inlined")
+    assert_true(_warned(w, "QM-W056"), "uncomparable definition warns")
+    # equal up to global phase is still the native gate, silently
+    w = List[String]()
+    c = parse_qasm_with_warnings("OPENQASM 3.0;\nqubit[1] q;\ngate z a { rz(pi) a; }\nz q[0];\n", w)
+    assert_equal(c.ops[0].kind, Op.Z, "rz(pi) is z up to phase")
+    assert_false(_warned(w, "QM-W056"))
+    # other gates defined in the file are not an excuse to skip the check
+    w = List[String]()
+    c = parse_qasm_with_warnings("OPENQASM 3.0;\nqubit[1] q;\ngate h a { h a; }\nh q[0];\n", w)
+    assert_equal(c.ops[0].kind, Op.H, "gate h { h } is the native h")
+    assert_false(_warned(w, "QM-W056"))
+
+    # every definition QUMO writes maps back to its native opcode, silently
+    var natives: List[Int] = [Op.SXDG, Op.ISWAP, Op.ISWAPDG, Op.ECR, Op.RXX, Op.RYY, Op.RZZ, Op.CCZ]
+    for k in natives:
+        var src = Circuit(3)
+        var nq = op_arity(k)
+        if op_num_params(k) == 1:
+            src.add(k, 0, 1 if nq > 1 else -1, 2 if nq > 2 else -1, Param(0.731))
+        else:
+            src.add(k, 0, 1 if nq > 1 else -1, 2 if nq > 2 else -1)
+        var text = to_qasm(src)
+        assert_true(text.find("gate " + op_name(k)) >= 0, "definition emitted for " + op_name(k))
+        w = List[String]()
+        var back = parse_qasm_with_warnings(text, w)
+        assert_equal(len(back.ops), 1, "one op back for " + op_name(k))
+        assert_equal(back.ops[0].kind, k, "native opcode back for " + op_name(k))
+        assert_false(_warned(w, "QM-W05"), "no warning for emitted " + op_name(k) + ": " + (w[0] if len(w) > 0 else ""))
+        assert_equal(to_qasm(back), text, "round trip of " + op_name(k))
+
+    # ... and every definition of the OpenQASM 2 exporter
+    var checked = 0
+    for k in range(Op.CCZ + 1):
+        var d = qasm2_gate_definition(k)
+        if d == "":
+            continue
+        var name = qasm2_gate_name(k)
+        var src2 = "OPENQASM 2.0;\nqreg q[3];\n" + d + "\n" + _call_text(k, name)
+        w = List[String]()
+        var b2 = parse_qasm_with_warnings(src2, w)
+        assert_equal(len(b2.ops), 1, "one op back for qasm2 " + name)
+        assert_equal(b2.ops[0].kind, k, "native opcode back for qasm2 " + name)
+        assert_false(_warned(w, "QM-W05"), "no warning for qasm2 " + name + ": " + (w[0] if len(w) > 0 else ""))
+        checked += 1
+    assert_true(checked >= 10, "the OpenQASM 2 definitions were checked")
+
+    # a circuit with every gate the emitter defines round-trips unchanged
+    var all = Circuit(3)
+    for k in natives:
+        var nq = op_arity(k)
+        if op_num_params(k) == 1:
+            all.add(k, 0, 1 if nq > 1 else -1, 2 if nq > 2 else -1, Param(0.731))
+        else:
+            all.add(k, 0, 1 if nq > 1 else -1, 2 if nq > 2 else -1)
+    var all_text = to_qasm(all)
+    var all_back = parse_qasm(all_text)
+    assert_equal(len(all_back.ops), len(natives))
+    for i in range(len(natives)):
+        assert_equal(all_back.ops[i].kind, natives[i])
+    assert_equal(to_qasm(all_back), all_text, "round trip with every emitted definition")
+    print("  native-gate shadowing")
+
+
 def test_unicode_and_comments() raises:
     var c = parse_qasm("""
 // leading comment
@@ -771,6 +904,7 @@ def test_box_and_annotations() raises:
 def main() raises:
     test_bell_qasm2_qasm3()
     test_registers_and_broadcast()
+    test_slice_bounds()
     test_aliases_and_params()
     test_input_params()
     test_gate_defs_and_modifiers()
@@ -779,6 +913,7 @@ def main() raises:
     test_pragmas_roundtrip()
     test_roundtrip_all_gates()
     test_emitted_definitions_are_exact()
+    test_native_shadow_definition()
     test_unicode_and_comments()
     test_real_world_dialects()
     test_switch()

@@ -11,9 +11,9 @@ other QUMO modules plug their features into it.
 | OpenQASM 2 emitter | `qumo/ir/qasm2.mojo` | Portable `qelib1.inc` output that every SDK parser loads (Qiskit strict and legacy, pytket, Cirq) |
 | JSON | `qumo/core/json.mojo` | Streaming writer and arena parser, deterministic output, error positions |
 | Diagnostics | `qumo/ai/diagnostics.mojo` | Stable codes, line/col, snippet, fix hint, lint warnings |
-| Self-description | `qumo/ai/describe.mojo` | Gate set, error catalog, capabilities and circuit JSON, generated from the implementation |
+| Self-description | `qumo/ai/describe.mojo` | Gate set, error catalog, capabilities and circuit summary, generated from the implementation (circuit and program JSON are in `qumo/ir/json.mojo`) |
 | Tool registry | `qumo/ai/tools.mojo`, `qumo/ai/registry.mojo` | One implementation per operation, shared by MCP and CLI; `full_registry()` adds the module tools |
-| Module tools | `qumo/exec/tools.mojo` | Compile, resources, VQE, QAOA, QEC experiments (all decoders), GPU status, device-explicit runs |
+| Module tools | `qumo/ai/exec_tools.mojo` | Compile, resources, VQE, QAOA, QEC experiments (all decoders), GPU status, device-explicit runs |
 | MCP server | `qumo/ai/mcp.mojo` | JSON-RPC 2.0 over stdio (MCP 2025-06-18) |
 | CLI | `cli/app.mojo` (commands, options, help; `run_cli(args)`), `cli/main.mojo` (the entry file) -> `build/qumo` | `qumo <command> [--json]`, plus generic `qumo tool <name> '<json>'` |
 | CLI help for tools | `qumo/ai/cli_help.mojo` | `qumo tool <name> --help` generated from the tool's JSON Schema, "did you mean" hints |
@@ -51,8 +51,13 @@ other QUMO modules plug their features into it.
 * **Portable output.** Native gates that are missing from `stdgates.inc`
   (`sxdg`, `iswap`, `iswapdg`, `ecr`, `rxx`, `ryy`, `rzz`, `ccz`) are emitted
   with exact `gate` definitions. The tests check each definition against the
-  native unitary to 1e-12. When QUMO reads such a definition back, it treats it
-  as a declaration and uses the exact native opcode.
+  native unitary to 1e-12. When QUMO reads a definition with the name and
+  signature of a native gate, it compares the body with the native gate (dense
+  unitary up to global phase, at three generic angle sets for a parametrised
+  gate, up to 4 qubits). If they are equal it uses the exact native opcode;
+  if they differ, or the comparison cannot be made (a noise gate name, a body
+  that calls a gate the file does not define), the definition is used as
+  written and QM-W056 is reported. `gate h a { x a; }` is an X, not an H.
 * **OpenQASM 2 for interoperability.** `qumo.ir.qasm2.to_qasm2` (MCP
   `qumo_convert` with `to: "qasm2"`, CLI `qumo convert --to qasm2`) writes
   `qelib1.inc` output for tools that only read OpenQASM 2. Without a
@@ -102,7 +107,10 @@ other QUMO modules plug their features into it.
   Modifiers `inv @`, `ctrl @`, `ctrl(n) @`, `negctrl @` and `pow(k) @` are
   applied through the IR functors `inverse()`, `controlled()` and `power()`.
 * Register broadcast (`h q;`, `cx q[0], q;`, `measure q -> c;`), inclusive
-  slices `q[0:2]`, index sets `q[{0,2}]` and negative indices.
+  slices `q[0:2]`, index sets `q[{0,2}]` and negative indices. Negative bounds count
+  from the end before the range is walked (`q[0:-1]` is the whole register, `q[-3:-1]` the last three
+  qubits), a negative step counts down (`q[3:-1:0]`), and a range that selects nothing (`q[2:1]`)
+  is error `QM-E521`.
 * `c = measure q;`, `c[0] = measure q[0];`, `measure q[0] -> c[0];`,
   `bit[2] c = measure q;`, `reset`, `barrier`.
 * Feed-forward on one bit: `if (c[0]) x q[1];`, `if (c[0] == 1) { ... } else { ... }`,
@@ -249,6 +257,12 @@ cannot drift from the implementation:
 * **Circuit JSON** (`qumo.circuit.v1`): `circuit_to_json` and
   `circuit_from_json` round-trip. Every tool accepts `circuit` (JSON) instead
   of `qasm`, for agents that prefer structured input.
+  The loader bounds sizes (QM-E911, the wire rule under "Size limits") and the values
+  in each instruction: qubits and clbits against the register, records against the
+  measurements made so far (absolute from 0, or negative to count back), an observable
+  index in 0 to 63, probabilities in [0, 1] (a channel's branches add up to at most 1),
+  Pauli letters 1 to 3, Kraus matrices of 2 x 2^n x 2^n numbers, condition bits of 0 or
+  more and condition values of 0 or 1.
 * **Program JSON** (`qumo.program.v1`): `program_to_json` and `program_from_json`
   round-trip, wrapping circuit JSON. Malformed input is QM-E587, or QM-E583 for a
   wrong nesting; every index is checked before anything runs.
@@ -280,6 +294,14 @@ implements MCP **2025-06-18** (it also accepts 2025-03-26 and 2024-11-05).
 | `tools/list` | Each tool's `name`, `title`, `description`, `inputSchema` (JSON Schema) and `annotations` (the four MCP hints, per tool; see below) |
 | `tools/call` | `{content: [{type: "text", text}], structuredContent, isError}` |
 
+**Server ceilings.** A call may not ask for more than the server allows, below the
+tools' own ranges (the CLI keeps those): `shots` 1000000, `max_qubits` 30 and
+`max_iterations` 1000000 (16 times the default of 65536). A call above one is
+refused before it runs with QM-E913 and the limit in the message; it is not
+clamped. The server has one thread, so a `while (true)` with `max_iterations` at
+2^62 would block `ping` for as long as it ran; at the ceiling it ends in about a
+second with QM-E480. Longer loops run from the CLI (`qumo run --max-iterations`).
+
 **Tool annotations.** Each tool carries its own `readOnlyHint`, `destructiveHint`,
 `idempotentHint` and `openWorldHint` (`ToolHints` in `qumo/ai/tools.mojo`). A tool
 registered with `reg.add` and no hints gets the MCP default: not read-only,
@@ -287,7 +309,7 @@ destructive, not idempotent, open world, so a client must not auto-approve it.
 `reg.add_read_only` marks a tool as verified pure local computation: no file write,
 no network, no hardware submission, no state kept between calls (seeds are explicit
 arguments; the only reads are of `QUMO_MODEL_DIR` / `models/ai_transpiler` files).
-Audit of all 24 registered tools (`qumo/ai`, `qumo/exec`, `qumo/ft`): every one meets
+Audit of all 24 registered tools (all in `qumo/ai`): every one meets
 that bar, so every one is `readOnlyHint: true, destructiveHint: false,
 idempotentHint: true, openWorldHint: false`. This includes `qumo_run_device` and
 `qumo_gpu_info`, which select a local CPU/GPU *simulator* and never talk to a QPU.
@@ -321,8 +343,8 @@ same.
 | Tool | Arguments | Result |
 |---|---|---|
 | `qumo_run_qasm` | `qasm` \| `circuit` \| `program`, `shots`=1024, `seed`=1234, `params`, `max_qubits`=28, `max_iterations`=65536 | `counts` (sorted), `method` (`statevector:static` or `:trajectories`), `most_frequent`, `warnings`, `timing_ms`; a program adds `iterations` and `outputs`. Circuits without measurements are measured on all qubits (QM-W004). |
-| `qumo_statevector` | `qasm`, `params`, `max_amplitudes`=64, `threshold`, `max_qubits`=24 | `amplitudes[{index, bitstring, re, im, probability}]`, `num_nonzero`, `truncated`, `norm` |
-| `qumo_expectation` | `qasm`, `observable` (string or array), `params` | `expectation`, `results[]` |
+| `qumo_statevector` | `qasm`, `params`, `max_amplitudes`=64, `threshold`, `max_qubits`=24 | `amplitudes[{index, bitstring, re, im, probability}]`, `num_nonzero`, `truncated`, `norm`. Terminal measurements are ignored; a reset, a noise channel or a mid-circuit measurement is refused (QM-E416): use `qumo_run_qasm` or `qumo_density` |
+| `qumo_expectation` | `qasm`, `observable` (string or array), `params` | `expectation`, `results[]`. Exact value on one pure state, so the same circuits are refused (QM-E416); `qumo_density` gives the exact noisy value |
 | `qumo_validate_qasm` | `qasm` | `valid`, `errors[]` (every error the parser can reach, not only the first), `errors_complete`, `warnings[]` (lint; QM-W054 for a program), `summary` when valid. After a failing gate call, measurement or assignment the check goes on to the next statement; an error in a declaration or a block header stops it, and `errors_complete` is then `false` (later lines were not checked) |
 | `qumo_describe` | `topic`: gates \| gate \| errors \| error \| capabilities, `name`, `format`: json \| markdown | self-description JSON (`markdown`, topic `errors` only: the text of docs/ERRORS.md) |
 | `qumo_circuit_info` | `qasm` \| `program`, `include_instructions`, `include_qasm`, `include_lint` | `summary`, `lint`, and optionally `circuit` (`program` for a program) and `qasm` |
@@ -335,20 +357,20 @@ order or an object such as `{"theta": 0.1}`.
 A tool that needs one circuit, such as `qumo_statevector` or `qumo_expectation`,
 answers QM-E585 for a program with runtime regions: it has no single final state.
 
-Module tools (`qumo/exec/tools.mojo`, registered by `full_registry()`):
+Module tools (`qumo/ai/exec_tools.mojo`, registered by `full_registry()`):
 
 | Tool | Arguments | Result |
 |---|---|---|
 | `qumo_transpile` | `qasm` \| `circuit` \| `program`, `target` (e.g. `grid:4x4/sc_cz`, `heavy_hex:5/rz,sx,x,ecr`, `trapped_ion:11`, `neutral_atom:4x4`) or `edges` + `basis`, `level` 0-3, `pipeline`, `seed` | compiled QASM 3, per-pass report, layouts, swaps, estimated fidelity |
 | `qumo_estimate_resources` | `qasm`, `profile`: superconducting \| trapped_ion \| neutral_atom, `physical_error`, `error_budget` | logical, NISQ and fault-tolerant estimates |
-| `qumo_vqe`, `qumo_qaoa_maxcut` | Pauli-sum `hamiltonian` / edge-list `graph`, optimizer options, `seed` | energy or cut, parameters, convergence |
+| `qumo_vqe`, `qumo_qaoa_maxcut` | Pauli-sum `hamiltonian` / edge-list `graph`, optimizer options, `seed`, `max_qubits`=24 | energy or cut, parameters, convergence. A width above `max_qubits` is refused with QM-E930 before any work (the server caps `max_qubits` at 30); QAOA also refuses graphs of more than 26 nodes up front (QM-E807, the brute-force reference). |
 | `qumo_qec_memory` | `code`: surface_z \| surface_x \| repetition, `distance`, `rounds`, `p`, `shots`, `decoder`, `seed`, `max_errors` | logical error rate, std error, Wilson interval, per-round rate, timing |
 | `qumo_qec_dem` | `code`, `distance`, `rounds`, `p`, `include_stim` | detector error model in Stim DEM text |
 | `qumo_emulate` | `qasm` \| `circuit`, target as `qumo_transpile`, `calibration`, `compile`, `level`, `shots`=1024, `seed`=1234 | `counts` under the target's noise, `method`, `shots`, `seed`, `num_qubits`, `compiled` (whether it was transpiled first), `estimated_fidelity`, `target`; nothing touches a device. A circuit that does not fit the target is QM-E615 unless `compile` is true |
 | `qumo_density` | `qasm` \| `circuit`, `observable` | exact `probabilities`, `trace`, `purity`, `expectation`; up to 15 qubits |
 | `qumo_to_pbc` | `qasm` \| `circuit`, `fix_clifford` | Pauli-product rotations and measurements in the input frame, with `counts` |
 | `qumo_stim_import` | `stim`, `include_dem`, `include_qasm` | sizes, `missing_detectors`, optionally the DEM and OpenQASM |
-| `qumo_ft_codes` (`qumo/ft/tools.mojo`) | `code` (optional), `check_distance`, `architecture`: steane \| iceberg_<k>, `verify_gadgets` | code definitions, verified distance, architecture description, verification status of every gadget ([FT.md](FT.md)) |
+| `qumo_ft_codes` (`qumo/ai/ft_tools.mojo`) | `code` (optional), `check_distance`, `architecture`: steane \| iceberg_<k>, `verify_gadgets` | code definitions, verified distance, architecture description, verification status of every gadget ([FT.md](FT.md)) |
 | `qumo_ft_encode` | `qasm` \| `circuit`, `architecture`, `n_blocks`, QEC policy (`qec_style`, `qec_threshold`, `qec_costs`), factories, `feed_forward`, `magic_prep`, `rz_mode`, `shots`, `noise_p`, `include_logical`, `include_qasm` | logical program summary, resource report, outputs / post-selection bits, optional emulation next to the unencoded reference |
 | `qumo_ft_verify` | `code`, `kind`: clifford \| state, `semantic_qasm`, `impl_qasm`, `num_blocks`, `num_ancillas` | valid + the first failing operator |
 | `qumo_gpu_info` | none | whether the build has GPU support (`-D QUMO_GPU`), device name, API (CUDA, ROCm/HIP, Metal), `precision` (what `auto` runs: fp32 by default on every GPU), `precision_build_default`, `precision_env` (`QUMO_GPU_PRECISION`), `precisions` (selectable), `precision_note`, `fp64_supported`, auto-dispatch threshold, device profile |
@@ -432,7 +454,7 @@ or in `.mcp.json` / Claude Desktop / any MCP client:
 
 ```
 -> {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"x","version":"1"}}}
-<- {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"qumo","title":"QUMO quantum toolkit","version":"0.1.0"},"instructions":"..."}}
+<- {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"qumo","title":"QUMO quantum toolkit","version":"0.2.0"},"instructions":"..."}}
 -> {"jsonrpc":"2.0","method":"notifications/initialized"}
 -> {"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"qumo_run_qasm","arguments":{"qasm":"OPENQASM 3.0; include \"stdgates.inc\"; qubit[2] q; bit[2] c; h q[0]; cx q[0], q[1]; c = measure q;","shots":1000,"seed":7}}}
 <- {"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"counts\":{\"00\":484,\"11\":516},...}"}],"structuredContent":{"counts":{"00":484,"11":516},"shots":1000,"seed":7,"method":"statevector:static",...},"isError":false}}
@@ -532,13 +554,13 @@ code 1, the same refusal as over MCP.
 `qumo tool <name>`, in `qumo tool list` and in `describe capabilities`):
 
 ```mojo
-# qumo/compiler/tools.mojo  (owned by the compiler module)
+# qumo/ai/compiler_tools.mojo  (tool handlers live in qumo/ai: no other package imports ai)
 from qumo.ai.tools import ToolRegistry, ToolResult, ToolContext, tool_ok, arg_circuit, arg_int
 from qumo.core.json import JsonValue, JsonWriter
 from qumo.ai.describe import write_circuit_summary
 from qumo.ir.qasm import to_qasm
 from qumo.compiler.pass_manager import transpile
-from qumo.compiler.target import parse_target
+from qumo.device.target import parse_target
 
 def _transpile(args: JsonValue, ctx: ToolContext) raises -> ToolResult:
     var warnings = List[String]()
@@ -561,9 +583,10 @@ def register_compiler_tools(mut reg: ToolRegistry):
             _transpile)
 ```
 
-Then add one line to `full_registry()` in `qumo/ai/registry.mojo` (module
-tools live there, so that `qumo.ai.tools` needs no imports from higher-level
-modules):
+Then add one line to `full_registry()` in `qumo/ai/registry.mojo`. Put the
+file in `qumo/ai`, next to `exec_tools.mojo`, `algorithm_tools.mojo` and
+`ft_tools.mojo`: `ai` is the top package, and a tools file inside the module
+it wraps would make that module import `ai` (a package cycle):
 
 ```mojo
     register_compiler_tools(reg)   # like register_exec_tools(reg)

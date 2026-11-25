@@ -19,7 +19,7 @@ from std.math import pi, floor
 from qumo.ir.gates import Op, op_name
 from qumo.ir.param import Param
 from qumo.ir.circuit import Circuit, Instruction
-from qumo.compiler.target import Target
+from qumo.device.target import Target
 
 
 def _in_range(v: Float64, lo: Float64, hi: Float64) -> Bool:

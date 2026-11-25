@@ -136,7 +136,11 @@ The native harness is chosen like any other: `--backend mojo`, or one agent on i
 `"backends": {"code-review": "mojo"}` in `agents.json`. Its model comes from the `mojo` section
 (`"models"`, `"model"`), then the `openrouter` ones, so by default both harnesses run an agent
 on the same OpenRouter id. To point the native harness at another OpenAI-compatible server,
-change `openrouter.base_url` in `agents.json`; it has no separate `local` mode yet.
+change `openrouter.base_url` in `agents.json`; it has no separate `local` mode yet. The native
+harness sends the model key and an MCP bearer token over plain `http://` only to this machine
+(`localhost`, a name ending in `.localhost`, a literal `127.x.y.z` address or `[::1]`); any other
+`http://` URL is refused with `QA-E140`, so a model server on another machine needs `https`.
+The Python `openrouter` and `local` back ends have no such check.
 
 ### Your machine, your choices: `agents/agents.local.json`
 
@@ -190,14 +194,56 @@ the value.
 
 ## 7. What the agents may and may not do
 
-* Read the repository, except `.venv`, `build`, `.git`, `.worktrees` and secret-looking files.
+* Read the repository, except `.venv`, `build`, `.git`, `.worktrees` and secret-looking files (file or directory names; `read_file`, `list_files` and `search_code` share one rule, and symlinks leaving the repository are skipped; the native Mojo harness applies the same rule to every path component).
 * Run only allow-listed commands, without a shell: one Mojo test or example, one example
   through `examples/run_examples.py`, the hardware plugin tests, `build/qumo`, `git diff`
-  and `git status`.
+  and `git status`. Arguments are path-like only, never absolute, and `git` takes only
+  `--stat --name-only --name-status --cached --staged --`. `build/qumo` takes the `run`,
+  `statevector`, `expect`, `transpile`, `emulate`, `validate`, `info`, `draw`, `convert`, `vqe`
+  and `describe` subcommands (not `tool` or `mcp`) and the options listed in
+  `agents/qumo_agents/tools/repo.py`; every file argument follows the `read_file` rules (so
+  `validate .env` is refused), and `-o` / `--output` is refused unless a sandbox is open and the
+  path is inside it. This holds in the Python tool and in the native Mojo harness.
+* On the `claude-code` back end a read-only agent may run `build/qumo` only with the
+  subcommands that cannot write a file (`run`, `statevector`, `expect`, `emulate`, `validate`,
+  `info`, `draw`, `vqe`, `describe`). `convert` and `transpile` are not allowed there, because
+  a Claude Code rule can only match a command prefix and cannot refuse `-o`; the `qumo` MCP
+  tools do both without writing a file. Claude Code's own `Read` tool is not limited by these
+  rules.
+* Checks run on the `openrouter`, `local` and `mojo` back ends get an environment without
+  variables named like `TOKEN`, `SECRET`, `KEY`, `PASSWORD`, `CREDENTIAL`, `AUTH`, `COOKIE` or
+  `SESSION`. The `claude-code` and `codex` CLIs run with your whole environment by default,
+  and so does every command an agent runs through them. `"claude_code": {"env": "scrub"}` and
+  `"codex": {"env": "scrub"}` (in `agents.local.json`) remove variables of other services
+  named like `TOKEN`, `SECRET`, `KEY`, `PASSWORD`, `CREDENTIAL` or `COOKIE`
+  (`OPENROUTER_API_KEY`, `GITHUB_TOKEN`, cloud and quantum-vendor tokens) and keep the CLI's own
+  `ANTHROPIC_` / `CLAUDE_` (or `OPENAI_` / `CODEX_`) variables and `ALPHAXIV_API_KEY`, which the MCP config names. The subscription login is not an
+  environment variable (it is in the CLI's home directory config or the keychain), but this
+  has not been tried against the real login, so `scrub` is opt-in. With a Bedrock or Vertex
+  setup keep `"inherit"`: the CLI needs its `AWS_` or `GOOGLE_` variables. The trade-off: a
+  run that does not need your other credentials no longer holds them, and a run that does
+  (for example a hardware plugin test with a vendor token) fails until you go back to `"inherit"`.
 * Write only `agents/reports/`, and (autoresearch) files inside its own sandbox worktree.
 * Use only alphaXiv's read tools. Its library, folder and follow tools are never loaded.
 * Treat fetched papers, release notes and pages as data. The prompts tell every agent to
   ignore instructions found in them and to report them.
+* Web text and code execution, enforced in `agents/qumo_agents/registry.py` at import:
+  no agent has both `research` (web fetch) and `check` (`run_check`) tools; and every agent
+  that reaches both through delegation (today `autoresearch` and `orchestrator`) must list,
+  in `untrusted_subagents`, each subagent that reaches web fetch, and nothing else. In the
+  openrouter and local back ends the answer of a listed subagent is replaced by a copy cut to
+  6000 characters inside an `UNTRUSTED-DATA` block with a random closing token. Reports copied
+  into a sandbox by `open_sandbox`, and reports read from `agents/reports/` with `read_file`,
+  are wrapped the same way (cut at 60000 characters). What this does not do: the field format
+  (source URL, claim, proposed change) is asked for in the prompts, not checked; a model can
+  still obey wrapped text; `search_code` over `agents/reports/` returns raw lines; the task
+  text an agent writes for a subagent is not wrapped; the Claude Code, Codex and Mojo back ends
+  do not apply the wrapper.
+* What `run_check` does not confine: the command list is fixed and runs without a shell and
+  without credential-looking environment variables, but a test or example it runs is ordinary
+  Python or Mojo code in your user account. It can read any file you can read, write outside
+  the sandbox and open network connections. A sandbox worktree limits what the file tools
+  write, not what a program run there does.
 * Never commit, push, open pull requests or submit jobs to real hardware. The execution
   agent describes the hardware plugin command for a person to run.
 

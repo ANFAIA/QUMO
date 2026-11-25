@@ -37,7 +37,7 @@ out, initial, final, report = q.transpile_program(p, 7, [[i, i + 1] for i in ran
 
 ```mojo
 from qumo.compiler.program_compile import compile_program
-from qumo.compiler.target import parse_target
+from qumo.device.target import parse_target
 from qumo.ir.qasm import load_any, to_qasm
 from qumo.sim.program_runner import sample_program
 
@@ -126,7 +126,7 @@ range has a `bit` in its body.
 
 | Surface | Program support |
 |---|---|
-| Mojo | `load_any`, `parse_qasm_program`, `to_qasm`, `draw_program` (`qumo.ir.qasm`); `sample_program` (`qumo.sim.program_runner`); `compile_program`, `compile_spec_program`, `verify_program`, `program_metrics` (`qumo.compiler.program_compile`); `program_to_json`, `program_from_json` (`qumo.ai.describe`); `lint_program` (`qumo.ai.diagnostics`); `ProgramBuilder` (`qumo.ir.program`) |
+| Mojo | `load_any`, `parse_qasm_program`, `to_qasm`, `draw_program` (`qumo.ir.qasm`); `sample_program` (`qumo.sim.program_runner`); `compile_program`, `compile_spec_program`, `verify_program`, `program_metrics` (`qumo.compiler.program_compile`); `program_to_json`, `program_from_json` (`qumo.ir.json`; `qumo.ai.describe` re-exports them); `lint_program` (`qumo.ai.diagnostics`); `ProgramBuilder` (`qumo.ir.program`) |
 | Python | `qumo_py.Program`, `load_program`, `program_from_json`, `sample_program`, `transpile_program`, `draw_program` |
 | CLI | `qumo run` with `--max-iterations`; `qumo draw`, `validate`, `info`, `convert` |
 | MCP | `qumo_run_qasm`, `qumo_run_device`, `qumo_transpile`, `qumo_draw`, `qumo_validate_qasm`, `qumo_circuit_info`, `qumo_convert` take `qasm`, `program` or `circuit`. Every tool that needs one circuit answers QM-E585 |
@@ -205,7 +205,7 @@ this work: `rz(3/4*pi)` is 0.0 and `rz(10000000000*10000000000)` is 1e20.
 | Non-finite constants | In a flat declaration or gate argument, gate bodies included, QM-E533: `sqrt(-1.0)`, `ln(0.0)`, `1e308 * 10`. In a program, QM-E482 at the gate that reads one |
 | `switch` | On an integer or bits; on a float it is QM-E580. A label of the wrong sign for the target is QM-E580 |
 | Variables in a shot | Nothing survives from the shot before: variables, slots and bits start again |
-| Loop budget | `max_iterations` back-edges per shot, 65536 by default; past it, QM-E480 |
+| Loop budget | `max_iterations` back-edges per shot, 65536 by default; past it, QM-E480. The MCP server refuses more than 1000000 (QM-E913); the CLI and the Mojo API have no ceiling |
 | `input angle[n]` | A float in radians in both parsers, not quantised to n bits. In expressions it behaves as a float |
 
 ### Warnings
@@ -289,9 +289,9 @@ Blocks compile in exact mode: `remove_identities`, merging, commutation, resynth
 angle comparisons work to 1e-13 or better, far below that distance, so nothing the check
 can see is dropped, one gate at a time or as a sum. 20000 of `rx(1e-10) q[0]; cx q[0], q[1];`
 compile and pass, and so does a sweep of theta from 1e-12 to 1e-3 over rx, rz, p, crz, cp
-and rzz, with `pi / 2 ** k`, at levels 1 to 3. **A flat `transpile` is not exact:** it
-keeps its tolerances and drops a rotation below about 2e-6, where `remove_identities`
-sees an infidelity under 1e-12. A block keeps that rotation.
+and rzz, with `pi / 2 ** k`, at levels 1 to 3. `remove_identities` uses the same 1e-14
+tolerance in a flat `transpile` and in a block, so neither drops a small rotation that
+could add up to something visible.
 
 The cost of a block is gates x 2^wires x 2 states. The budget is **2^27 per block and
 2^29 per compile**, with at most **22 wires** for the memory of one state. Over budget

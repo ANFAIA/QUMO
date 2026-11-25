@@ -41,18 +41,15 @@ from qumo.ir.gates import Op, op_arity, op_inverse_kind, op_is_unitary, matrix_1
 from qumo.ir.circuit import Instruction, QUARTER_TURN_LIMIT
 from qumo.ir.param import Param
 from qumo.ir.gateset import GateSet
+from qumo.compiler.common import BlockKind
 from qumo.compiler.kak import cx_cost
-from qumo.compiler.target import Target
+from qumo.device.target import Target
 
 
 # ----------------------------------------------------------------------------
-# Kinds
+# Kinds (BlockKind is defined in common.mojo and imported above; modules that
+# import it from here keep working)
 # ----------------------------------------------------------------------------
-struct BlockKind:
-    comptime CLIFFORD = 0
-    comptime LINEAR = 1
-    comptime PERM = 2
-    comptime PAULI = 3
 
 
 def block_kind_name(kind: Int) -> String:
