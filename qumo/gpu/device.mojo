@@ -25,7 +25,7 @@ asked for, runtime/cudaq/platform/default/nvidia.yml L21-32 at tag 0.16.0):
         same build line works on every vendor. `-D QUMO_GPU_FP32` (the old
         opt-in) is accepted as a no-op alias; with both, QUMO_GPU_FP64 wins.
       - run time: the selector "auto" | "fp32" | "fp64" of
-        `qumo.exec.dispatch.sample_on`, `Device.gpu(precision=...)`, the MCP
+        `qumo.gpu.dispatch.sample_on`, `Device.gpu(precision=...)`, the MCP
         tool `qumo_run_device`, `qumo_py.sample_device(..., precision=...)`
         and `qumo run --precision`. "auto" = the environment variable
         QUMO_GPU_PRECISION (fp32 | fp64) when set, else the build default

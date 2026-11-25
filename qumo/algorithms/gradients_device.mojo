@@ -3,7 +3,7 @@
 `value_and_gradient_on(circuit, h, params, device, note)` returns E(theta) and
 dE/dtheta on the CPU (`ExpectationEngine`, fp64 adjoint) or on the GPU state
 vector (`qumo.gpu`, fp32 by default), with the same fallback rules as
-`qumo.exec.dispatch.sample_on`: a GPU request on a build without
+`qumo.gpu.dispatch.sample_on`: a GPU request on a build without
 `-D QUMO_GPU`, or without a usable device, runs on the CPU and `note` says why.
 `expectation_on` / `expectations_on` do the same for values only
 (`expectations_on` evolves once and evaluates many observables, e.g. every

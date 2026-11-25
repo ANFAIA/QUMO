@@ -25,7 +25,7 @@ from qumo.ir.circuit import Circuit
 from qumo.ir.gates import Op
 from qumo.device.target import Target, parse_target
 from qumo.compiler.pass_manager import transpile, preset_pipeline
-from qumo.exec.emulate import emulate
+from qumo.noise.emulate import emulate
 from qumo.sim.runner import evolve
 from qumo.testing.checks import CheckLog
 

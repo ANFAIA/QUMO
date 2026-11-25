@@ -57,7 +57,7 @@ Versions: Qiskit 2.6.1, qiskit-ibm-runtime 0.51, Aer 0.18.2, pytket 2.18.5, tket
 
 | Feature | Source | Status |
 |---|---|---|
-| `NoiseModel.from_target`, `emulate` | Braket 1.112 | done, `qumo.exec.emulate`, `qumo_emulate` |
+| `NoiseModel.from_target`, `emulate` | Braket 1.112 | done, `qumo.noise.emulate`, `qumo_emulate` |
 | Trajectory deduplication | CUDA-Q 0.14 PTSBE | done, `sample_ptsbe`, [SIMULATION](SIMULATION.md) |
 | T-REX | Cirq contrib, `qiskit-mitigation` | done, `trex_expectation`; not compared with `qiskit_mitigation.TREX` |
 | M3 | `mthree` 3.0 | done, `mitigate_counts_m3`, matches to 5e-9 |
@@ -72,7 +72,7 @@ Versions: Qiskit 2.6.1, qiskit-ibm-runtime 0.51, Aer 0.18.2, pytket 2.18.5, tket
 | Qubit loss, leakage | QDK 1.25-1.32, cuStabilizer 0.5, Selene | deferred |
 | Lindblad dynamics | CUDA-Q | deferred |
 | Extended stabilizer, TDVP, DMRG | Aer, cuDensityMat | skipped: wait for MPS |
-| FT cost of arbitrary rotations | PennyLane estimator | have (`SynthesisModel` in `qumo.exec.resources`, commit 5a965fa) |
+| FT cost of arbitrary rotations | PennyLane estimator | have (`SynthesisModel` in `qumo.compiler.resources`, commit 5a965fa) |
 
 ## QEC and FT
 

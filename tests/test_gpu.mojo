@@ -46,7 +46,7 @@ from qumo.gpu.device import (
     GPU_MIN_QUBITS, GpuProfile, TileKernelLimits, parse_gpu_precision, resolve_gpu_precision, gpu_build_precision,
     gpu_precision_available, check_gpu_precision, GPU_PRECISION_ENV,
 )
-from qumo.exec.dispatch import choose_method, sample_auto, sample_on
+from qumo.gpu.dispatch import choose_method, sample_auto, sample_on
 from qumo.exec.orchestrator import Workflow, Device
 from qumo.ai.registry import full_registry
 from qumo.core.json import parse_json

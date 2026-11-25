@@ -83,7 +83,7 @@ Full install, update, GPU and hardware steps: [docs/GETTING_STARTED.md](docs/GET
 | `qumo.sim` | State vector (SIMD, threads), stabilizer tableau, Pauli-frame sampler, density matrix |
 | `qumo.noise` | `NoiseModel` from calibration data, randomized benchmarking, T1/Ramsey fits, readout mitigation (tensored and M3) |
 | `qumo.gpu` | One Mojo source for NVIDIA, AMD and Apple GPUs |
-| `qumo.exec` | Sampler/Estimator primitives, HEFT orchestration over CPU/GPU/QPU, resource estimation |
+| `qumo.exec` | Sampler/Estimator primitives, HEFT orchestration over CPU/GPU/QPU (resource estimation: `qumo.compiler.resources`; simulator selection: `qumo.gpu.dispatch`; device emulation: `qumo.noise.emulate`) |
 | `qumo.algorithms` | QFT, Grover, QPE, Trotter, UCCSD, gradients, VQE, QAOA, QML |
 | `qumo.qec`, `qumo.ft` | Surface codes, decoders, detector error models; fault-tolerant programming |
 | `qumo.ai`, `cli/` | JSON everywhere, stable `QM-Exxx` error codes with hints, MCP server, CLI |

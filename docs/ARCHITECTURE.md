@@ -14,8 +14,8 @@ their wire formats) is not in `qumo/`: see [Vendor code](#4c-vendor-code-outside
    ┌───────────────────────┴───────────┐  ┌───────┴─────────────┐  ┌──────┴────────────┐
    │ qumo.algorithms                   │  │ qumo.exec           │  │ qumo.qec          │
    │ kernels, gradients, optimizers,   │  │ PUB primitives,     │  │ codes, DEM,       │
-   │ VQE/QAOA, Hamiltonians            │  │ HEFT orchestrator,  │  │ decoders, sweeps, │
-   └───────────────┬───────────────────┘  │ resources           │  │ characterization  │
+   │ VQE/QAOA, Hamiltonians            │  │ HEFT orchestrator   │  │ decoders, sweeps, │
+   └───────────────┬───────────────────┘  │                     │  │ characterization  │
                    │                      └───────┬─────────────┘  └──────┬────────────┘
    ┌───────────────┴──────────────────────────────┴───────────────────────┴────────────┐
    │ qumo.compiler: pass pipeline (text spec), routing, synthesis (targets: qumo.device)│
@@ -40,17 +40,17 @@ today (`qumo/*/*.mojo`, `from qumo.X` lines; the re-export shims for old paths a
 |---|---|---|---|
 | 0 | `core` | JSON writer and parser, `Rng` | nothing from QUMO |
 | 1 | `ir` | gates, `Circuit`, `Program`, Pauli, QASM, circuit/program JSON (`ir/json.mojo`) | `core` |
-| 2 | `device` | `Target`: coupling graph, basis, errors, durations, presets, `parse_target` | `ir` |
-| 2 | `sim` | state vector, tableau, Pauli frames, runners, density, branching | `core`, `ir` |
-| 3 | `noise` | `NoiseModel`, `apply_noise_model`, RB, T1/Ramsey, readout mitigation, M3 | `core`, `ir`, `device`, `sim` |
-| 3 | `compiler` | pass manager, routing, synthesis, `Program` compilation | `core`, `ir`, `device`, `sim` |
+| 2 | `device` | `Target`: coupling graph, basis, errors, durations, presets, `parse_target`; `conformance_error` | `ir` |
+| 2 | `sim` | state vector, tableau, Pauli frames, runners, density, branching, CPU simulator selection (`dispatch`) | `core`, `ir` |
+| 3 | `noise` | `NoiseModel`, `apply_noise_model`, RB, T1/Ramsey, readout mitigation, M3, the device emulator (`emulate`) | `core`, `ir`, `device`, `sim` |
+| 3 | `compiler` | pass manager, routing, synthesis, `Program` compilation, static resource estimation (`resources`) | `core`, `ir`, `device`, `sim` |
 | 3 | `qec` | codes, DEM, decoders, sweeps | `core`, `ir`, `sim` |
-| 3 | `gpu` | vendor-neutral GPU state-vector and frame back ends (`-D QUMO_GPU`) | `core`, `ir`, `sim` |
+| 3 | `gpu` | vendor-neutral GPU state-vector and frame back ends (`-D QUMO_GPU`); simulator selection over CPU and GPU (`dispatch`: `sample_auto`, `sample_on`) | `core`, `ir`, `sim` |
 | 3 | `net` | HTTP/1.1 + TLS client (no QUMO imports). No package of `qumo/` imports it: its users are the vendor clients outside the core | nothing from QUMO |
 | 4 | `algorithms` | kernels, gradients, optimizers, VQE/QAOA, mitigation | `core`, `ir`, `sim`, `noise`, `qec`, `gpu`, `exec` (one file) |
-| 4 | `exec` | primitives, dispatch, orchestrator, emulate, resources | `ir`, `device`, `sim`, `noise`, `compiler`, `gpu` |
+| 4 | `exec` | orchestration only: PUB primitives and the HEFT orchestrator | `ir`, `sim`, `gpu` |
 | 4 | `ft` | fault-tolerant programming layer (Steane, Iceberg, Rz synthesis) | `core`, `ir`, `sim`, `qec` |
-| 5 | `ai` | tool registry, the tool handlers of every module, diagnostics, describe, MCP | `core`, `ir`, `device`, `sim`, `compiler`, `qec`, `gpu`, `algorithms`, `exec`, `ft` |
+| 5 | `ai` | tool registry, the tool handlers of every module, diagnostics, describe, MCP | `core`, `ir`, `device`, `sim`, `noise`, `compiler`, `qec`, `gpu`, `algorithms`, `ft` |
 | - | `bench`, `testing` | benchmark circuits, test helpers | `core`, `ir` (`testing`: nothing from QUMO) |
 
 `core`, `ir`, `device`, `sim` and `noise` import none of `compiler`, `qec`, `ai`, `exec`, `algorithms`.
@@ -68,6 +68,21 @@ Old import paths are kept for one release as one-line re-exports: `qumo.sim.rng`
 functions of `qumo.ai.describe` (now `qumo.ir.json`). `qumo.exec.tools` and `qumo.ft.tools` have no
 re-export: one inside `exec` or `ft` would import `ai` again. Import `qumo.ai.exec_tools` and
 `qumo.ai.ft_tools`.
+
+`exec` holds orchestration only (`primitives`, `orchestrator`). What else was there went to the package
+its imports put it in, and `qumo.exec.dispatch`, `qumo.exec.emulate` and `qumo.exec.resources` are
+re-exports for one release (none closes a cycle; they are not counted in the table):
+
+| Was | Is | Why there |
+|---|---|---|
+| `exec/dispatch.mojo`: `choose_method_cpu`, `sample_frame`, `counts_from_measurements` | `sim/dispatch.mojo` | CPU simulator selection; imports `ir` and `sim` only |
+| `exec/dispatch.mojo`: `sample_auto`, `sample_on`, `choose_method`, `gpu_sample_route`, `sample_frame_gpu`, `gpu_eligible`, `frame_eligible_gpu` | `gpu/dispatch.mojo` | the selection that calls the GPU back ends; `gpu` imports `sim`, so in `sim` it would close a cycle |
+| `exec/emulate.mojo` | `noise/emulate.mojo` | it is `NoiseModel.from_target` plus a CPU sampler; `noise` imports `sim`, so it cannot be in `sim` |
+| `exec/resources.mojo` | `compiler/resources.mojo` | static analysis of a circuit; imports `ir` only |
+| `conformance_error` of `compiler/pass_manager.mojo` (still importable from there) | `device/conformance.mojo` | so that `noise.emulate` does not import the compiler |
+
+There are three files named `emulate.mojo`, each in its own package: `noise/emulate.mojo` (a device's
+noise on the CPU), `gpu/emulate.mojo` (host emulation of the GPU kernel bodies) and `ft/emulate.mojo`.
 
 ## 1. IR (`qumo/ir`)
 
@@ -128,7 +143,8 @@ The IR is self-contained: `qumo/ir` imports nothing from the simulators, the com
   **Pauli-frame sampler**: one reference run, then 512 shots per
   `SIMD[uint64, 8]` batch, parallel over batches (Stim's key idea; 3–4× Stim
   single-threaded on surface-code memory circuits).
-* **Automatic dispatch** (`qumo.exec.dispatch`): noisy Clifford circuits with
+* **Automatic dispatch** (`qumo.sim.dispatch` for the CPU methods, `qumo.gpu.dispatch` for `sample_auto` /
+  `sample_on`, which add the GPU): noisy Clifford circuits with
   many shots → Pauli frames; other Clifford circuits → tableau; everything else
   → state vector. Reported in `SampleResult.method`.
 * **Cache blocking**: for ≥ 19 qubits, consecutive kernels on qubits < 15 are
@@ -174,6 +190,9 @@ The IR is self-contained: `qumo/ir` imports nothing from the simulators, the com
 * **Programs**: `program_compile.mojo` runs the passes around `route` on each block
   and keeps one layout: a region exits with the layout it entered with, and
   `verify_program` checks the skeleton, every edge and the blocks it can.
+* **Resources** (`resources.mojo`): logical metrics + recommended simulator, NISQ duration /
+  success probability per modality profile, surface-code fault-tolerant
+  estimate (distance, factories, physical qubits, runtime).
 
 ## 3b. AI-transpiler training (`rl/`: `qrl` and `qumo_bridge`)
 
@@ -220,14 +239,15 @@ independent of the core count (fixed seed tree and reduction order). Design: `rl
   queue/shot/cost models. HEFT list scheduling assigns jobs (respecting
   capability constraints and an optional time-vs-money weight) and explains
   every decision; execution runs dependency waves in parallel.
-* **Resources**: logical metrics + recommended simulator, NISQ duration /
-  success probability per modality profile, surface-code fault-tolerant
-  estimate (distance, factories, physical qubits, runtime).
+
+Simulator selection, the device emulator and resource estimation are not here: see the table in
+[Package layering](#package-layering).
 
 ## 4b. Side packages: noise, FT, GPU, network
 
 * **`qumo/noise`**: `NoiseModel` from calibration data, `apply_noise_model`, randomized benchmarking,
-  T1/Ramsey, readout calibration and mitigation, M3. Used by `exec.emulate` and `algorithms.mitigation`.
+  T1/Ramsey, readout calibration and mitigation, M3, and `emulate` (a compiled circuit under its target's
+  noise; `noise/emulate.mojo`). Used by `algorithms.mitigation`.
   See [QEC.md](QEC.md) (Characterization).
 * **`qumo/ft`**: the fault-tolerant programming layer: `LogicalProgram`, stabilizer codes, Steane and
   Iceberg architectures, factories, Clifford+T `Rz` synthesis, verification on the tableau; its tools are

@@ -75,7 +75,7 @@ qumo/
   sim/         state vector, stabilizer tableau + branching, Pauli frames, density matrix
   noise/       NoiseModel, characterization (RB, T1/Ramsey), readout mitigation, M3
   gpu/         MAX GPU kernels and state vector (opt-in: -D QUMO_GPU)
-  exec/        PUB primitives, HEFT orchestrator, resource estimation, auto dispatch, agent tools
+  exec/        orchestration: PUB primitives, HEFT orchestrator
   algorithms/  QFT, Grover, QPE, ansatze, Trotter, UCCSD, gradients, optimizers, VQE/QAOA
   ft/          stabilizer codes, logical programs, encoding passes, gadget verification
   qec/         codes, detector error models, decoders, Sinter-style experiments

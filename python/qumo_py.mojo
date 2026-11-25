@@ -62,7 +62,7 @@ from qumo.compiler.program_compile import compile_program
 from qumo.ai.describe import program_from_json, program_to_json
 from qumo.core.json import parse_json
 from qumo.ai.diagnostics import diagnostic_from_error, lint_program
-from qumo.exec.dispatch import sample_on
+from qumo.gpu.dispatch import sample_on
 from qumo.gpu.device import query_gpu
 from qumo.compiler.pass_manager import transpile, compile_spec, transpile_ai, CompileResult
 from qumo.algorithms.gradients import batch_value_and_gradient, Grad
@@ -82,7 +82,7 @@ from max.algorithm import parallelize
 from qumo.sim.statevector import StateVector
 from qumo.compiler.target import Target, parse_target
 from qumo.ir.kraus import KrausChannel
-from qumo.exec.emulate import emulate
+from qumo.noise.emulate import emulate
 from qumo.algorithms.variational import vqe, qaoa_maxcut
 from qumo.algorithms.hamiltonians import (
     Graph, maxcut, transverse_field_ising, heisenberg_xxz, fermi_hubbard, h2_sto3g, ground_energy,

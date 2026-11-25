@@ -3,7 +3,7 @@ from qumo.ir.param import Param
 from qumo.ir.pauli import parse_pauli_sum
 from qumo.exec.orchestrator import Workflow, Device, job_precision
 from std.math import pi
-from qumo.exec.resources import estimate_resources, estimate_hardware, estimate_fault_tolerant, HardwareProfile, SynthesisModel
+from qumo.compiler.resources import estimate_resources, estimate_hardware, estimate_fault_tolerant, HardwareProfile, SynthesisModel
 from std.testing import assert_equal, assert_true, assert_almost_equal
 
 

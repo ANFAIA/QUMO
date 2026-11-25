@@ -386,7 +386,7 @@ shortest paths plus a dense blossom; small codes and reference), `uf`
 (union-find; fast, slightly lower threshold) and `lookup` (lookup table;
 tiny codes with at most 64 detectors). See [QEC.md](QEC.md).
 
-`qumo_run_device` selects the simulator as follows (`qumo.exec.dispatch.sample_on`):
+`qumo_run_device` selects the simulator as follows (`qumo.gpu.dispatch.sample_on`):
 
 * `auto` uses the same dispatch as `qumo_run_qasm`. Noisy Clifford circuits
   without feed-forward go to CPU Pauli frames. Other wide, noisy or dynamic

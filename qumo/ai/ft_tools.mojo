@@ -30,7 +30,7 @@ from qumo.ir.circuit import Circuit
 from qumo.ir.qasm import to_qasm, parse_qasm_with_warnings
 from qumo.core.json import JsonWriter, JsonValue
 from qumo.ai.tools import ToolRegistry, ToolResult, ToolContext, tool_ok, arg_circuit, arg_int, arg_required
-from qumo.exec.resources import estimate_resources
+from qumo.compiler.resources import estimate_resources
 from qumo.qec.codes import NoiseParams
 from qumo.ft.code import StabilizerCode, code_by_name, code_names
 from qumo.ft.arch import Architecture, SteaneBuilder, IcebergBuilder, QECPolicy, FactoryConf, architecture_by_name
@@ -89,7 +89,7 @@ def gadget_checks_json(arch: Architecture) raises -> String:
 
 def resource_report_json(prog: EncodedProgram) raises -> String:
     """Logical + physical resources of an encoded program (physical metrics
-    from qumo.exec.resources.estimate_resources)."""
+    from qumo.compiler.resources.estimate_resources)."""
     var r = estimate_resources(prog.circuit)
     var w = JsonWriter()
     w.begin_object()

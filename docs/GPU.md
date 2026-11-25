@@ -41,7 +41,7 @@ code in the repository, and no vendor gets a code path the others lack.
 
 Integration (all GPU calls gated, see below):
 
-* `qumo/exec/dispatch.mojo`: `choose_method` returns `"gpu"` for static,
+* `qumo/gpu/dispatch.mojo`: `choose_method` returns `"gpu"` for static,
   noiseless, non-Clifford (or parametric) circuits with at least
   `GPU_MIN_QUBITS` qubits (16 on Apple, 20 elsewhere; see
   [Dispatch threshold](#dispatch-threshold)), when the build has GPU support

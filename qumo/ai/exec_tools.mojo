@@ -24,19 +24,19 @@ from qumo.ai.tools import (
 )
 from qumo.ir.json import write_program_json
 from qumo.ir.gates import op_from_name
-from qumo.exec.emulate import emulate
+from qumo.noise.emulate import emulate
 from qumo.sim.density import density_evolve
 from qumo.compiler.pbc import to_pbc
 from qumo.qec.stim_text import from_stim
 from qumo.qec.lint import missing_detectors
 from qumo.sim.runner import SampleResult
-from qumo.exec.dispatch import sample_on
+from qumo.gpu.dispatch import sample_on
 from qumo.gpu.device import query_gpu, GPU_MIN_QUBITS, parse_gpu_precision
 from qumo.device.target import Target, parse_target
 from qumo.compiler.pass_manager import transpile, compile_spec, transpile_ai, CompileResult
 from qumo.compiler.program_compile import ProgramCompileResult, compile_program, compile_spec_program
 from qumo.sim.program_runner import is_clifford_program, sample_program
-from qumo.exec.resources import (
+from qumo.compiler.resources import (
     estimate_resources, estimate_hardware, estimate_fault_tolerant, HardwareProfile,
 )
 from qumo.algorithms.hamiltonians import Graph

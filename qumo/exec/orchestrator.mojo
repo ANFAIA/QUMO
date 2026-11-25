@@ -19,7 +19,7 @@ emulator and flagged (the OpenQASM 3 payload is what would be submitted).
 Jobs that HEFT maps to a GPU device (`Device.gpu`) run on the GPU when the
 build has `-D QUMO_GPU` and a device is usable: estimate jobs on the GPU state
 vector (`qumo.gpu.statevector_gpu`), sample jobs as routed by
-`qumo.exec.dispatch.gpu_sample_route` (Clifford circuits without feed-forward
+`qumo.gpu.dispatch.gpu_sample_route` (Clifford circuits without feed-forward
 -> GPU Pauli frames, other static noiseless circuits -> GPU state vector).
 Otherwise they run on the CPU and `JobResult.backend` ends with
 "(gpu fallback: <reason>)" (no GPU build, no usable device, > 62 classical
@@ -49,7 +49,7 @@ from max.algorithm import parallelize
 from qumo.ir.circuit import Circuit
 from qumo.ir.pauli import PauliSum
 from qumo.sim.runner import sample, expectation, SampleResult
-from qumo.exec.dispatch import sample_auto, gpu_sample_route, sample_frame_gpu
+from qumo.gpu.dispatch import sample_auto, gpu_sample_route, sample_frame_gpu
 from qumo.gpu.device import gpu_available, parse_gpu_precision, resolve_gpu_precision, check_gpu_precision
 from qumo.gpu.statevector_gpu import sample_gpu_runtime, expectation_gpu_runtime
 

@@ -516,7 +516,7 @@ python -m qumo_hardware run examples/foundations/ghz.qasm -p local -b 'qumo-sim+
 | `neutral_atom` | 5e-4 | 5e-3 | 1e-2 |
 | `custom(p1,p2,pm)` | p1 | p2 | pm (each in [0, 0.75]) |
 
-The rates are QUMO's `HardwareProfile` presets (qumo/exec/resources.mojo), so
+The rates are QUMO's `HardwareProfile` presets (qumo/compiler/resources.mojo), so
 the emulator and `qumo_estimate_resources` agree on what a modality means.
 After QUMO compiles the circuit for the target topology and basis, the plugin
 inserts `#pragma qumo depolarize1(p1)` after every 1-qubit gate,
