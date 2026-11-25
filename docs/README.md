@@ -31,8 +31,10 @@ For research use: the reference by module below, [EXTENDING](EXTENDING.md), the 
 | Module | Doc |
 |---|---|
 | `qumo.ir`, classical variables and `while` | [CONTROL_FLOW](CONTROL_FLOW.md) |
-| `qumo.compiler` | [COMPILER](COMPILER.md), [AI_TRANSPILER](AI_TRANSPILER.md) |
+| `qumo.device` (`Target`, `parse_target`) | [COMPILER](COMPILER.md#targets-qumodevicetarget), [EXTENDING](EXTENDING.md#5-a-target) |
+| `qumo.compiler` | [COMPILER](COMPILER.md), [PASSES](PASSES.md) (generated: every pass, alias and argument), [AI_TRANSPILER](AI_TRANSPILER.md) |
 | `qumo.sim`, noise channels and `#pragma qumo` noise syntax | [SIMULATION](SIMULATION.md) |
+| `qumo.noise` (`NoiseModel`, characterization, readout mitigation, M3) | [QEC](QEC.md#characterization-qumonoisecharacterization) |
 | `qumo.gpu` | [GPU](GPU.md) |
 | `qumo.algorithms` | [ALGORITHMS](ALGORITHMS.md), [QML](QML.md) |
 | `qumo.qec` | [QEC](QEC.md) |
@@ -66,9 +68,12 @@ For research use: the reference by module below, [EXTENDING](EXTENDING.md), the 
 
 ```
 qumo/
-  ir/          circuit IR, Program (control flow, classical variables), gates, Param, Pauli, OpenQASM 2/3
-  compiler/    Target (data), text pass pipelines, routing (VF2 + SABRE), KAK, phase folding
-  sim/         state vector, stabilizer tableau + branching, Pauli frames, density matrix, RNG
+  core/        JSON writer and parser, seeded Rng (imports nothing from QUMO)
+  ir/          circuit IR, Program (control flow, classical variables), gates, Param, Pauli, OpenQASM 2/3, circuit and program JSON
+  device/      Target (data): coupling graph, basis, errors, presets, parse_target
+  compiler/    text pass pipelines, routing (VF2 + SABRE), KAK, phase folding
+  sim/         state vector, stabilizer tableau + branching, Pauli frames, density matrix
+  noise/       NoiseModel, characterization (RB, T1/Ramsey), readout mitigation, M3
   gpu/         MAX GPU kernels and state vector (opt-in: -D QUMO_GPU)
   exec/        PUB primitives, HEFT orchestrator, resource estimation, auto dispatch, agent tools
   algorithms/  QFT, Grover, QPE, ansatze, Trotter, UCCSD, gradients, optimizers, VQE/QAOA
@@ -90,3 +95,5 @@ models/        research: trained AI-transpiler models, loaded only by the AI tra
 tests/         one test_<module>.mojo per module
 docs/          this documentation
 ```
+
+The package layering (which package may import which) and the old import paths that still work for one release (`qumo.sim.rng`, `qumo.compiler.target`, `qumo.qec.characterization`, `qumo.qec.mthree`, the JSON functions of `qumo.ai.describe`) are in [ARCHITECTURE](ARCHITECTURE.md#package-layering).

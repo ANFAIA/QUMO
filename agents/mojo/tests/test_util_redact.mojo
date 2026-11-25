@@ -41,4 +41,38 @@ def main() raises:
     assert_equal(redact_all("alpha-value-0001 changed-value-0009", names), "alpha-value-0001 [REDACTED]")
     for n in names:
         _ = unsetenv(n)
+
+    # Bearer / Basic in any letter case; the whole value goes, dots and base64 signs included
+    assert_equal(redact("authorization: bearer abcdefgh12345", ""), "authorization: bearer [REDACTED]")
+    assert_equal(redact("AUTHORIZATION: BEARER abcdefgh12345", ""), "AUTHORIZATION: BEARER [REDACTED]")
+    assert_equal(redact("Bearer eyJhbGciOiJ9.eyJzdWIiOiJ4In0.c2lnbmF0dXJl end", ""), "Bearer [REDACTED] end")
+    assert_equal(redact("Authorization: Basic bWFkZS11cDpub3QtcmVhbA== end", ""), "Authorization: Basic [REDACTED] end")
+    assert_equal(redact("authorization: basic dXNlcjpwYXNz", ""), "authorization: basic [REDACTED]")
+    # must keep: prose after the scheme words, short values, words that only contain them
+    assert_equal(redact("use basic authentication here", ""), "use basic authentication here")
+    assert_equal(redact("Basic Authentication is off", ""), "Basic Authentication is off")
+    assert_equal(redact("bearer abc", ""), "bearer abc")
+    assert_equal(redact("forbearer abcdefgh12345", ""), "forbearer abcdefgh12345")
+    assert_equal(redact("job d1f2a3b4c5d6e7f8a9b0 sha 9f86d081884c7d659a2fbd3ca0c0b1f1e7b6a9c2", ""),
+                 "job d1f2a3b4c5d6e7f8a9b0 sha 9f86d081884c7d659a2fbd3ca0c0b1f1e7b6a9c2")
+
+    # JSON-escaped form of a known value (a server echoing the key inside a JSON string)
+    var odd = String('ab"cd\\ef-0001')
+    assert_equal(redact('{"echo": "ab\\"cd\\\\ef-0001"} raw ab"cd\\ef-0001', odd), '{"echo": "[REDACTED]"} raw [REDACTED]')
+
+    # short values: 4 to 7 bytes only as a whole word, under 4 never
+    assert_equal(redact("got ab12z, cab12zd and (ab12z)", "ab12z"), "got [REDACTED], cab12zd and ([REDACTED])")
+    assert_equal(redact("ab12z", "ab12z"), "[REDACTED]")
+    assert_equal(redact("abc and cabcd", "abc"), "abc and cabcd")
+
+    # every variable of the process whose name looks secret, not only the listed ones;
+    # a value that contains another one is replaced whole
+    _ = setenv("QUMO_TEST_OTHER_TOKEN", "omega-value-0004")
+    _ = setenv("QUMO_TEST_LONGER_API_KEY", "omega-value-0004-and-more")
+    var none = List[String]()
+    assert_equal(redact_all("a omega-value-0004 b omega-value-0004-and-more c", none), "a [REDACTED] b [REDACTED] c")
+    _ = setenv("QUMO_TEST_OTHER_TOKEN", 'om"ega-0005')
+    assert_equal(redact_all('{"m": "bad om\\"ega-0005"}', none), '{"m": "bad [REDACTED]"}')
+    _ = unsetenv("QUMO_TEST_OTHER_TOKEN")
+    _ = unsetenv("QUMO_TEST_LONGER_API_KEY")
     print("test_util_redact OK")

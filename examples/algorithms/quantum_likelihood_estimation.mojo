@@ -23,7 +23,7 @@ from std.math import cos, exp, floor, log, pi, sin, sqrt
 from qumo.algorithms.library import trotter
 from qumo.ir.circuit import Circuit
 from qumo.ir.pauli import PauliSum
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.sim.runner import evolve, sample
 from qumo.testing.checks import CheckLog
 

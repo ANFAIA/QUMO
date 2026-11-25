@@ -327,7 +327,7 @@ struct GeneratedTools(Movable):
         var conf = Optional[Confinement](None)
         var trampoline = String()
         if self._os_sandbox():
-            conf = Confinement(CONF_TOOL, [tmp_real], self._read_allow.copy(), _home_realpath(),
+            conf = Confinement(CONF_TOOL, [tmp_real], self._read_allow.copy(), List[String](), _home_realpath(),
                                4 * timeout_s + 10, TOOL_FSIZE_BYTES)
             trampoline = self._self_binary
         var params = StdioServerParams(copy, List[String](), List[String](), tmp_real, timeout_s * 1000,

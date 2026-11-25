@@ -287,14 +287,14 @@ def test_trampolines() raises:
     assert_true(r.stderr.find("QA-E163") >= 0, r.stderr)
     var bin = realpath_strict(app_binary())
     if sandbox_kind(bin) != "none":
-        var conf = Confinement(CONF_CHECK, List[String](), List[String](), String(), 0, 0)
+        var conf = Confinement(CONF_CHECK, List[String](), List[String](), List[String](), String(), 0, 0)
         r = run_app(["__confine", conf.to_json(), "/usr/bin/true"], env_with(none), "", 20000)
         assert_equal(r.exit_code, 0, r.stderr)
         # A write outside write_dirs is refused by the OS.
         r = run_app(["__confine", conf.to_json(), "/usr/bin/touch", dir + "/nope"], env_with(none), "", 20000)
         assert_true(r.exit_code != 0)
         assert_false(exists(dir + "/nope"))
-        var conf2 = Confinement(CONF_CHECK, [realpath_strict(dir)], List[String](), String(), 0, 0)
+        var conf2 = Confinement(CONF_CHECK, [realpath_strict(dir)], List[String](), List[String](), String(), 0, 0)
         r = run_app(["__confine", conf2.to_json(), "/usr/bin/touch", realpath_strict(dir) + "/yes"], env_with(none), "", 20000)
         assert_equal(r.exit_code, 0, r.stderr)
         assert_true(exists(dir + "/yes"))

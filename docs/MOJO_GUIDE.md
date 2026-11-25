@@ -87,7 +87,7 @@ Full notes: [v1.2.0 release notes](https://github.com/modular/modular/blob/main/
 ## QUMO conventions
 
 * Error messages start with a stable code `QM-Exxx` and end with a `Hint:` — agents key on these (`docs/ERRORS.md`).
-* Every random process takes an explicit `seed` → bit-identical reruns (`qumo.sim.rng.Rng`, use `rng.split(k)` per worker).
+* Every random process takes an explicit `seed` → bit-identical reruns (`qumo.core.rng.Rng`, use `rng.split(k)` per worker).
 * Qubit order: little-endian (bit k of basis index = qubit k); bitstring keys are Qiskit-style (leftmost = highest clbit).
 * Hot loops: split re/im `List[Float64]`, raw pointers, `W = 8` SIMD lanes, `run_chunks` for threads.
 * Tests: one `tests/test_<module>.mojo` per module with `def main() raises:` and prints `test_<module> OK`.

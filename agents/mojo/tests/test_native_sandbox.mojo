@@ -8,7 +8,7 @@ Run from the repository root.
 """
 
 from std.testing import assert_equal, assert_true, assert_false
-from std.os import getenv, mkdir, symlink as std_symlink
+from std.os import getenv, symlink as std_symlink
 
 from qumo_agent.native.sandbox import *
 from qumo_agent.native.spawn import (
@@ -54,26 +54,27 @@ def _q(s: String) -> String:
     return '"' + s + '"'
 
 
-def _has(items: List[String], p: String) -> Bool:
-    for i in items:
-        if i == p:
-            return True
-    return False
+def _rx(dir: String) -> String:
+    """The SBPL regex for the direct entries of `dir` (`.` is the only special character
+    in the test paths)."""
+    return '#"^' + dir.replace(".", "\\.") + '/[^/]+$"'
 
 
 def test_json_round_trip() raises:
-    var c = Confinement(CONF_TOOL, ["/tmp/a b", "/x\"y"], ["/lib\\z"], "/Users/u", 14, 67108864)
+    var c = Confinement(CONF_TOOL, ["/tmp/a b", "/x\"y"], ["/lib\\z"], ["/Users/u/repo"], "/Users/u", 14, 67108864)
     var j = c.to_json()
-    assert_equal(j, '{"profile":3,"write_dirs":["/tmp/a b","/x\\"y"],"read_allow":["/lib\\\\z"],"home":"/Users/u","cpu_s":14,"fsize_bytes":67108864}')
+    assert_equal(j, '{"profile":3,"write_dirs":["/tmp/a b","/x\\"y"],"read_allow":["/lib\\\\z"],"list_dirs":["/Users/u/repo"],"home":"/Users/u","cpu_s":14,"fsize_bytes":67108864}')
     var back = confinement_from_json(j)
     assert_equal(back.profile, CONF_TOOL)
     assert_equal(len(back.write_dirs), 2)
     assert_equal(back.write_dirs[1], "/x\"y")
     assert_equal(back.read_allow[0], "/lib\\z")
+    assert_equal(back.list_dirs[0], "/Users/u/repo")
     assert_equal(back.home, "/Users/u")
     assert_equal(back.cpu_s, 14)
     assert_equal(back.fsize_bytes, 67108864)
-    for bad in ['[]', '{"profile":9,"write_dirs":[],"read_allow":[],"home":"","cpu_s":0,"fsize_bytes":0}', '{"profile":1}', '{"profile":1,"write_dirs":[1],"read_allow":[],"home":"","cpu_s":0,"fsize_bytes":0}']:
+    for bad in ['[]', '{"profile":9,"write_dirs":[],"read_allow":[],"list_dirs":[],"home":"","cpu_s":0,"fsize_bytes":0}', '{"profile":1}', '{"profile":1,"write_dirs":[1],"read_allow":[],"list_dirs":[],"home":"","cpu_s":0,"fsize_bytes":0}',
+                '{"profile":1,"write_dirs":[],"read_allow":[],"home":"","cpu_s":0,"fsize_bytes":0}']:
         try:
             _ = confinement_from_json(bad)
             assert_true(False, "accepted " + bad)
@@ -83,65 +84,71 @@ def test_json_round_trip() raises:
 
 def test_profiles() raises:
     var home = realpath_strict(make_temp_dir("qumo-home-"))
-    mkdir(home + "/.ssh")
-    mkdir(home + "/.some-new-cli")
-    mkdir(home + "/.local")
-    mkdir(home + "/visible")
-    mkdir(home + "/real_config")
-    std_symlink(home + "/real_config", home + "/.config")
-    var tool = Confinement(CONF_TOOL, ["/w/one", "/w/q\"uote\\d"], ["/r/lib"], home, 0, 0)
+    var tool = Confinement(CONF_TOOL, ["/w/one", "/w/q\"uote\\d"], ["/r/lib"], List[String](), home, 0, 0)
     assert_equal(
         macos_profile(tool),
         '(version 1)(allow default)(deny network*)(deny file-write*)'
         + '(allow file-write* (literal "/dev/null") (subpath "/w/one") (subpath "/w/q\\"uote\\\\d"))'
         + '(deny process-fork)(deny file-read* (subpath ' + _q(home) + '))(allow file-read* (subpath "/r/lib"))',
     )
-    var no_allow = Confinement(CONF_TOOL, List[String](), List[String](), home, 0, 0)
+    var no_allow = Confinement(CONF_TOOL, List[String](), List[String](), List[String](), home, 0, 0)
     assert_equal(
         macos_profile(no_allow),
         '(version 1)(allow default)(deny network*)(deny file-write*)(allow file-write* (literal "/dev/null"))'
         + '(deny process-fork)(deny file-read* (subpath ' + _q(home) + '))',
     )
-    var sens = sensitive_home_paths(home)
-    var want: List[String] = [
-        home + "/.ssh", home + "/.aws", home + "/.azure", home + "/.gnupg", home + "/real_config", home + "/.config",
-        home + "/.docker", home + "/.kube", home + "/.netrc", home + "/.git-credentials", home + "/.pypirc",
-        home + "/.npmrc", home + "/.zsh_history", home + "/.bash_history", home + "/Library/Keychains",
-    ]
-    # The fixed names come first (existing ones as realpaths), then the other dot entries.
-    for i in range(len(want)):
-        assert_equal(sens[i], want[i])
-    for extra in [".codex", ".claude", ".claude.json", ".gemini", ".hf-cli", ".qiskit", ".cache", ".gitconfig",
-                  ".zshrc", "Library/Application Support"]:
-        assert_true(_has(sens, home + "/" + extra), "not denied: " + extra)
-    assert_true(_has(sens, home + "/.some-new-cli"), "an unlisted dot directory must be denied")
-    assert_false(_has(sens, home + "/.local"))
-    assert_false(_has(sens, home + "/visible"))
-    var deny = String("(deny file-read*")
-    for p in sens:
-        deny += " (subpath " + _q(p) + ")"
-    deny += ")"
+    # CONF_CHECK and CONF_BUILD: $HOME is denied as a whole; with nothing named below it,
+    # nothing is allowed back.
+    var head = '(version 1)(allow default)(deny network*)(deny file-write*)'
     for prof in [CONF_CHECK, CONF_BUILD]:
-        var c = Confinement(prof, ["/sandbox"], List[String](), home, 0, 0)
+        var c = Confinement(prof, ["/sandbox"], ["/elsewhere"], ["/other"], home + "/", 0, 0)
         assert_equal(
             macos_profile(c),
-            '(version 1)(allow default)(deny network*)(deny file-write*)(allow file-write* (literal "/dev/null") (subpath "/sandbox"))' + deny,
+            head + '(allow file-write* (literal "/dev/null") (subpath "/sandbox"))(deny file-read* (subpath ' + _q(home) + '))',
         )
-    # What the caller names below $HOME stays readable even inside a denied directory.
-    var inner = Confinement(CONF_BUILD, [home + "/.cache/work"], [home + "/.local/lib", "/elsewhere"], home, 0, 0)
+    # What the caller names below $HOME is allowed back: write dirs and read_allow as
+    # subtrees, list_dirs as single directories, their ancestors for metadata only.
+    # $HOME itself, a path above it and a path outside it are not allowed back.
+    var inner = Confinement(
+        CONF_BUILD, [home + "/.cache/work"], [home + "/repo/qumo", "/elsewhere", home, "/"], [home + "/repo", home], home, 0, 0,
+    )
     assert_equal(
         macos_profile(inner),
-        '(version 1)(allow default)(deny network*)(deny file-write*)(allow file-write* (literal "/dev/null") (subpath ' + _q(home + "/.cache/work") + '))'
-        + deny + '(allow file-read* (subpath ' + _q(home + "/.cache/work") + ') (subpath ' + _q(home + "/.local/lib") + '))',
+        head + '(allow file-write* (literal "/dev/null") (subpath ' + _q(home + "/.cache/work") + '))'
+        + '(deny file-read* (subpath ' + _q(home) + '))'
+        + '(allow file-read* (subpath ' + _q(home + "/.cache/work") + ') (subpath ' + _q(home + "/repo/qumo") + ') (literal ' + _q(home + "/repo") + '))'
+        + '(allow file-read-metadata (literal ' + _q(home) + ') (regex ' + _rx(home) + ') (regex ' + _rx(home + "/.cache") + ') (regex ' + _rx(home + "/repo") + '))',
     )
-    assert_equal(len(sensitive_home_paths("")), 0)
     try:
-        _ = macos_profile(Confinement(CONF_TOOL, ["/a\nb"], List[String](), "", 0, 0))
+        _ = macos_profile(Confinement(CONF_CHECK, List[String](), ["/h\"x/a/b"], List[String](), "/h\"x", 0, 0))
+        assert_true(False, "a double quote in an ancestor must be refused")
+    except e:
+        assert_true(String(e).startswith("QA-E163: OS confinement failed: path with a double quote"), String(e))
+    # No $HOME: no read rule.
+    assert_equal(
+        macos_profile(Confinement(CONF_CHECK, ["/sandbox"], ["/r"], List[String](), "", 0, 0)),
+        head + '(allow file-write* (literal "/dev/null") (subpath "/sandbox"))',
+    )
+    # venv_read_paths: the virtualenv, each link on the way to the interpreter, its prefix.
+    make_dirs(home + "/py/cpython-3.12.1/bin")
+    write_text(home + "/py/cpython-3.12.1/bin/python3.12", "")
+    std_symlink(home + "/py/cpython-3.12.1", home + "/py/cpython-3.12")
+    make_dirs(home + "/repo/.venv/bin")
+    std_symlink(home + "/py/cpython-3.12/bin/python3.12", home + "/repo/.venv/bin/python")
+    std_symlink("repo/.venv", home + "/venv-link")
+    var vp = venv_read_paths(home + "/venv-link")
+    var vwant: List[String] = [home + "/repo/.venv", home + "/venv-link", home + "/repo/.venv/bin/python", home + "/py/cpython-3.12", home + "/py/cpython-3.12.1"]
+    assert_equal(len(vp), len(vwant))
+    for i in range(len(vwant)):
+        assert_equal(vp[i], vwant[i])
+    assert_equal(len(venv_read_paths(home + "/missing-venv")), 0)
+    try:
+        _ = macos_profile(Confinement(CONF_TOOL, ["/a\nb"], List[String](), List[String](), "", 0, 0))
         assert_true(False, "a control character must be refused")
     except e:
         assert_true(String(e).startswith("QA-E163: OS confinement failed: path with a control character"), String(e))
     try:
-        _ = macos_profile(Confinement(7, List[String](), List[String](), "", 0, 0))
+        _ = macos_profile(Confinement(7, List[String](), List[String](), List[String](), "", 0, 0))
         assert_true(False)
     except e:
         assert_true(String(e).startswith("QA-E163"))
@@ -149,7 +156,7 @@ def test_profiles() raises:
 
 
 def test_confine_shape(self_bin: String) raises:
-    var c = Confinement(CONF_CHECK, ["/tmp"], List[String](), "", 0, 0)
+    var c = Confinement(CONF_CHECK, ["/tmp"], List[String](), List[String](), "", 0, 0)
     var env: List[String] = ["PATH=/usr/bin:/bin", "A=1"]
     var spec = SpawnSpec("echo", ["echo", "x y", "z"], env.copy(), "/tmp", STDIO_NULL, STDIO_PIPE, STDIO_PIPE, True)
     var out = confine(spec, c, self_bin)
@@ -215,7 +222,7 @@ def test_confined_runs(tramp: String, work: String) raises:
     var env = minimal_child_env()
 
     # Writes: only below write_dirs.
-    var check = Confinement(CONF_CHECK, [inside], List[String](), home, 0, 0)
+    var check = Confinement(CONF_CHECK, [inside], List[String](), List[String](), home, 0, 0)
     var r = run_capture(confine(_spec("/usr/bin/touch", ["touch", outside + "/x"], env), check, tramp), 20000, 4000, "")
     assert_true(r.exit_code != 0, "touch outside write_dirs succeeded")
     assert_false(exists(outside + "/x"))
@@ -229,7 +236,7 @@ def test_confined_runs(tramp: String, work: String) raises:
     var probe = probe_dir + "/native_sandbox_read_probe.txt"
     write_text(probe, "readable")
     if probe.startswith(home + "/"):
-        var tool = Confinement(CONF_TOOL, [inside], List[String](), home, 0, 0)
+        var tool = Confinement(CONF_TOOL, [inside], List[String](), List[String](), home, 0, 0)
         r = run_capture(_spec("/bin/cat", ["cat", probe], env), 20000, 4000, "")
         assert_equal(r.stdout, "readable")
         r = run_capture(confine(_spec("/bin/cat", ["cat", probe], env), tool, tramp), 20000, 4000, "")
@@ -238,37 +245,11 @@ def test_confined_runs(tramp: String, work: String) raises:
     else:
         print("note: repository not under $HOME; the $HOME read check was skipped")
 
-    # CONF_CHECK/CONF_BUILD: credential files other CLIs keep under $HOME are not readable
-    # (a fake home, so no real secret is involved); the toolchain dirs and the caller's
-    # allowed paths stay readable.
-    if is_macos():
-        var fake = realpath_strict(make_temp_dir("qumo-conf-home-"))
-        for d in [".codex", ".some-new-cli", ".cache/huggingface", ".local/share", "plain"]:
-            make_dirs(fake + "/" + d)
-        write_text(fake + "/.codex/auth.json", "secret")
-        write_text(fake + "/.some-new-cli/token", "secret")
-        write_text(fake + "/.cache/huggingface/token", "secret")
-        write_text(fake + "/.claude.json", "secret")
-        write_text(fake + "/.local/share/ok", "fine")
-        write_text(fake + "/plain/ok", "fine")
-        for prof in [CONF_CHECK, CONF_BUILD]:
-            var fc = Confinement(prof, [inside], List[String](), fake, 0, 0)
-            for f in [".codex/auth.json", ".some-new-cli/token", ".cache/huggingface/token", ".claude.json"]:
-                r = run_capture(confine(_spec("/bin/cat", ["cat", fake + "/" + f], env), fc, tramp), 20000, 4000, "")
-                assert_true(r.exit_code != 0 and r.stdout.find("secret") < 0, "profile " + String(prof) + " read " + f)
-            for f in [".local/share/ok", "plain/ok"]:
-                r = run_capture(confine(_spec("/bin/cat", ["cat", fake + "/" + f], env), fc, tramp), 20000, 4000, "")
-                assert_equal(r.stdout, "fine")
-        var fa = Confinement(CONF_CHECK, [inside], [fake + "/.some-new-cli"], fake, 0, 0)
-        r = run_capture(confine(_spec("/bin/cat", ["cat", fake + "/.some-new-cli/token"], env), fa, tramp), 20000, 4000, "")
-        assert_equal(r.stdout, "secret")
-        remove_tree(fake)
-
     # A reference Mojo binary copied to a temp dir runs under CONF_TOOL with an empty
     # environment, and cannot connect to a local listener.
     var tool_dir = realpath_strict(make_temp_dir("qumo-conf-tool-"))
     copy_file(tramp, tool_dir + "/tool", 0o755)
-    var tool = Confinement(CONF_TOOL, [tool_dir], [modular_lib_dir(repo)], home, 30, 64 * 1024 * 1024)
+    var tool = Confinement(CONF_TOOL, [tool_dir], [modular_lib_dir(repo)], List[String](), home, 30, 64 * 1024 * 1024)
     r = run_capture(confine(_spec(tool_dir + "/tool", ["tool", "hello"], List[String]()), tool, tramp), 60000, 4000, "")
     assert_equal(r.exit_code, 0, r.stderr)
     assert_equal(r.stdout, "hello from fixture\n")
@@ -300,7 +281,7 @@ def test_confined_runs(tramp: String, work: String) raises:
     # runtime's crash reporter prints a stack dump and the program keeps running),
     # and macOS sends nothing more at the hard limit, so for Mojo tools the caller's
     # timeout and process-group kill are what stop a busy loop.
-    var cpu = Confinement(CONF_CHECK, [inside], List[String](), home, 1, 0)
+    var cpu = Confinement(CONF_CHECK, [inside], List[String](), List[String](), home, 1, 0)
     var t0 = monotonic_ms()
     r = run_capture(confine(_spec("/bin/sh", ["sh", "-c", "while :; do :; done"], env), cpu, tramp), 30000, 4000, "")
     var dt = monotonic_ms() - t0
@@ -322,7 +303,7 @@ def test_confined_runs(tramp: String, work: String) raises:
     r = run_capture(_spec(tramp, [tramp, "__confine"], env), 20000, 4000, "")
     assert_equal(r.exit_code, 125)
     assert_true(r.stderr.startswith("QA-E163: OS confinement failed: usage"), r.stderr)
-    var bad = Confinement(CONF_TOOL, ["/a\x01b"], List[String](), home, 0, 0)
+    var bad = Confinement(CONF_TOOL, ["/a\x01b"], List[String](), List[String](), home, 0, 0)
     r = run_capture(_spec(tramp, [tramp, "__confine", bad.to_json(), "/bin/true"], env), 20000, 4000, "")
     assert_equal(r.exit_code, 125)
     assert_true(r.stderr.startswith("QA-E163: OS confinement failed: path with a control character"), r.stderr)
@@ -341,6 +322,52 @@ def test_confined_runs(tramp: String, work: String) raises:
     remove_tree(probe)
 
 
+def test_home_is_denied_by_default(tramp: String) raises:
+    """CONF_CHECK and CONF_BUILD read nothing below $HOME except what the caller names
+    (a fake home: no real file is involved). macOS only: the Linux rule is not run here."""
+    var fake = realpath_strict(make_temp_dir("qumo-conf-home2-"))
+    var inside = realpath_strict(make_temp_dir("qumo-conf-in2-"))
+    var env = minimal_child_env()
+    for d in ["code/other", "Documents", "checkout/agents", "checkout/qumo", "work", ".codex", ".local/share"]:
+        make_dirs(fake + "/" + d)
+    write_text(fake + "/code/other/.env", "secret")
+    write_text(fake + "/Documents/notes.txt", "secret")
+    write_text(fake + "/checkout/.env", "secret")
+    write_text(fake + "/checkout/agents/agents.local.json", "secret")
+    write_text(fake + "/top.txt", "secret")
+    write_text(fake + "/.codex/auth.json", "secret")
+    write_text(fake + "/.local/share/token", "secret")
+    write_text(fake + "/.claude.json", "secret")
+    write_text(fake + "/checkout/qumo/ok.mojo", "fine")
+    write_text(fake + "/work/ok", "fine")
+    var secrets: List[String] = ["code/other/.env", "Documents/notes.txt", "checkout/.env", "checkout/agents/agents.local.json", "top.txt",
+                                 ".codex/auth.json", ".local/share/token", ".claude.json"]
+    for prof in [CONF_CHECK, CONF_BUILD]:
+        var c = Confinement(prof, [inside, fake + "/work"], [fake + "/checkout/qumo"], [fake + "/checkout"], fake, 0, 0)
+        for f in secrets:
+            var r = run_capture(confine(_spec("/bin/cat", ["cat", fake + "/" + f], env), c, tramp), 20000, 4000, "")
+            assert_true(r.exit_code != 0 and r.stdout.find("secret") < 0, "profile " + String(prof) + " read $HOME/" + f)
+        for d in ["", "/Documents", "/code"]:
+            var r = run_capture(confine(_spec("/bin/ls", ["ls", fake + d], env), c, tramp), 20000, 4000, "")
+            assert_true(r.exit_code != 0 and r.stdout == "", "profile " + String(prof) + " listed $HOME" + d + ": " + r.stdout)
+        # what the caller names stays readable: a read_allow subtree and a write dir
+        for f in ["checkout/qumo/ok.mojo", "work/ok"]:
+            var r = run_capture(confine(_spec("/bin/cat", ["cat", fake + "/" + f], env), c, tramp), 20000, 4000, "")
+            assert_equal(r.stdout, "fine", r.stderr)
+        # the direct entries of an ancestor can be stat-ed (not read); deeper ones cannot
+        var st = run_capture(confine(_spec("/usr/bin/stat", ["stat", "-f", "%z", fake + "/top.txt"], env), c, tramp), 20000, 4000, "")
+        assert_equal(st.stdout, "6\n", st.stderr)
+        st = run_capture(confine(_spec("/usr/bin/stat", ["stat", "-f", "%z", fake + "/Documents/notes.txt"], env), c, tramp), 20000, 4000, "")
+        assert_true(st.exit_code != 0 and st.stdout == "", "stat of Documents/notes.txt: " + st.stdout)
+        # a list_dirs directory can be listed, and that is all: its files stay unreadable
+        var ls = run_capture(confine(_spec("/bin/ls", ["ls", "-a", fake + "/checkout"], env), c, tramp), 20000, 4000, "")
+        assert_equal(ls.stdout, ".\n..\n.env\nagents\nqumo\n", ls.stderr)
+        ls = run_capture(confine(_spec("/bin/ls", ["ls", fake + "/checkout/agents"], env), c, tramp), 20000, 4000, "")
+        assert_true(ls.exit_code != 0 and ls.stdout == "", "listed checkout/agents: " + ls.stdout)
+    remove_tree(fake)
+    remove_tree(inside)
+
+
 def main() raises:
     test_json_round_trip()
     test_profiles()
@@ -353,11 +380,13 @@ def main() raises:
     if kind == "none":
         print("note: no OS sandbox on this machine; confined runs were not exercised")
         try:
-            _ = confine(_spec("/bin/true", ["true"], List[String]()), Confinement(CONF_TOOL, List[String](), List[String](), "", 0, 0), tramp)
+            _ = confine(_spec("/bin/true", ["true"], List[String]()), Confinement(CONF_TOOL, List[String](), List[String](), List[String](), "", 0, 0), tramp)
             assert_true(False, "confine must refuse without an OS sandbox")
         except e:
             assert_equal(String(e), "QA-E163: no OS sandbox is available on this machine")
     else:
+        if is_macos():
+            test_home_is_denied_by_default(tramp)
         test_confined_runs(tramp, work)
     remove_tree(work)
     print("test_native_sandbox OK")

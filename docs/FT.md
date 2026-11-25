@@ -61,6 +61,12 @@ small codes.
 | `five_qubit_code()` | [[5,1,3]] | perfect code (non-CSS) |
 | `surface_code(d)` | [[d^2,1,d]] | adapter: checks read from `qumo.qec.codes.surface_code_memory` |
 | `repetition_code(d)` | [[d,1,1]] | adapter over `repetition_code_memory` (bit-flip distance d) |
+| `helix_code()` / `helix_10_2_3_code()` | [[20,2,6]] / [[10,2,3]] | arXiv:2609.03194 Table I, definition only (see Helix below) |
+| `identity_code(k)` | [[k,k,1]] | trivial code with no redundancy (Guppy FT `_identity_code`) |
+
+`code_by_name(name)` takes `steane`, `five_qubit`, `css_422`, `noncss_422`, `helix`
+(or `helix_20_2_6`), `helix_10_2_3`, `iceberg_<k>`, `surface_<d>`, `repetition_<d>` and
+`identity_<k>`; another name is `QM-E722`.
 
 Pauli labels use the Guppy FT / Stim convention: character i is physical qubit i.
 
@@ -79,6 +85,12 @@ var steane = SteaneBuilder()
     .build(3)
 var ice = IcebergBuilder(4).build(2)             # two [[6,4,2]] blocks = 8 logical qubits
 ```
+
+`build(n)` is the number of logical blocks the allocator may use, and the comparator
+circuit needs many more than the program's own qubits (its angle register, workspace
+and magic states are logical qubits too). One `rz(0.7)` with
+`.with_rz("comparator", 0.1, 16, 2)` raises `QM-E725` at `build(3)` and at `build(8)` and
+encodes at `build(12)`; `examples/ft/magic_t_and_comparator_rz.mojo` uses `build(16)`.
 
 | | Steane [[7,1,3]] | Iceberg [[k+2,k,2]] |
 |---|---|---|
@@ -241,7 +253,8 @@ which would need automorphism gates, fold-transversal S and a non-matching decod
   plus random seeds) each expected generator has expectation exactly +1.
 * `valid_magic_state_preparation(impl, code, theta)` (state vector,
   post-selected flags): stabilizers +1 and logical Bloch vector
-  (cos theta, sin theta, 0).
+  (cos theta, sin theta, 0). This one is defined in `qumo.ft.gadgets`, not in
+  `qumo.ft.verify` (import it from there); it takes codes with k = 1 (`QM-E723` otherwise).
 
 Failures name the operator, e.g. the incorrect non-CSS [[4,2,2]] gadget of
 Guppy FT's tests is reported as "the right operator with the wrong sign".

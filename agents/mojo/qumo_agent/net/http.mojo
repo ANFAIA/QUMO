@@ -11,14 +11,22 @@ the stream, and a TLS stream that ended without `close_notify` is a truncation e
 unless the request accepts it (`accept_ragged_eof`, research GETs only, X15).
 
 Redirects (D2c): at most `max_redirects` hops and 4 visits of one URL, https to http
-is always refused, and `Authorization` and `Cookie` are dropped when the scheme, host
-or port change.
+is always refused. When the scheme, host or port change, only the headers of
+`cross_origin_safe_header` are sent on (`Authorization`, `Cookie`, `X-Api-Key` and any
+other caller header are dropped), and a request with a body (307/308) is refused
+instead of sending the body to the other origin.
+
+`request_guarded` (research GETs) also applies a `UrlGuard` (net/guard.mojo) to the first
+URL and to every redirect target before connecting, refuses a host that resolves to an
+address that is not globally routable, reports more than `max_redirects` hops as
+`refused URL: too many redirects`, and drops `Authorization` and `Cookie` on every redirect.
 """
 
 from std.memory import ArcPointer
 
 from qumo_agent.core.errors import E_NETWORK
 from qumo_agent.net.url import Url, parse_url, resolve_reference
+from qumo_agent.net.guard import UrlGuard, no_guard, refusal
 from qumo_agent.net.socket import ByteStream, NetStream, connect_stream
 from qumo_agent.net.tls import TlsContext
 
@@ -491,8 +499,25 @@ def read_response[S: ByteStream](mut s: S, method: String, opts: HttpOptions) ra
 # Redirects
 # ---------------------------------------------------------------------------
 def keeps_authorization(current: Url, target: Url) -> Bool:
-    """True when scheme, host and port are unchanged (Authorization and Cookie kept)."""
+    """True when scheme, host and port are unchanged (the same origin: every header and
+    the body are kept)."""
     return current.scheme == target.scheme and current.host == target.host and current.port == target.port
+
+
+def cross_origin_safe_header(name: String) -> Bool:
+    """The request headers that follow a redirect to another origin. Every other header
+    (`Authorization`, `Cookie`, `X-Api-Key`, `Api-Key`, a session id, anything a caller
+    configured) may carry a credential and is dropped."""
+    var ln = _lower(name)
+    return (ln == "accept" or ln == "accept-encoding" or ln == "accept-language" or ln == "connection"
+            or ln == "content-type" or ln == "user-agent")
+
+
+def check_redirect_body(current: Url, target: Url, body: String) raises:
+    """Refuses (QA-E104) a redirect that would send a request body to another origin."""
+    if body.byte_length() > 0 and not keeps_authorization(current, target):
+        raise Error(E_NETWORK + ": refusing to send the request body to another origin (redirect from "
+                    + current.origin() + " to " + target.origin() + ")")
 
 
 def _is_redirect_status(status: Int) -> Bool:
@@ -600,13 +625,15 @@ struct _Exchange(Movable):
         return HttpBodyStream(self.head, final_url, self.stream^, self.reader^, body^, opts)
 
 
-def _without(names: List[String], values: List[String], drop: List[String],
+def _without(names: List[String], values: List[String], drop: List[String], same_origin: Bool,
              mut out_names: List[String], mut out_values: List[String]):
+    """The headers for the next hop: without `drop`, and for another origin only the
+    `cross_origin_safe_header` ones."""
     out_names.clear()
     out_values.clear()
     for i in range(min(len(names), len(values))):
         var ln = _lower(names[i])
-        var skip = False
+        var skip = not same_origin and not cross_origin_safe_header(ln)
         for d in drop:
             if ln == d:
                 skip = True
@@ -633,9 +660,10 @@ struct HttpClient(Movable):
             self.tls = ArcPointer(TlsContext())
         return self.tls
 
-    def _exchange(mut self, req: HttpRequest, opts: HttpOptions) raises -> _Exchange:
+    def _exchange(mut self, req: HttpRequest, opts: HttpOptions, guard: UrlGuard) raises -> _Exchange:
         """Sends `req`, following redirects per `opts`, and returns the final response
-        head with its unread body on the open connection."""
+        head with its unread body on the open connection. `guard` is applied to every URL
+        before its connection is opened."""
         var url = parse_url(req.url)
         var method = req.method.copy()
         var body = req.body.copy()
@@ -644,12 +672,13 @@ struct HttpClient(Movable):
         var visits = Dict[String, Int]()
         var hops = 0
         while True:
+            var public_only = guard.check(url)
             if url.scheme == "http" and not opts.allow_plain_http:
                 raise Error(E_NETWORK + ": refusing plain http URL " + url.to_string())
             var hop_req = HttpRequest(method, url.to_string(), names.copy(), values.copy(), body)
             var head_text = request_head(hop_req, url)
             var tls = self._tls_for(url)
-            var stream = connect_stream(url, tls, opts.connect_timeout_ms)
+            var stream = connect_stream(url, tls, opts.connect_timeout_ms, public_only)
             self.requests += 1
             stream.write_all(head_text + body, opts.io_timeout_ms)
             var reader = _Reader()
@@ -662,13 +691,16 @@ struct HttpClient(Movable):
                 return _Exchange(head^, url^, method, stream^, reader^)
             stream.close()
             hops += 1
+            if guard.enabled and hops > opts.max_redirects:
+                raise refusal("too many redirects")
             var key = target.to_string()
             var seen = visits.get(key, 0)
             if hops > opts.max_redirects or seen >= MAX_VISITS_PER_URL:
                 raise Error(E_NETWORK + ": redirect loop")
             visits[key] = seen + 1
             var drop = List[String]()
-            if not keeps_authorization(url, target):
+            if guard.enabled:
+                # guarded (research) requests drop the credentials on every redirect
                 drop.append("authorization")
                 drop.append("cookie")
             if opts.redirect_mode == REDIRECT_URLLIB and head.status != 307 and head.status != 308:
@@ -677,16 +709,22 @@ struct HttpClient(Movable):
                 body = String()
                 drop.append("content-length")
                 drop.append("content-type")
+            var cross = not keeps_authorization(url, target)
+            check_redirect_body(url, target, body)
             var nn = List[String]()
             var nv = List[String]()
-            _without(names, values, drop, nn, nv)
+            _without(names, values, drop, not cross, nn, nv)
             names = nn^
             values = nv^
             url = target^
 
     def request(mut self, req: HttpRequest, opts: HttpOptions) raises -> HttpResponse:
         """One request with redirects; the whole body is read under `opts`' cap."""
-        var ex = self._exchange(req, opts)
+        return self.request_guarded(req, opts, no_guard())
+
+    def request_guarded(mut self, req: HttpRequest, opts: HttpOptions, guard: UrlGuard) raises -> HttpResponse:
+        """`request` with `guard` applied to the URL and to every redirect target."""
+        var ex = self._exchange(req, opts, guard)
         var st = _framing(ex.head, ex.method, opts.accept_ragged_eof)
         var body = List[UInt8]()
         var truncated: Bool
@@ -701,6 +739,6 @@ struct HttpClient(Movable):
 
     def open(mut self, req: HttpRequest, opts: HttpOptions) raises -> HttpBodyStream:
         """Like `request`, but the body is streamed (redirects resolved before)."""
-        var ex = self._exchange(req, opts)
+        var ex = self._exchange(req, opts, no_guard())
         var st = _framing(ex.head, ex.method, opts.accept_ragged_eof)
         return ex^.into_body_stream(st^, opts)

@@ -229,6 +229,61 @@ def test_secret_names() raises:
         assert_false(is_secret_name(n), "should not be secret: " + n)
 
 
+def test_secret_components(base: String) raises:
+    """A secret-looking name in ANY path component is refused by read_file and hidden from
+    list_files and search_code, as repo.py `_forbidden` / `_walkable` do (the tree of
+    agents/tests/test_security.py `_secret_tree`, plus `..` spellings)."""
+    var root = base + "/secret_tree/repo"
+    var outside = base + "/secret_tree/outside.txt"
+    make_dirs(root + "/sub")
+    make_dirs(root + "/secrets_dir/deep")
+    make_dirs(root + "/secrets")
+    make_dirs(root + "/ok")
+    write_text(root + "/.env", "TOKEN=fake-env-value\n")
+    write_text(root + "/sub/secrets.yaml", "key: fake-yaml-value\n")
+    write_text(root + "/x.pem", "fake-pem-value\n")
+    write_text(root + "/secrets_dir/plain.txt", "fake-in-secret-dir\n")
+    write_text(root + "/secrets_dir/deep/more.txt", "fake-deep-value\n")
+    write_text(root + "/secrets/a.txt", "fake-a-value\n")
+    write_text(root + "/normal.txt", "normal line\n")
+    write_text(root + "/ok/fine.txt", "fine line\n")
+    write_text(outside, "fake-outside-value\n")
+    symlink(outside, root + "/link.txt")
+    symlink(root + "/.env", root + "/link_to_env.txt")
+    symlink(root + "/secrets/a.txt", root + "/alias.txt")
+    symlink(root + "/normal.txt", root + "/same.txt")
+    var st = state(root, [".git"], default_allowed())
+    var found = tool_search_code(st, ".", ".", "*")
+    var listed = tool_list_files(st, ".", "*")
+    assert_equal(listed, "normal.txt\nok/fine.txt\nsame.txt")
+    assert_equal(found, "normal.txt:1: normal line\nok/fine.txt:1: fine line\nsame.txt:1: normal line")
+    var bad: List[String] = [".env", "secrets.yaml", "x.pem", "secrets_dir", "plain.txt", "link.txt",
+                             "link_to_env", "secrets/", "alias.txt", "fake-"]
+    for b in bad:
+        assert_true(found.find(b) < 0, "search_code shows " + b + ": " + found)
+        assert_true(listed.find(b) < 0, "list_files shows " + b + ": " + listed)
+    var refused: List[String] = [".env", "sub/secrets.yaml", "x.pem", "secrets_dir/plain.txt", "link_to_env.txt",
+                                 "secrets/a.txt", "ok/../secrets/a.txt", "./secrets/./a.txt", "SECRETS/a.txt",
+                                 "secrets_dir/deep/more.txt", "alias.txt", "secrets", "secrets_dir/deep"]
+    for p in refused:
+        assert_equal(tool_read_file(st, p, 1, 400), "error: " + p + " is not readable by agents")
+        assert_equal(tool_list_files(st, p, "*"), "error: " + p + " is not readable by agents")
+        assert_equal(tool_search_code(st, ".", p, "*"), "error: " + p + " is not readable by agents")
+    # The sandbox write and edit tools resolve paths with the same rule.
+    var sb = state(root, [".git"], default_allowed())
+    sb.sandbox = root
+    assert_equal(tool_sandbox_write(sb, "secrets/new.txt", "x"), "error: secrets/new.txt is not readable by agents")
+    assert_equal(tool_sandbox_write(sb, "ok/../secrets/new.txt", "x"), "error: ok/../secrets/new.txt is not readable by agents")
+    assert_false(exists(root + "/secrets/new.txt"))
+    assert_equal(tool_sandbox_edit(sb, "secrets/a.txt", "fake", "real", False), "error: secrets/a.txt is not readable by agents")
+    assert_equal(read_text_lossy(root + "/secrets/a.txt"), "fake-a-value\n")
+    # run_check: a build/qumo file argument follows the same rule.
+    assert_equal(run_check_refusal(["build/qumo", "validate", "secrets/a.txt"], default_allowed(), root, "", [".git"]),
+                 "refused: secrets/a.txt is not readable by agents")
+    # A name that only passes through a secret-looking directory with `..` is fine.
+    assert_equal(tool_read_file(st, "secrets/../normal.txt", 1, 400), "1\tnormal line")
+
+
 def test_report_slug() raises:
     # Python: re.sub(r"[^\w-]+", "-", name).strip("-")[:n] or fallback (ASCII inputs).
     assert_equal(report_slug("Hello World!", 80, "report"), "Hello-World")
@@ -431,6 +486,37 @@ def test_confined_check(base: String) raises:
     var env_out = tool_run_check(st, ["/usr/bin/env"], 30)
     assert_true(env_out.find("MODULAR_CACHE_DIR=" + st.repo_root + "/build/agent-sandbox-cache") >= 0, env_out)
     assert_true(env_out.find("TMPDIR=") >= 0, env_out)
+    test_confined_mojo_run(tramp, kind)
+
+
+def test_confined_mojo_run(tramp: String, kind: String) raises:
+    """A real `.venv/bin/mojo run` from a sandbox of this checkout: the toolchain is
+    readable, the files of the main checkout and the rest of $HOME are not (macOS; the
+    Linux rule is not run here)."""
+    if kind != "sandbox-exec":
+        return
+    var real_root = realpath_strict(".")
+    var home = realpath_strict(getenv("HOME", "/"))
+    if not real_root.startswith(home + "/"):
+        print("test_tools_repo: repository not under $HOME; confined mojo run not checked")
+        return
+    var sandbox = real_root + "/build/test-fixtures/confined-sandbox"
+    if exists(sandbox):
+        remove_tree(sandbox)
+    make_dirs(sandbox)
+    symlink(real_root + "/.venv", sandbox + "/.venv")
+    write_text(sandbox + "/ok.mojo", "def main():\n    print(\"mojo ran\")\n")
+    var peek = String("def peek(path: String):\n    try:\n        with open(path, \"r\") as f:\n            print(\"LEAK\", f.read().byte_length())\n    except:\n        print(\"denied\")\n\n\n")
+    peek += "def main():\n    peek(\"" + real_root + "/CHANGELOG.md\")\n    peek(\"" + real_root + "/agents/agents.json\")\n"
+    write_text(sandbox + "/peek.mojo", peek)
+    var allowed = List[List[String]]()
+    allowed.append([".venv/bin/mojo", "run", "-I", "."])
+    var st = RepoState(real_root, sandbox, [".git"], 60000, 12000, allowed^, tramp, kind, False)
+    var ok = tool_run_check(st, [".venv/bin/mojo", "run", "-I", ".", "ok.mojo"], 300)
+    assert_true(ok.startswith("exit 0\n") and ok.find("mojo ran\n") >= 0, ok)
+    var out = tool_run_check(st, [".venv/bin/mojo", "run", "-I", ".", "peek.mojo"], 300)
+    assert_true(out.startswith("exit 0\n") and out.find("denied\ndenied\n") >= 0 and out.find("LEAK") < 0, out)
+    remove_tree(sandbox)
 
 
 # --------------------------------------------------------------------------- writing
@@ -514,6 +600,7 @@ def main() raises:
     test_resolve(base)
     test_search_errors(base)
     test_secret_names()
+    test_secret_components(base)
     test_report_slug()
     test_run_check(base)
     test_run_check_rules(base)

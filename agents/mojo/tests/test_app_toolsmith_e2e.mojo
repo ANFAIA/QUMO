@@ -67,7 +67,7 @@ def make_repo(work: String) raises -> String:
     var git = git_bin()
     _ = run([git, "init", "-q", "-b", "main", repo], work)
     _ = run([git, "-C", repo, "add", "-A"], work)
-    _ = run([git, "-C", repo, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", "init"], work)
+    _ = run([git, "-C", repo, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"], work)
     return realpath_strict(repo)
 
 

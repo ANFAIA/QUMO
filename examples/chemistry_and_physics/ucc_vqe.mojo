@@ -49,10 +49,10 @@ from qumo.algorithms.library import append_pauli_rotation, h2_ansatz
 from qumo.algorithms.hamiltonians import h2_sto3g, ground_energy, H2_EXACT_ENERGY, H2_HF_ENERGY
 from qumo.algorithms.gradients import Grad
 from qumo.algorithms.variational import vqe
-from qumo.compiler.target import Target
+from qumo.device.target import Target
 from qumo.compiler.pass_manager import compile_spec
 from qumo.exec.primitives import EstimatorPub, run_estimator
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.testing.checks import CheckLog
 
 comptime SHOTS = 4000

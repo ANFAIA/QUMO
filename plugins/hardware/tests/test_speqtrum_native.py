@@ -288,3 +288,49 @@ def test_the_access_token_is_redacted_from_job_errors(fake):
     with pytest.raises(HardwareError) as exc:
         prov.result(job)
     assert "token-2" not in str(exc.value) and "<redacted>" in str(exc.value)
+
+
+# ----------------------------------------------------------------- options read back from a job file
+def _stored_job(fake, **provider_options):
+    """Submit to `fake`, then store the job with `provider_options` as a job file would hold them."""
+    from qumo_hardware import jobs as job_store
+
+    job = native().submit(make_compiled(), 100, DEVICE, confirm=True)
+    job.meta["provider_options"] = {"client": "native", **provider_options}
+    job_store.save(job)
+    return job
+
+
+@pytest.mark.parametrize("planted", [{"url": None, "username": "x"}, {"url": None}, {"username": "x"},
+                                     {"api_key": "k"}, {"audience": "other"}])
+def test_job_file_cannot_redirect_the_provider(fake, tmp_path, planted):
+    """`status` / `result` never use an endpoint or a credential found in the job file."""
+    from qumo_hardware import runner
+
+    other_dir = tmp_path / "other"
+    other_dir.mkdir()
+    other = Fake(other_dir)  # stands for a host the user never configured
+    try:
+        if "url" in planted:
+            planted = {**planted, "url": other.base_url}
+        job = _stored_job(fake, **planted)
+        before = len(fake.requests())
+        for call in (runner.job_status, runner.job_result):
+            with pytest.raises(HardwareError) as exc:
+                call(job.job_id)
+            assert exc.value.code == E_JOB and "provider_options" in str(exc.value)
+            assert API_KEY not in str(exc.value)
+        assert other.requests() == []  # no login, no credential sent to the planted host
+        assert len(fake.requests()) == before
+    finally:
+        other.stop()
+
+
+def test_job_file_options_that_are_not_declared_are_ignored(fake):
+    """The endpoint and the credentials come from the current environment, as at submit."""
+    from qumo_hardware import runner
+
+    job = _stored_job(fake, targets={"x": {}}, note=1)
+    assert runner.job_status(job.job_id)["status"] == DONE
+    last = fake.requests()[-1]
+    assert last["method"] == "GET" and last["path"].startswith(f"/jobs/{job.job_id}?")
