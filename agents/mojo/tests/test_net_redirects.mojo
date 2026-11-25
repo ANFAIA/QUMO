@@ -1,5 +1,6 @@
 """Tests for the redirect rules of net/http.mojo (D2c, [critic A8]): https to http
-refused, Authorization and Cookie dropped on a scheme, host or port change, at most 10
+refused, only the safe headers sent on and a request body refused on a scheme, host or
+port change (Authorization, Cookie, X-Api-Key and other caller headers dropped), at most 10
 hops and 4 visits of one URL, and each mode's method/body handling. The pure rules are
 checked directly; the hop loop runs against tests/support/http_fixture_server."""
 
@@ -19,6 +20,7 @@ from qumo_agent.native.rand import uuid4_hex
 from qumo_agent.net.url import parse_url
 from qumo_agent.net.http import (
     HttpClient, HttpRequest, HttpOptions, HttpResponse, redirect_target, keeps_authorization,
+    cross_origin_safe_header, check_redirect_body,
     REDIRECT_NONE, REDIRECT_URLLIB, REDIRECT_SAME_ORIGIN, REDIRECT_KEEP_METHOD,
 )
 
@@ -210,8 +212,8 @@ def test_modes_and_headers() raises:
         + "]}")
     var fx = Fixture(script)
     var c = HttpClient(None)
-    var names: List[String] = ["Authorization", "Cookie", "X-Keep"]
-    var values: List[String] = ["Bearer secret-token", "a=b", "1"]
+    var names: List[String] = ["Authorization", "Cookie", "X-Keep", "X-Api-Key", "Api-Key", "Accept", "User-Agent"]
+    var values: List[String] = ["Bearer secret-token", "a=b", "1", "secret-key", "secret-key-2", "text/plain", "ua/1"]
     var r1 = c.request(HttpRequest("GET", fx.url("/same"), names.copy(), values.copy(), ""), _opts(REDIRECT_URLLIB))
     assert_equal(r1.text(), "same origin")
     var r2 = c.request(HttpRequest("GET", fx.url("/cross"), names.copy(), values.copy(), ""), _opts(REDIRECT_URLLIB))
@@ -243,11 +245,17 @@ def test_modes_and_headers() raises:
     assert_equal(log[1].get_string("path", ""), "/same2")
     assert_equal(same2.get_string("authorization", ""), "Bearer secret-token")
     assert_equal(same2.get_string("cookie", ""), "a=b")
-    # Port change: dropped, other headers kept.
+    assert_equal(same2.get_string("x-api-key", ""), "secret-key")
+    assert_equal(same2.get_string("x-keep", ""), "1")
+    # Port change: only the headers of the safe list go to the other origin.
     var landing = other.log()[0].get("headers")
+    assert_equal(landing.get_string("accept", ""), "text/plain")
+    assert_equal(landing.get_string("user-agent", ""), "ua/1")
+    assert_false(landing.has("x-api-key"), "x-api-key sent to another origin")
+    assert_false(landing.has("api-key"), "api-key sent to another origin")
+    assert_false(landing.has("x-keep"))
     assert_false(landing.has("authorization"))
     assert_false(landing.has("cookie"))
-    assert_equal(landing.get_string("x-keep", ""), "1")
     # POST 303 -> GET without body and content headers, Authorization kept (same origin).
     var got = log[4].copy()
     assert_equal(got.get_string("method", ""), "GET")
@@ -262,9 +270,56 @@ def test_modes_and_headers() raises:
     assert_equal(kept.get("headers").get_string("content-type", ""), "application/json")
 
 
+def test_cross_origin_body() raises:
+    # 307/308 to another origin: the request body is not sent there.
+    var other = Fixture('{"responses": [' + '{"match": {"path": "/sink"}, "status": 200, "body": "got it"}' + "]}")
+    var fx = Fixture('{"responses": [' + _redirect("/model", 307, other.url("/sink")) + ",\n"
+                     + _redirect("/model8", 308, other.url("/sink")) + "]}")
+    var c = HttpClient(None)
+    var pn: List[String] = ["Content-Type", "Authorization"]
+    var pv: List[String] = ["application/json", "Bearer k"]
+    var paths: List[String] = ["/model", "/model8"]
+    for p in paths:
+        var got = String()
+        try:
+            var r = c.request(HttpRequest("POST", fx.url(p), pn.copy(), pv.copy(), '{"prompt": "private"}'),
+                              _opts(REDIRECT_KEEP_METHOD))
+            got = String(r.status) + " " + r.text()
+        except e:
+            got = "ERR " + String(e)
+        assert_equal(got, "ERR QA-E104: refusing to send the request body to another origin (redirect from "
+                     + fx.url("") + " to " + other.url("") + ")")
+    assert_equal(fx.finish(), 0)
+    _ = other.finish()
+    assert_equal(len(other.log()), 0)
+
+
+def test_pure_headers() raises:
+    assert_true(cross_origin_safe_header("Accept"))
+    assert_true(cross_origin_safe_header("user-agent"))
+    assert_true(cross_origin_safe_header("Content-Type"))
+    var secret: List[String] = ["Authorization", "Cookie", "X-Api-Key", "api-key", "X-Auth-Token", "Proxy-Authorization",
+                                "Mcp-Session-Id", "X-Title", "HTTP-Referer"]
+    for n in secret:
+        assert_false(cross_origin_safe_header(n), n)
+    # The body rule, without a connection.
+    var a = parse_url("https://api.example.test/v1/chat/completions")
+    check_redirect_body(a, parse_url("https://api.example.test/v2/chat/completions"), "{}")
+    check_redirect_body(a, parse_url("https://other.example.test/x"), "")
+    var why = String("NO ERROR")
+    try:
+        check_redirect_body(a, parse_url("https://other.example.test/x"), "{}")
+    except e:
+        why = String(e)
+    assert_equal(why, "QA-E104: refusing to send the request body to another origin (redirect from "
+                 + "https://api.example.test to https://other.example.test)")
+
+
 def main() raises:
     ignore_sigpipe()
     test_pure()
+    test_pure_headers()
+    test_cross_origin_body()
     test_hops_and_visits()
     test_modes_and_headers()
     print("test_net_redirects OK")

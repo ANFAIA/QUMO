@@ -327,6 +327,23 @@ def main() raises:
     assert_equal(unset, "QA-E140: set QUMO_TEST_LLM_KEY to use the openrouter back end, or pass --replay FILE")
     _ = setenv(KEY_ENV, KEY, True)
 
+    # The key goes over plain http only to a loopback host (local model servers).
+    var remote: List[String] = ["127.attacker.example", "127.0.0.1.attacker.example", "api.example.test",
+                                "localhost.attacker.example"]
+    for h in remote:
+        var why = String("NO ERROR")
+        try:
+            _ = LlmClient(_endpoint("http://" + h + "/v1", 2), None)
+        except e:
+            why = String(e)
+        assert_true(why.startswith("QA-E140: refusing to send " + KEY_ENV + " to http://" + h + " over plain http"),
+                    h + ": " + why)
+        assert_true(why.find(KEY) < 0)
+    var local: List[String] = ["localhost:11434", "127.0.0.1:1", "127.9.9.9:1", "[::1]:1", "ollama.localhost:1"]
+    for h in local:
+        _ = LlmClient(_endpoint("http://" + h + "/v1", 2), None)
+    _ = LlmClient(_endpoint("https://api.example.test/v1", 2), None)
+
     # https with OpenSSL absent: QA-E105 on the first request (OpenSSL is loaded lazily), not retried.
     var tls_less = LlmClient(_endpoint("https://127.0.0.1:1/api/v1", 2), None)
     var no_ssl = _complete(tls_less)

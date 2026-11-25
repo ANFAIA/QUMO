@@ -136,7 +136,11 @@ The native harness is chosen like any other: `--backend mojo`, or one agent on i
 `"backends": {"code-review": "mojo"}` in `agents.json`. Its model comes from the `mojo` section
 (`"models"`, `"model"`), then the `openrouter` ones, so by default both harnesses run an agent
 on the same OpenRouter id. To point the native harness at another OpenAI-compatible server,
-change `openrouter.base_url` in `agents.json`; it has no separate `local` mode yet.
+change `openrouter.base_url` in `agents.json`; it has no separate `local` mode yet. The native
+harness sends the model key and an MCP bearer token over plain `http://` only to this machine
+(`localhost`, a name ending in `.localhost`, a literal `127.x.y.z` address or `[::1]`); any other
+`http://` URL is refused with `QA-E140`, so a model server on another machine needs `https`.
+The Python `openrouter` and `local` back ends have no such check.
 
 ### Your machine, your choices: `agents/agents.local.json`
 
