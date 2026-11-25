@@ -232,6 +232,29 @@ errors, QM-E952 for authorisation errors), job lookup/status/result →
 QM-E959. Their message keeps the exception type and a shortened first line in
 which anything that looks like a credential is replaced by `<redacted>`.
 
+**Redaction rule (`qumo_hardware.errors.redact_text`).** It is applied to every
+SDK exception text above and to the CLI's `QM-E999: unexpected ...` message
+(and its `QUMO_HW_DEBUG=1` traceback). It replaces:
+
+- the current value of `QISKIT_IBM_TOKEN`, `IONQ_API_KEY`, `QBRAID_API_KEY`,
+  `QUMO_SPEQTRUM_APIKEY` and of any variable named `*_API_KEY`, `*_APIKEY`,
+  `*_TOKEN`, `*SECRET*` or `*PASSWORD*`, as it is, URL-encoded and
+  JSON-escaped. A value of 8 characters or more is replaced wherever it occurs;
+  one of 4 to 7 only as a whole word; one under 4 is not replaced (it would
+  mark every occurrence of two or three common characters);
+- the value of an `Authorization` header and what follows `Bearer` / `Basic`;
+- the value after a credential name (`x-api-key: v`, `access_token=v`,
+  `password=v`, `"secret": "v"`); the name stays. After a plain space
+  (`key v`) only a word that looks like a key (20 characters or more, or 8 with
+  a digit, `+ / =` or mixed case) is replaced, so `the token expired` is kept;
+- JSON Web Tokens and words of 40 or more letters, digits, `_`, `-`.
+
+Kept: lower-case hexadecimal digests of 40 or 64 digits (SHA-1, SHA-256),
+UUIDs, provider job ids. A credential that is not in the environment (a saved
+account file, an option passed in code) and is printed with no name before it
+is caught only by the last rule, so a bare key under 40 characters, or one
+that is exactly 40 or 64 lower-case hexadecimal digits, would not be replaced.
+
 **Target.** `target_from_qiskit(backend)` reads `backend.target`: basis
 `rz, sx, x` + `cz` (Heron: ibm_torino, ibm_fez, ibm_marrakesh, ibm_kingston, ...)
 or `ecr` (Eagle); undirected couplings, median errors/durations, per-qubit
