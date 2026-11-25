@@ -2,11 +2,13 @@
 #
 # STATUS: the workflow has run on GitHub since 2026-11-13 (see the Actions tab). It was reshaped to make
 # pull requests faster; the jobs are:
-#   checks    (pull requests, blocking): build, smoke test, independence, example index, Python package tests
+#   checks    (pull requests, blocking): build, smoke test, independence, example index, Python static check
+#             (ruff, error rules only), Python package tests
 #   tests     (pull requests, blocking): the Mojo test files, split over 4 parallel shards (about 10 min of wall time)
 #   rl        (pull requests, blocking): the fast RL tests (make test-rl)
 #   nightly   (nightly, push to main, manual): the full Mojo suite, the GPU test files on the CPU, the slow RL
-#             tests, GPU cross-compilation and the examples. Runs only when the change is merged or on schedule.
+#             tests, GPU cross-compilation, the examples, every Python test (make test-py: package, examples
+#             runner, hardware plugins) and the agent layer tests (make test-agents). Runs only when the change is merged or on schedule.
 #   nightly-linux (nightly, experimental): the full suite on ubuntu-latest (x86-64). UNVERIFIED on Linux:
 #             allowed to fail (continue-on-error) until someone has seen it pass.
 #
@@ -64,12 +66,16 @@ jobs:
       - name: Example headers and generated indexes are current
         run: python3 examples/run_examples.py --check-index
 
+      # Errors only (syntax errors, undefined names, invalid comparisons): no style rules.
+      - name: Python static check (ruff, error rules)
+        run: uvx ruff@0.17.6 check --select E9,F63,F7,F82 python plugins/hardware agents/qumo_agents agents/tests examples bench
+
       # make test-python builds build/qumo_py.so (make py) and runs python/tests with the Python of
       # build/ci-venv, which must be 3.12 (the version the extension is built for).
       - name: Python 3.12 venv with NumPy and pytest
         run: |
           uv venv build/ci-venv --python 3.12
-          uv pip install --python build/ci-venv/bin/python numpy pytest
+          uv pip install --python build/ci-venv/bin/python numpy scipy pytest
 
       - name: make test-python
         run: make test-python PY=build/ci-venv/bin/python
@@ -169,6 +175,23 @@ jobs:
 
       - name: make examples (fast tier, verified by CHECK lines)
         run: make examples PY=python3
+
+      # Every Python test: the qumo package, the examples runner, the heterogeneous examples and
+      # the hardware plugins (local fake servers only; vendor SDK tests skip when the SDK is absent).
+      - name: Python 3.12 venv with NumPy and pytest
+        run: |
+          uv venv build/ci-venv --python 3.12
+          uv pip install --python build/ci-venv/bin/python numpy scipy pytest
+
+      - name: make py and make test-py (Python package, examples runner, hardware plugins)
+        run: |
+          make py
+          make test-py PY=build/ci-venv/bin/python
+
+      - name: make setup-agents and make test-agents (agent layer, offline)
+        run: |
+          make setup-agents
+          make test-agents
 
       - name: Upload the examples report
         if: always()
