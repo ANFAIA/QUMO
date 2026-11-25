@@ -39,7 +39,7 @@ from qumo.compiler.pass_manager import PassId, pass_decl, pass_description, arg_
 from std.os import getenv
 from std.os.path import exists
 
-comptime QUMO_VERSION = "0.1.0"
+comptime QUMO_VERSION = "0.2.0"
 
 
 # ---------------------------------------------------------------------------

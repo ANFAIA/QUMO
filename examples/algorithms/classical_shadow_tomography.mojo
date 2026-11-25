@@ -46,7 +46,7 @@ example-meta: {"framework": "classiq", "tier": "fast", "timeout": 120, "requires
 
 from std.math import ceil, log, sqrt
 from qumo.ir.circuit import Circuit
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.sim.runner import evolve, evolve_into, sample
 from qumo.sim.statevector import StateVector
 from qumo.testing.checks import CheckLog

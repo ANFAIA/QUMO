@@ -49,7 +49,7 @@ from qumo.algorithms.hamiltonians import transverse_field_ising, heisenberg_xxz
 from qumo.algorithms.gradients import ExpectationEngine, Grad, batch_gradient
 from qumo.exec.primitives import EstimatorPub, run_estimator
 from qumo.exec.orchestrator import Workflow, Device
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.testing.checks import CheckLog
 
 comptime NSETS = 10000

@@ -11,7 +11,7 @@ Framework: QUMO - https://github.com/ANFAIA/QUMO
 """
 
 from std.time import perf_counter_ns
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.algorithms.library import hardware_efficient_ansatz
 from qumo.algorithms.hamiltonians import transverse_field_ising
 from qumo.algorithms.gradients import ExpectationEngine, Grad, shift_evaluations

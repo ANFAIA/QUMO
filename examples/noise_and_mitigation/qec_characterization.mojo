@@ -10,7 +10,7 @@ from qumo.ir.circuit import Circuit
 from qumo.sim.stabilizer import sample_stabilizer
 from qumo.qec.codes import surface_code_memory, NoiseParams
 from qumo.qec.experiments import run_circuit_experiment
-from qumo.qec.characterization import (
+from qumo.noise.characterization import (
     NoiseModel, apply_noise_model, randomized_benchmarking_1q, t1_experiment,
     ramsey_experiment, ReadoutCalibration, mitigate_counts, expectation_z,
 )

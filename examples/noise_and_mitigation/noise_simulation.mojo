@@ -48,7 +48,7 @@ from qumo.ir.circuit import Circuit
 from qumo.ir.gates import Op, op_is_unitary, op_is_noise, op_arity
 from qumo.ir.pauli import PauliSum
 from qumo.sim.runner import sample
-from qumo.qec.characterization import NoiseModel, apply_noise_model
+from qumo.noise.characterization import NoiseModel, apply_noise_model
 from qumo.algorithms.library import ghz
 from qumo.algorithms.mitigation import sampled_expectation
 from qumo.testing.checks import CheckLog

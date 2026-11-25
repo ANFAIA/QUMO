@@ -52,7 +52,7 @@ example-meta: {"framework": "qsharp", "tier": "fast", "timeout": 90, "requires":
 from std.math import pi
 from qumo.ir.circuit import Circuit
 from qumo.ir.gates import Op
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.sim.runner import evolve
 from qumo.sim.statevector import StateVector
 from qumo.exec.resources import (

@@ -82,7 +82,7 @@ scripts in scratch) answers and, if needed, has C0 add a fixture (16, rule 6).
   from newly exported manifests (the loader never reads it). The Qiskit comparison lives in `bench/neutral`
   (a benchmark, not training) and is untouched.
 * **D3 Python RNG compatibility**: not required (MT19937, PCG64, torch Philox are not reproduced). All randomness
-  is the seeded `qumo.sim.rng.Rng` (xoshiro256**). The old pipeline was not reproducible anyway.
+  is the seeded `qumo.core.rng.Rng` (xoshiro256**). The old pipeline was not reproducible anyway.
 * **D4 checkpoints**: f32 *model-container directories* (loadable by `load_model_file`) replace `.safetensors`.
   A read-only safetensors importer is provided only so an old Python run can still warm-start a Mojo run
   (component C11a, optional, low priority).

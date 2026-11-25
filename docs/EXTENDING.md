@@ -56,6 +56,8 @@ q2: ----------------+----M>c2--
 
 The drawing shows the expanded gates: QUMO's circuit is flat, so a user gate does not survive as a named box. The OpenQASM 3 modifiers work on user gates: `ctrl @ entangle(pi) q[0], q[1], q[2];`, `inv @ entangle(pi/2) q[1], q[2];` and `pow(2) @ entangle(pi/2) q[1], q[2];` were all run. Gate definitions may call other user gates (up to 64 levels deep); recursion and subroutines (`def`) are not supported.
 
+A definition may reuse the name and signature of a built-in gate. QUMO compares its body with the built-in unitary (up to global phase, up to 4 qubits): if they are equal the built-in gate is used, which is what makes files written by `to_qasm` and `to_qasm2` load back unchanged; if they differ, or cannot be compared, your definition is used as written and the warning QM-W056 says so. `gate h a { x a; } h q[0];` is an X. Pick another name unless you mean to replace the built-in gate.
+
 ### In Mojo
 
 A composite gate is a function that returns a small `Circuit`. `compose` places it; `inverse()`, `power(k)` and `controlled(q)` derive new gates from it.
@@ -209,7 +211,7 @@ A pass is any function from a circuit to an equivalent circuit. You cannot give 
 ```mojo
 from qumo.ir.circuit import Circuit
 from qumo.ir.gates import Op
-from qumo.compiler.target import parse_target
+from qumo.device.target import parse_target
 from qumo.compiler.pass_manager import compile_spec
 
 
@@ -349,7 +351,7 @@ A target is data: number of qubits, coupling edges, basis gates and, optionally,
 
 ```mojo
 from qumo.ir.circuit import Circuit
-from qumo.compiler.target import Target
+from qumo.device.target import Target
 from qumo.compiler.pass_manager import transpile
 from qumo.exec.emulate import emulate
 

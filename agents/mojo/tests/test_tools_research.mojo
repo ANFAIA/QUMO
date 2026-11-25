@@ -6,6 +6,9 @@ agents/.venv): the PyPI and GitHub JSON, the arXiv query URL, module_watchlist. 
 go through tests/support/http_fixture_server on 127.0.0.1 (the tools' base URLs are fields
 of ResearchTools): request paths and headers, redirects, caps, error texts, the 16 MiB
 sdk_releases path (X6) and secret redaction. https itself is covered by the live checks.
+The outbound rules (https, port 443, public addresses, the API allow-list, 3 redirects) are
+checked on URLs that are refused before a connection is opened, and on redirects the fixture
+server sends; the rules themselves are in test_net_guard.
 """
 
 from std.os import setenv, unsetenv
@@ -26,7 +29,7 @@ from qumo_agent.net.http import HttpClient
 from qumo_agent.tools.config import Modules, LocalToolsCatalog
 from qumo_agent.tools.research import (
     ResearchTools, research_get, arxiv_query_url, pypi_info_json, github_releases_json,
-    is_github_repo, py_net_error, research_get_prefixed,
+    is_github_repo, py_net_error, research_get_prefixed, api_hosts,
 )
 from qumo_agent.util.pyfmt import py_json_dumps
 
@@ -271,7 +274,8 @@ def test_unreachable() raises:
 def test_refusals() raises:
     var http = HttpClient(None)
     var none = List[String]()
-    for u in ["http://example.com/x", "ftp://example.com/x", "HTTPS://pypi.org/x", "http://export.arxiv.org.evil.example/x", "/relative", ""]:
+    for u in ["http://example.com/x", "ftp://example.com/x", "HTTPS://pypi.org/x", "http://export.arxiv.org.evil.example/x",
+              "http://export.arxiv.org/api/query", "http://127.0.0.1/x", "/relative", ""]:
         var msg = String()
         try:
             _ = research_get(http, String(u), none, none, 1000, "ua", 5)
@@ -279,6 +283,109 @@ def test_refusals() raises:
             msg = String(e)
         assert_equal(msg, "ValueError: only https URLs are fetched", u)
     assert_equal(http.requests, 0)
+
+
+def fetch_error(text: String) -> String:
+    return "{\n \"error\": \"fetch failed: ValueError: " + text + "\"\n}"
+
+
+def test_address_refusals() raises:
+    """The production configuration (no test prefix): every URL here is refused before a
+    connection is opened."""
+    var tools = make_tools(String("https://export.arxiv.org/api/query"), String("https://pypi.org/pypi/"),
+                           String("https://api.github.com/repos/"), String())
+    for h in ["127.0.0.1", "10.0.0.5", "169.254.169.254", "192.168.1.1", "100.64.0.1", "2130706433", "0x7f000001",
+              "0x7f.1", "127.1", "0177.0.0.1", "[::1]", "[::ffff:127.0.0.1]", "[::ffff:10.0.0.5]", "[fe80::1]", "[fd00::1]"]:
+        var bare = String(h).replace("[", "").replace("]", "")
+        assert_equal(tools.fetch_page("https://" + String(h) + "/x"), fetch_error(bare + " is not a public address"), h)
+    assert_equal(tools.fetch_page("https://127.0.0.1:1/x"), fetch_error("only the default https port is fetched"))
+    assert_equal(tools.fetch_page("https://example.org:8443/x"), fetch_error("only the default https port is fetched"))
+    assert_equal(tools.fetch_page("http://export.arxiv.org/api/query"), fetch_error("only https URLs are fetched"))
+    # A name: `localhost` passes the URL rules and is refused on the address it resolves to
+    # (a lookup in the hosts file; no connection).
+    assert_equal(tools.fetch_page("https://localhost/x"), fetch_error("localhost is not a public address"))
+    assert_equal(tools.http.requests, 0)
+    # The API tools only call their own hosts.
+    var http = HttpClient(None)
+    var none = List[String]()
+    for u in ["https://example.org/x", "https://pypi.org.evil.example/x", "https://8.8.8.8/x"]:
+        var msg = String()
+        try:
+            _ = research_get_prefixed(http, String(u), none, none, 1000, "ua", 5, String(), api_hosts())
+        except e:
+            msg = String(e)
+        assert_true(msg.startswith("ValueError: ") and msg.endswith(" is not on the allow-list for this tool"), msg)
+    assert_equal(http.requests, 0)
+    var elsewhere = make_tools(String("https://example.org/api/query"), String("https://example.org/pypi/"),
+                               String("https://example.org/repos/"), String())
+    assert_equal(elsewhere.search_arxiv("x", "", 5),
+                 "{\n \"error\": \"arXiv query failed: ValueError: example.org is not on the allow-list for this tool\"\n}")
+    assert_equal(elsewhere.sdk_releases("qiskit"),
+                 "{\n \"error\": \"PyPI lookup failed for qiskit: ValueError: example.org is not on the allow-list for this tool\"\n}")
+    assert_equal(elsewhere.github_release_notes("a/b", 1), "{\n \"error\": \"GitHub lookup failed for a/b: ValueError\"\n}")
+    assert_equal(elsewhere.http.requests, 0)
+
+
+def moved(path: String, location: String) -> String:
+    return resp(path, 302, "Found", "", [["Location", location]])
+
+
+def test_redirect_hops() raises:
+    """Every redirect target is checked like the first URL (the fixture server sends the
+    redirects; no target is ever connected to), and at most 3 redirects are followed."""
+    var rs = List[String]()
+    rs.append(moved("/r1", "https://10.0.0.5/x"))
+    rs.append(moved("/r2", "https://169.254.169.254/latest/meta-data/"))
+    rs.append(moved("/r3", "https://[::ffff:127.0.0.1]/x"))
+    rs.append(moved("/r4", "https://2130706433/x"))
+    rs.append(moved("/r5", "https://example.org:8443/x"))
+    rs.append(moved("/r6", "http://example.org/x"))
+    rs.append(moved("/r7", "https://localhost/x"))
+    rs.append(moved("/api1", "https://example.org/x"))
+    # 3 redirects are followed
+    rs.append(moved("/d1", "/d2"))
+    rs.append(moved("/d2", "/d3"))
+    rs.append(moved("/d3", "/d4"))
+    rs.append(resp("/d4", 200, "OK", "<p>landed</p>"))
+    # the 4th is not
+    rs.append(moved("/c1", "/c2"))
+    rs.append(moved("/c2", "/c3"))
+    rs.append(moved("/c3", "/c4"))
+    rs.append(moved("/c4", "/c5"))
+    # Authorization does not follow a redirect, same host or not
+    rs.append(moved("/a1", "/a2"))
+    rs.append(resp("/a2", 200, "OK", "ok"))
+    var fx = Fixture(script(rs))
+    var tools = make_tools(fx.url("/api/query"), fx.prefix() + "pypi/", fx.prefix() + "repos/", fx.prefix())
+    assert_equal(tools.fetch_page(fx.url("/r1")), fetch_error("10.0.0.5 is not a public address"))
+    assert_equal(tools.fetch_page(fx.url("/r2")), fetch_error("169.254.169.254 is not a public address"))
+    assert_equal(tools.fetch_page(fx.url("/r3")), fetch_error("::ffff:127.0.0.1 is not a public address"))
+    assert_equal(tools.fetch_page(fx.url("/r4")), fetch_error("2130706433 is not a public address"))
+    assert_equal(tools.fetch_page(fx.url("/r5")), fetch_error("only the default https port is fetched"))
+    assert_equal(tools.fetch_page(fx.url("/r6")), fetch_error("only https URLs are fetched"))
+    assert_equal(tools.fetch_page(fx.url("/r7")), fetch_error("localhost is not a public address"))
+    var http = HttpClient(None)
+    var none = List[String]()
+    var msg = String()
+    try:
+        _ = research_get_prefixed(http, fx.url("/api1"), none, none, 1000, "ua", 5, fx.prefix(), api_hosts())
+    except e:
+        msg = String(e)
+    assert_equal(msg, "ValueError: example.org is not on the allow-list for this tool")
+    assert_equal(tools.fetch_page(fx.url("/d1")), "landed")
+    assert_equal(tools.fetch_page(fx.url("/c1")), fetch_error("too many redirects"))
+    var names: List[String] = ["Authorization"]
+    var values: List[String] = ["Bearer " + String(TOKEN)]
+    var body = research_get_prefixed(http, fx.url("/a1"), names, values, 1000, "ua", 5, fx.prefix(), api_hosts())
+    assert_equal(String(from_utf8_lossy=Span(body)), "ok")
+    assert_equal(fx.finish(), 0)
+    var log = fx.log()
+    assert_equal(len(log), 18)      # one request per scripted response: no redirect target was asked for
+    assert_equal(log[16].get_string("path", ""), "/a1")
+    assert_equal(log[16].get("headers").get_string("authorization", ""), "Bearer " + String(TOKEN))
+    assert_equal(log[17].get_string("path", ""), "/a2")
+    assert_false(log[17].get("headers").has("authorization"))
+    assert_equal(tools.http.requests + http.requests, 18)
 
 
 def test_network() raises:
@@ -298,9 +405,6 @@ def test_network() raises:
     var basic = html.at(0)
     assert_equal(basic.get_string("name", ""), "basic")
 
-    # A second server plays "another host": the server is on 127.0.0.1, "localhost" is another
-    # host for the redirect rules.
-    var fxb = Fixture(script([resp("/moved", 200, "OK", "[]")]))
     var rs = List[String]()
     # 0 search_arxiv ok
     rs.append(resp("/api/query", 200, "OK", arxiv_like.get_string("xml", ""), [["Content-Type", "application/atom+xml"]]))
@@ -320,8 +424,8 @@ def test_network() raises:
     rs.append(resp("/pypi/bad/json", 200, "OK", "<html>not json</html>"))
     # 8 github ok with token
     rs.append(resp("/repos/Qiskit/qiskit/releases", 200, "OK", gh_two.get("doc").to_json()))
-    # 9 github, redirect to another host (localhost)
-    rs.append(resp("/repos/a/b/releases", 302, "Found", "", [["Location", "http://localhost:" + String(fxb.port) + "/moved"]]))
+    # 9 github, redirect to a host that is not on the allow-list: refused, not followed
+    rs.append(resp("/repos/a/b/releases", 302, "Found", "", [["Location", "https://example.org/moved"]]))
     # 10 github 403
     rs.append(resp("/repos/a/b/releases", 403, "rate limit exceeded", "{}"))
     # 11 fetch_page with a redirect
@@ -360,7 +464,7 @@ def test_network() raises:
 
     # github_release_notes
     assert_equal(tools.github_release_notes("Qiskit/qiskit", 3), gh_two.get_string("expected", ""))
-    assert_equal(tools.github_release_notes("a/b", 3), "[]")
+    assert_equal(tools.github_release_notes("a/b", 3), "{\n \"error\": \"GitHub lookup failed for a/b: ValueError\"\n}")
     assert_equal(tools.github_release_notes("a/b", 3), "{\n \"error\": \"GitHub lookup failed for a/b: HTTPError\"\n}")
     assert_equal(tools.github_release_notes("a/b/c", 3), "{\n \"error\": \"repo must look like owner/name\"\n}")
 
@@ -393,22 +497,14 @@ def test_network() raises:
     assert_equal(h8.get_string("accept", ""), "application/vnd.github+json")
     assert_equal(h8.get_string("authorization", ""), "Bearer " + TOKEN)
     assert_equal(h8.get_string("user-agent", ""), "qumo-agents/0.1 (+https://github.com/ANFAIA/QUMO)")
-    # the cross-host redirect keeps the User-Agent and drops the token
     assert_equal(log[9].get_string("path", ""), "/repos/a/b/releases?per_page=3")
     assert_true(log[9].get("headers").has("authorization"))
-    assert_equal(fxb.finish(), 0)
-    var logb = fxb.log()
-    assert_equal(len(logb), 1)
-    assert_equal(logb[0].get_string("path", ""), "/moved")
-    assert_equal(logb[0].get("headers").get_string("host", ""), "localhost:" + String(fxb.port))
-    assert_false(logb[0].get("headers").has("authorization"))
-    assert_equal(logb[0].get("headers").get_string("user-agent", ""), "qumo-agents/0.1 (+https://github.com/ANFAIA/QUMO)")
     _ = unsetenv("GITHUB_TOKEN")
 
 
 def research_get_plain(mut http: HttpClient, url: String, prefix: String) raises -> List[UInt8]:
     """`research_get` with the fixture's plain prefix."""
-    return research_get_prefixed(http, url, List[String](), List[String](), 400000, "ua", 5, prefix)
+    return research_get_prefixed(http, url, List[String](), List[String](), 400000, "ua", 5, prefix, List[String]())
 
 
 def arxiv_like_error(expected_parse_error: String) -> String:
@@ -421,5 +517,7 @@ def main() raises:
     test_pure()
     test_refusals()
     test_unreachable()
+    test_address_refusals()
+    test_redirect_hops()
     test_network()
     print("test_tools_research OK")
