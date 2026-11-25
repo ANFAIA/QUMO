@@ -13,7 +13,7 @@ other QUMO modules plug their features into it.
 | Diagnostics | `qumo/ai/diagnostics.mojo` | Stable codes, line/col, snippet, fix hint, lint warnings |
 | Self-description | `qumo/ai/describe.mojo` | Gate set, error catalog, capabilities and circuit summary, generated from the implementation (circuit and program JSON are in `qumo/ir/json.mojo`) |
 | Tool registry | `qumo/ai/tools.mojo`, `qumo/ai/registry.mojo` | One implementation per operation, shared by MCP and CLI; `full_registry()` adds the module tools |
-| Module tools | `qumo/exec/tools.mojo` | Compile, resources, VQE, QAOA, QEC experiments (all decoders), GPU status, device-explicit runs |
+| Module tools | `qumo/ai/exec_tools.mojo` | Compile, resources, VQE, QAOA, QEC experiments (all decoders), GPU status, device-explicit runs |
 | MCP server | `qumo/ai/mcp.mojo` | JSON-RPC 2.0 over stdio (MCP 2025-06-18) |
 | CLI | `cli/app.mojo` (commands, options, help; `run_cli(args)`), `cli/main.mojo` (the entry file) -> `build/qumo` | `qumo <command> [--json]`, plus generic `qumo tool <name> '<json>'` |
 | CLI help for tools | `qumo/ai/cli_help.mojo` | `qumo tool <name> --help` generated from the tool's JSON Schema, "did you mean" hints |
@@ -309,7 +309,7 @@ destructive, not idempotent, open world, so a client must not auto-approve it.
 `reg.add_read_only` marks a tool as verified pure local computation: no file write,
 no network, no hardware submission, no state kept between calls (seeds are explicit
 arguments; the only reads are of `QUMO_MODEL_DIR` / `models/ai_transpiler` files).
-Audit of all 24 registered tools (`qumo/ai`, `qumo/exec`, `qumo/ft`): every one meets
+Audit of all 24 registered tools (all in `qumo/ai`): every one meets
 that bar, so every one is `readOnlyHint: true, destructiveHint: false,
 idempotentHint: true, openWorldHint: false`. This includes `qumo_run_device` and
 `qumo_gpu_info`, which select a local CPU/GPU *simulator* and never talk to a QPU.
@@ -357,7 +357,7 @@ order or an object such as `{"theta": 0.1}`.
 A tool that needs one circuit, such as `qumo_statevector` or `qumo_expectation`,
 answers QM-E585 for a program with runtime regions: it has no single final state.
 
-Module tools (`qumo/exec/tools.mojo`, registered by `full_registry()`):
+Module tools (`qumo/ai/exec_tools.mojo`, registered by `full_registry()`):
 
 | Tool | Arguments | Result |
 |---|---|---|
@@ -370,7 +370,7 @@ Module tools (`qumo/exec/tools.mojo`, registered by `full_registry()`):
 | `qumo_density` | `qasm` \| `circuit`, `observable` | exact `probabilities`, `trace`, `purity`, `expectation`; up to 15 qubits |
 | `qumo_to_pbc` | `qasm` \| `circuit`, `fix_clifford` | Pauli-product rotations and measurements in the input frame, with `counts` |
 | `qumo_stim_import` | `stim`, `include_dem`, `include_qasm` | sizes, `missing_detectors`, optionally the DEM and OpenQASM |
-| `qumo_ft_codes` (`qumo/ft/tools.mojo`) | `code` (optional), `check_distance`, `architecture`: steane \| iceberg_<k>, `verify_gadgets` | code definitions, verified distance, architecture description, verification status of every gadget ([FT.md](FT.md)) |
+| `qumo_ft_codes` (`qumo/ai/ft_tools.mojo`) | `code` (optional), `check_distance`, `architecture`: steane \| iceberg_<k>, `verify_gadgets` | code definitions, verified distance, architecture description, verification status of every gadget ([FT.md](FT.md)) |
 | `qumo_ft_encode` | `qasm` \| `circuit`, `architecture`, `n_blocks`, QEC policy (`qec_style`, `qec_threshold`, `qec_costs`), factories, `feed_forward`, `magic_prep`, `rz_mode`, `shots`, `noise_p`, `include_logical`, `include_qasm` | logical program summary, resource report, outputs / post-selection bits, optional emulation next to the unencoded reference |
 | `qumo_ft_verify` | `code`, `kind`: clifford \| state, `semantic_qasm`, `impl_qasm`, `num_blocks`, `num_ancillas` | valid + the first failing operator |
 | `qumo_gpu_info` | none | whether the build has GPU support (`-D QUMO_GPU`), device name, API (CUDA, ROCm/HIP, Metal), `precision` (what `auto` runs: fp32 by default on every GPU), `precision_build_default`, `precision_env` (`QUMO_GPU_PRECISION`), `precisions` (selectable), `precision_note`, `fp64_supported`, auto-dispatch threshold, device profile |
@@ -554,7 +554,7 @@ code 1, the same refusal as over MCP.
 `qumo tool <name>`, in `qumo tool list` and in `describe capabilities`):
 
 ```mojo
-# qumo/compiler/tools.mojo  (owned by the compiler module)
+# qumo/ai/compiler_tools.mojo  (tool handlers live in qumo/ai: no other package imports ai)
 from qumo.ai.tools import ToolRegistry, ToolResult, ToolContext, tool_ok, arg_circuit, arg_int
 from qumo.core.json import JsonValue, JsonWriter
 from qumo.ai.describe import write_circuit_summary
@@ -583,9 +583,10 @@ def register_compiler_tools(mut reg: ToolRegistry):
             _transpile)
 ```
 
-Then add one line to `full_registry()` in `qumo/ai/registry.mojo` (module
-tools live there, so that `qumo.ai.tools` needs no imports from higher-level
-modules):
+Then add one line to `full_registry()` in `qumo/ai/registry.mojo`. Put the
+file in `qumo/ai`, next to `exec_tools.mojo`, `algorithm_tools.mojo` and
+`ft_tools.mojo`: `ai` is the top package, and a tools file inside the module
+it wraps would make that module import `ai` (a package cycle):
 
 ```mojo
     register_compiler_tools(reg)   # like register_exec_tools(reg)

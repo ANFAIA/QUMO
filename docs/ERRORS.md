@@ -47,7 +47,7 @@ Machine-readable catalog: `qumo describe errors --json`, or the MCP tool
 | `QM-E64x` | training | Native training stack of the AI-transpiler models (rl/: qrl and qumo_bridge) |
 | `QM-E7xx` | stabilizer | Stabilizer / Pauli-frame simulation and QEC (qumo.sim.stabilizer, qumo.sim.frame, qumo.qec) |
 | `QM-E8xx` | algorithms | Algorithms library (qumo.algorithms) |
-| `QM-E9xx` | interface | JSON, MCP tools, CLI and device selection (qumo.ai, qumo.exec.tools, cli); QM-E999 = uncategorized |
+| `QM-E9xx` | interface | JSON, MCP tools, CLI and device selection (qumo.ai, cli); QM-E999 = uncategorized |
 | `QM-E95x` | hardware | Hardware plugins (Python package plugins/hardware: IBM Quantum via Qiskit Runtime, Quantinuum via pytket/qnexus) |
 | `QM-E96x` | benchmark | Benchmark harness (bench/run_benchmarks.py, Python) |
 | `QM-W0xx` | warning | Warnings: lint findings QM-W001..W019 (qumo.ai.diagnostics.lint), execution notes QM-W020..W049, OpenQASM parser warnings QM-W050..W053, QM-W055 and QM-W056, Program lint QM-W054 |

@@ -266,7 +266,7 @@ def error_ranges() -> List[ErrorRange]:
     _r(r, "QM-E7xx", "stabilizer", "Stabilizer simulation and QEC", "Stabilizer / Pauli-frame simulation and QEC (qumo.sim.stabilizer, qumo.sim.frame, qumo.qec)", 700, 799,
        "See [QEC.md](QEC.md).")
     _r(r, "QM-E8xx", "algorithms", "Algorithms", "Algorithms library (qumo.algorithms)", 800, 899)
-    _r(r, "QM-E9xx", "interface", "Interface", "JSON, MCP tools, CLI and device selection (qumo.ai, qumo.exec.tools, cli); QM-E999 = uncategorized", 900, 999)
+    _r(r, "QM-E9xx", "interface", "Interface", "JSON, MCP tools, CLI and device selection (qumo.ai, cli); QM-E999 = uncategorized", 900, 999)
     _r(r, "QM-E95x", "hardware", "Hardware plugins", "Hardware plugins (Python package plugins/hardware: IBM Quantum via Qiskit Runtime, Quantinuum via pytket/qnexus)", 950, 959,
        "Raised by the Python package `qumo_hardware`, not by the Mojo core. This block mirrors `CATALOG` in plugins/hardware/qumo_hardware/errors.py (tests/test_mcp.mojo checks that every code used there is listed here). See [HARDWARE_PLUGINS.md](HARDWARE_PLUGINS.md#error-codes); `python -m qumo_hardware errors --json` prints the plugin's own catalogue. Messages never contain credentials.")
     _r(r, "QM-E96x", "benchmark", "Benchmark harness", "Benchmark harness (bench/run_benchmarks.py, Python)", 960, 969,

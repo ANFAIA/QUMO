@@ -64,7 +64,7 @@ Integration (all GPU calls gated, see below):
   `gpu_sample_route`), in the device's precision unless the job sets its own
   (`add_sample / add_estimate(..., precision=...)`). Otherwise they run on
   the CPU and `JobResult.backend` ends with `(gpu fallback: <reason>)`.
-* MCP / CLI tools (`qumo/exec/tools.mojo`): `qumo_gpu_info` and
+* MCP / CLI tools (`qumo/ai/exec_tools.mojo`): `qumo_gpu_info` and
   `qumo_run_device` (`qumo_run_qasm` plus `"device": "auto"|"cpu"|"gpu"` and
   `"precision": "auto"|"fp32"|"fp64"`, warning `QM-W020` with the reason on
   fallback, `QM-W021` when a requested precision did not apply; the result

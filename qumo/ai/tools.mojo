@@ -9,10 +9,12 @@ return a JSON object (`structured`), so CLI `--json` output, MCP
 Errors never escape: `ToolRegistry.call` converts any raised `QM-Exxx`
 error into an `isError` result carrying the structured `Diagnostic`.
 
-Extending (other QUMO modules)
-------------------------------
+Extending (tools over another QUMO module)
+------------------------------------------
+The handlers live in `qumo/ai` (`exec_tools`, `algorithm_tools`, `ft_tools`):
+`ai` is the top package, the module the tool wraps does not import it.
 ```mojo
-# qumo/compiler/tools.mojo
+# qumo/ai/compiler_tools.mojo
 from qumo.ai.tools import ToolRegistry, ToolResult, ToolContext, tool_ok, arg_circuit
 from qumo.core.json import JsonValue
 def _transpile(args: JsonValue, ctx: ToolContext) raises -> ToolResult: ...
@@ -21,7 +23,7 @@ def register_compiler_tools(mut reg: ToolRegistry):
                       "{\\"type\\":\\"object\\", ...}", _transpile)
     # a tool that writes a file or submits a job: reg.add(..., ToolHints(False, False, False, True))
 ```
-then add one line to `default_registry()` below. Every registered tool
+then add one line to `full_registry()` in `qumo/ai/registry.mojo`. Every registered tool
 appears automatically in MCP `tools/list`, `qumo tool <name> '<json>'`,
 `qumo tool list` and `describe capabilities`.
 """
@@ -243,12 +245,10 @@ struct ToolRegistry(Movable):
 
 
 def default_registry() -> ToolRegistry:
-    """Core tools + (one line per module) tools contributed by other modules."""
+    """Core tools only. The tools over other modules (`exec_tools`, `algorithm_tools`,
+    `ft_tools`) are added by `qumo.ai.registry.full_registry()`."""
     var reg = ToolRegistry()
     register_core_tools(reg)
-    # register_compiler_tools(reg)    # qumo.compiler.tools  (transpile, optimize)
-    # register_qec_tools(reg)         # qumo.qec.tools       (memory experiments, decoding)
-    # register_algorithm_tools(reg)   # qumo.algorithms.tools (vqe, qaoa, resource estimation)
     return reg^
 
 

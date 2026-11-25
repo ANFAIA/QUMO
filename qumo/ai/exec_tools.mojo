@@ -1,6 +1,10 @@
 """Agent tools for compilation, resource estimation, variational algorithms,
 QEC experiments and device-explicit simulation (CPU / GPU).
 
+They are the tools over `qumo.exec`, `qumo.compiler`, `qumo.qec` and the
+variational algorithms. The file is in `qumo/ai` (it was `qumo/exec/tools.mojo`)
+so that `exec` does not import `ai`.
+
 Registered in `qumo.ai.registry.full_registry()`, so they appear in MCP
 `tools/list`, `qumo tool <name> '<json>'` and the capabilities document.
 Targets are vendor-neutral one-line specs (`qumo.device.target.parse_target`)

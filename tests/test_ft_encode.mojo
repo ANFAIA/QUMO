@@ -14,7 +14,7 @@ from qumo.ir.circuit import Circuit
 from qumo.ir.gates import Op
 from qumo.sim.runner import evolve
 from qumo.ai.tools import ToolRegistry
-from qumo.ft.tools import register_ft_tools
+from qumo.ai.ft_tools import register_ft_tools
 from qumo.core.json import parse_json
 from qumo.ft.classical import XorExpr
 from qumo.ft.logical import LogicalProgram, LogicalOpKind
