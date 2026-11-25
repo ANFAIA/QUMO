@@ -32,17 +32,34 @@ SANDBOX_ROOT = REPO_ROOT / ".worktrees"
 _state = {"sandbox": None}  # Path of the sandbox worktree opened in this process
 
 
+def _forbidden(parts) -> bool:
+    """True when any path component is a skipped directory or a secret-looking name.
+    The one rule behind _resolve, list_files and search_code, so they cannot drift."""
+    return any(part in SKIP_DIRS or SECRET_NAMES.search(part) for part in parts)
+
+
+def _walkable(p: Path, root: Path) -> bool:
+    """A file found while walking: regular, with nothing forbidden in its root-relative
+    path or in where it really points (a symlink must not leave the root or reach a secret)."""
+    try:
+        if _forbidden(p.relative_to(root).parts) or not p.is_file():
+            return False
+        real = p.resolve()
+        return real == root.resolve() or not _forbidden(real.relative_to(root.resolve()).parts)
+    except (OSError, ValueError):
+        return False
+
+
 def _resolve(path: str, root: Path) -> Path:
     # The path as written is checked first, so a forbidden directory is refused by its own
     # rule even when it is a symlink that resolves outside the repository (.venv often is).
     lexical = Path(os.path.normpath(path))
-    if set(lexical.parts) & SKIP_DIRS or SECRET_NAMES.search(lexical.name):
+    if _forbidden(lexical.parts):
         raise ValueError(f"{path} is not readable by agents")
     p = (root / path).resolve()
     if p != root and root not in p.parents:
         raise ValueError(f"{path} is outside {root}")
-    parts = set(p.relative_to(root).parts)
-    if parts & SKIP_DIRS or SECRET_NAMES.search(p.name):
+    if _forbidden(p.relative_to(root).parts):
         raise ValueError(f"{path} is not readable by agents")
     return p
 
@@ -80,9 +97,9 @@ def list_files(path: str = ".", pattern: str = "*") -> str:
         return f"error: {e}"
     out = []
     for p in sorted(base.rglob("*")):
-        rel = p.relative_to(_root())
-        if set(rel.parts) & SKIP_DIRS or not p.is_file() or not fnmatch.fnmatch(p.name, pattern):
+        if not fnmatch.fnmatch(p.name, pattern) or not _walkable(p, _root()):
             continue
+        rel = p.relative_to(_root())
         out.append(str(rel))
         if len(out) >= 300:
             out.append("... truncated")
@@ -101,9 +118,9 @@ def search_code(regex: str, path: str = ".", glob: str = "*.mojo") -> str:
         return f"error: {e}"
     hits = []
     for p in sorted(base.rglob(glob)):
-        rel = p.relative_to(_root())
-        if set(rel.parts) & SKIP_DIRS or not p.is_file():
+        if not _walkable(p, _root()):
             continue
+        rel = p.relative_to(_root())
         for i, line in enumerate(p.read_text(errors="replace").splitlines(), 1):
             if rx.search(line):
                 hits.append(f"{rel}:{i}: {line.strip()[:200]}")

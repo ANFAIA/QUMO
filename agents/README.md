@@ -80,7 +80,7 @@ shows what each agent would run on. Details: [docs/AGENTS.md](../docs/AGENTS.md)
 
 ## Safety
 
-* Read tools stay inside the repository and skip `.venv`, `build`, `.git` and secret-looking files.
+* Read tools stay inside the repository and skip `.venv`, `build`, `.git` and secret-looking files; reading, listing and searching all apply the same rule to every path component (a secret-named directory is skipped too), and symlinks that leave the repository are not followed.
 * Only `autoresearch` writes code, and only inside a sandbox git worktree on a new
   `agents/<topic>-<time>` branch. The main checkout is never written. A person reviews the branch.
 * Commands run from an allow-list, without a shell.

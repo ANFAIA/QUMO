@@ -52,7 +52,7 @@ from std.memory import ArcPointer
 from std.runtime import parallelism_level
 from max.algorithm import parallelize
 
-from qumo.qec.dem import DetectorErrorModel, combine_independent
+from qumo.qec.dem import DetectorErrorModel, DemError, combine_independent
 from qumo.sim.frame import DetectorSamples, FW, BATCH
 
 
@@ -68,6 +68,45 @@ trait Decoder(Copyable, Deinitable):
 # ---------------------------------------------------------------------------
 # Matching graph
 # ---------------------------------------------------------------------------
+def graph_pieces(e: DemError) -> DemError:
+    """`e` with its `^` pieces made safe to index: the one place that decides
+    what a piece without detectors means (used by MatchingGraph, graphlike_dem
+    and the correlated decoder).
+
+    Stim's `^` only suggests a split into graph-like pieces. A piece with no
+    detector flips no detector, it only carries an observable flip, so its
+    observable mask is XORed into the adjacent piece that has detectors (the
+    previous one, else the next one) and the empty piece is removed. The
+    mechanism's total observable flip and detector set do not change. If no
+    piece has a detector the result has no detectors and keeps the total
+    observable mask (an undetectable mechanism, skipped by the graph). If one
+    piece remains the result is a plain error. Pieces with more than two
+    detectors are kept: callers decompose them like an undecomposed hyperedge."""
+    if len(e.comp_dets) <= 1:
+        return e.copy()
+    var dets = List[List[Int]]()
+    var obs = List[UInt64]()
+    var carry = UInt64(0)  # observable bits of leading empty pieces
+    for c in range(len(e.comp_dets)):
+        if len(e.comp_dets[c]) == 0:
+            if len(obs) > 0:
+                obs[len(obs) - 1] ^= e.comp_obs[c]
+            else:
+                carry ^= e.comp_obs[c]
+        else:
+            dets.append(e.comp_dets[c].copy())
+            obs.append(e.comp_obs[c] ^ carry)
+            carry = 0
+    if len(dets) == 0:
+        return DemError(e.p, List[Int](), e.obs)
+    if len(dets) == 1:
+        return DemError(e.p, dets[0].copy(), obs[0])
+    var out = e.copy()
+    out.comp_dets = dets^
+    out.comp_obs = obs^
+    return out^
+
+
 struct MatchingGraph(Copyable, Writable):
     var num_detectors: Int
     var num_observables: Int
@@ -103,13 +142,25 @@ struct MatchingGraph(Copyable, Writable):
         self.num_undetectable = 0
         self.wmax_extra = 0.0
         self._index = Dict[Int, Int]()
-        # pass 1: graph-like errors and Stim-style decomposed pieces
-        for e in dem.errors:
+        # pass 1: graph-like errors and Stim-style decomposed pieces. Pieces
+        # with more than two detectors are queued with the plain hyperedges.
+        var pdets = List[List[Int]]()
+        var pobs = List[UInt64]()
+        var pp = List[Float64]()
+        var pcount = List[Bool]()  # True: count it as a hyperedge in pass 2
+        for e0 in dem.errors:
+            var e = graph_pieces(e0)
             var nd = len(e.dets)
             if len(e.comp_dets) > 1:
                 self.num_hyperedges += 1
                 for c in range(len(e.comp_dets)):
                     ref cd = e.comp_dets[c]
+                    if len(cd) > 2:
+                        pdets.append(cd.copy())
+                        pobs.append(e.comp_obs[c])
+                        pp.append(e.p)
+                        pcount.append(False)
+                        continue
                     var u = cd[0]
                     var v = cd[1] if len(cd) == 2 else self.boundary
                     self._add_edge(u, v, e.p, e.comp_obs[c])
@@ -119,19 +170,22 @@ struct MatchingGraph(Copyable, Writable):
                     self.num_undetectable += 1
                 continue
             if nd > 2:
+                pdets.append(e.dets.copy())
+                pobs.append(e.obs)
+                pp.append(e.p)
+                pcount.append(True)
                 continue
             var u = e.dets[0]
             var v = e.dets[1] if nd == 2 else self.boundary
             self._add_edge(u, v, e.p, e.obs)
         # pass 2: decompose remaining hyperedges against the existing edges
-        for e in dem.errors:
-            if len(e.dets) <= 2 or len(e.comp_dets) > 1:
-                continue
-            self.num_hyperedges += 1
+        for k in range(len(pdets)):
+            if pcount[k]:
+                self.num_hyperedges += 1
             var parts = List[Int]()
-            if len(e.dets) <= 16 and self._decompose(e.dets, 0, e.obs, parts):
+            if len(pdets[k]) <= 16 and self._decompose(pdets[k], 0, pobs[k], parts):
                 for idx in parts:
-                    self.ep[idx] = combine_independent(self.ep[idx], e.p)
+                    self.ep[idx] = combine_independent(self.ep[idx], pp[k])
             else:
                 self.num_dropped += 1
         # weights + CSR adjacency
@@ -287,8 +341,29 @@ def graphlike_dem(dem: DetectorErrorModel) -> DetectorErrorModel:
     var out = dem.copy()
     var g = MatchingGraph(dem)
     for i in range(len(out.errors)):
+        out.errors[i] = graph_pieces(out.errors[i])
         ref e = out.errors[i]
-        if len(e.dets) <= 2 or len(e.comp_dets) > 1 or len(e.dets) > 16:
+        if len(e.comp_dets) > 1:
+            # a piece with more than two detectors becomes the edges it decomposes into
+            var cds = List[List[Int]]()
+            var cos = List[UInt64]()
+            for c in range(len(e.comp_dets)):
+                var parts = List[Int]()
+                if len(e.comp_dets[c]) > 2 and len(e.comp_dets[c]) <= 16 and g._decompose(e.comp_dets[c], 0, e.comp_obs[c], parts):
+                    for idx in parts:
+                        var cd = List[Int]()
+                        cd.append(g.eu[idx])
+                        if g.ev[idx] != g.boundary:
+                            cd.append(g.ev[idx])
+                        cds.append(cd^)
+                        cos.append(g.eobs[idx])
+                else:
+                    cds.append(e.comp_dets[c].copy())
+                    cos.append(e.comp_obs[c])
+            e.comp_dets = cds^
+            e.comp_obs = cos^
+            continue
+        if len(e.dets) <= 2 or len(e.dets) > 16:
             continue
         var parts = List[Int]()
         if not g._decompose(e.dets, 0, e.obs, parts):
