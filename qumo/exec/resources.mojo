@@ -52,12 +52,31 @@ struct SynthesisModel(Copyable):
         return max(1, Int(ceil(self.a * log2(1.0 / eps) + self.b)))
 
 
+def _angle_cost(angle: Float64, n: Int, scale: Float64, mut exact: Int, mut rots: Int):
+    """Cost of one constant rotation angle on `n` wires, `scale` times the angle:
+    a multiple of pi/2 is Clifford (free), an odd multiple of pi/4 is one exact T
+    per wire, anything else is `n` arbitrary rotations to synthesise."""
+    var r = angle * scale / (pi / 4)
+    if abs(r) < 2.0 * QUARTER_TURN_LIMIT and abs(r - round(r)) < 1e-12:
+        if Int(round(r)) % 2 != 0:
+            exact += n
+        return
+    rots += n
+
+
 def t_cost(g: Instruction, mut exact: Int, mut rots: Int):
     """Exact T gates and arbitrary rotations to synthesise for one gate.
 
     Decompositions: controlled rotations are two half-angle rotations, CP three
-    (P(t/2) on each wire and one between CX gates), U three (ZYZ). A rotation
-    by an odd multiple of pi/4 is one exact T up to Cliffords."""
+    (P(t/2) on each wire and one between CX gates). A rotation by an odd multiple
+    of pi/4 is one exact T up to Cliffords.
+
+    U(theta, phi, lambda) = e^{i(phi+lambda)/2} Rz(phi) Ry(theta) Rz(lambda). With
+    constant angles each angle is classified as a rotation. When theta is a
+    multiple of pi, Ry(theta) is Clifford (+-I or +-Y, and Y Rz(lambda) Y =
+    Rz(-lambda)), so the two Rz merge into one rotation by phi + lambda (theta
+    an even multiple of pi) or phi - lambda (an odd multiple). Symbolic angles
+    keep the worst case of three rotations."""
     exact = 0
     rots = 0
     if not op_is_unitary(g.kind) or g.is_clifford():
@@ -73,7 +92,20 @@ def t_cost(g: Instruction, mut exact: Int, mut rots: Int):
         exact = 7  # standard Toffoli decomposition
         return
     if k == Op.U:
-        rots = 3
+        if g.p0.is_symbolic() or g.p1.is_symbolic() or g.p2.is_symbolic():
+            rots = 3
+            return
+        var theta = g.p0.value()
+        var phi = g.p1.value()
+        var lam = g.p2.value()
+        var m = theta / pi
+        if abs(m) < QUARTER_TURN_LIMIT and abs(m - round(m)) < 1e-12:
+            var odd = Int(round(m)) % 2 != 0
+            _angle_cost(phi - lam if odd else phi + lam, 1, 1.0, exact, rots)
+            return
+        _angle_cost(theta, 1, 1.0, exact, rots)
+        _angle_cost(phi, 1, 1.0, exact, rots)
+        _angle_cost(lam, 1, 1.0, exact, rots)
         return
     var n = 1
     var scale = 1.0
@@ -88,12 +120,7 @@ def t_cost(g: Instruction, mut exact: Int, mut rots: Int):
     if g.p0.is_symbolic():
         rots = n
         return
-    var r = g.p0.value() * scale / (pi / 4)
-    if abs(r) < 2.0 * QUARTER_TURN_LIMIT and abs(r - round(r)) < 1e-12:
-        if Int(round(r)) % 2 != 0:
-            exact = n
-        return
-    rots = n
+    _angle_cost(g.p0.value(), n, scale, exact, rots)
 
 
 struct ResourceEstimate(Copyable, Writable):

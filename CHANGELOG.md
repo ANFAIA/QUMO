@@ -34,7 +34,11 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 - 21 more Classiq examples; `examples/CATALOG.md`; `run_examples.py --framework NAME`. ([#4](https://github.com/ANFAIA/QUMO/pull/4), 2026-11-05)
 - The AI agent layer (`agents/`, `bin/qumo-agents`, `docs/AGENTS.md`): nine agents built on deepagents. Benchmark charts of compile time and memory per SDK (`make bench-charts`). Classiq examples. ([#3](https://github.com/ANFAIA/QUMO/pull/3), 2026-11-05)
 - Four features taken from qilisdk under QUMO names: QUBO models and conversion to Ising (`qumo/algorithms/qubo.mojo`), analog schedules (`qumo/algorithms/schedule.mojo`), angle perturbations (`qumo/sim/perturbation.mojo`), flow-style YAML for Pauli sums; and a SpeQtrum hardware provider. ([#2](https://github.com/ANFAIA/QUMO/pull/2), 2026-11-03)
-- `Program`: `while`, `break`, `continue`, classical variables and a derived control-flow graph above `Circuit` (`docs/CONTROL_FLOW.md`). ([#1](https://github.com/ANFAIA/QUMO/pull/1), 2026-11-03)
+- `Program`: `while`, `break`, `continue`, classical variables and a derived control-flow graph above `Circuit` (`docs/CONTROL_FLOW.md`). ([#1](https://github.c
+
+### Fixed
+
+- The resource estimator counted three synthesised rotations for every constant `U` gate, so `U(pi/2, 0, pi)` (H) and `U(0, 0, pi/4)` (T) were reported as non-Clifford rotations. Constant angles are now classified as for `RZ`/`RY`: a multiple of pi/2 is free, an odd multiple of pi/4 is one T, and when theta is a multiple of pi the two Rz merge into one rotation by phi + lambda (phi - lambda for an odd multiple). Symbolic angles still count three. `recommended_method` and `is_clifford()` are unchanged (they still treat `U` as non-Clifford). (`qumo/exec/resources.mojo`, `tests/test_orchestrator.mojo`)om/ANFAIA/QUMO/pull/1), 2026-11-03)
 
 ### Fixed
 
