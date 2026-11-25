@@ -6,16 +6,21 @@ raises: a network, HTTP or parse failure becomes `{"error": "..."}` (or, for `fe
 same JSON), as in Python, and the cases Python lets crash (unknown `module`, X4) are error
 results too. Results are `json.dumps(obj, indent=1, ensure_ascii=False)`.
 
-`research_get` is the one HTTP GET: https only (plus `http://export.arxiv.org/`, which is what
-the arXiv API is spoken over), urllib's redirect rules, a byte cap, TLS EOFs accepted as urllib
-does. Its errors are raised with the text Python's `f"{type(e).__name__}: {e}"` would give,
+`research_get` is the one HTTP GET: a byte cap, TLS EOFs accepted as urllib does, and the
+outbound rules of Python's `_check_url`, applied to the URL and to every redirect target
+before a connection is opened (net/guard.mojo): https only, port 443 only, no address that is
+not globally routable (loopback, private, link-local, metadata; a name is refused when any
+address it resolves to is one), the API tools limited to `api_hosts()`, at most
+`MAX_REDIRECTS` redirects, `Authorization` dropped on every redirect. Its errors are raised with the text Python's `f"{type(e).__name__}: {e}"` would give,
 so a tool can put them straight into its error result:
 
 - `HTTPError: HTTP Error <code>: <reason>` for a non-2xx answer after redirects,
 - `URLError: <urlopen error <detail>>` for DNS, connect and TLS failures,
 - `TimeoutError: timed out` for a read or write that stalls,
 - `IncompleteRead: ...` for a body that ends early,
-- `ValueError: only https URLs are fetched` for a refused URL.
+- `ValueError: only https URLs are fetched` and the other `_check_url` messages (`only the
+  default https port is fetched`, `<host> is not on the allow-list for this tool`, `<host> is
+  not a public address`, `cannot resolve <host>`, `too many redirects`) for a refused URL.
 
 The detail after `URLError` is this port's own wording (it has no errno), not CPython's.
 Error texts pass through `redact_all`, so a GitHub token never reaches the model.
@@ -28,6 +33,7 @@ from qumo.core.json import JsonValue, JsonWriter, parse_json
 from qumo_agent.net.http import (
     HttpClient, HttpRequest, HttpResponse, HttpOptions, REDIRECT_URLLIB,
 )
+from qumo_agent.net.guard import UrlGuard, REFUSED
 from qumo_agent.net.url import quote, urlencode
 from qumo_agent.tools.atom import parse_arxiv_atom, arxiv_entries_json
 from qumo_agent.tools.config import LocalToolsCatalog, Modules
@@ -36,7 +42,7 @@ from qumo_agent.util.pyfmt import cp_head, py_json_dumps
 from qumo_agent.util.redact import redact_all, secret_env_names
 
 comptime ARXIV_API = "https://export.arxiv.org/api/query"
-comptime ARXIV_PLAIN_PREFIX = "http://export.arxiv.org/"
+comptime MAX_REDIRECTS = 3
 comptime PYPI_BASE = "https://pypi.org/pypi/"
 comptime GITHUB_API = "https://api.github.com/repos/"
 # X6: sdk_releases reads whole PyPI JSON documents (qiskit's is several MiB).
@@ -70,6 +76,8 @@ def py_net_error(e: Error) -> String:
         return "IncompleteRead: " + msg
     if msg.startswith("invalid URL"):
         return "ValueError: " + msg
+    if msg.startswith(REFUSED):
+        return "ValueError: " + String(msg[byte=REFUSED.byte_length():msg.byte_length()])
     if msg.startswith("response body larger than"):
         return "ValueError: " + msg
     if msg.find("timed out") >= 0:
@@ -104,10 +112,18 @@ def error_json(msg: String) -> String:
 # ---------------------------------------------------------------------------
 # HTTP GET
 # ---------------------------------------------------------------------------
+def api_hosts() -> List[String]:
+    """Hosts the API tools may call (Python's `API_HOSTS`). `fetch_page` reads any public https host."""
+    return ["export.arxiv.org", "pypi.org", "api.github.com"]
+
+
 def research_get_prefixed(mut http: HttpClient, url: String, header_names: List[String], header_values: List[String],
-                  max_bytes: Int, user_agent: String, timeout_s: Int, plain_prefix: String) raises -> List[UInt8]:
-    """`research_get` with the plain-http prefix as a parameter (tests point it at a local
-    fixture server; `research_get` fixes it to http://export.arxiv.org/)."""
+                  max_bytes: Int, user_agent: String, timeout_s: Int, plain_prefix: String,
+                  hosts: List[String]) raises -> List[UInt8]:
+    """`research_get` with two more parameters. `hosts`: the allow-list (empty: any public
+    host). `plain_prefix`: a test seam, empty outside tests; a URL that starts with it (a
+    fixture server on loopback) may be plain http and skips the outbound rules, on the first
+    request and on a redirect."""
     var plain = plain_prefix.byte_length() > 0 and url.startswith(plain_prefix)
     if not url.startswith("https://") and not plain:
         raise Error("ValueError: only https URLs are fetched")
@@ -124,10 +140,11 @@ def research_get_prefixed(mut http: HttpClient, url: String, header_names: List[
         if not replaced:
             names.append(header_names[i])
             values.append(header_values[i])
-    var opts = HttpOptions(timeout_s * 1000, timeout_s * 1000, max_bytes, True, REDIRECT_URLLIB, 10, plain, True)
+    var opts = HttpOptions(timeout_s * 1000, timeout_s * 1000, max_bytes, True, REDIRECT_URLLIB, MAX_REDIRECTS, plain, True)
+    var guard = UrlGuard(True, hosts.copy(), plain_prefix)
     var resp: HttpResponse
     try:
-        resp = http.request(HttpRequest("GET", url, names^, values^, String()), opts)
+        resp = http.request_guarded(HttpRequest("GET", url, names^, values^, String()), opts, guard)
     except e:
         raise Error(_redact(py_net_error(e)))
     if resp.status < 200 or resp.status >= 300:
@@ -137,9 +154,10 @@ def research_get_prefixed(mut http: HttpClient, url: String, header_names: List[
 
 def research_get(mut http: HttpClient, url: String, header_names: List[String], header_values: List[String],
                  max_bytes: Int, user_agent: String, timeout_s: Int) raises -> List[UInt8]:
-    """GET `url` (https, or http://export.arxiv.org/) and return at most `max_bytes` of the
+    """GET `url` (https, port 443, any public host) and return at most `max_bytes` of the
     body. Raises `<Type>: <message>` texts (see the module doc)."""
-    return research_get_prefixed(http, url, header_names, header_values, max_bytes, user_agent, timeout_s, ARXIV_PLAIN_PREFIX)
+    return research_get_prefixed(http, url, header_names, header_values, max_bytes, user_agent, timeout_s, String(),
+                                 List[String]())
 
 
 def _lossy(body: List[UInt8]) -> String:
@@ -374,7 +392,8 @@ struct ResearchTools(Movable):
     var modules: Modules
     var catalog: LocalToolsCatalog
     # Where the requests go. The defaults are the real services; tests point them at a local
-    # fixture server (and set `plain_prefix` so that its http URL is accepted).
+    # fixture server (and set `plain_prefix`, empty by default, so that its http URL on
+    # loopback is accepted: see `research_get_prefixed`).
     var arxiv_api: String
     var pypi_base: String
     var github_api: String
@@ -387,11 +406,15 @@ struct ResearchTools(Movable):
         self.arxiv_api = String(ARXIV_API)
         self.pypi_base = String(PYPI_BASE)
         self.github_api = String(GITHUB_API)
-        self.plain_prefix = String(ARXIV_PLAIN_PREFIX)
+        self.plain_prefix = String()
 
-    def _get(mut self, url: String, header_names: List[String], header_values: List[String], max_bytes: Int) raises -> List[UInt8]:
+    def _get(mut self, url: String, header_names: List[String], header_values: List[String], max_bytes: Int,
+             api: Bool) raises -> List[UInt8]:
+        """`api`: one of the API tools, limited to `api_hosts()`; False for `fetch_page`."""
+        var hosts = api_hosts() if api else List[String]()
         return research_get_prefixed(self.http, url, header_names, header_values, max_bytes,
-                             self.catalog.research_user_agent(), self.catalog.research_timeout_s(), self.plain_prefix)
+                             self.catalog.research_user_agent(), self.catalog.research_timeout_s(), self.plain_prefix,
+                             hosts)
 
     def search_arxiv(mut self, query: String, module: String, max_results: Int) -> String:
         var cats = List[String]()
@@ -404,7 +427,7 @@ struct ResearchTools(Movable):
             cats.append("quant-ph")
         try:
             var body = self._get(_arxiv_url(self.arxiv_api, query, cats, max_results), List[String](), List[String](),
-                                 self.catalog.research_max_bytes())
+                                 self.catalog.research_max_bytes(), True)
             return arxiv_entries_json(parse_arxiv_atom(_lossy(body)))
         except e:
             return error_json("arXiv query failed: " + String(e))
@@ -412,7 +435,7 @@ struct ResearchTools(Movable):
     def sdk_releases(mut self, package: String) -> String:
         try:
             var body = self._get(self.pypi_base + quote(package, "/") + "/json", List[String](), List[String](),
-                                 SDK_RELEASES_MAX_BYTES)
+                                 SDK_RELEASES_MAX_BYTES, True)
             return pypi_info_json(package, _lossy(body))
         except e:
             return error_json("PyPI lookup failed for " + package + ": " + String(e))
@@ -429,7 +452,7 @@ struct ResearchTools(Movable):
         var text: String
         try:
             var body = self._get(self.github_api + repo + "/releases?per_page=" + String(_clamp(count, 1, 10)),
-                                 names, values, self.catalog.research_max_bytes())
+                                 names, values, self.catalog.research_max_bytes(), True)
             text = _lossy(body)
             # json.loads sits inside the same try in Python: a bad document is a lookup failure.
             _ = parse_json(text)
@@ -459,7 +482,7 @@ struct ResearchTools(Movable):
 
     def fetch_page(mut self, url: String) -> String:
         try:
-            var body = self._get(url, List[String](), List[String](), self.catalog.research_max_bytes())
+            var body = self._get(url, List[String](), List[String](), self.catalog.research_max_bytes(), False)
             return strip_html(_lossy(body))
         except e:
             return error_json("fetch failed: " + String(e))

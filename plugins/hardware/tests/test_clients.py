@@ -152,3 +152,51 @@ def test_a_global_python_choice_leaves_native_only_providers_native(monkeypatch)
     monkeypatch.setenv("QUMO_HW_CLIENT_LOCAL", "python")
     with pytest.raises(HardwareError):
         get_provider("local")
+
+
+def test_job_ids_never_share_a_file():
+    """`a/b` and `a_b` are two jobs: one used to overwrite the other."""
+    from qumo_hardware import jobs as job_store
+    from qumo_hardware.base import QUEUED, JobHandle
+
+    for jid, shots in (("a/b", 1), ("a_b", 2), ("a%2Fb", 3), ("a b", 4)):
+        job_store.save(JobHandle(jid, "local", "qumo-sim", shots, True, QUEUED))
+    assert [job_store.load(j).shots for j in ("a/b", "a_b", "a%2Fb", "a b")] == [1, 2, 3, 4]
+    assert all(p.parent == job_store.store_dir() for p in map(job_store._path, ("../x", "a/b", "..")))
+
+
+def test_job_stored_under_the_old_file_name_is_still_found():
+    import json
+
+    from qumo_hardware import jobs as job_store
+    from qumo_hardware.base import QUEUED, JobHandle
+    from qumo_hardware.errors import E_UNKNOWN_JOB, HardwareError
+
+    old = job_store._legacy_path("x:1")
+    old.write_text(json.dumps(JobHandle("x:1", "local", "qumo-sim", 7, True, QUEUED).to_dict()))
+    assert job_store.load("x:1").shots == 7
+    with pytest.raises(HardwareError) as exc:  # same old file name, another job
+        job_store.load("x/1")
+    assert exc.value.code == E_UNKNOWN_JOB
+
+
+def test_job_file_options_are_limited_to_the_declared_ones():
+    from qumo_hardware.base import QUEUED, JobHandle
+    from qumo_hardware.errors import E_JOB, HardwareError
+
+    def opts(provider, stored, local=False):
+        return runner._job_file_options(JobHandle("j", provider, "b", 1, local, QUEUED, meta={"provider_options": stored}))
+
+    assert opts("quantinuum", {"project": "p", "client": "python", "max_cost": 1e9, "seed": 3}) == {
+        "project": "p", "client": "python"}
+    assert opts("ibm", {"instance": "crn:v1:x", "account_name": "work", "channel": None, "use_fractional_gates": True,
+                        "server_dry_run": True, "sampler_options": {"a": 1}, "client": "native"}) == {
+        "instance": "crn:v1:x", "account_name": "work", "channel": None, "use_fractional_gates": True,
+        "client": "native"}
+    assert opts("ionq", {}) == {"client": "python"} and opts("local", {}, local=True) == {}
+    for provider, stored in (("ibm", {"service": {}}), ("ibm", {"url": "https://other.example"}),
+                             ("ionq", {"api_key": "k"}), ("qbraid", {"Token": "t", "client": "native"}), ("ibm", {"instance": ["x"]}),
+                             ("ionq", {"client": 3}), ("speqtrum", ["url"])):
+        with pytest.raises(HardwareError) as exc:
+            opts(provider, stored)
+        assert exc.value.code == E_JOB

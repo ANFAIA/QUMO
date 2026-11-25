@@ -286,6 +286,8 @@ class IBMProvider:
         self.server_dry_run = server_dry_run
 
     # ------------------------------------------------------------ plumbing
+    JOB_OPTIONS = ("channel", "instance", "account_name", "use_fractional_gates")  # read back from a job file
+
     def public_options(self) -> dict:
         """Constructor options worth persisting with a job (identifiers only, never tokens)."""
         return {"channel": self.channel, "instance": self.instance, "account_name": self.account_name,

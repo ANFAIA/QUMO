@@ -8,7 +8,8 @@ the sandbox write/edit tools use it as their root. Paths in the outputs are writ
 <ROOT> and <OUT> in place of the temporary directories.
 
 Calls where the Mojo port deliberately differs (X5, X14 in DESIGN.md 0.4) carry "mojo": the
-expected Mojo text, and "why".
+expected Mojo text, and "why". The secret-name and symlink skips of list_files and search_code
+are Python's own (`_forbidden`, `_walkable`), so those calls carry no "mojo".
 
     agents/.venv/bin/python -I agents/mojo/tests/fixtures/tools/gen_repo_golden.py
 """
@@ -39,6 +40,7 @@ FILES = {
     ".env": "KEY=1 TODO\n",
     "config/secret.mojo": "TODO secret\n",
     "config/Credentials.txt": "TODO\n",
+    "secrets/a.txt": "TODO in a secret-looking directory\n",
     "keys/id_rsa": "TODO\n",
     "server.PEM": "TODO\n",
     ".venv/x": "v\n",
@@ -61,8 +63,6 @@ LINKS = {
     "a/c/up": "..",
 }
 
-X5_SECRET = "search_code skips secret-looking names (X5)"
-X5_LINK = "search_code skips symlinks resolving outside the root (X5)"
 X14 = "skip directories compared case-insensitively (X14)"
 
 CALLS = [
@@ -93,6 +93,10 @@ CALLS = [
     ("read_file", {"path": "config/secret.mojo"}),
     ("read_file", {"path": "config/Credentials.txt"}),
     ("read_file", {"path": "keys/id_rsa"}),
+    ("read_file", {"path": "secrets/a.txt"}),
+    ("read_file", {"path": "src/../secrets/a.txt"}),
+    ("read_file", {"path": "Secrets/a.txt"}),
+    ("read_file", {"path": "secrets/../README.md"}),
     ("read_file", {"path": "src/link_in.mojo"}),
     ("read_file", {"path": "a/c/up/b"}),
     ("read_file", {"path": "<ROOT>/README.md"}),
@@ -110,6 +114,10 @@ CALLS = [
     ("list_files", {"path": ".git"}),
     ("list_files", {"path": "linkdir"}),
     ("list_files", {"path": "../"}),
+    ("list_files", {"path": "secrets"}),
+    ("list_files", {"path": "config"}),
+    ("search_code", {"regex": "TODO", "path": "src/../secrets", "glob": "*"}),
+    ("search_code", {"regex": "TODO", "path": "config", "glob": "*"}),
     ("search_code", {"regex": "TODO"}),
     ("search_code", {"regex": "print\\(", "path": "src"}),
     ("search_code", {"regex": "^x", "glob": "*.py"}),
@@ -154,8 +162,6 @@ CALLS = [
     ("run_check", {"argv": ["build/qumo", "convert", "src/a.py", "-o", "../escape.qasm"]}),
     ("run_check", {"argv": ["build/qumo", "convert", "src/a.py", "-o", ".env"]}),
 ]
-# Results that depend on the tree's search order and the X5 skips are recomputed below.
-X5_SEARCHES = {("search_code", "TODO", "*.mojo"), ("search_code", "(?i)todo", "*"), ("search_code", "TODO", "*.txt")}
 
 
 def build(root: Path, out: Path) -> None:
@@ -192,13 +198,6 @@ def main() -> None:
         entry = {"tool": tool, "args": args, "python": text}
         if len(c) > 2:
             entry["mojo"], entry["why"] = c[2], c[3]
-        key = (tool, args.get("regex"), args.get("glob", "*.mojo"))
-        if key in X5_SEARCHES and "path" not in args:
-            kept = [ln for ln in text.split("\n")
-                    if not repo.SECRET_NAMES.search(ln.split(":", 1)[0].rsplit("/", 1)[-1])
-                    and not ln.startswith("link_out.mojo:")]
-            entry["mojo"] = "\n".join(kept) or "no matches"
-            entry["why"] = X5_SECRET + "; " + X5_LINK
         results.append(entry)
     doc = {"schema": "qumo.test_repo_golden.v1",
            "files": FILES, "bytes": BYTES, "outside": OUTSIDE, "links": LINKS,

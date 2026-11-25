@@ -3,7 +3,9 @@
 Lets `status JOB` / `result JOB` work from a new process (the CLI is
 stateless). Location: $QUMO_HARDWARE_HOME/jobs (default ~/.qumo/hardware/jobs),
 never inside the repository. Records contain job ids, backend names, shot
-counts, layouts and (for local runs) counts. They never contain credentials.
+counts, layouts and (for local runs) counts. They never contain credentials,
+and the runner never takes an endpoint or a credential from one
+(runner._job_file_options).
 """
 
 from __future__ import annotations
@@ -20,6 +22,10 @@ from .errors import E_UNKNOWN_JOB, HardwareError
 _SAFE = re.compile(r"[^A-Za-z0-9._-]")
 
 
+def _escape(m: "re.Match[str]") -> str:
+    return "".join(f"%{b:02X}" for b in m.group(0).encode("utf-8", "surrogatepass"))
+
+
 def store_dir() -> Path:
     root = os.environ.get("QUMO_HARDWARE_HOME")
     base = Path(root).expanduser() if root else Path.home() / ".qumo" / "hardware"
@@ -29,6 +35,13 @@ def store_dir() -> Path:
 
 
 def _path(job_id: str) -> Path:
+    """One file per job id. A character outside [A-Za-z0-9._-] is written as %XX per UTF-8
+    byte, so two different ids never share a file (`a/b` is `a%2Fb.json`, not `a_b.json`)."""
+    return store_dir() / (_SAFE.sub(_escape, job_id) + ".json")
+
+
+def _legacy_path(job_id: str) -> Path:
+    """Name used before ids were escaped (every other character became `_`)."""
     return store_dir() / (_SAFE.sub("_", job_id) + ".json")
 
 
@@ -44,6 +57,14 @@ def save(job: JobHandle) -> Path:
 def load(job_id: str) -> JobHandle:
     path = _path(job_id)
     if not path.exists():
+        old = _legacy_path(job_id)
+        if old != path and old.exists():  # stored by an earlier version; only if it is this very job
+            try:
+                data = json.loads(old.read_text())
+            except ValueError:
+                data = None
+            if isinstance(data, dict) and data.get("job_id") == job_id:
+                return JobHandle.from_dict(data)
         raise HardwareError(E_UNKNOWN_JOB, f"no job '{job_id}' in the local job store ({path.parent})")
     return JobHandle.from_dict(json.loads(path.read_text()))
 

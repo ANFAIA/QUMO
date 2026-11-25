@@ -155,7 +155,7 @@ The full map is [docs/README.md](docs/README.md). Common entry points:
 
 ## Status
 
-Research prototype (version string 0.1.0, no tagged release yet). APIs are small and documented but may change, and Mojo itself moves quickly. In progress: measuring the GPU engine on NVIDIA/AMD, parity with Qiskit on the densest 100+ qubit circuits, and real-hardware submission (the plugins are tested offline only).
+Research prototype (version string 0.2.0, no tagged release yet). APIs are small and documented but may change, and Mojo itself moves quickly. In progress: measuring the GPU engine on NVIDIA/AMD, parity with Qiskit on the densest 100+ qubit circuits, and real-hardware submission (the plugins are tested offline only).
 
 ## Citing and contributing
 
