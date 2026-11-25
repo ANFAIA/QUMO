@@ -3,6 +3,8 @@ addresses are numeric or loopback names, which resolve without DNS."""
 
 from __future__ import annotations
 
+import os
+import subprocess
 import urllib.request
 
 import pytest
@@ -355,3 +357,21 @@ def test_search_and_list_skip_secret_files(tmp_path, monkeypatch):
     assert "fake-" not in found
     for p in (".env", "sub/secrets.yaml", "x.pem", "secrets_dir/plain.txt", "link_to_env.txt"):
         assert repo.read_file.invoke({"path": p}).startswith("error:")
+
+
+def test_env_scrub_keeps_git_usable(monkeypatch):
+    """GIT_CONFIG_KEY_n matches the secret pattern; dropping it and keeping GIT_CONFIG_COUNT
+    made every git command exit 128 ("missing config key GIT_CONFIG_KEY_0")."""
+    from qumo_agents import backends
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "http.extraheader")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "Authorization: Bearer abc")
+    monkeypatch.setenv("GIT_CONFIG_PARAMETERS", "'http.extraheader=Authorization: Bearer abc'")
+    env = repo._check_env()
+    assert not [k for k in env if k.startswith("GIT_CONFIG_")]
+    r = subprocess.run(["git", "--version"], env=env, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    r = subprocess.run(["git", "config", "--list"], env=env, capture_output=True, text=True)
+    assert r.returncode == 0 and "Bearer abc" not in r.stdout, r.stderr
+    cli = backends.scrub_env(dict(os.environ), "codex")
+    assert not [k for k in cli if k.startswith("GIT_CONFIG_")]
