@@ -6,11 +6,10 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 
 ## [Unreleased]
 
-### Fixed
 
+### Changed
 
-- `remove_identities`, the first pass of every preset, dropped each rotation below about 2e-6 rad on its own, so many small rotations that add up were all deleted: `h q0; 300000 x rz(1.9e-6) q0; h q0` (= `rz(0.57)`, P(1) = 0.079) compiled to an empty circuit at O1, O2 and O3. It now drops a gate only when it equals the identity to 1e-14, in flat `transpile` and in Program blocks alike. Rotations between 1e-14 and 2e-6 (`rx(1e-9)`) are no longer removed on their own. Regression test `test_small_rotations_accumulate` in `tests/test_compiler.mojo`. (deep pass of 2026-11-25)
-
+- **Behaviour change**: `evolve`, `expectation`, `GpuStateVector.evolve` (so `evolve_gpu`/`expectation_gpu`) and `run_estimator` now raise `QM-E416` for a circuit with a `reset`, a noise channel or a mid-circuit measurement. They used to drop those instructions silently and return the noiseless value (`x; reset` gave `<Z> = -1`, true `+1`; `expectation(x_error(1.0))` gave `+1`, true `-1`). Terminal measurements, barriers and annotations are still ignored. To drop the noise on purpose, use the new `Circuit.without_noise()` (Python: `qumo.expectation(..., noise="ignore")` does it); otherwise use `sample` or the density-matrix simulator (`check_pure_state_circuit` in `qumo/sim/runner.mojo`; `docs/SIMULATION.md`, `docs/ERRORS.md`).
 
 ### Added
 

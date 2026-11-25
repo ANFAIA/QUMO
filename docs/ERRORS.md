@@ -224,6 +224,11 @@ Fix: Pass matrices with sum K^dag K = identity; run them on density_evolve() or 
 **An angle perturbation cannot apply: the standard deviation or the offset is not finite, or the standard deviation is negative.**  
 Fix: Pass a finite offset and a standard deviation >= 0, e.g. gaussian_angle_perturbation(circuit, 0.01, seed).
 
+### QM-E416
+
+**evolve()/expectation() (CPU and GPU) cannot take a circuit with a reset, a noise channel or a mid-circuit measurement: a pure state would silently drop it.**  
+Fix: Use sample() (trajectories) or the density-matrix simulator; terminal measurements are fine.
+
 ### QM-E408
 
 **Invalid cache-block size for execute_plan_reordered (need 1 <= nb <= num_qubits).**  
