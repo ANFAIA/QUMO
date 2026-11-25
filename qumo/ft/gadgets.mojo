@@ -36,7 +36,7 @@ from qumo.ir.gates import Op
 from qumo.ir.pauli import PauliSum, PauliTerm
 from qumo.sim.statevector import StateVector
 from qumo.sim.runner import apply_instruction
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.ft.code import StabilizerCode
 from qumo.ft.pauli import SymPauli
 from qumo.ft.verify import (

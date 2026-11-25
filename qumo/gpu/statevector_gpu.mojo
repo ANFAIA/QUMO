@@ -60,7 +60,7 @@ from max.gpu.host import DeviceContext, DeviceBuffer, Attribute, FuncAttribute
 from qumo.ir.gates import Op, M2, M4
 from qumo.ir.circuit import Circuit, Instruction
 from qumo.ir.pauli import PauliSum
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.sim.statevector import StateVector
 from qumo.sim.runner import build_plan, check_pure_state_circuit, KOp, KernelKind, SampleResult, check_statevector_size, terminal_measure_map
 from qumo.gpu.kernels import (

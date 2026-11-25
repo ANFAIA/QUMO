@@ -2,7 +2,7 @@
 
 No vendor SDK and no Python on this path. The pieces are all QUMO's own:
 OpenQASM parsing (qumo.ir.qasm), JSON (qumo.core.json), HTTP/1.1 + TLS over libc sockets
-with OpenSSL 3 loaded at run time (qumo.net), and the seeded RNG (qumo.sim.rng).
+with OpenSSL 3 loaded at run time (qumo.net), and the seeded RNG (qumo.core.rng).
 plugins/hardware/qumo_hardware/ionq.py only adapts these functions to the plugin API.
 
 Wire format: IonQ API v0.4, `ionq.circuit.v1`, gateset `qis`. The circuit list is the one
@@ -34,7 +34,7 @@ from qumo.ir.gates import Op, op_arity
 from qumo.ir.qasm import parse_qasm
 from qumo.net.http import HttpClient, HttpOptions, HttpRequest, HttpResponse, REDIRECT_NONE
 from qumo.net.url import Url, parse_url
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 
 comptime DEFAULT_API_URL = "https://api.ionq.co/v0.4"
 comptime API_KEY_VAR = "IONQ_API_KEY"

@@ -53,7 +53,7 @@ from std.math import exp, log
 from std.bit import pop_count
 from qumo.ir.circuit import Instruction
 from qumo.ir.gates import Op
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.compiler.blockalg import (
     SubGraph, BlockKind, Perm, GF2Mat, SympTab, PauliRot, PauliNet, emit_rotation,
 )

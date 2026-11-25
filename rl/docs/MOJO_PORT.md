@@ -113,7 +113,7 @@ scripts in scratch) answers and, if needed, has C0 add a fixture (16, rule 6).
 
 | need | existing symbol |
 |---|---|
-| seeded RNG, `split`, `normal`, `below` | `qumo/sim/rng.mojo::Rng` |
+| seeded RNG, `split`, `normal`, `below` | `qumo/core/rng.mojo::Rng` |
 | model loader, f16 decode, FNV-1a64, WL hash, INDEX reader | `qumo/compiler/policy.mojo::{load_model_file, ModelFile, f16_to_f32, fnv1a64_bytes, hex16, wl_hash, read_model_index, ModelIndexEntry, MODEL_FORMAT_*, model_kind_code, gate_code}` |
 | packed-state environment dynamics (all four kinds), `inverse`, `solved`, `observe`, `apply`, Pauli DAG cleaning | `qumo/compiler/policy_synth.mojo::PolicyEnv` (wrapped, not copied, by `TrainEnv`) |
 | inference forward, ensemble, greedy / beam / sampled search, rollouts | `MLPPolicy`, `greedy_trace`, `search_best` |

@@ -48,7 +48,7 @@ from max.gpu import global_idx
 from max.gpu.host import DeviceContext, DeviceBuffer
 
 from qumo.ir.circuit import Circuit
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.sim.frame import (
     FrameProgram, FrameKind, FW, DetectorSamples, MeasurementSamples, num_batches_for,
 )

@@ -21,7 +21,7 @@ from std.collections import Dict
 from qumo.ir.gates import Op, op_arity, op_is_noise, op_is_pauli_noise, op_is_annotation, op_is_unitary
 from qumo.ir.circuit import Circuit, Instruction, check_finite_values, check_shots
 from qumo.sim.statevector import StateVector
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.sim.runner import (
     SampleResult, KOp, build_plan, execute_plan, _apply_pauli, terminal_measure_map, TerminalMeasureMap,
     check_statevector_size,

@@ -82,7 +82,7 @@ from qumo.compiler.block_synth import synth_perm, synth_linear, synth_clifford, 
 from qumo.compiler.policy import model_search_dirs
 from qumo.compiler.policy_synth import PolicySession
 from qumo.sim.stabilizer import TableauSimulator
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from max.algorithm import parallelize
 
 # Verifier width limits per kind (QM-E618 above them).

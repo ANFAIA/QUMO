@@ -50,7 +50,7 @@ from qumo.core.json import parse_json, JsonValue
 from qumo.compiler.policy import (
     load_model_file, model_search_dirs, read_model_index, MODEL_FORMAT_ROUTE, MODEL_KIND_ROUTING,
 )
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from max.algorithm import parallelize
 
 

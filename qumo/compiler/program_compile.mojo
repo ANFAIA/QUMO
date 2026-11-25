@@ -54,7 +54,7 @@ from qumo.compiler.pass_manager import (
 )
 from qumo.compiler.routing import RouteOptions, plan_route, route_circuit
 from qumo.compiler.target import Target
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.sim.runner import apply_instruction
 from qumo.sim.statevector import StateVector
 

@@ -26,7 +26,7 @@ from max.algorithm import parallelize
 
 from qumo.ir.gates import M2, M4
 from qumo.ir.pauli import PauliSum
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 
 comptime W = 8
 comptime LOGW = 3

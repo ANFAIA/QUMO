@@ -15,7 +15,7 @@ from std.bit import pop_count
 from std.math import cos, sin, sqrt
 from qumo.ir.circuit import Circuit
 from qumo.ir.param import Param
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from max.algorithm import parallelize
 
 

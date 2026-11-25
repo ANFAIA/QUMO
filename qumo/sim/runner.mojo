@@ -24,7 +24,7 @@ from qumo.sim.statevector import (
     StateVector, FPtr, LOGW, k1_range, kdiag_range, kx_range, kc1_range, kcx_range,
     kcphase_range, krzz_range, kswap_range, k2_range, kscale_range,
 )
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from max.algorithm import parallelize
 
 

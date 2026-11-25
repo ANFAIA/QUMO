@@ -20,7 +20,7 @@ from qumo.ir.circuit import Circuit
 from qumo.qec.codes import CodeCircuit, NoiseParams
 from qumo.qec.dem import DetectorErrorModel, DemError, _xor_sorted, _split
 from qumo.sim.frame import DetectorSamples, BATCH, FW
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 
 comptime _MAX_INSTRUCTIONS = 50_000_000
 

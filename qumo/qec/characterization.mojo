@@ -34,7 +34,7 @@ from std.collections import Dict
 
 from qumo.ir.gates import Op, op_arity, op_is_unitary, op_is_noise, op_is_annotation
 from qumo.ir.circuit import Circuit, Instruction
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.sim.frame import FrameSimulator
 from qumo.compiler.target import Target
 

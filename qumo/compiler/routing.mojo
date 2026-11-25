@@ -26,7 +26,7 @@ Best-of synthesis:
   * Qiskit `StarPreRouting` as a portfolio candidate (`star_preroute`): runs of
     2q blocks sharing a centre become a swap chain (star -> path); the pass
     manager plans both variants and keeps the cheaper.
-  * Deterministic for a given seed (`qumo.sim.rng.Rng`). Non-unitary ops keep
+  * Deterministic for a given seed (`qumo.core.rng.Rng`). Non-unitary ops keep
     their program order through a classical chain in the DAG; barriers
     synchronise all wires; conditioned 2q gates are routed like any gate.
 
@@ -44,7 +44,7 @@ from qumo.compiler.common import (
 )
 from qumo.ir.gates import M4
 from qumo.compiler.kak import mm4, gate_m4
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from max.algorithm import parallelize
 
 

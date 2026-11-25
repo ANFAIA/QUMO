@@ -35,7 +35,7 @@ from qumo.ir.gates import Op, op_arity, op_is_unitary, op_is_noise, op_is_annota
 from qumo.sim.stabilizer import TableauSimulator
 from qumo.sim.statevector import StateVector
 from qumo.sim.runner import apply_instruction, sample
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.sim.branching import BranchingSimulator
 from qumo.qec.codes import NoiseParams
 from qumo.ft.classical import XorExpr

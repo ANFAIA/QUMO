@@ -25,7 +25,7 @@ from qumo.ir.circuit import Circuit
 from qumo.ir.pauli import PauliSum
 from qumo.sim.runner import sample, evolve_into, SampleResult, check_statevector_size
 from qumo.sim.statevector import StateVector
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.algorithms.gradients import ExpectationEngine, Grad, grad_method_name, batch_expectation
 from qumo.algorithms.optimizers import Objective, Optimizer, OptimizeResult, minimize
 from qumo.algorithms.hamiltonians import Graph, maxcut, check_fits

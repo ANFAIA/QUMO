@@ -28,7 +28,7 @@ from std.math import sqrt, ceil
 from std.bit import pop_count
 
 from qumo.ir.pauli import PauliSum
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.sim.statevector import run_chunks
 from qumo.algorithms.hamiltonians import check_fits
 from qumo.algorithms.linalg import jacobi_eigh

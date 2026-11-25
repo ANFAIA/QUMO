@@ -37,7 +37,7 @@ from std.runtime import parallelism_level
 from max.algorithm import parallelize
 from qumo.ir.pauli import PauliTerm, PauliSum
 from qumo.sim.statevector import StateVector, run_chunks, PAR_MIN_ITEMS
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.sim.runner import check_statevector_size
 from qumo.algorithms.linalg import (
     sv_dot, sv_norm, sv_zero, sv_assign, sv_scale, sv_axpy, sv_mul_minus_i,
