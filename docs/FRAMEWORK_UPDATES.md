@@ -87,6 +87,7 @@ Versions: Qiskit 2.6.1, qiskit-ibm-runtime 0.51, Aer 0.18.2, pytket 2.18.5, tket
 | `reichardt` QEC style | guppyft 0.5 | done; not compared with guppyft on Selene |
 | Iceberg Pauli exponentials | guppyft 0.5 | done, verified at theta = pi/2 |
 | `helix_code()` | arXiv:2609.03194 | done: definition only |
+| Exact fault-tolerance check of state preparation (`fault_tolerant_state_preparation`) | Schmid and Wille, arXiv:2611.25107 (Definition 1); research-watch 2026-11-23 | done, `qumo.ft.faults`, [FT](FT.md); example `examples/ft/ft_state_prep_check.mojo`, counts reproduced with Stim 1.16. Check constructions (Block, Bare, Cat) and the Pareto search deferred; MQT QECC not compared |
 | Helix architecture | Quantinuum | deferred: needs hypergraph decoding and unreadable figures |
 | BP+OSD, Relay-BP, BB codes | cudaq-qec 0.5-0.8 | deferred |
 | QRE v3 Pareto estimator, tiered estimator | QDK 1.28-1.33, `pennylane.estimator`, CUDA-Q Logical | deferred |

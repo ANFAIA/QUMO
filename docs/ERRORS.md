@@ -855,6 +855,11 @@ Fix: Decompose it into 1- and 2-qubit gates first (qumo.compiler.basis.unroll_3q
 **A computational circuit given to encode() contains noise channels, QEC annotations or unbound symbolic parameters.**  
 Fix: Encode noiseless, QEC-agnostic, bound circuits; add noise with qumo.ft.emulate.add_noise; use the comparator circuit for run-time angles.
 
+### QM-E738
+
+**Input outside the scope of the exact fault-tolerance check (qumo.ft.faults): non-CSS code or state, more than 64 qubits or measurements, a conditioned or unsupported operation, a random verification measurement, a state group too large, or more fault sets than max_fault_sets.**  
+Fix: Use a CSS code and a one-block preparation of reset, measure, H, S, SDG, X, Y, Z, CX, CZ whose verification measurements are deterministic; lower t or raise max_fault_sets.
+
 ## QM-E8xx — Algorithms
 
 ### QM-E801
