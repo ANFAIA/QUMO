@@ -209,3 +209,30 @@ def test_cli_env_is_unchanged_by_default_and_scrubbed_on_request():
                 "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"} & set(codex)
     with pytest.raises(RuntimeError, match="scrub"):
         backends.claude_code_env(Settings({**raw, "claude_code": {"env": "none"}}), FAKE_ENV)
+def _secret_tree(tmp_path):
+    root = tmp_path.resolve() / "repo"
+    (root / "sub").mkdir(parents=True)
+    (root / "secrets_dir").mkdir()
+    (root / ".env").write_text("TOKEN=fake-env-value\n")
+    (root / "sub" / "secrets.yaml").write_text("key: fake-yaml-value\n")
+    (root / "x.pem").write_text("fake-pem-value\n")
+    (root / "secrets_dir" / "plain.txt").write_text("fake-in-secret-dir\n")
+    (root / "normal.txt").write_text("normal line\n")
+    outside = tmp_path.resolve() / "outside.txt"
+    outside.write_text("fake-outside-value\n")
+    (root / "link.txt").symlink_to(outside)
+    (root / "link_to_env.txt").symlink_to(root / ".env")
+    return root
+
+
+def test_search_and_list_skip_secret_files(tmp_path, monkeypatch):
+    root = _secret_tree(tmp_path)
+    monkeypatch.setitem(repo._state, "sandbox", root)
+    found = repo.search_code.invoke({"regex": ".", "glob": "*"})
+    listed = repo.list_files.invoke({"path": ".", "pattern": "*"})
+    assert "normal.txt" in found and "normal.txt" in listed
+    for bad in (".env", "secrets.yaml", "x.pem", "secrets_dir", "plain.txt", "link.txt", "link_to_env"):
+        assert bad not in found and bad not in listed
+    assert "fake-" not in found
+    for p in (".env", "sub/secrets.yaml", "x.pem", "secrets_dir/plain.txt", "link_to_env.txt"):
+        assert repo.read_file.invoke({"path": p}).startswith("error:")

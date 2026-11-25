@@ -126,6 +126,57 @@ def test_repeated_clbit_last_write_wins() raises:
             _only(dyn, key, "statevector:trajectories")
 
 
+def _raises_e416(c: Circuit, z: PauliSum) raises:
+    var got = String("")
+    try:
+        _ = expectation(c, z)
+    except e:
+        got = String(e)
+    assert_true(got.startswith("QM-E416"), "expected QM-E416, got: " + got)
+    var got2 = String("")
+    try:
+        _ = evolve(c)
+    except e:
+        got2 = String(e)
+    assert_true(got2.startswith("QM-E416"), "evolve: expected QM-E416, got: " + got2)
+
+
+def test_evolve_refuses_non_unitary() raises:
+    """Regression: evolve/expectation silently dropped reset, noise and
+    mid-circuit measurement (x; reset gave Z = -1, true +1)."""
+    var z = parse_pauli_sum("Z0")
+    var r = Circuit(1)
+    r.x(0)
+    r.reset(0)
+    _raises_e416(r, z)
+    var ne = Circuit(1)
+    ne.x_error(1.0, 0)
+    _raises_e416(ne, z)
+    var dp = Circuit(1)
+    dp.depolarize1(0.1, 0)
+    _raises_e416(dp, z)
+    var mm = Circuit(1, 2)
+    mm.h(0)
+    mm.measure(0, 0)
+    mm.x(0)
+    _raises_e416(mm, z)
+    # dropping the noise is explicit: without_noise() gives the ideal circuit
+    assert_almost_equal(expectation(ne.without_noise(), z), 1.0)
+    # terminal measurements, barriers and ticks are still ignored
+    var ok = Circuit(2, 2)
+    ok.x(0)
+    ok.barrier()
+    ok.measure(0, 0)
+    ok.measure(1, 1)
+    assert_almost_equal(expectation(ok, parse_pauli_sum("Z0")), -1.0)
+    assert_almost_equal(expectation(ok, parse_pauli_sum("Z1")), 1.0)
+    # measuring a qubit and then only gates on OTHER qubits is not mid-circuit
+    var other = Circuit(2, 1)
+    other.measure(0, 0)
+    other.x(1)
+    assert_almost_equal(expectation(other, parse_pauli_sum("Z1")), -1.0)
+
+
 def main() raises:
     # Bell state
     var c = Circuit(2)
@@ -205,4 +256,5 @@ def main() raises:
     nz.measure(0, 0)
     assert_equal(sample(nz, 10).counts.get("1", 0), 10)
     test_repeated_clbit_last_write_wins()
+    test_evolve_refuses_non_unitary()
     print("test_sim OK")
