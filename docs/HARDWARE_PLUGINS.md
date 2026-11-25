@@ -87,7 +87,7 @@ Rules every provider follows:
 | `CompiledCircuit` | `qasm` (physical, OpenQASM 2), `source_qasm` (logical), `num_qubits/num_logical/num_clbits`, `initial_layout/final_layout` (physical qubit of logical *l*), `measure_map` (clbit → physical), `ops`, `two_qubit_gates`, `depth`, `region`, `estimated_success()` |
 | `CostEstimate` | `unit` (`QPU-seconds`, `HQC`, `eHQC`, `free`), `amount`, `formula`, `usd` (only with a known list price), `breakdown`, `notes` |
 | `JobHandle` | `job_id, provider, backend, shots, local, status, meta` (layouts, measure map, provider options; never tokens), `counts` (local runs) |
-| `Provider` (protocol) | `name`, `payload_format` (`openqasm2`, or `yaml` for SpeQtrum), `encode(compiled, shots, backend) -> str` (the QASM-to-payload conversion: the text the provider ships; `qumo_payload_yaml` builds the QUMO YAML document), `list_backends(online)`, `target(backend)`, `is_local(backend)`, `prepare(compiled, backend) -> (payload, report)`, `validate(payload, backend)`, `estimate_cost(compiled, shots, backend, payload=None)`, `submit(compiled, shots, backend, seed=None, payload=None, report=None, confirm=False, **opts) -> JobHandle` (refuses remote backends with QM-E957 unless `confirm=True`), `status(job)`, `result(job) -> counts`; optional `provider_compile` / `circuit_stats` (comparison), `public_options()` |
+| `Provider` (protocol) | `name`, `payload_format` (`openqasm2`, or `yaml` for SpeQtrum), `encode(compiled, shots, backend) -> str` (the QASM-to-payload conversion: the text the provider ships; `qumo_payload_yaml` builds the QUMO YAML document), `list_backends(online)`, `target(backend)`, `is_local(backend)`, `prepare(compiled, backend) -> (payload, report)`, `validate(payload, backend)`, `estimate_cost(compiled, shots, backend, payload=None)`, `submit(compiled, shots, backend, seed=None, payload=None, report=None, confirm=False, **opts) -> JobHandle` (refuses remote backends with QM-E957 unless `confirm=True`), `status(job)`, `result(job) -> counts`; optional `provider_compile` / `circuit_stats` (comparison), `public_options()` with the class attribute `JOB_OPTIONS` (the names read back from a job file) |
 
 High-level workflow (`qumo_hardware.runner`), used by the CLI, examples and agents.
 This snippet runs from the repository root without any account (`make py` first):
@@ -541,6 +541,19 @@ free).
   stored in the repository or in job records
   (`$QUMO_HARDWARE_HOME/jobs`, default `~/.qumo/hardware/jobs`, holds job ids,
   backend names, layouts and counts).
+* A job file is data, not configuration. When `status` / `result` build the
+  provider again they read from `provider_options` only `client` and the names
+  the provider class declares in `JOB_OPTIONS` (IBM: `channel`, `instance`,
+  `account_name`, `use_fractional_gates`; Quantinuum: `project`; local:
+  `use_fractional_gates`; none for IonQ, SpeQtrum and qBraid), with plain
+  values. Other names are ignored, and a name that looks like an endpoint or a
+  credential (`url`, `username`, `api_key`, `token`, ...) is refused with
+  QM-E959 before any request. The endpoint and the credentials come from the
+  current environment (for example `QUMO_SPEQTRUM_URL`), as at submit. A
+  third-party provider declares `JOB_OPTIONS` on its class to have its
+  `public_options()` read back.
+* Job file names are the job id with every character outside `[A-Za-z0-9._-]`
+  written as `%XX`, so two ids never share a file.
 * Errors are coded (QM-E95x) with hints; no stack traces (set
   `QUMO_HW_DEBUG=1` to see one for an unexpected `QM-E999`).
 * The test suite redirects `HOME`, the IBM account file and the job store and

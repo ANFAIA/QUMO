@@ -132,22 +132,24 @@ def provider_names() -> list[str]:
     return sorted(set(BUILTIN) | set(_entry_points()))
 
 
+def provider_class(name: str, client: str | None = None) -> tuple[type, str | None]:
+    """(class, client used) of provider `name`; the client is None for a third-party provider."""
+    if name in BUILTIN:
+        loader, used = resolve_client(name, client)
+        return loader(), used
+    eps = _entry_points()
+    if name not in eps:
+        raise HardwareError(E_UNKNOWN_BACKEND, f"unknown provider '{name}'",
+                            f"available providers: {', '.join(provider_names())}")
+    return eps[name].load(), None
+
+
 def get_provider(name: str, **options: Any):
     """Instantiate provider `name`; options the constructor does not accept are ignored.
 
     `client` ("native" | "python", default from QUMO_HW_CLIENT) picks the implementation of a
     built-in provider; the instance records the one used in its `client` attribute."""
-    client = options.pop("client", None)
-    used = None
-    if name in BUILTIN:
-        loader, used = resolve_client(name, client)
-        cls = loader()
-    else:
-        eps = _entry_points()
-        if name not in eps:
-            raise HardwareError(E_UNKNOWN_BACKEND, f"unknown provider '{name}'",
-                                f"available providers: {', '.join(provider_names())}")
-        cls = eps[name].load()
+    cls, used = provider_class(name, options.pop("client", None))
     params = inspect.signature(cls.__init__).parameters
     accepts_kwargs = any(p.kind == p.VAR_KEYWORD for p in params.values())
     kwargs = {k: v for k, v in options.items() if v is not None and (accepts_kwargs or k in params)}

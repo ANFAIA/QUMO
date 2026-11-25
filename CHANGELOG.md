@@ -8,6 +8,7 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 
 ### Fixed
 
+- Hardware plugin: `status` and `result` no longer build the provider from whatever `provider_options` a job file holds. A file in `~/.qumo/hardware/jobs` with `"provider_options": {"url": "https://other.example/api", "username": "x"}` made the SpeQtrum client log in at that host with the API key of the environment. Only `client` and the options a provider declares in `JOB_OPTIONS` (IBM `channel`, `instance`, `account_name`, `use_fractional_gates`; Quantinuum `project`; local `use_fractional_gates`) are read back; an endpoint or credential name is refused with QM-E959 before any request, and the endpoint and credentials come from the current environment as at submit. Job file names now escape unsafe characters as `%XX`, so `a/b` and `a_b` are two files (they shared `a_b.json`); a file stored under the old name is still found. (project review, 2026-11-25)
 - MCP server: `max_iterations` has a ceiling of 1000000 per call (`qumo_run_qasm`, `qumo_run_device`), refused with QM-E913 like `shots` and `max_qubits`. Before, `{"qasm": "... while (true) { x q[0]; } ...", "max_iterations": 9000000000000000000}` blocked the single-threaded server, `ping` included. The CLI keeps its range. (project review, 2026-11-25)
 
 ### Changed

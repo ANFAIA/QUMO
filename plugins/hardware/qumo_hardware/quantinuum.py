@@ -300,6 +300,8 @@ class QuantinuumProvider:
         self.max_cost = max_cost
         self.seed = seed
 
+    JOB_OPTIONS = ("project",)  # read back from a job file
+
     def public_options(self) -> dict:
         return {"project": self.project}
 
