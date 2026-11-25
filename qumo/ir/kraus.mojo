@@ -91,7 +91,7 @@ def thermal_relaxation(t: Float64, t1: Float64, t2: Float64) raises -> KrausChan
 
     rho_11 -> e^{-t/T1} rho_11, rho_01 -> e^{-t/T2} rho_01. The composition of
     amplitude damping with pure dephasing; the Pauli twirl of this channel is
-    `qumo.qec.characterization.thermal_pauli_channel`."""
+    `qumo.noise.characterization.thermal_pauli_channel`."""
     if t < 0.0 or t1 <= 0.0 or t2 <= 0.0 or t2 > 2.0 * t1 + 1e-12:
         raise Error("QM-E414: thermal relaxation needs t >= 0, T1 > 0 and 0 < T2 <= 2 T1. Hint: got t=" + String(t) + ", T1=" + String(t1) + ", T2=" + String(t2) + ".")
     var gamma = 1.0 - exp(-t / t1)

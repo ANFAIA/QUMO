@@ -45,7 +45,7 @@ bench/.venv/bin/python bench/bench_qec.py --part B --tp-shots 30000 --reps 5   #
 | Dense exact MWPM (APSP table, Edmonds blossom) | PyMatching v0, van Rantwijk's mwmatching | `MwpmDecoder`, `BlossomMatcher` |
 | Decoder plug-in interface, batch decode | CUDA-Q QEC `decoder` API | `trait Decoder` |
 | Fused sample+decode, `max_errors` early stop, Wilson intervals, CSV/JSON tables | Sinter | `qumo/qec/experiments.mojo` |
-| Noise model from calibration (T1/T2/gate/readout), RB, T1/Ramsey, readout mitigation | Qibocal, Cirq experiments, Qiskit Experiments / Aer `NoiseModel.from_backend` | `qumo/qec/characterization.mojo` |
+| Noise model from calibration (T1/T2/gate/readout), RB, T1/Ramsey, readout mitigation | Qibocal, Cirq experiments, Qiskit Experiments / Aer `NoiseModel.from_backend` | `qumo/noise/characterization.mojo` |
 | Stim text export (`QUBIT_COORDS`, `DETECTOR(x,y,t)`, `rec[-k]`) for Crumble/Sinter cross-checks | Stim | `to_stim()` |
 
 ## Simulators
