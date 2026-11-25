@@ -22,7 +22,7 @@ from std.collections import Dict
 from std.math import log
 from std.memory import ArcPointer
 from qumo.qec.dem import DetectorErrorModel, DemError, combine_independent
-from qumo.qec.decoders import MatchingGraph, Decoder
+from qumo.qec.decoders import MatchingGraph, Decoder, graph_pieces
 from qumo.qec.sparse_blossom import (
     SparseBlossomDecoder, SparseGraph, CompressedEdge, discretize_weights, weight_normalising_constant,
     SB_NUM_DISTINCT_WEIGHTS, _hpush, _hpop,
@@ -39,13 +39,19 @@ def _xor_probability(a: Float64, b: Float64) -> Float64:
     return a * (1.0 - b) + b * (1.0 - a)
 
 
-def _component_edges(g: MatchingGraph, e: DemError) -> List[Int]:
+def _component_edges(g: MatchingGraph, e0: DemError) -> List[Int]:
     """Graph edges one DEM error fires."""
+    var e = graph_pieces(e0)
     var out = List[Int]()
     if len(e.comp_dets) > 1:
-        for c in e.comp_dets:
-            var v = c[1] if len(c) == 2 else g.boundary
-            var i = g.edge_between(c[0], v)
+        for c in range(len(e.comp_dets)):
+            ref cd = e.comp_dets[c]
+            if len(cd) > 2:
+                if len(cd) <= 16:
+                    _ = g._decompose(cd, 0, e.comp_obs[c], out)
+                continue
+            var v = cd[1] if len(cd) == 2 else g.boundary
+            var i = g.edge_between(cd[0], v)
             if i >= 0:
                 out.append(i)
     elif len(e.dets) >= 1 and len(e.dets) <= 2:

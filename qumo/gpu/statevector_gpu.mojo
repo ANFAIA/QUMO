@@ -62,7 +62,7 @@ from qumo.ir.circuit import Circuit, Instruction
 from qumo.ir.pauli import PauliSum
 from qumo.sim.rng import Rng
 from qumo.sim.statevector import StateVector
-from qumo.sim.runner import build_plan, KOp, KernelKind, SampleResult, check_statevector_size, terminal_measure_map
+from qumo.sim.runner import build_plan, check_pure_state_circuit, KOp, KernelKind, SampleResult, check_statevector_size, terminal_measure_map
 from qumo.gpu.kernels import (
     TPB, RED_ITEMS, MAX_RED_BLOCKS, EXP_G, GPtr, I64Ptr, I32Ptr, tile_bits, tile_smem_bytes, tile_smem_typical,
     sample_seg, TILE_SMEM_DYNAMIC, TILE_SAFE_THREADS, TILE_LAUNCH_BOUND, REG_BITS,
@@ -591,9 +591,11 @@ struct GpuStateVector[dtype: DType = GPU_DEFAULT_DTYPE](Movable):
 
     def evolve(mut self, circuit: Circuit, params: List[Float64] = List[Float64]()) raises:
         """Apply the unitary part of `circuit` (fused plan + global phase) to
-        the current state. Measurements/resets are skipped (like
-        `qumo.sim.runner.evolve_into`); conditioned gates raise QM-E401."""
+        the current state. Terminal measurements are skipped; resets, noise
+        and mid-circuit measurements raise QM-E416 and conditioned gates
+        QM-E401 (same contract as `qumo.sim.runner.evolve`)."""
         circuit.validate()
+        check_pure_state_circuit(circuit, "GpuStateVector.evolve()")
         if circuit.num_qubits > self.num_qubits:
             raise Error("QM-E474: circuit has " + String(circuit.num_qubits) + " qubits but the GPU state has " + String(self.num_qubits) + ". Hint: allocate GpuStateVector(circuit.num_qubits).")
         if len(params) != circuit.num_params():

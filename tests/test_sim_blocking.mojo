@@ -17,7 +17,7 @@ from qumo.ir.gates import Op, op_is_unitary
 from qumo.ir.pauli import parse_pauli_sum
 from qumo.sim.statevector import StateVector
 from qumo.sim.runner import (
-    evolve, sample, apply_instruction, build_plan, execute_plan,
+    evolve, evolve_into, sample, apply_instruction, build_plan, execute_plan,
     execute_plan_reordered, execute_plan_reordered_stats, ReorderStats,
     BLOCK_BITS, MIN_BLOCKS_LOG2,
 )
@@ -240,14 +240,22 @@ def main() raises:
     assert_equal(st.vector_pairs, 0, String(st))
     assert_true(st.restore_min_bit < 0 or st.restore_min_bit >= 3, String(st))
 
-    # 5. non-unitary ops are skipped by the plan path (evolve semantics)
+    # 5. non-unitary ops are skipped by the plan path (evolve_into); the public
+    # evolve() refuses them (QM-E416)
     var cm = random_circuit(19, 60, 3, rng)
     cm.measure(18, 0)
     cm.reset(0)
     cm.add(Op.BARRIER, 5)
     var tail = random_circuit(19, 60, 1, rng)
     cm.compose(tail)
-    check_same(evolve(cm), reference(cm), "non-unitary skipped")
+    var skipped = StateVector(cm.num_qubits)
+    evolve_into(skipped, cm, List[Float64]())
+    check_same(skipped, reference(cm), "non-unitary skipped")
+    try:
+        _ = evolve(cm)
+        raise Error("reset must be rejected by evolve()")
+    except e:
+        expect_error("QM-E416", String(e))
     var cc = Circuit(19, 1)
     cc.h(0)
     cc.measure(0, 0)
