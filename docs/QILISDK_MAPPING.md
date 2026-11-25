@@ -56,8 +56,8 @@ quoted string is still accepted.
 | OpenQASM 2 and 3 | `parse_qasm`, `to_qasm`, `to_qasm2` | `qumo/ir/qasm.mojo`, `qasm2.mojo` | |
 | `Readout` sampling and expectation | `sample`, expectation values | `qumo/sim/runner.mojo`, `hamiltonians.mojo` | |
 | `KrausChannel`, `AmplitudeDamping`, `Dephasing` | `KrausChannel`, `amplitude_damping`, `phase_damping`, `thermal_relaxation` | `qumo/ir/kraus.mojo` | |
-| `ReadoutAssignment` | `ReadoutCalibration`, `mitigate_counts` | `qumo/qec/characterization.mojo` | Calibration circuits and mitigation of counts. |
-| `NoiseModel` | `NoiseModel`, `apply_noise_model` | `qumo/qec/characterization.mojo` | Pauli channels per qubit, not qilisdk's scopes. |
+| `ReadoutAssignment` | `ReadoutCalibration`, `mitigate_counts` | `qumo/noise/characterization.mojo` | Calibration circuits and mitigation of counts. |
+| `NoiseModel` | `NoiseModel`, `apply_noise_model` | `qumo/noise/characterization.mojo` | Pauli channels per qubit, not qilisdk's scopes. |
 
 ### Added in this change
 

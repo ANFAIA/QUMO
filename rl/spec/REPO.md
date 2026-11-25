@@ -67,11 +67,11 @@ its only purpose is Python<->Mojo parity); KEEP = already Mojo.
 | `training/ai_transpiler/synth/eval_blocks.mojo` | 280 | policy vs greedy/auto/exact on 100 seeded blocks, verification, JSON summary | called as a subprocess by `eval.py` |
 | `tests/test_policy.mojo` | 344 | loader/parity/determinism, replays embedded test vectors of fixtures AND `models/ai_transpiler/synth` | |
 | `tests/test_ai_route.mojo` | 433 | replays `test_vectors.obs_logits` and `test_vectors.episodes` of the committed router, statevector equivalence | |
-| `qumo/sim/rng.mojo` | | xoshiro256** + SplitMix64, `uniform`, `below`, `normal` (Box-Muller, 2 uniforms/call), `split` | |
+| `qumo/core/rng.mojo` | | xoshiro256** + SplitMix64, `uniform`, `below`, `normal` (Box-Muller, 2 uniforms/call), `split` | |
 | `qumo/algorithms/optimizers.mojo` | | `Adam` (Float64, whole-problem `minimize`, not stepwise) | not usable as-is for NN training |
 | `qumo/algorithms/qml_train.mojo` | | `StepOptimizer.adam(... form="optax")` (stepwise, Float64), `cosine_lr(step,total,lr0)`, `Batcher`, `cross_entropy` (takes probabilities, hard labels) | formulas reusable; need f32 tensor-level versions + soft-target CE on logits |
 | `qumo/core/json.mojo` | | `parse_json`, `JsonValue`, `JsonWriter` (compact), `pretty_json` | exporter can build manifests with `JsonWriter` |
-| `qumo/compiler/target.mojo` | | `Target.heavy_hex_edges(d)` == rustworkx `heavy_hex_graph(d)` edge-for-edge; `from_edges` (dedup a<b insertion order, CSR, BFS dist) | `bench/neutral/targets.py` heavy_hex_edges(min_qubits) = smallest odd d with (5d^2-2d-1)/2 >= min |
+| `qumo/device/target.mojo` | | `Target.heavy_hex_edges(d)` == rustworkx `heavy_hex_graph(d)` edge-for-edge; `from_edges` (dedup a<b insertion order, CSR, BFS dist) | `bench/neutral/targets.py` heavy_hex_edges(min_qubits) = smallest odd d with (5d^2-2d-1)/2 >= min |
 
 ### 1.2 Python files (all 17): disposition
 

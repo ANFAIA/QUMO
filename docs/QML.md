@@ -16,7 +16,7 @@ qumo/algorithms/
   qgeometry.mojo   parameter layers, metric tensor, QNG direction and optimizer
   datasets.mojo    parity, DoubleCake, circle, moons, bars-and-stripes, CSV/JSON loaders, scaling
   gradients.mojo   + ExpectationEngine.set_initial_state, batch_value_and_gradient
-qumo/sim/rng.mojo  + Rng.normal, Rng.normal_list
+qumo/core/rng.mojo  + Rng.normal, Rng.normal_list
 ```
 
 Tests: `tests/test_qml.mojo`, `tests/test_qkernels.mojo`, `tests/test_qgeometry.mojo`.

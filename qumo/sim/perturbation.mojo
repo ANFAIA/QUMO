@@ -19,7 +19,7 @@ from std.math import isinf, isnan
 from qumo.ir.circuit import Circuit
 from qumo.ir.gates import Op
 from qumo.ir.param import Param
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 
 
 def is_angle_rotation(kind: Int) -> Bool:

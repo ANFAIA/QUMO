@@ -113,14 +113,14 @@ scripts in scratch) answers and, if needed, has C0 add a fixture (16, rule 6).
 
 | need | existing symbol |
 |---|---|
-| seeded RNG, `split`, `normal`, `below` | `qumo/sim/rng.mojo::Rng` |
+| seeded RNG, `split`, `normal`, `below` | `qumo/core/rng.mojo::Rng` |
 | model loader, f16 decode, FNV-1a64, WL hash, INDEX reader | `qumo/compiler/policy.mojo::{load_model_file, ModelFile, f16_to_f32, fnv1a64_bytes, hex16, wl_hash, read_model_index, ModelIndexEntry, MODEL_FORMAT_*, model_kind_code, gate_code}` |
 | packed-state environment dynamics (all four kinds), `inverse`, `solved`, `observe`, `apply`, Pauli DAG cleaning | `qumo/compiler/policy_synth.mojo::PolicyEnv` (wrapped, not copied, by `TrainEnv`) |
 | inference forward, ensemble, greedy / beam / sampled search, rollouts | `MLPPolicy`, `greedy_trace`, `search_best` |
 | routing environment (full episode), problem builder, model, verification | `qumo/compiler/ai_route.mojo::{Episode, RProblem, RouteModel, load_route_model, run_batch}` |
 | teacher / DAgger data generation, eval, episode traces | `rl/qumo_bridge/drivers/route_tool.mojo` (`gen`, `eval`, `episode`; helpers move to `rl/qrl/jobs.mojo`) |
 | block-level evaluation vs exact / greedy synthesizers | `rl/qumo_bridge/drivers/eval_blocks.mojo` (body moves to `rl/qumo_bridge/eval_blocks.mojo`) |
-| heavy-hex edges, BFS distances, `Target.from_edges` | `qumo/compiler/target.mojo::Target` |
+| heavy-hex edges, BFS distances, `Target.from_edges` | `qumo/device/target.mojo::Target` |
 | JSON parse / compact writer | `qumo/core/json.mojo::{parse_json, JsonValue, JsonWriter, pretty_json}` |
 | cosine schedule (Float64) | `qumo/algorithms/qml_train.mojo::cosine_lr` (same closed form `lr0 (1+cos(pi e/T))/2`) |
 | `parallelize`, `run_chunks` | `max.algorithm`, `qumo/sim/statevector.mojo::run_chunks` |

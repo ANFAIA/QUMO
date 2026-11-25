@@ -43,7 +43,7 @@ from qumo.ir.param import Param
 from qumo.ir.gateset import GateSet
 from qumo.compiler.common import BlockKind
 from qumo.compiler.kak import cx_cost
-from qumo.compiler.target import Target
+from qumo.device.target import Target
 
 
 # ----------------------------------------------------------------------------

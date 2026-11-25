@@ -44,7 +44,7 @@ Algorithms (see docs/AI_TRANSPILER.md for complexity and references):
 from std.bit import pop_count
 from qumo.ir.gates import Op, op_arity
 from qumo.ir.circuit import Instruction
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.compiler.blockalg import (
     BlockKind, SubGraph, Perm, GF2Mat, SympTab, PauliRot, PauliNet, emit_rotation,
     g1, g2, inverse_ops, ops_cx_count, ops_depth2q, paulis_anticommute,

@@ -40,7 +40,7 @@ Error codes: QM-E723 (gadget/semantic circuit not suitable for verification).
 from qumo.ir.circuit import Circuit
 from qumo.ir.gates import Op, op_name, op_is_unitary, op_is_annotation, op_is_noise
 from qumo.sim.stabilizer import TableauSimulator
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.ft.pauli import SymPauli, StabilizerGroup
 from qumo.ft.code import StabilizerCode
 from qumo.core.json import JsonWriter

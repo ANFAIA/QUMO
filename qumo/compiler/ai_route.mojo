@@ -38,7 +38,7 @@ from std.math import exp, log
 from std.bit import count_trailing_zeros
 from qumo.ir.gates import Op, op_arity, op_is_unitary
 from qumo.ir.circuit import Circuit, Instruction
-from qumo.compiler.target import Target
+from qumo.device.target import Target
 from qumo.compiler.common import shell_like, is_all_wire_op
 from qumo.compiler.basis import unroll_3q
 from qumo.compiler.routing import (
@@ -50,7 +50,7 @@ from qumo.core.json import parse_json, JsonValue
 from qumo.compiler.policy import (
     load_model_file, model_search_dirs, read_model_index, MODEL_FORMAT_ROUTE, MODEL_KIND_ROUTING,
 )
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from max.algorithm import parallelize
 
 

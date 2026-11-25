@@ -36,7 +36,7 @@ from max.algorithm import parallelize
 
 from qumo.ir.gates import Op, op_name, op_arity, op_is_unitary, op_is_noise
 from qumo.ir.circuit import Circuit, Instruction
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.sim.stabilizer import reference_sample, quarter_turns
 
 comptime FW = 8  # UInt64 words per batch

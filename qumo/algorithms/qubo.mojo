@@ -16,7 +16,7 @@ from std.bit import pop_count
 from std.collections import Dict
 from std.math import exp, log
 from qumo.ir.pauli import PauliSum
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 
 comptime QUBO_MAX_VARS = 64  # masks are UInt64, as are the Pauli bit masks
 comptime QUBO_BRUTE_MAX = 24

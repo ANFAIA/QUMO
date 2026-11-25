@@ -13,7 +13,7 @@ from std.collections import Dict
 from std.math import cos, sin, sqrt
 
 from qumo.ir.analog import AnalogProgram
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 
 comptime MAX_ATOMS = 20
 

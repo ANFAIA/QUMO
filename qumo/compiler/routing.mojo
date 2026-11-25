@@ -26,7 +26,7 @@ Best-of synthesis:
   * Qiskit `StarPreRouting` as a portfolio candidate (`star_preroute`): runs of
     2q blocks sharing a centre become a swap chain (star -> path); the pass
     manager plans both variants and keeps the cheaper.
-  * Deterministic for a given seed (`qumo.sim.rng.Rng`). Non-unitary ops keep
+  * Deterministic for a given seed (`qumo.core.rng.Rng`). Non-unitary ops keep
     their program order through a classical chain in the DAG; barriers
     synchronise all wires; conditioned 2q gates are routed like any gate.
 
@@ -38,13 +38,13 @@ qubits; `final_layout[l]` says where logical l ends up after the SWAPs.
 from std.collections import Dict
 from qumo.ir.gates import Op, op_arity, op_is_unitary, op_is_noise
 from qumo.ir.circuit import Circuit, Instruction
-from qumo.compiler.target import Target
+from qumo.device.target import Target
 from qumo.compiler.common import (
     shell_like, is_all_wire_op, is_bound, wire_axis, AX_Z, AX_ANY, AX_OTHER,
 )
 from qumo.ir.gates import M4
 from qumo.compiler.kak import mm4, gate_m4
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from max.algorithm import parallelize
 
 

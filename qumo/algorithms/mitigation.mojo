@@ -21,7 +21,7 @@ result:
 Terminal measurements are removed before folding and re-appended after it.
 Circuits with noise channels, resets, classical control or mid-circuit
 measurements are rejected (QM-E801): fold first, then add noise
-(`qumo.qec.characterization.apply_noise_model`).
+(`qumo.noise.characterization.apply_noise_model`).
 
 Extrapolation to scale 0 (Mitiq factories):
 
@@ -49,12 +49,12 @@ from std.math import exp, log, sqrt, floor
 from qumo.ir.circuit import Circuit, Instruction
 from qumo.ir.gates import Op, op_is_unitary, op_num_params, op_inverse_kind
 from qumo.ir.pauli import PauliSum
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.sim.runner import SampleResult
 from qumo.ir.pauli import PauliSum
 from qumo.sim.runner import sample
-from qumo.sim.rng import Rng
-from qumo.qec.characterization import NoiseModel, apply_noise_model
+from qumo.core.rng import Rng
+from qumo.noise.characterization import NoiseModel, apply_noise_model
 from qumo.exec.primitives import qwc_setting, qwc_group_stats
 
 

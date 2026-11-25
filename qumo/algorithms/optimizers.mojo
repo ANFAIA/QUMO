@@ -30,7 +30,7 @@ configuration).
 """
 
 from std.math import sqrt
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 
 
 trait Objective:

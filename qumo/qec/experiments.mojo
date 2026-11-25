@@ -34,7 +34,7 @@ from std.runtime import parallelism_level
 from max.algorithm import parallelize
 
 from qumo.ir.circuit import Circuit
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.sim.frame import FrameProgram, FrameBuffers, batch_rng, FW, BATCH
 from qumo.qec.codes import NoiseParams, CodeCircuit, generate_code
 from qumo.qec.dem import DetectorErrorModel, detector_error_model

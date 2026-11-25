@@ -11,7 +11,7 @@ other QUMO modules plug their features into it.
 | OpenQASM 2 emitter | `qumo/ir/qasm2.mojo` | Portable `qelib1.inc` output that every SDK parser loads (Qiskit strict and legacy, pytket, Cirq) |
 | JSON | `qumo/core/json.mojo` | Streaming writer and arena parser, deterministic output, error positions |
 | Diagnostics | `qumo/ai/diagnostics.mojo` | Stable codes, line/col, snippet, fix hint, lint warnings |
-| Self-description | `qumo/ai/describe.mojo` | Gate set, error catalog, capabilities and circuit JSON, generated from the implementation |
+| Self-description | `qumo/ai/describe.mojo` | Gate set, error catalog, capabilities and circuit summary, generated from the implementation (circuit and program JSON are in `qumo/ir/json.mojo`) |
 | Tool registry | `qumo/ai/tools.mojo`, `qumo/ai/registry.mojo` | One implementation per operation, shared by MCP and CLI; `full_registry()` adds the module tools |
 | Module tools | `qumo/exec/tools.mojo` | Compile, resources, VQE, QAOA, QEC experiments (all decoders), GPU status, device-explicit runs |
 | MCP server | `qumo/ai/mcp.mojo` | JSON-RPC 2.0 over stdio (MCP 2025-06-18) |

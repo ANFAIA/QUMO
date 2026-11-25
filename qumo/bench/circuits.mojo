@@ -11,7 +11,7 @@ from qumo.ir.circuit import Circuit, Instruction
 from qumo.ir.gates import Op, op_arity
 from qumo.ir.param import Param
 from qumo.ir.pauli import PauliSum, PauliTerm
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 
 
 def _random_su2(mut c: Circuit, q: Int, mut rng: Rng):

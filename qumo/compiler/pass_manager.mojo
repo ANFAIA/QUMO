@@ -27,7 +27,7 @@ from qumo.ir.gates import Op, op_name, op_arity, op_is_unitary
 from qumo.ir.circuit import Circuit, Instruction
 from qumo.compiler.common import fmt_num, basis_str, reduce_large_angles, wrap_angle, TWO_PI, BlockKind
 from qumo.ir.gateset import GateSet
-from qumo.compiler.target import Target, parse_basis, parse_angle_bound
+from qumo.device.target import Target, parse_basis, parse_angle_bound
 from qumo.compiler.optimize import (
     remove_identities, cancel_inverses, merge_rotations, commute_rotations,
     fuse_1q, eject_z, elide_swaps,

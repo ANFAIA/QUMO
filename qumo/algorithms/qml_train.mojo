@@ -23,7 +23,7 @@ from std.math import sqrt, cos, log, pi, pow
 
 from qumo.ir.circuit import Circuit
 from qumo.ir.pauli import PauliSum
-from qumo.sim.rng import Rng
+from qumo.core.rng import Rng
 from qumo.sim.runner import evolve
 from qumo.algorithms.gradients import ExpectationEngine, Grad
 
