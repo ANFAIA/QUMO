@@ -3,7 +3,7 @@ QEC experiments and device-explicit simulation (CPU / GPU).
 
 Registered in `qumo.ai.registry.full_registry()`, so they appear in MCP
 `tools/list`, `qumo tool <name> '<json>'` and the capabilities document.
-Targets are vendor-neutral one-line specs (`qumo.compiler.target.parse_target`)
+Targets are vendor-neutral one-line specs (`qumo.device.target.parse_target`)
 or explicit coupling edges + basis names.
 """
 
@@ -28,7 +28,7 @@ from qumo.qec.lint import missing_detectors
 from qumo.sim.runner import SampleResult
 from qumo.exec.dispatch import sample_on
 from qumo.gpu.device import query_gpu, GPU_MIN_QUBITS, parse_gpu_precision
-from qumo.compiler.target import Target, parse_target
+from qumo.device.target import Target, parse_target
 from qumo.compiler.pass_manager import transpile, compile_spec, transpile_ai, CompileResult
 from qumo.compiler.program_compile import ProgramCompileResult, compile_program, compile_spec_program
 from qumo.sim.program_runner import is_clifford_program, sample_program

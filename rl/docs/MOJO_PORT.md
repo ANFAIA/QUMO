@@ -120,7 +120,7 @@ scripts in scratch) answers and, if needed, has C0 add a fixture (16, rule 6).
 | routing environment (full episode), problem builder, model, verification | `qumo/compiler/ai_route.mojo::{Episode, RProblem, RouteModel, load_route_model, run_batch}` |
 | teacher / DAgger data generation, eval, episode traces | `rl/qumo_bridge/drivers/route_tool.mojo` (`gen`, `eval`, `episode`; helpers move to `rl/qrl/jobs.mojo`) |
 | block-level evaluation vs exact / greedy synthesizers | `rl/qumo_bridge/drivers/eval_blocks.mojo` (body moves to `rl/qumo_bridge/eval_blocks.mojo`) |
-| heavy-hex edges, BFS distances, `Target.from_edges` | `qumo/compiler/target.mojo::Target` |
+| heavy-hex edges, BFS distances, `Target.from_edges` | `qumo/device/target.mojo::Target` |
 | JSON parse / compact writer | `qumo/core/json.mojo::{parse_json, JsonValue, JsonWriter, pretty_json}` |
 | cosine schedule (Float64) | `qumo/algorithms/qml_train.mojo::cosine_lr` (same closed form `lr0 (1+cos(pi e/T))/2`) |
 | `parallelize`, `run_chunks` | `max.algorithm`, `qumo/sim/statevector.mojo::run_chunks` |

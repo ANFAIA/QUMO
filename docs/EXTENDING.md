@@ -8,7 +8,7 @@ How to add your own gate, noise channel, compiler pass, decoder or device target
 | Noise channel | yes: `KrausChannel` in Mojo, `#pragma qumo kraus1` / `kraus2` in OpenQASM | not needed |
 | Compiler pass | yes: a Mojo function `Circuit -> Circuit`, called between built-in pipelines | no: the pass names are a closed table in `qumo/compiler/pass_manager.mojo` |
 | Decoder | yes: a struct with the `Decoder` trait, run with `sample_and_decode` | no: the decoder names are a closed table in `qumo/qec/experiments.mojo` |
-| Target | yes: targets are data (edges, basis, error rates) | yes for data; a new one-line topology keyword means editing `qumo/compiler/target.mojo` |
+| Target | yes: targets are data (edges, basis, error rates) | yes for data; a new one-line topology keyword means editing `qumo/device/target.mojo` |
 
 There is no plugin loader: QUMO does not discover passes or decoders at run time. Mojo compiles everything ahead of time, so "from your own code" means your Mojo file imports `qumo` and is compiled with `-I .`.
 
@@ -397,7 +397,7 @@ From Python, `qumo.transpile(c, coupling_map=[(0, 1), (1, 2), (1, 3)], basis=["r
 
 ### A new one-line keyword (core edit)
 
-`parse_target("grid:4x4/sc_cz")` understands a fixed list of topology words (`line`, `ring`, `grid`, `torus`, `tree`, `heavy_hex`, `all_to_all`, and the modality presets). To add a word, add a constructor to `struct Target` and a branch in `_parse_target`, both in `qumo/compiler/target.mojo`, and extend the QM-E611 hint. Keep presets named by modality or topology, not by vendor: QUMO has no vendor default by design.
+`parse_target("grid:4x4/sc_cz")` understands a fixed list of topology words (`line`, `ring`, `grid`, `torus`, `tree`, `heavy_hex`, `all_to_all`, and the modality presets). To add a word, add a constructor to `struct Target` and a branch in `_parse_target`, both in `qumo/device/target.mojo`, and extend the QM-E611 hint. Keep presets named by modality or topology, not by vendor: QUMO has no vendor default by design.
 
 A real device from a provider (IBM Quantum, Quantinuum, IonQ) comes in through the hardware plugins, which build the target from the provider's data: [HARDWARE_PLUGINS.md](HARDWARE_PLUGINS.md), section "Adding a provider".
 

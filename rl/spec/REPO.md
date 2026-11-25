@@ -71,7 +71,7 @@ its only purpose is Python<->Mojo parity); KEEP = already Mojo.
 | `qumo/algorithms/optimizers.mojo` | | `Adam` (Float64, whole-problem `minimize`, not stepwise) | not usable as-is for NN training |
 | `qumo/algorithms/qml_train.mojo` | | `StepOptimizer.adam(... form="optax")` (stepwise, Float64), `cosine_lr(step,total,lr0)`, `Batcher`, `cross_entropy` (takes probabilities, hard labels) | formulas reusable; need f32 tensor-level versions + soft-target CE on logits |
 | `qumo/core/json.mojo` | | `parse_json`, `JsonValue`, `JsonWriter` (compact), `pretty_json` | exporter can build manifests with `JsonWriter` |
-| `qumo/compiler/target.mojo` | | `Target.heavy_hex_edges(d)` == rustworkx `heavy_hex_graph(d)` edge-for-edge; `from_edges` (dedup a<b insertion order, CSR, BFS dist) | `bench/neutral/targets.py` heavy_hex_edges(min_qubits) = smallest odd d with (5d^2-2d-1)/2 >= min |
+| `qumo/device/target.mojo` | | `Target.heavy_hex_edges(d)` == rustworkx `heavy_hex_graph(d)` edge-for-edge; `from_edges` (dedup a<b insertion order, CSR, BFS dist) | `bench/neutral/targets.py` heavy_hex_edges(min_qubits) = smallest odd d with (5d^2-2d-1)/2 >= min |
 
 ### 1.2 Python files (all 17): disposition
 

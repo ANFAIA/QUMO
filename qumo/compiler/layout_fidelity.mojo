@@ -19,7 +19,7 @@ estimate, and a uniform target has nothing to gain and keeps its output exactly.
 from std.math import log
 from qumo.ir.gates import Op, op_arity, op_is_unitary
 from qumo.ir.circuit import Circuit
-from qumo.compiler.target import Target
+from qumo.device.target import Target
 
 
 def _log_keep(e: Float64) -> Float64:

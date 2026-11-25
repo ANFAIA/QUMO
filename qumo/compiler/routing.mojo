@@ -38,7 +38,7 @@ qubits; `final_layout[l]` says where logical l ends up after the SWAPs.
 from std.collections import Dict
 from qumo.ir.gates import Op, op_arity, op_is_unitary, op_is_noise
 from qumo.ir.circuit import Circuit, Instruction
-from qumo.compiler.target import Target
+from qumo.device.target import Target
 from qumo.compiler.common import (
     shell_like, is_all_wire_op, is_bound, wire_axis, AX_Z, AX_ANY, AX_OTHER,
 )

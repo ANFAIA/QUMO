@@ -11,7 +11,7 @@ Nothing here touches a real device.
 
 from qumo.ir.gates import Op, op_arity, op_is_unitary, op_is_noise
 from qumo.ir.circuit import Circuit
-from qumo.compiler.target import Target
+from qumo.device.target import Target
 from qumo.compiler.pass_manager import conformance_error
 from qumo.qec.characterization import NoiseModel, apply_noise_model
 from qumo.sim.runner import SampleResult, sample

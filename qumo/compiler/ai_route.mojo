@@ -38,7 +38,7 @@ from std.math import exp, log
 from std.bit import count_trailing_zeros
 from qumo.ir.gates import Op, op_arity, op_is_unitary
 from qumo.ir.circuit import Circuit, Instruction
-from qumo.compiler.target import Target
+from qumo.device.target import Target
 from qumo.compiler.common import shell_like, is_all_wire_op
 from qumo.compiler.basis import unroll_3q
 from qumo.compiler.routing import (
