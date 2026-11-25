@@ -454,7 +454,7 @@ or in `.mcp.json` / Claude Desktop / any MCP client:
 
 ```
 -> {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"x","version":"1"}}}
-<- {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"qumo","title":"QUMO quantum toolkit","version":"0.1.0"},"instructions":"..."}}
+<- {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"qumo","title":"QUMO quantum toolkit","version":"0.2.0"},"instructions":"..."}}
 -> {"jsonrpc":"2.0","method":"notifications/initialized"}
 -> {"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"qumo_run_qasm","arguments":{"qasm":"OPENQASM 3.0; include \"stdgates.inc\"; qubit[2] q; bit[2] c; h q[0]; cx q[0], q[1]; c = measure q;","shots":1000,"seed":7}}}
 <- {"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"counts\":{\"00\":484,\"11\":516},...}"}],"structuredContent":{"counts":{"00":484,"11":516},"shots":1000,"seed":7,"method":"statevector:static",...},"isError":false}}

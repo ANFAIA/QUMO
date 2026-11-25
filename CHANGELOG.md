@@ -2,9 +2,13 @@
 
 All notable changes to QUMO are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version`) and has not changed since the first commit, and there is no tagged release yet. Until there is one, entries are grouped under "Unreleased" by pull request and date, newest first. Entries are taken from the titles and descriptions of the merged pull requests and from the commit history before pull requests were used; nothing here was added from memory.
+QUMO is a research prototype. Its version string is `0.2.0` (`build/qumo version`), set on 2026-11-25 after the fixes and reorganisation of pull requests #41 to #60; it was `0.1.0` from the first commit until then. There is no tagged release yet. Until there is one, entries are grouped under "Unreleased" by pull request and date, newest first. Entries are taken from the titles and descriptions of the merged pull requests and from the commit history before pull requests were used; nothing here was added from memory.
 
 ## [Unreleased]
+
+### Changed
+
+- Version string `0.2.0` (was `0.1.0`): `build/qumo version`, the MCP server info, `qumo.__version__`, `pyproject.toml` and `CITATION.cff`. The hardware plugin and the agents package keep their own versions.
 
 ### Fixed
 
