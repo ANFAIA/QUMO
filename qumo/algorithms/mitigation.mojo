@@ -55,6 +55,7 @@ from qumo.ir.pauli import PauliSum
 from qumo.sim.runner import sample
 from qumo.sim.rng import Rng
 from qumo.qec.characterization import NoiseModel, apply_noise_model
+from qumo.exec.primitives import qwc_setting, qwc_group_stats
 
 
 # ---------------------------------------------------------------------------
@@ -341,15 +342,6 @@ def extrapolate(scales: List[Float64], values: List[Float64], method: String = "
 # ---------------------------------------------------------------------------
 # Shot-based expectation values (noise-aware)
 # ---------------------------------------------------------------------------
-def _parity(x: Int) -> Int:
-    var v = x
-    var p = 0
-    while v != 0:
-        v &= v - 1
-        p ^= 1
-    return p
-
-
 def _estimate(circuit: Circuit, h: PauliSum, shots: Int, seed: UInt64, use_model: Bool, noise: NoiseModel) raises -> Tuple[Float64, Float64]:
     if shots < 1:
         raise Error("QM-E802: shot-based estimation needs shots >= 1, got " + String(shots) + ".")
@@ -368,8 +360,6 @@ def _estimate(circuit: Circuit, h: PauliSum, shots: Int, seed: UInt64, use_model
     var var_total = 0.0
     for gi in range(len(groups)):
         ref grp = groups[gi]
-        var gx: UInt64 = 0
-        var gy: UInt64 = 0
         var has_support = False
         for ti in grp:
             var t = h.terms[ti]
@@ -377,39 +367,16 @@ def _estimate(circuit: Circuit, h: PauliSum, shots: Int, seed: UInt64, use_model
                 ev += t.coeff
             else:
                 has_support = True
-            gx |= t.x
-            gy |= t.x & t.z
         if not has_support:
             continue
-        var m = body.copy()
-        m.num_clbits = 0
-        for q in range(n):
-            var b = UInt64(1) << UInt64(q)
-            if (gx & b) != 0:
-                if (gy & b) != 0:
-                    m.sdg(q)
-                m.h(q)
-        for q in range(n):
-            m.measure(q, q)
+        var base = 0
+        var m = qwc_setting(body, h, grp, base)
         if use_model:
             m = apply_noise_model(m, noise)
         var res = sample(m, shots, seed + UInt64(gi) * 1000003)
-        var s1 = 0.0
-        var s2 = 0.0
-        for o in res.memory:
-            var v = 0.0
-            for ti in grp:
-                var t = h.terms[ti]
-                var support = Int(t.x | t.z)
-                if support == 0:
-                    continue
-                v += -t.coeff if _parity(o & support) == 1 else t.coeff
-            s1 += v
-            s2 += v * v
-        var mean = s1 / Float64(shots)
-        ev += mean
-        var var1 = max(0.0, s2 / Float64(shots) - mean * mean)
-        var_total += var1 / Float64(shots)
+        var st = qwc_group_stats(res, h, grp, base)
+        ev += st[0]
+        var_total += st[1]
     return (ev, sqrt(var_total))
 
 

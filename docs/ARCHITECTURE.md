@@ -159,7 +159,14 @@ independent of the core count (fixed seed tree and reduction order). Design: `rl
   and `SamplerPub(circuit, shots, parameter_sets)`. Exact estimation on the
   state vector, or hardware-faithful shot estimation with qubit-wise
   commuting measurement groups and standard errors. Parameter sets of small
-  circuits run in parallel.
+  circuits run in parallel. In shot mode `precision` is the standard error the
+  estimate stays under: shots per setting = ceil(sum over groups of (sum |coeff|)^2 /
+  precision^2), at most 10,000,000 (QM-E913). The reported std is the sample
+  variance of the per-shot weighted sum of a group (its terms share the shots and
+  are correlated), so it is usually below that bound. Shots come from the real
+  sampler: reset, noise, mid-circuit measurement and classical control are honoured,
+  while the exact path (`precision = 0`) evolves one pure state. An observable wider
+  than the circuit raises QM-E405 in both modes.
 * **Orchestrator**: a workflow is a DAG of sample/estimate jobs; a device pool
   mixes CPU/GPU state-vector simulators, stabilizer devices and QPUs with
   queue/shot/cost models. HEFT list scheduling assigns jobs (respecting
