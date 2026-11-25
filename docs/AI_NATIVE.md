@@ -51,8 +51,13 @@ other QUMO modules plug their features into it.
 * **Portable output.** Native gates that are missing from `stdgates.inc`
   (`sxdg`, `iswap`, `iswapdg`, `ecr`, `rxx`, `ryy`, `rzz`, `ccz`) are emitted
   with exact `gate` definitions. The tests check each definition against the
-  native unitary to 1e-12. When QUMO reads such a definition back, it treats it
-  as a declaration and uses the exact native opcode.
+  native unitary to 1e-12. When QUMO reads a definition with the name and
+  signature of a native gate, it compares the body with the native gate (dense
+  unitary up to global phase, at three generic angle sets for a parametrised
+  gate, up to 4 qubits). If they are equal it uses the exact native opcode;
+  if they differ, or the comparison cannot be made (a noise gate name, a body
+  that calls a gate the file does not define), the definition is used as
+  written and QM-W056 is reported. `gate h a { x a; }` is an X, not an H.
 * **OpenQASM 2 for interoperability.** `qumo.ir.qasm2.to_qasm2` (MCP
   `qumo_convert` with `to: "qasm2"`, CLI `qumo convert --to qasm2`) writes
   `qelib1.inc` output for tools that only read OpenQASM 2. Without a
