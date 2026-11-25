@@ -186,7 +186,10 @@ The defaults of `sample`, `run` and `transpile` are those of the command line.
 * An **observable** is a Pauli-sum string (`"Z0 Z1 + 0.5 * X0"`, or dense
   labels `"ZZ + 0.5*IX"`), or a list of `(label, coeff)` pairs
   (`[("ZZ", 1.0), ("IX", 0.5)]`; a dict works too). A dense label reads left
-  to right from the highest qubit, as in Qiskit. Complex coefficients, as
+  to right from the highest qubit, as in Qiskit. A label has at most 64
+  characters (QM-E302), a qubit appears once per term (`"X0 Z0"` and
+  `"Z0 Z0"` raise QM-E301 instead of being merged) and a `+` or `-` must be
+  followed by a term (`"Z0 +"` raises QM-E301). Complex coefficients, as
   `SparsePauliOp.to_list()` gives them, are accepted when their imaginary part
   is zero (`[("ZZ", 1+0j)]`); a non-zero imaginary part raises QM-E913.
 * `expectation` with `noise="auto"` evaluates a circuit that holds noise
