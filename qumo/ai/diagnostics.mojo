@@ -455,6 +455,7 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E736", "qec", "Invalid sliding-window setup: window, step, or missing detector round data.", "0 < step <= window <= rounds and (rounds - window) % step == 0; the DEM needs detector coordinates or an explicit round per detector.")
     _e(c, "QM-E737", "qec", "missing_detectors needs a Clifford circuit with at most 20000 measurements.", "Bind parameters and remove non-Clifford gates.")
     _e(c, "QM-E731", "qec", "Correlated matching needs error probabilities up to 0.5.", "Use plain 'mwpm' for this detector error model.")
+    _e(c, "QM-E738", "qec", "apply_noise_model got a unitary gate of arity 3 (CCX, CSWAP, CCZ) while the noise model has gate errors; a 3-qubit gate has no gate-error rule.", "Decompose it into 1- and 2-qubit gates first (qumo.compiler.basis.unroll_3q, or transpile to a target without CCX), then add noise.")
     _e(c, "QM-E730", "ft", "A computational circuit given to encode() contains noise channels, QEC annotations or unbound symbolic parameters.", "Encode noiseless, QEC-agnostic, bound circuits; add noise with qumo.ft.emulate.add_noise; use the comparator circuit for run-time angles.")
     # algorithms
     _e(c, "QM-E801", "algorithms", "Invalid algorithm option, or a tool argument its inputSchema does not declare (the message names it).", "Check the option names/values in the function docstring, or the tool's inputSchema for its argument names.")
