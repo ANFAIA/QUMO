@@ -9,6 +9,7 @@ from std.math import pi, sin, cos, tan, sqrt, exp, log, asin, acos, atan, floor,
 from qumo.ir.gates import Op, op_arity, op_num_params, op_period
 from qumo.ir.circuit import UNUSED_WIRES, Circuit, Instruction
 from qumo.ir.mc import controlled_by
+from qumo.ir.gate_equiv import MAX_EQUIV_QUBITS, equal_up_to_phase
 from qumo.ir.kraus import KrausChannel
 from qumo.ir.param import Param
 from qumo.ir.classical import (
@@ -132,6 +133,7 @@ struct QasmParser(Movable):
     # program mode (parse_qasm_program): statements go to a tape, the ops of
     # circs[0] are its arena, and classical variables exist at run time
     var program_mode: Bool
+    var shadow_nested: Bool  # parsing a native-comparison snippet: native-named definitions are used as written, unchecked
     var prog: Program
     var tb: TapeBuilder
     var reassigned: Dict[String, Bool]  # names assigned after their declaration
@@ -186,6 +188,7 @@ struct QasmParser(Movable):
         self.room = MAX_SOURCE_ITEMS + src.byte_length()
         self.wide = self.toks[0]
         self.program_mode = False
+        self.shadow_nested = False
         self.prog = Program(Circuit(0, 0, name))
         self.tb = TapeBuilder()
         self.reassigned = Dict[String, Bool]()
@@ -1290,14 +1293,86 @@ struct QasmParser(Movable):
             var np = _special_nparams(k) if k < 0 else op_num_params(k)
             var na = _special_arity(k) if k < 0 else op_arity(k)
             if np == len(pnames) and na == len(qnames):
-                return  # declaration of a native gate: keep exact native semantics
-            self.warn("QM-W050", "gate definition '" + nm + "' shadows a QUMO native gate with a different signature; the definition is used", nt, "rename the gate to avoid confusion")
-            _ = self.gate_table.pop(nm)
+                # In a comparison snippet the prelude holds definitions the outer parser already
+                # decided to use; checking them again would nest one parse per earlier definition.
+                var verdict = -2 if self.shadow_nested else self.definition_matches_native(nm, pnames, qnames, body_start, body_end)
+                if verdict == 1:
+                    return  # the native gate itself: keep exact native semantics
+                if verdict == -2:
+                    pass
+                elif verdict == 0:
+                    self.warn("QM-W056", "gate definition '" + nm + "' differs from the built-in gate of the same name; the definition is used", nt, "rename the gate if you meant a different gate, or fix the body if you meant the built-in one")
+                else:
+                    self.warn("QM-W056", "gate definition '" + nm + "' could not be compared with the built-in gate of the same name; the definition is used", nt, "the comparison needs a unitary body of at most " + String(MAX_EQUIV_QUBITS) + " qubits that uses only gates defined by the language")
+                _ = self.gate_table.pop(nm)
+            else:
+                self.warn("QM-W050", "gate definition '" + nm + "' shadows a QUMO native gate with a different signature; the definition is used", nt, "rename the gate to avoid confusion")
+                _ = self.gate_table.pop(nm)
         if nm in self.user_gates:
             raise self.err("QM-E522", "gate '" + nm + "' is already defined", nt, "rename one of the definitions")
         _ = gt
         self.user_gates[nm] = len(self.gates)
         self.gates.append(GateDef(nm, pnames^, qnames^, body_start, body_end))
+
+    def gate_source(self, nm: String, pnames: List[String], qnames: List[String], body_start: Int, body_end: Int) -> String:
+        """`gate nm(params) qubits { body }` rebuilt from the tokens of a definition."""
+        var s = "gate " + nm
+        if len(pnames) > 0:
+            s += "("
+            for i in range(len(pnames)):
+                s += (", " if i > 0 else "") + pnames[i]
+            s += ")"
+        for i in range(len(qnames)):
+            s += (", " if i > 0 else " ") + qnames[i]
+        var bs = self.src.as_bytes()
+        var from_byte = self.toks[body_start].start
+        var to_byte = self.toks[body_end].start
+        s += " {"
+        if to_byte > from_byte:
+            s += String(unsafe_from_utf8=bs[from_byte:to_byte])
+        return s + "}\n"
+
+    def definition_matches_native(self, nm: String, pnames: List[String], qnames: List[String], body_start: Int, body_end: Int) -> Int:
+        """Whether the `gate` definition `nm` (same name and signature as a native
+        gate) has the native gate's unitary up to global phase: 1 yes, 0 no, -1 it
+        cannot be told (body not unitary or not self-contained, more than
+        MAX_EQUIV_QUBITS qubits). Both sides are parsed as tiny programs by a fresh
+        parser and compared densely; a parametrised gate is compared at three sets
+        of generic angles."""
+        var na = len(qnames)
+        var n = na if na > 0 else 1
+        if n > MAX_EQUIV_QUBITS:
+            return -1
+        var prelude = String()  # earlier user gates, which the body may call
+        for g in self.gates:
+            prelude += self.gate_source(g.name, g.pnames, g.qnames, g.body_start, g.body_end)
+        var args = String()
+        for i in range(na):
+            args += (", " if i > 0 else "") + "q[" + String(i) + "]"
+        var sets = 3 if len(pnames) > 0 else 1
+        try:
+            for s in range(sets):
+                var angles = String()
+                if len(pnames) > 0:
+                    angles = "("
+                    for i in range(len(pnames)):
+                        angles += (", " if i > 0 else "") + String(0.731 + 0.613 * Float64(s) - 1.087 * Float64(s * s) + 0.377 * Float64(i))
+                    angles += ")"
+                var head = "OPENQASM 3.0;\nqubit[" + String(n) + "] q;\n"
+                var native_src = head + nm + angles + (" " + args if na > 0 else "") + ";\n"
+                var user_src = head + prelude + self.gate_source("qumo_shadow_check", pnames, qnames, body_start, body_end) + "qumo_shadow_check" + angles + (" " + args if na > 0 else "") + ";\n"
+                var native = parse_qasm(native_src)
+                var up = QasmParser(user_src, "shadow")
+                up.shadow_nested = True
+                up.parse_program()
+                var user = up.finish()
+                if native.num_qubits != n or user.num_qubits != n:
+                    return -1
+                if not equal_up_to_phase(native.ops, user.ops, n):
+                    return 0
+        except:
+            return -1
+        return 1
 
     def parse_measure_arrow(mut self) raises:
         var mt = self.next()

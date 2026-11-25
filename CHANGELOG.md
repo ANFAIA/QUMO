@@ -38,6 +38,7 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 
 ### Fixed
 
+- OpenQASM: a `gate` definition with the name and signature of a native gate was dropped and the native gate ran, whatever the body said (`gate h a { x a; } h q[0];` gave an H). The body is now compared with the native unitary (up to global phase, up to 4 qubits): an equal definition still maps to the native opcode, so `to_qasm` output round-trips as before, and a different one (or one that cannot be compared) is used as written with the new warning QM-W056. Every definition `to_qasm` and `to_qasm2` write was checked and matches its native gate.
 - The resource estimator counted three synthesised rotations for every constant `U` gate, so `U(pi/2, 0, pi)` (H) and `U(0, 0, pi/4)` (T) were reported as non-Clifford rotations. Constant angles are now classified as for `RZ`/`RY`: a multiple of pi/2 is free, an odd multiple of pi/4 is one T, and when theta is a multiple of pi the two Rz merge into one rotation by phi + lambda (phi - lambda for an odd multiple). Symbolic angles still count three. `recommended_method` and `is_clifford()` are unchanged (they still treat `U` as non-Clifford). (`qumo/exec/resources.mojo`, `tests/test_orchestrator.mojo`)om/ANFAIA/QUMO/pull/1), 2026-11-03)
 
 ### Fixed
