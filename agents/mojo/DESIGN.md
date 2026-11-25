@@ -471,8 +471,9 @@ Behaviour:
   `stderr_fd >= 0`, appending what arrives to a ring buffer of the last 64 KiB (`stderr_tail()`),
   so a child that writes a lot to stderr never blocks on a full pipe while the parent waits
   for stdout.
-- `is_secret_env_name(n)`: upper-cased `n` ends with `_API_KEY`, `_TOKEN`, `_SECRET` or
-  `_PASSWORD`, or contains `SECRET` or `PASSWORD`.
+- `is_secret_env_name(n)`: upper-cased `n` contains `TOKEN`, `SECRET`, `KEY`, `PASSWORD`,
+  `CREDENTIAL` or `COOKIE` (`lists.env.secret_name_substrings` of `agents/spec/guard_rules.json`,
+  the rule of the Python harness).
 - `environ_list()`: macOS `_NSGetEnviron()` (verified), Linux `/proc/self/environ` split on NUL.
 
 #### 2.1.3 `native/clock.mojo`
@@ -769,8 +770,8 @@ characters, or one of 4 to 7 glued to other key characters, stays readable.
 
 `redact_all(s, names)` hides the current value (read with `getenv` at each call, never cached)
 of every variable in `names` and of every variable of the process whose name looks secret
-(`native/spawn.is_secret_env_name`: `*_API_KEY`, `*_TOKEN`, `*_SECRET`, `*_PASSWORD`,
-`*SECRET*`, `*PASSWORD*`), longest value first, each also JSON-escaped; then the patterns of
+(`native/spawn.is_secret_env_name`: it holds `TOKEN`, `SECRET`, `KEY`, `PASSWORD`, `CREDENTIAL`
+or `COOKIE`), longest value first, each also JSON-escaped; then the patterns of
 `redact`. So the model key of every endpoint, the alphaXiv key (whatever `key_env` names it),
 `GITHUB_TOKEN` and an MCP `bearer_env` are covered without being listed. Every component calls
 `redact_all(text, secret_env_names(endpoint.api_key_env))` on every error text it produces from
