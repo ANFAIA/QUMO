@@ -706,22 +706,40 @@ def _write_condition_json(mut w: JsonWriter, circuit: Circuit, g: Instruction):
     w.end_object()
 
 
-def _read_condition_json(mut c: Circuit, g: JsonValue) raises:
-    """Condition of the instruction just appended, as `_write_condition_json` wrote it."""
+def _read_condition_json(mut c: Circuit, g: JsonValue, path: String, room: Int) raises:
+    """Condition of the instruction just appended, as `_write_condition_json` wrote it.
+    A bit is 0 or more (a negative one used to mean "no condition"), a value is 0 or 1
+    (any other can never hold), and a bit past the register is refused at the end of
+    the document, once every measure has grown it."""
     var cond = g.get("condition")
-    if not cond.is_object():
+    if not cond.is_defined() or cond.is_null():
         return
+    if not cond.is_object():
+        raise _path_err(path + ".condition", "expected an object", "e.g. {\"clbit\": 0, \"value\": 1}")
     var bv = cond.get("bits")
     if not bv.is_defined():
-        c.c_if(cond.get_int("clbit", 0), cond.get_int("value", 1))
+        var bit = cond.get_int("clbit", 0)
+        var val = cond.get_int("value", 1)
+        if bit < 0 or bit >= room:
+            raise _path_err(path + ".condition.clbit", "bit " + String(bit) + " is not a classical bit", "use 0 or more, below the register size")
+        if val != 0 and val != 1:
+            raise _path_err(path + ".condition.value", "value " + String(val) + " is not 0 or 1", "a classical bit holds 0 or 1")
+        c.c_if(bit, val)
         return
     var vv = cond.get("values")
+    if not bv.is_array() or not vv.is_array() or len(bv) != len(vv) or len(bv) == 0:
+        raise _path_err(path + ".condition", "bits and values must be arrays of the same, non-zero length", "e.g. {\"bits\": [0, 1], \"values\": [1, 0]}")
     var bits = List[Int]()
     var vals = List[Int]()
     for j in range(len(bv)):
-        bits.append(bv.at(j).as_int())
-    for j in range(len(vv)):
-        vals.append(vv.at(j).as_int())
+        var bit = bv.at(j).as_int()
+        var val = vv.at(j).as_int()
+        if bit < 0 or bit >= room:
+            raise _path_err(path + ".condition.bits[" + String(j) + "]", "bit " + String(bit) + " is not a classical bit", "use 0 or more, below the register size")
+        if val != 0 and val != 1:
+            raise _path_err(path + ".condition.values[" + String(j) + "]", "value " + String(val) + " is not 0 or 1", "a classical bit holds 0 or 1")
+        bits.append(bit)
+        vals.append(val)
     c.c_if_register(bits, vals)
 
 
@@ -813,11 +831,32 @@ def _path_err(path: String, msg: String, hint: String) -> Error:
     return Error("QM-E911: " + path + ": " + msg + ". Hint: " + hint)
 
 
+comptime _MAX_OBSERVABLES = 64  # the DEM and the frame simulators hold observables in a UInt64 mask
+
+
+def _check_probability(x: Float64, path: String) raises:
+    if not (x >= 0.0 and x <= 1.0):
+        raise _path_err(path, "probability " + String(x) + " is outside [0, 1]", "a probability is between 0 and 1")
+
+
+def _check_probability_sum(xs: List[Float64], path: String) raises:
+    var total = 0.0
+    for x in xs:
+        _check_probability(x, path)
+        total += x
+    if total > 1.0 + 1e-9:
+        raise _path_err(path, "the probabilities add up to " + String(total), "the branches of one channel add up to at most 1")
+
+
 def circuit_from_json(v: JsonValue) raises -> Circuit:
     """Inverse of `circuit_to_json` (format qumo.circuit.v1). Gate names may
     be any QASM alias; params are numbers or {param, coeff, offset} objects. A size
     has to come with the instructions that use it: a short document cannot ask for
-    a large allocation further on."""
+    a large allocation further on. The values an instruction carries are checked
+    the same way: qubits and clbits against the register, records against the
+    measurements made so far (negative counts back), an observable index below 64,
+    probabilities in [0, 1], Pauli letters 1 to 3, Kraus matrices of the right size,
+    condition bits of 0 or more and condition values of 0 or 1."""
     if not v.is_object():
         raise _path_err("circuit", "expected an object", "pass the output of circuit_to_json / qumo_convert(to='json')")
     var nq = v.get_int("num_qubits", -1)
@@ -860,12 +899,21 @@ def circuit_from_json(v: JsonValue) raises -> Circuit:
         if k == Op.DETECTOR or k == Op.OBSERVABLE:
             var recs = List[Int]()
             var rv = g.get("records")
+            if rv.is_defined() and not rv.is_array():
+                raise _path_err(path + ".records", "expected an array", "list measurement records, e.g. [0, 1] or [-1]")
+            var nmeas = c.num_measurements
             for j in range(len(rv)):
-                recs.append(rv.at(j).as_int())
+                var r = rv.at(j).as_int()
+                if r < -nmeas or r >= nmeas:
+                    raise _path_err(path + ".records[" + String(j) + "]", "record " + String(r) + " does not exist yet (" + String(nmeas) + " measurements so far)", "records are absolute measurement indices (0 = first), or negative to count back")
+                recs.append(r + nmeas if r < 0 else r)
             if k == Op.DETECTOR:
                 c.detector(recs)
             else:
-                c.observable(g.get_int("index", 0), recs)
+                var index = g.get_int("index", 0)
+                if index < 0 or index >= _MAX_OBSERVABLES:
+                    raise _path_err(path + ".index", "observable index " + String(index) + " is outside [0, " + String(_MAX_OBSERVABLES) + ")", "the simulators keep observables in a 64-bit mask")
+                c.observable(index, recs)
             continue
         if k == Op.BARRIER or k == Op.TICK:
             c.add(k, -1)
@@ -875,10 +923,18 @@ def circuit_from_json(v: JsonValue) raises -> Circuit:
             var el = List[Int]()
             var pv = g.get("paulis")
             for j in range(len(pv)):
-                eq.append(pv.at(j).at(0).as_int())
-                el.append(pv.at(j).at(1).as_int())
-            c.correlated_error(g.get_float("probability", 0.0), eq, el, g.get_bool("else", False))
-            _read_condition_json(c, g)
+                var pq = pv.at(j).at(0).as_int()
+                var pl = pv.at(j).at(1).as_int()
+                if pq < 0 or pq >= nq:
+                    raise _path_err(path + ".paulis[" + String(j) + "]", "qubit " + String(pq) + " is outside the " + String(nq) + " qubits", "use 0 to num_qubits - 1")
+                if pl < 1 or pl > 3:
+                    raise _path_err(path + ".paulis[" + String(j) + "]", "Pauli letter " + String(pl) + " is not 1, 2 or 3", "1 is X, 2 is Y, 3 is Z")
+                eq.append(pq)
+                el.append(pl)
+            var pe = g.get_float("probability", 0.0)
+            _check_probability(pe, path + ".probability")
+            c.correlated_error(pe, eq, el, g.get_bool("else", False))
+            _read_condition_json(c, g, path, room)
             continue
         var qv = g.get("qubits")
         var a = op_arity(k)
@@ -886,12 +942,16 @@ def circuit_from_json(v: JsonValue) raises -> Circuit:
             raise _path_err(path + ".qubits", "'" + nm + "' needs " + String(a) + " qubit(s), got " + String(len(qv)), "e.g. \"qubits\": [0, 1] for two-qubit gates")
         var qs = List[Int]()
         for j in range(a):
-            qs.append(qv.at(j).as_int())
+            var q = qv.at(j).as_int()
+            if q < 0 or q >= nq:
+                raise _path_err(path + ".qubits[" + String(j) + "]", "qubit " + String(q) + " is outside the " + String(nq) + " qubits", "use 0 to num_qubits - 1")
+            qs.append(q)
         if k == Op.PAULI_CHANNEL_2:
             var probs = List[Float64]()
             var pv = g.get("probabilities")
             for j in range(len(pv)):
                 probs.append(pv.at(j).as_float())
+            _check_probability_sum(probs, path + ".probabilities")
             c.pauli_channel_2(probs, qs[0], qs[1])
         elif k == Op.KRAUS1 or k == Op.KRAUS2:
             var ch = KrausChannel(g.get_string("channel", "kraus"), a)
@@ -900,13 +960,19 @@ def circuit_from_json(v: JsonValue) raises -> Circuit:
                 var re = List[Float64]()
                 var im = List[Float64]()
                 var row = mv.at(m)
+                var dim = 1 << a
+                if not row.is_array() or len(row) != 2 * dim * dim:
+                    raise _path_err(path + ".matrices[" + String(m) + "]", "a " + String(a) + "-qubit Kraus operator needs " + String(2 * dim * dim) + " numbers (row-major re, im pairs)", "write each entry as two numbers: real, imaginary")
                 for j in range(0, len(row), 2):
                     re.append(row.at(j).as_float())
                     im.append(row.at(j + 1).as_float())
                 ch.add(re^, im^)
             c.apply_channel(ch, qs[0], qs[1] if a == 2 else -1)
         elif k == Op.MEASURE:
-            c.measure(qs[0], g.get_int("clbit", qs[0]))
+            var cb = g.get_int("clbit", qs[0])
+            if cb < 0 or cb >= room:
+                raise _path_err(path + ".clbit", "clbit " + String(cb) + " is not a classical bit", "use 0 or more, below " + String(room))
+            c.measure(qs[0], cb)
         else:
             var pv = g.get("params")
             var np = op_num_params(k)
@@ -928,10 +994,20 @@ def circuit_from_json(v: JsonValue) raises -> Circuit:
                     pp.append(Param(_read_number(x, "offset", 0.0), idx, _read_number(x, "coeff", 1.0)))
                 else:
                     raise _path_err(path + ".params[" + String(j) + "]", "expected a number or parameter object", "e.g. 0.5 or {\"param\": \"theta\", \"coeff\": 2.0, \"offset\": 0.0}")
+            if k == Op.DEPOLARIZE1 or k == Op.DEPOLARIZE2 or k == Op.X_ERROR or k == Op.Y_ERROR or k == Op.Z_ERROR or k == Op.PAULI_CHANNEL_1:
+                var constants = List[Float64]()
+                for j in range(np):
+                    if not pp[j].is_symbolic():
+                        constants.append(pp[j].value())
+                if k == Op.PAULI_CHANNEL_1:
+                    _check_probability_sum(constants, path + ".params")
+                else:
+                    for x in constants:
+                        _check_probability(x, path + ".params")
             while len(pp) < 3:
                 pp.append(Param(0.0))
             c.add(k, qs[0] if a > 0 else -1, qs[1] if a > 1 else -1, qs[2] if a > 2 else -1, pp[0], pp[1], pp[2])
-        _read_condition_json(c, g)
+        _read_condition_json(c, g, path, room)
     if c.num_clbits < 0 or c.num_clbits > room:  # a measure grows the register
         raise _path_err("circuit", "an instruction writes past num_clbits", "keep clbit below " + String(room))
     c.validate()
