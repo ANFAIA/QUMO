@@ -41,7 +41,7 @@ from std.os import getenv
 from qumo.core.json import JsonValue, parse_json
 
 from qumo_agent.core.errors import E_MCP, E_CONFIG, E_NETWORK, qa_error, error_code
-from qumo_agent.net.url import Url, parse_url
+from qumo_agent.net.url import Url, parse_url, is_loopback_host
 from qumo_agent.net.http import (
     HttpClient, HttpRequest, HttpOptions, HttpBodyStream, REDIRECT_SAME_ORIGIN,
 )
@@ -81,11 +81,6 @@ def _is_valid_env_name(s: String) -> Bool:
         if not alpha and not (digit and i > 0):
             return False
     return True
-
-
-def _is_loopback_host(host: String) -> Bool:
-    """localhost, 127.0.0.0/8 and ::1 (the URL parser lower-cases and unbrackets hosts)."""
-    return host == "localhost" or host == "::1" or host.startswith("127.")
 
 
 def _first_code_points(s: String, n: Int) -> String:
@@ -182,7 +177,7 @@ struct McpHttpSession(Movable):
         """Checks the URL and the key variable; nothing is sent. `bearer_env` is the NAME of
         the variable holding the bearer token ("" = no Authorization header). Plain `http`
         is accepted when the URL itself is `http://`, but a bearer token is never sent in
-        clear text to a host other than loopback."""
+        clear text to a host other than loopback (`is_loopback_host`)."""
         var parsed: Url
         try:
             parsed = parse_url(url)
@@ -193,9 +188,10 @@ struct McpHttpSession(Movable):
                 raise qa_error(E_CONFIG, "'" + bearer_env + "' is not a valid environment variable name", "")
             if getenv(bearer_env, "").byte_length() == 0:
                 raise qa_error(E_CONFIG, "set " + bearer_env + " to use the MCP server " + parsed.origin(), "")
-            if parsed.scheme == "http" and not _is_loopback_host(parsed.host):
+            if parsed.scheme == "http" and not is_loopback_host(parsed.host):
                 raise qa_error(E_CONFIG, "refusing to send " + bearer_env + " to " + parsed.origin()
-                               + " over plain http", "use an https URL")
+                               + " over plain http",
+                               "use an https URL (plain http carries the token only to localhost, 127.0.0.0/8 or [::1])")
         self.session_id = String()
         self.protocol_version = String()
         self.server_name = String()

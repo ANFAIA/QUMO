@@ -3,7 +3,7 @@
 
 from std.testing import assert_equal, assert_true, assert_false
 
-from qumo_agent.net.url import Url, parse_url, resolve_reference, quote, quote_plus, urlencode
+from qumo_agent.net.url import Url, parse_url, resolve_reference, quote, quote_plus, urlencode, is_loopback_host
 
 
 def _refused(url: String, part: String) raises:
@@ -103,7 +103,30 @@ def test_quote() raises:
     assert_equal(urlencode(List[String](), List[String]()), "")
 
 
+def test_loopback() raises:
+    # Hosts as parse_url returns them (lower-case, IPv6 without brackets).
+    var local: List[String] = ["http://localhost/", "http://LOCALHOST:11434/v1", "http://api.localhost/",
+                               "http://a.b.localhost:8080/", "http://127.0.0.1/", "http://127.0.0.1:9/",
+                               "http://127.255.255.255/", "http://127.8.9.10/", "http://[::1]:9/"]
+    for u in local:
+        assert_true(is_loopback_host(parse_url(u).host), u)
+    var remote: List[String] = ["http://127.attacker.example/mcp", "http://127.0.0.1.attacker.example/",
+                                "http://127.example/", "http://127.0.0.1.nip.io/", "http://127.1/", "http://127.0.1/",
+                                "http://127.0.0.256/", "http://127.0.0.1.2/", "http://127.0.0.01/", "http://127.0.0.1./",
+                                "http://127.0.0.0x1/", "http://127..0.1/", "http://127.0.0.1111/",
+                                "http://128.0.0.1/", "http://1.127.0.1/", "http://0x7f.0.0.1/", "http://2130706433/",
+                                "http://localhost.attacker.example/", "http://notlocalhost/", "http://.localhost.example/",
+                                "http://192.168.1.10/", "http://10.0.0.1/", "http://0.0.0.0/", "http://[::2]/",
+                                "http://[::ffff:127.0.0.1]/", "http://api.example.test/"]
+    for u in remote:
+        assert_false(is_loopback_host(parse_url(u).host), u)
+    assert_false(is_loopback_host(""))
+    assert_false(is_loopback_host(".localhost"))
+    assert_false(is_loopback_host("127.0.0.1:80"))
+
+
 def main() raises:
+    test_loopback()
     test_parse()
     test_resolve()
     test_quote()

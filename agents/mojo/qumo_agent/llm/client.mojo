@@ -18,14 +18,14 @@ from std.os import getenv
 from std.math import isfinite
 
 from qumo.core.json import JsonValue, parse_json
-from qumo_agent.core.errors import E_MODEL_HTTP, E_CONTEXT_OVERFLOW, E_NETWORK, E_CONFIG, error_code
+from qumo_agent.core.errors import E_MODEL_HTTP, E_CONTEXT_OVERFLOW, E_NETWORK, E_CONFIG, error_code, qa_error
 from qumo_agent.core.endpoint import ModelEndpoint
 from qumo_agent.core.messages import ChatRequest, ChatResponse, parse_chat_response, is_context_overflow
 from qumo_agent.core.stats import RunStats, zero_stats
 from qumo_agent.native.clock import sleep_ms, http_date_to_unix, unix_now
 from qumo_agent.native.rand import random_unit
 from qumo_agent.util.redact import redact_all, secret_env_names
-from qumo_agent.net.url import parse_url
+from qumo_agent.net.url import Url, parse_url, is_loopback_host
 from qumo_agent.net.tls import TlsContext
 from qumo_agent.net.http import HttpClient, HttpRequest, HttpOptions, HttpResponse, REDIRECT_KEEP_METHOD
 
@@ -249,16 +249,22 @@ struct LlmClient(Movable):
 
     def __init__(out self, endpoint: ModelEndpoint, tls: Optional[ArcPointer[TlsContext]]) raises:
         """Checks the key variable (QA-E140) and the base URL. Plain `http` is used only
-        when `base_url` is itself `http://` (local model servers); for `https` without
-        `tls` the production TLS context is created on the first request."""
+        when `base_url` is itself `http://` and its host is loopback (local model servers;
+        `is_loopback_host`): the key is never sent in clear text to another host (QA-E140).
+        For `https` without `tls` the production TLS context is created on the first request."""
         if not _is_valid_env_name(endpoint.api_key_env):
             raise Error(E_CONFIG + ": '" + endpoint.api_key_env + "' is not a valid environment variable name")
         if getenv(endpoint.api_key_env, "").byte_length() == 0:
             raise _missing_key_error(endpoint.api_key_env)
+        var parsed: Url
         try:
-            _ = parse_url(endpoint.base_url)
+            parsed = parse_url(endpoint.base_url)
         except e:
             raise Error(E_CONFIG + ": invalid model base_url: " + String(e))
+        if parsed.scheme == "http" and not is_loopback_host(parsed.host):
+            raise qa_error(E_CONFIG, "refusing to send " + endpoint.api_key_env + " to " + parsed.origin()
+                           + " over plain http",
+                           "use an https base_url (plain http carries the key only to localhost, 127.0.0.0/8 or [::1])")
         self.endpoint = endpoint.copy()
         self.http = HttpClient(tls)
         self.stats = zero_stats()

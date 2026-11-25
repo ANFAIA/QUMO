@@ -1155,11 +1155,15 @@ at 64 KiB, at most 100 header lines. Body cap per `HttpOptions`.
 
 Redirects (D2c, [critic A8]): at most `max_redirects` (10) hops and at most 4 visits of one URL
 (urllib), else `QA-E104: redirect loop`. `https -> http` is always refused
-(`QA-E104: refusing redirect from https to http`). `Authorization` (and `Cookie`) are dropped
-when scheme, host or port change. `REDIRECT_URLLIB`: 301/302/303 turn POST into GET without a
+(`QA-E104: refusing redirect from https to http`). When scheme, host or port change, only the
+headers of `cross_origin_safe_header` (`Accept`, `Accept-Encoding`, `Accept-Language`,
+`Connection`, `Content-Type`, `User-Agent`) are sent on: `Authorization`, `Cookie`, `X-Api-Key`
+and every other caller header are dropped, and a request that still has a body (307/308) is
+refused (`QA-E104: refusing to send the request body to another origin (redirect from <origin>
+to <origin>)`). `REDIRECT_URLLIB`: 301/302/303 turn POST into GET without a
 body (urllib), 307/308 keep GET/HEAD; `REDIRECT_SAME_ORIGIN`: only 307/308 to the same origin,
 anything else is returned as the response; `REDIRECT_KEEP_METHOD`: only 307/308, method and
-body kept.
+body kept (same origin only, by the rule above).
 
 #### 2.4.6 `net/sse.mojo`
 
@@ -1217,8 +1221,11 @@ def parse_retry_after_s(header_names: List[String], header_values: List[String],
 - Construction checks `api_key_env` is a valid variable name and set
   (`QA-E140: set OPENROUTER_API_KEY to use the openrouter back end, or pass --replay FILE`).
   The key is read with `getenv` when each request is built and never stored, logged or
-  returned. `https` needs `tls`; plain `http` is allowed for a loopback host or when
-  `base_url` itself is `http://` (local model servers).
+  returned. `https` needs `tls`; plain `http` is allowed only when `base_url` itself is
+  `http://` and its host is loopback (local model servers; `net/url.mojo`
+  `is_loopback_host`: `localhost`, `*.localhost`, a literal IPv4 in 127.0.0.0/8, `::1`).
+  Any other `http://` base URL is refused at construction (`QA-E140: refusing to send
+  <KEY_ENV> to <origin> over plain http`), as `McpHttpSession` does for its bearer token.
 - POST `base_url + "/chat/completions"`, body `req.body_json()`, headers per section 1.5,
   `HttpOptions(connect=io=timeout_s*1000, max_body_bytes=64 MiB, truncate=False,
   REDIRECT_KEEP_METHOD, 10, allow_plain_http, accept_ragged_eof=False)`. A TLS-truncated
@@ -3326,7 +3333,7 @@ retyped). Goldens are committed; regenerating them needs `agents/.venv`.
 | F | `test_native_regex`, `test_native_fnmatch` | translation table (2.1.5) incl. refusals; search on platform constants; `fnmatch_py` (`[^a]`, `\`, dot files); `wc_glob_match` vectors from deepagents (`*.py` matches `src/app/main.py`, `src/**/*.py`, `/*.py` top-level only, `**` not into `.github`, `.github/**/*.yml`, `*.{yml,yaml}`, `..` refused); `pathlib_glob_match` |
 | F | `test_util_pyfmt`, `test_util_jsonx`, `test_util_sha256`, `test_util_redact` | `pyfmt.json` vectors; lenient parse with a raw newline and tab inside strings; B2 table (empty, null, `[]`, `0`, object, `[1]`, `5`, `"x"`, invalid; the truthy non-objects give `arguments must be a JSON object`, X13); NIST SHA-256 vectors (`""`, `"abc"`, one million `a`); `redact_all` removes the values of three set variables in JSON bodies and plain text, ignores unset ones |
 | F | `test_core_messages`, `test_core_replay` | wire JSON of each role (assistant `content: null` with calls, `name`, `arguments` re-serialized with `", "`/`": "` and `é` kept, invalid calls after valid ones with raw text, tool parts array); `parse_chat_response` B4 (reasoning dropped), B5 (error body, missing/null/empty choices), list content; `is_context_overflow` markers (400/413/422 with each marker; 503 with `exceeds the context window` true, 503 with `prompt is too long` false); `error_http_status` of E101/E102 texts; replay routing by `at`, error lines, exhaustion message, request log directory |
-| N | `test_net_url`, `test_net_http_framing`, `test_net_redirects`, `test_net_sse` | URL parse/resolve; `quote`/`quote_plus`/`urlencode` (the arXiv example in [gaps §2] byte-exact); framing over a `CannedStream` (chunked with extensions and trailers, Content-Length, close-delimited, 1xx, HEAD/204/304, truncation, a close-delimited body on a scripted ragged-EOF stream refused unless `accept_ragged_eof`, header caps, injection refused); D2c table (https to http refused, Authorization dropped on host/port/scheme change, 10 hops, 4 visits); SSE splits at every byte offset, CR/LF/CRLF, comments, multi-line data, id/retry, BOM |
+| N | `test_net_url`, `test_net_http_framing`, `test_net_redirects`, `test_net_sse` | URL parse/resolve; `quote`/`quote_plus`/`urlencode` (the arXiv example in [gaps §2] byte-exact); framing over a `CannedStream` (chunked with extensions and trailers, Content-Length, close-delimited, 1xx, HEAD/204/304, truncation, a close-delimited body on a scripted ragged-EOF stream refused unless `accept_ragged_eof`, header caps, injection refused); D2c table (https to http refused, only the safe headers kept and a request body refused on host/port/scheme change, 10 hops, 4 visits); SSE splits at every byte offset, CR/LF/CRLF, comments, multi-line data, id/retry, BOM |
 | N | `test_net_tls_local` | with a per-run CA and leaves made by `openssl` 3 (`req -x509 ... ec P-256`, leaf SAN `DNS:localhost,IP:127.0.0.1`, second leaf `DNS:other.test`) and `openssl s_server -accept 127.0.0.1:<port> -WWW` in a temp dir: GET a fixture file with `TlsContext(ca)`; default store gives verify error 20; `SSL_CERT_FILE=ca.pem` with the production constructor succeeds; `other.test` leaf gives 62; IP literal with IP SAN succeeds, without gives 64; killing the server mid-body gives a truncation error for a Content-Length body and, without `accept_ragged_eof`, for a close-delimited body (`s_server -WWW` sends no Content-Length); a `TcpListener` that never accepts makes the handshake time out in 1.5 s ± 0.5 |
 | N | `test_net_http_fixture`, `test_llm_client` | through `http_fixture_server`: plain GET/POST with every framing; redirect chains; the model client against `http://127.0.0.1:<port>/api/v1`: request headers and body, 429 with `retry-after-ms` retried, 500 twice then 200 (2 retries), 500 three times gives `QA-E101` after 3 attempts, `x-should-retry: false`, `retry-after: 200` not retried, 400 `context_length_exceeded` gives `QA-E102` at once, 200 with `error` gives `QA-E103`, the key echoed by the server is redacted; `retry_delay_ms` table with fixed randomness |
 | M | `test_mcp_protocol` | tools page parsing with `nextCursor`; call results to outcomes (B6: two text parts, error with empty content, success with empty content, image block placeholder); `transform_input_schema` (B7: `$ref`/`$defs` inlined and dropped, top `title` and `description` popped, nested `title` keys removed, a property named `title` kept, lists untouched, `$schema` and `additionalProperties` kept) |

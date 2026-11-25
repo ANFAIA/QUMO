@@ -11,8 +11,10 @@ the stream, and a TLS stream that ended without `close_notify` is a truncation e
 unless the request accepts it (`accept_ragged_eof`, research GETs only, X15).
 
 Redirects (D2c): at most `max_redirects` hops and 4 visits of one URL, https to http
-is always refused, and `Authorization` and `Cookie` are dropped when the scheme, host
-or port change.
+is always refused. When the scheme, host or port change, only the headers of
+`cross_origin_safe_header` are sent on (`Authorization`, `Cookie`, `X-Api-Key` and any
+other caller header are dropped), and a request with a body (307/308) is refused
+instead of sending the body to the other origin.
 
 `request_guarded` (research GETs) also applies a `UrlGuard` (net/guard.mojo) to the first
 URL and to every redirect target before connecting, refuses a host that resolves to an
@@ -497,8 +499,25 @@ def read_response[S: ByteStream](mut s: S, method: String, opts: HttpOptions) ra
 # Redirects
 # ---------------------------------------------------------------------------
 def keeps_authorization(current: Url, target: Url) -> Bool:
-    """True when scheme, host and port are unchanged (Authorization and Cookie kept)."""
+    """True when scheme, host and port are unchanged (the same origin: every header and
+    the body are kept)."""
     return current.scheme == target.scheme and current.host == target.host and current.port == target.port
+
+
+def cross_origin_safe_header(name: String) -> Bool:
+    """The request headers that follow a redirect to another origin. Every other header
+    (`Authorization`, `Cookie`, `X-Api-Key`, `Api-Key`, a session id, anything a caller
+    configured) may carry a credential and is dropped."""
+    var ln = _lower(name)
+    return (ln == "accept" or ln == "accept-encoding" or ln == "accept-language" or ln == "connection"
+            or ln == "content-type" or ln == "user-agent")
+
+
+def check_redirect_body(current: Url, target: Url, body: String) raises:
+    """Refuses (QA-E104) a redirect that would send a request body to another origin."""
+    if body.byte_length() > 0 and not keeps_authorization(current, target):
+        raise Error(E_NETWORK + ": refusing to send the request body to another origin (redirect from "
+                    + current.origin() + " to " + target.origin() + ")")
 
 
 def _is_redirect_status(status: Int) -> Bool:
@@ -606,13 +625,15 @@ struct _Exchange(Movable):
         return HttpBodyStream(self.head, final_url, self.stream^, self.reader^, body^, opts)
 
 
-def _without(names: List[String], values: List[String], drop: List[String],
+def _without(names: List[String], values: List[String], drop: List[String], same_origin: Bool,
              mut out_names: List[String], mut out_values: List[String]):
+    """The headers for the next hop: without `drop`, and for another origin only the
+    `cross_origin_safe_header` ones."""
     out_names.clear()
     out_values.clear()
     for i in range(min(len(names), len(values))):
         var ln = _lower(names[i])
-        var skip = False
+        var skip = not same_origin and not cross_origin_safe_header(ln)
         for d in drop:
             if ln == d:
                 skip = True
@@ -678,7 +699,8 @@ struct HttpClient(Movable):
                 raise Error(E_NETWORK + ": redirect loop")
             visits[key] = seen + 1
             var drop = List[String]()
-            if guard.enabled or not keeps_authorization(url, target):
+            if guard.enabled:
+                # guarded (research) requests drop the credentials on every redirect
                 drop.append("authorization")
                 drop.append("cookie")
             if opts.redirect_mode == REDIRECT_URLLIB and head.status != 307 and head.status != 308:
@@ -687,9 +709,11 @@ struct HttpClient(Movable):
                 body = String()
                 drop.append("content-length")
                 drop.append("content-type")
+            var cross = not keeps_authorization(url, target)
+            check_redirect_body(url, target, body)
             var nn = List[String]()
             var nv = List[String]()
-            _without(names, values, drop, nn, nv)
+            _without(names, values, drop, not cross, nn, nv)
             names = nn^
             values = nv^
             url = target^

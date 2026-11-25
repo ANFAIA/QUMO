@@ -237,6 +237,17 @@ def test_construction() raises:
     assert_equal(_config_error("http://localhost/mcp", KEY_ENV), "NO ERROR")
     assert_equal(_config_error("http://[::1]:9/mcp", KEY_ENV), "NO ERROR")
     assert_equal(_config_error("https://api.example.test/mcp", KEY_ENV), "NO ERROR")
+    # Loopback is localhost, *.localhost, a literal 127.0.0.0/8 address and [::1]; a name
+    # that only starts with "127." is a remote host.
+    var remote: List[String] = ["127.attacker.example", "127.0.0.1.attacker.example", "127.1", "127.0.0.256",
+                                "127.0.0.1.", "127.0.0.01", "localhost.attacker.example", "notlocalhost"]
+    for h in remote:
+        var r = _config_error("http://" + h + "/mcp", KEY_ENV)
+        assert_true(r.startswith("QA-E140: refusing to send " + KEY_ENV + " to http://" + h + " over plain http"),
+                    h + ": " + r)
+    var local: List[String] = ["127.8.9.10:9", "127.255.255.255", "LOCALHOST", "mcp.localhost:8080"]
+    for h in local:
+        assert_equal(_config_error("http://" + h + "/mcp", KEY_ENV), "NO ERROR")
 
 
 def test_refused_connection() raises:
