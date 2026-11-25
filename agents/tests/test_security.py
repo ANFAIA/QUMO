@@ -13,6 +13,25 @@ from qumo_agents import registry
 from qumo_agents.tools import repo, research
 
 
+@pytest.fixture(autouse=True)
+def _no_dns(monkeypatch):
+    """No test here may need a resolver: host names get a fixed public address, IP
+    literals are parsed locally, and anything else fails as an unknown host."""
+    import socket
+    real = socket.getaddrinfo
+    public = {"api.github.com", "pypi.org", "export.arxiv.org", "example.com"}
+
+    def fake(host, port, *args, **kwargs):
+        if host in public:
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port))]
+        try:
+            return real(host, port, *args, **{**kwargs, "flags": socket.AI_NUMERICHOST})
+        except socket.gaierror:
+            raise socket.gaierror(socket.EAI_NONAME, "no DNS in tests") from None
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake)
+
+
 @pytest.mark.parametrize("url", [
     "http://export.arxiv.org/api/query?x=1",          # plain http
     "https://user:pw@pypi.org/pypi/qiskit/json",       # credentials in URL
@@ -316,7 +335,7 @@ def test_reports_reach_the_sandbox_and_the_reader_wrapped_and_bounded(tmp_path, 
     (reports / "2026-01-01-watch.md").write_text(hostile)
     (root / "agents" / ".gitignore").write_text("reports/*\n")
     for cmd in (["git", "init", "-q"], ["git", "add", "agents/.gitignore"],
-                ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "i"]):
+                ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", "commit", "-qm", "i"]):
         subprocess.run(cmd, cwd=root, check=True)
     monkeypatch.setattr(repo, "REPO_ROOT", root)
     monkeypatch.setattr(repo, "REPORTS_DIR", reports)
