@@ -221,10 +221,12 @@ def _shots_for_precision(observables: List[PauliSum], precision: Float64) raises
 def run_estimator(pub: EstimatorPub) raises -> EstimatorResult:
     """Run one Estimator PUB (all parameter sets x all observables)."""
     pub.circuit.validate()
-    check_pure_state_circuit(pub.circuit, "run_estimator()")
     var nsets = pub.num_sets()
     var nobs = len(pub.observables)
     var exact = pub.precision <= 0.0
+    if exact:
+        # The shot path samples every operation, so only the exact path drops them.
+        check_pure_state_circuit(pub.circuit, "run_estimator()")
     var res = EstimatorResult(nsets, nobs, "statevector:exact" if exact else "statevector:shots+qwc")
     for o in range(nobs):
         if pub.observables[o].num_qubits() > pub.circuit.num_qubits:
