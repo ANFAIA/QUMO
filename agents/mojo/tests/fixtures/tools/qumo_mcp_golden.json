@@ -64,7 +64,7 @@
   },
   {
    "name": "qumo_statevector",
-   "description": "Use when you need exact amplitudes (small circuits, debugging, checking an algorithm).\nInstead or first: qumo_run_qasm when only counts matter.\nWatch out: memory grows as 2^n; respect max_qubits.\n\nReturn the exact final state vector (amplitudes with probability > threshold, sorted by basis index) of a unitary circuit. Measurements and resets are ignored; classically-conditioned gates are rejected (QM-E401), and so is a program with runtime control flow (QM-E585).",
+   "description": "Use when you need exact amplitudes (small circuits, debugging, checking an algorithm).\nInstead or first: qumo_run_qasm when only counts matter.\nWatch out: memory grows as 2^n; respect max_qubits.\n\nReturn the exact final state vector (amplitudes with probability > threshold, sorted by basis index) of a unitary circuit. Terminal measurements are ignored; a reset, a noise channel or a mid-circuit measurement is rejected (QM-E416); classically-conditioned gates are rejected (QM-E401), and so is a program with runtime control flow (QM-E585).",
    "parameters": {
     "type": "object",
     "properties": {
