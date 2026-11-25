@@ -307,6 +307,15 @@ diagnostic), -32600 invalid request (including batches, which MCP 2025-06-18
 removed), -32601 unknown method, and -32602 for invalid params or an unknown
 tool (with `data` `{code: "QM-E912", available: [...]}`).
 
+**Arguments are strict.** `ToolRegistry.call` checks the arguments against the
+tool's `inputSchema` before the handler runs: a key that the schema does not
+list in `properties` is refused with `isError: true` and QM-E801, naming the
+unknown key and listing the allowed ones (`Hint: allowed arguments: ...`). A
+tool whose schema has no properties accepts only `{}`. Before this check a
+misspelt key (`shot` for `shots`) was ignored and the default was used. Keys
+that a tool's handler reads are declared in its schema; a new tool must do the
+same.
+
 ### Tools
 
 | Tool | Arguments | Result |
@@ -507,6 +516,9 @@ the CLI and change nothing for MCP clients:
   (`"-"` is stdin): the CLI reads the file and passes its text as `qasm`. The
   MCP server does not read files, and `file` is not in the tool's schema;
 * the JSON arguments may come from stdin: `qumo tool <name> -`.
+
+A key in the JSON that the tool's schema does not declare is QM-E801 with exit
+code 1, the same refusal as over MCP.
 
 **Seeds.** Defaults are stated once in
 [GETTING_STARTED.md](GETTING_STARTED.md#cli): 1234 for sampling and `emulate`,

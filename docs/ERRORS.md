@@ -822,12 +822,12 @@ Fix: Sample it with the Pauli-frame simulator.
 
 ### QM-E734
 
-**Stim circuit text could not be imported: unknown or unsupported instruction, bad target, or too many instructions after unrolling.**  
-Fix: See the message; docs/QEC.md lists what from_stim takes.
+**Stim circuit text could not be imported: unknown or unsupported instruction, bad target, REPEAT nested too deeply, or too many instructions after unrolling.**  
+Fix: See the message; docs/QEC.md lists what from_stim takes and its limits.
 
 ### QM-E735
 
-**Stim detector error model text could not be parsed.**  
+**Stim detector error model text could not be parsed, a repeat nests too deeply, or it unrolls to too many instructions.**  
 Fix: Use Stim's format: error(p) D0 D1 ^ D2 L0, detector, logical_observable, shift_detectors, repeat.
 
 ### QM-E736
@@ -845,6 +845,11 @@ Fix: Bind parameters and remove non-Clifford gates.
 **Correlated matching needs error probabilities up to 0.5.**  
 Fix: Use plain 'mwpm' for this detector error model.
 
+### QM-E738
+
+**apply_noise_model got a unitary gate of arity 3 (CCX, CSWAP, CCZ) while the noise model has gate errors; a 3-qubit gate has no gate-error rule.**  
+Fix: Decompose it into 1- and 2-qubit gates first (qumo.compiler.basis.unroll_3q, or transpile to a target without CCX), then add noise.
+
 ### QM-E730
 
 **A computational circuit given to encode() contains noise channels, QEC annotations or unbound symbolic parameters.**  
@@ -854,8 +859,8 @@ Fix: Encode noiseless, QEC-agnostic, bound circuits; add noise with qumo.ft.emul
 
 ### QM-E801
 
-**Invalid algorithm option.**  
-Fix: Check the option names/values in the function docstring.
+**Invalid algorithm option, or a tool argument its inputSchema does not declare (the message names it).**  
+Fix: Check the option names/values in the function docstring, or the tool's inputSchema for its argument names.
 
 ### QM-E802
 

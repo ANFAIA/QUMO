@@ -320,6 +320,11 @@ stops after the first wave reaching `max_errors` (deterministic). Results:
     (thermal part subtracted, like Aer's `from_backend`);
   * readout as X_ERROR((p01+p10)/2) before measurement (the asymmetric part
     is handled by mitigation).
+  * gates of arity 3 (CCX, CSWAP, CCZ) have no gate-error rule: when the model
+    has any gate error (1q, 2q or per-edge), `apply_noise_model` rejects them
+    with QM-E738; decompose them into 1q and 2q gates first
+    (`qumo.compiler.basis.unroll_3q`). With zero gate error they pass, with idle
+    noise only.
 * `randomized_benchmarking_1q(lengths, num_sequences, shots, seed,
   depolarizing_per_clifford, model)` — 24-element Clifford group from H/S
   BFS, inverting Clifford, frame-simulated survival, `fit_decay` →
@@ -343,6 +348,13 @@ one against `stim.Tableau` (40 of 40). `MPP`, `MX`, `MY`, `MRX`, `MXX`, `MZZ`,
 does, so no simulator needed a new opcode. `M(p)` flips the record and not the qubit,
 which `X_ERROR` cannot do, so it measures a copy on one spare qubit. `to_stim` gives
 Stim text back, with MPP lowered.
+
+Limits, enforced by the parsers before they allocate (QM-E734 for circuits, QM-E735 for
+detector error models): `REPEAT` blocks nest at most 256 levels, the same as the OpenQASM
+parser's `MAX_NESTING` (deeper text used to overflow the stack and crash the process);
+a circuit unrolls to at most 50,000,000 lines and a detector error model to at most
+2,000,000 lines, counted per pass of every `REPEAT`, so an empty body is charged too.
+The detector error model limit is about 1 GB of memory at a million mechanisms.
 
 Two noise opcodes use side tables, since `Instruction` holds three qubits:
 `PAULI_CHANNEL_2` (`Circuit.noise_table`) and `E` / `ELSE_CORRELATED_ERROR`

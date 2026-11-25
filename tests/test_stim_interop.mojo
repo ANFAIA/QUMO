@@ -3,6 +3,7 @@
 from std.testing import assert_equal, assert_true
 from qumo.ir.circuit import Circuit
 from qumo.ir.gates import Op
+from qumo.ir.program import MAX_NESTING
 from qumo.qec.codes import NoiseParams, generate_code, to_stim
 from qumo.qec.dem import detector_error_model
 from qumo.qec.decoders import MatchingGraph, count_logical_errors, UnionFindDecoder, graphlike_dem
@@ -113,6 +114,40 @@ def test_pauli_channel_2_and_e() raises:
     assert_equal(len(tab.counts), 1, "tableau takes E")
     assert_true(to_stim(from_stim("E(0.5) X0 Y2 Z3").circuit.copy()).find("E(0.5) X0 Y2 Z3") >= 0, "E export")
     print("  PAULI_CHANNEL_2, E, ELSE_CORRELATED_ERROR")
+
+
+def test_correlated_p0_p1_chain() raises:
+    # E(0) never fires and must not disturb the chain; E(1) always fires
+    var n = 100000
+    var zero = FrameSimulator(from_stim("E(0) X0\nM 0\nDETECTOR rec[-1]").circuit.copy()).sample_detectors(n, 21)
+    var fired0 = 0
+    for shot in range(n):
+        fired0 += len(zero.fired(shot))
+    assert_equal(fired0, 0, "E(0) never fires")
+    var one = FrameSimulator(from_stim("E(1) X0\nM 0\nDETECTOR rec[-1]").circuit.copy()).sample_detectors(n, 22)
+    var fired1 = 0
+    for shot in range(n):
+        fired1 += len(one.fired(shot))
+    assert_equal(fired1, n, "E(1) always fires")
+    # E(0) then ELSE(0.5): the ELSE fires on about half the shots, E's chain never blocks it
+    var ez = FrameSimulator(from_stim("E(0) X0\nELSE_CORRELATED_ERROR(0.5) X1\nM 0 1\nDETECTOR rec[-2]\nDETECTOR rec[-1]").circuit.copy()).sample_detectors(n, 23)
+    var else_hits = 0
+    var e_hits = 0
+    for shot in range(n):
+        e_hits += 1 if ez.get(shot, 0) else 0
+        else_hits += 1 if ez.get(shot, 1) else 0
+    assert_equal(e_hits, 0, "E(0) never fires before ELSE")
+    assert_true(abs(Float64(else_hits) / Float64(n) - 0.5) < 0.01, "ELSE(0.5) after E(0): " + String(else_hits))
+    # E(1) then ELSE(1): the chain is set by E, so ELSE never fires
+    var eo = FrameSimulator(from_stim("E(1) X0\nELSE_CORRELATED_ERROR(1) X1\nM 0 1\nDETECTOR rec[-2]\nDETECTOR rec[-1]").circuit.copy()).sample_detectors(n, 24)
+    var first = 0
+    var second = 0
+    for shot in range(n):
+        first += 1 if eo.get(shot, 0) else 0
+        second += 1 if eo.get(shot, 1) else 0
+    assert_equal(first, n, "E(1) fires on every shot")
+    assert_equal(second, 0, "ELSE(1) never fires after E(1)")
+    print("  E(0), E(1), E(0)+ELSE(0.5), E(1)+ELSE(1)")
 
 
 def test_dem_text() raises:
@@ -240,14 +275,64 @@ def test_window_approaches_plain() raises:
     print("  wide windows approach plain matching")
 
 
+def _nest(open_line: String, body: String, depth: Int) -> String:
+    """`open_line {` repeated `depth` times around `body`."""
+    var text = String("")
+    for _ in range(depth):
+        text += open_line + " {\n"
+    text += body
+    for _ in range(depth):
+        text += "}\n"
+    return text^
+
+
+def _circuit_error(text: String) -> String:
+    try:
+        _ = from_stim(text)
+    except e:
+        return String(e)
+    return ""
+
+
+def _dem_error_of(text: String) -> String:
+    try:
+        _ = parse_dem(text)
+    except e:
+        return String(e)
+    return ""
+
+
+def test_nesting_and_budget() raises:
+    # nesting: MAX_NESTING levels parse, one more is QM-E734 / QM-E735
+    var c = from_stim(_nest("REPEAT 1", "H 0\n", MAX_NESTING)).circuit.copy()
+    assert_equal(c.count(Op.H), 1, "innermost body once per level")
+    assert_equal(_circuit_error(_nest("REPEAT 1", "H 0\n", MAX_NESTING)), "", "circuit at the limit parses")
+    var over = _circuit_error(_nest("REPEAT 1", "H 0\n", MAX_NESTING + 1))
+    assert_true(over.startswith("QM-E734") and over.find(String(MAX_NESTING)) >= 0, "circuit one past the limit: " + over)
+    assert_equal(_dem_error_of(_nest("repeat 1", "error(0.1) D0\n", MAX_NESTING)), "", "DEM at the limit parses")
+    var dem_over = _dem_error_of(_nest("repeat 1", "error(0.1) D0\n", 3000))
+    assert_true(dem_over.startswith("QM-E735") and dem_over.find(String(MAX_NESTING)) >= 0, "DEM far past the limit: " + dem_over)
+    # budget: a DEM repeat that expands past the budget is refused before it fills memory
+    var big = _dem_error_of("repeat 1000000000 {\nerror(0.1) D0\n}\n")
+    assert_true(big.startswith("QM-E735") and big.find("instructions after unrolling") >= 0, "DEM budget: " + big)
+    var empty = _circuit_error("REPEAT 1000000000 {\n}\nH 0\n")
+    assert_true(empty.startswith("QM-E734"), "empty REPEAT bodies are charged too: " + empty)
+    # normal repeated circuits are unaffected
+    var rep = from_stim("H 0\nREPEAT 2000 {\n  X 0\n  TICK\n}\nH 0\n").circuit.copy()
+    assert_equal(rep.count(Op.X), 2000, "REPEAT 2000 unrolled")
+    print("  nesting limit, repeat budget, normal repeats")
+
+
 def main() raises:
     test_round_trip_generated()
     test_syntax()
     test_mpp_and_friends()
     test_pauli_channel_2_and_e()
+    test_correlated_p0_p1_chain()
     test_dem_text()
     test_dem_sampler()
     test_missing_detectors()
     test_window_equals_plain_at_full_size()
     test_window_approaches_plain()
+    test_nesting_and_budget()
     print("test_stim_interop OK")
