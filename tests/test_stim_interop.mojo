@@ -7,6 +7,7 @@ from qumo.qec.codes import NoiseParams, generate_code, to_stim
 from qumo.qec.dem import detector_error_model
 from qumo.qec.decoders import MatchingGraph, count_logical_errors, UnionFindDecoder, graphlike_dem
 from qumo.qec.sparse_blossom import SparseBlossomDecoder
+from qumo.qec.correlated import CorrelatedMatchingDecoder
 from qumo.qec.stim_text import from_stim, parse_dem, sample_dem
 from qumo.qec.lint import missing_detectors, count_determined_measurements
 from qumo.qec.window import plan_windows, detector_rounds, SlidingWindowDecoder
@@ -274,6 +275,67 @@ def test_window_approaches_plain() raises:
     print("  wide windows approach plain matching")
 
 
+def _fired(*ids: Int) -> List[Int]:
+    var out = List[Int]()
+    for i in ids:
+        out.append(i)
+    return out^
+
+
+def test_dem_piece_without_detectors() raises:
+    # "D0 ^ L0": the second piece only carries an observable; it folds into the D0 piece
+    var dem = parse_dem("error(0.1) D0 ^ L0\nerror(0.1) D0 D1\nerror(0.1) D1")
+    var g = MatchingGraph(dem)
+    assert_equal(g.num_edges(), 3, "edges")
+    var mw = SparseBlossomDecoder(g)
+    assert_equal(mw.decode(_fired(0)), UInt64(1), "mwpm: {D0} flips L0")
+    var uf = UnionFindDecoder(g.copy())
+    assert_equal(uf.decode(_fired(0)), UInt64(1), "union-find: {D0} flips L0")
+    var cm = CorrelatedMatchingDecoder(dem)
+    assert_equal(cm.decode(_fired(0)), UInt64(1), "correlated: {D0} flips L0")
+    # leading empty piece, and an empty piece between two real ones
+    var dem2 = parse_dem("error(0.1) L0 ^ D0\nerror(0.1) D0 ^ L0 ^ D1")
+    var g2 = MatchingGraph(dem2)
+    assert_equal(g2.num_edges(), 2, "edges 2")
+    # no detector at all: undetectable, skipped
+    var dem3 = parse_dem("error(0.1) L0\nerror(0.1) ^ L0\nerror(0.2) D0")
+    var g3 = MatchingGraph(dem3)
+    assert_equal(g3.num_edges(), 1, "undetectable mechanisms add no edge")
+    assert_equal(g3.num_undetectable, 2, "counted")
+    var mw3 = SparseBlossomDecoder(g3)
+    assert_equal(mw3.decode(_fired(0)), UInt64(0), "no flip")
+    var cm3 = CorrelatedMatchingDecoder(dem3)
+    assert_equal(cm3.decode(_fired(0)), UInt64(0), "correlated no flip")
+    # the exported graph-like text agrees with the graph
+    var gl = graphlike_dem(dem)
+    assert_equal(MatchingGraph(gl).num_edges(), 3, "graphlike_dem keeps the edges")
+    assert_equal(len(gl.errors[0].comp_dets), 0, "graphlike_dem: folded piece is a plain error")
+    assert_equal(gl.errors[0].obs, UInt64(1), "observable kept")
+    print("  DEM pieces without detectors fold into a neighbour or are skipped")
+
+
+def test_dem_piece_with_three_detectors() raises:
+    # a piece with 3 detectors is decomposed against existing edges like an undecomposed hyperedge
+    var text = "error(0.1) D0 D1\nerror(0.1) D2\nerror(0.01) D0 D1 D2 ^ D3\nerror(0.1) D3"
+    var dem = parse_dem(text)
+    var g = MatchingGraph(dem)
+    assert_equal(g.num_hyperedges, 1, "counted once")
+    assert_equal(g.num_dropped, 0, "decomposed, not dropped")
+    assert_equal(g.num_edges(), 3, "no new edges")
+    assert_true(g.ep[g.edge_between(2, g.boundary)] > 0.1, "D2 edge got the 3-detector piece's probability")
+    assert_true(g.ep[g.edge_between(3, g.boundary)] > 0.1, "D3 edge got the second piece")
+    var gl = graphlike_dem(dem)
+    for c in gl.errors[2].comp_dets:
+        assert_true(len(c) <= 2, "exported pieces are graph-like")
+    assert_equal(MatchingGraph(gl).num_dropped, 0, "re-import is stable")
+    var cm = CorrelatedMatchingDecoder(dem)
+    assert_equal(cm.decode(_fired(2, 3)), UInt64(0), "correlated runs")
+    # a piece that cannot be decomposed is dropped and counted, not lost silently
+    var g2 = MatchingGraph(parse_dem("error(0.1) D0\nerror(0.1) D0 D1 D2 ^ D3\nerror(0.1) D3"))
+    assert_equal(g2.num_dropped, 1, "undecomposable piece is counted as dropped")
+    print("  DEM pieces with 3 detectors follow the hyperedge rule")
+
+
 def main() raises:
     test_round_trip_generated()
     test_syntax()
@@ -285,4 +347,6 @@ def main() raises:
     test_missing_detectors()
     test_window_equals_plain_at_full_size()
     test_window_approaches_plain()
+    test_dem_piece_without_detectors()
+    test_dem_piece_with_three_detectors()
     print("test_stim_interop OK")

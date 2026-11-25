@@ -289,9 +289,9 @@ Blocks compile in exact mode: `remove_identities`, merging, commutation, resynth
 angle comparisons work to 1e-13 or better, far below that distance, so nothing the check
 can see is dropped, one gate at a time or as a sum. 20000 of `rx(1e-10) q[0]; cx q[0], q[1];`
 compile and pass, and so does a sweep of theta from 1e-12 to 1e-3 over rx, rz, p, crz, cp
-and rzz, with `pi / 2 ** k`, at levels 1 to 3. **A flat `transpile` is not exact:** it
-keeps its tolerances and drops a rotation below about 2e-6, where `remove_identities`
-sees an infidelity under 1e-12. A block keeps that rotation.
+and rzz, with `pi / 2 ** k`, at levels 1 to 3. `remove_identities` uses the same 1e-14
+tolerance in a flat `transpile` and in a block, so neither drops a small rotation that
+could add up to something visible.
 
 The cost of a block is gates x 2^wires x 2 states. The budget is **2^27 per block and
 2^29 per compile**, with at most **22 wires** for the memory of one state. Over budget

@@ -1002,7 +1002,7 @@ def register_core_tools(mut reg: ToolRegistry):
     )
     reg.add_read_only(
         "qumo_statevector", "Final state vector",
-        "Return the exact final state vector (amplitudes with probability > threshold, sorted by basis index) of a unitary circuit. Measurements and resets are ignored; classically-conditioned gates are rejected (QM-E401), and so is a program with runtime control flow (QM-E585).",
+        "Return the exact final state vector (amplitudes with probability > threshold, sorted by basis index) of a unitary circuit. Terminal measurements are ignored; a reset, a noise channel or a mid-circuit measurement is rejected (QM-E416); classically-conditioned gates are rejected (QM-E401), and so is a program with runtime control flow (QM-E585).",
         "{\"type\":\"object\",\"properties\":{" + _QASM_PROP + "," + _CIRCUIT_PROP + "," + _PROGRAM_PROP + "," + _PARAMS_PROP + ",\"max_amplitudes\":{\"type\":\"integer\",\"default\":64,\"minimum\":1},\"threshold\":{\"type\":\"number\",\"default\":1e-12},\"max_qubits\":{\"type\":\"integer\",\"default\":24}},\"additionalProperties\":false}",
         _statevector,
     )
