@@ -38,6 +38,7 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 
 ### Fixed
 
+- `qumo.ft.encode.compile`: a measured qubit that is used again, and a classical-lane qubit that read a clbit, now use the value from when it was measured / read even if the clbit is overwritten in between (before, the logical program used the new value: `x(0); measure(0,0); h(1); h(1); measure(1,0); z(0); measure(0,1)` compiled to c1=0, the source gives 1). `compile` copies the bit to a fresh private clbit only when such an overwrite happens, so every other compiled program is unchanged; the copies show up as extra leading clbits, and a copy past the 62-bit register raises QM-E406. Test: `test_clbit_reuse_after_overwrite` in `tests/test_ft_encode.mojo`. (project review, 2026-11-25)
 - The resource estimator counted three synthesised rotations for every constant `U` gate, so `U(pi/2, 0, pi)` (H) and `U(0, 0, pi/4)` (T) were reported as non-Clifford rotations. Constant angles are now classified as for `RZ`/`RY`: a multiple of pi/2 is free, an odd multiple of pi/4 is one T, and when theta is a multiple of pi the two Rz merge into one rotation by phi + lambda (phi - lambda for an odd multiple). Symbolic angles still count three. `recommended_method` and `is_clifford()` are unchanged (they still treat `U` as non-Clifford). (`qumo/exec/resources.mojo`, `tests/test_orchestrator.mojo`)om/ANFAIA/QUMO/pull/1), 2026-11-03)
 
 ### Fixed

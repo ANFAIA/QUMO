@@ -173,6 +173,18 @@ Classical-only qubits of the computational circuit (touched only by reset,
 X - possibly conditioned - and measure, e.g. a lane computing an OR) are not
 encoded at all: `compile` folds them into `CSET` classical assignments.
 
+A clbit can be overwritten while something still depends on its old value: a
+measured qubit that is used again is re-created from the outcome it had when it
+was measured, and a classical-lane qubit holds an expression over the bits it
+was conditioned on. When an op is about to overwrite a clbit that such a
+pending reader will still use (a later op touches the qubit before any reset),
+`compile` first copies the bit into a fresh clbit (`CSET`, numbered after the
+source's clbits) and points the reader at the copy. Without an overwrite
+nothing is emitted, so the compiled program is unchanged. The copies are
+ordinary logical clbits: they appear as extra leading characters in the
+decoded keys, and they count against the 62-bit classical register (QM-E406 if
+a copy would not fit).
+
 ## Rz synthesis (`qumo.ft.rz`)
 
 | Path | When | Cost |
