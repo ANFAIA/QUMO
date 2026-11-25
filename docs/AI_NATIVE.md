@@ -314,7 +314,7 @@ that bar, so every one is `readOnlyHint: true, destructiveHint: false,
 idempotentHint: true, openWorldHint: false`. This includes `qumo_run_device` and
 `qumo_gpu_info`, which select a local CPU/GPU *simulator* and never talk to a QPU.
 Hardware submission lives in the Python plugin layer (`plugins/hardware`) and in the
-native clients of `qumo/exec` (for example `ionq_api.mojo`, bound into `qumo_py`); neither
+native clients of `plugins/hardware/native/qumo_hw` (for example `ionq_api.mojo`, bound into `qumo_py`); neither
 is registered as an MCP tool. A tool that submits a job or writes a file must use `reg.add`
 with explicit hints, for example a submit tool: `readOnlyHint: false`,
 `destructiveHint: false`, `idempotentHint: false` (a retry submits a second job),

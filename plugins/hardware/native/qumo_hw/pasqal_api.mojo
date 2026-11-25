@@ -25,9 +25,11 @@ from std.os import getenv
 from std.time import sleep
 
 from qumo.core.json import JsonValue, json_quote, parse_json
-from qumo.ir.analog import AnalogDevice, AnalogProgram, check_against_device
+from qumo.ir.analog import AnalogProgram
 from qumo.net.http import HttpClient, HttpOptions, HttpRequest, HttpResponse, REDIRECT_NONE
 from qumo.net.url import Url, parse_url, quote
+from qumo_hw.common import loopback_host
+from qumo_hw.pasqal_pulser import AnalogDevice, check_against_device, pulser_json
 
 comptime CORE_URL = "https://apis.pasqal.cloud/core-fast"
 comptime AUTH_URL = "https://pasqal.eu.auth0.com/oauth/token"
@@ -51,17 +53,13 @@ def _printable(s: String, limit: Int) -> String:
     return String(from_utf8_lossy=Span(out))
 
 
-def _loopback(host: String) -> Bool:
-    return host == "127.0.0.1" or host == "localhost" or host == "::1"
-
-
 def _checked(url: String, what: String) raises -> Url:
     var u: Url
     try:
         u = parse_url(url)
     except e:
         raise Error(E_CREDENTIALS + ": " + what + " is not a valid URL")
-    if u.scheme != "https" and not _loopback(u.host):
+    if u.scheme != "https" and not loopback_host(u.host):
         raise Error(E_CREDENTIALS + ": " + what + " must be https (plain http only for a loopback host)")
     return u^
 
@@ -86,7 +84,7 @@ def _request(method: String, url: String, var names: List[String], var values: L
     names.append("User-Agent")
     values.append(USER_AGENT)
     var u = _checked(url, what + " URL")
-    var opts = HttpOptions(15000, 120000, MAX_RESPONSE_BYTES, False, REDIRECT_NONE, 0, _loopback(u.host), False)
+    var opts = HttpOptions(15000, 120000, MAX_RESPONSE_BYTES, False, REDIRECT_NONE, 0, loopback_host(u.host), False)
     var client = HttpClient(None)
     try:
         return client.request(HttpRequest(method, url, names^, values^, body), opts)
@@ -121,7 +119,7 @@ struct PasqalSession(Copyable):
                         + "(or PASQAL_user and PASQAL_pass) in the shell that runs QUMO")
         var auth = String(getenv("QUMO_PASQAL_AUTH_URL", AUTH_URL).strip())
         var au = _checked(auth, "the Pasqal login URL")
-        if not (_loopback(au.host) or au.host == "pasqal.eu.auth0.com"):
+        if not (loopback_host(au.host) or au.host == "pasqal.eu.auth0.com"):
             raise Error(E_CREDENTIALS + ": the Pasqal login host '" + au.host + "' is not Pasqal's; the password is sent "
                         + "only to pasqal.eu.auth0.com")
         var body = ("client_id=" + quote(CLIENT_ID, "") + "&grant_type=" + quote("http://auth0.com/oauth/grant-type/password-realm", "")
@@ -258,8 +256,8 @@ def pasqal_submit(project_id: String, prog: AnalogProgram, spec_device: String, 
     # emulators take the device's virtual form (no layout, any positions); QPUs the physical device + layout
     var virtual = device_type.startswith("EMU")
     check_against_device(prog, dev, runs, virtual)
-    var seq = (prog.to_pulser_json(dev.virtual_json, "", "") if virtual
-               else prog.to_pulser_json(dev.json, dev.layout_json, dev.layout_slug))
+    var seq = (pulser_json(prog, dev.virtual_json, "", "") if virtual
+               else pulser_json(prog, dev.json, dev.layout_json, dev.layout_slug))
     var body = ("{\"project_id\":" + json_quote(s.project) + ",\"sequence_builder\":" + json_quote(seq)
                 + ",\"device_type\":" + json_quote(device_type) + ",\"open\":false,\"jobs\":[{\"runs\":" + String(runs)
                 + "}]}")

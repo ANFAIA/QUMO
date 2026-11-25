@@ -1,6 +1,6 @@
 """Python bindings for QUMO (CPython extension built from Mojo).
 
-    mojo build -I . --emit shared-lib -o build/qumo_py.so python/qumo_py.mojo
+    mojo build -I . -I plugins/hardware/native --emit shared-lib -o build/qumo_py.so python/qumo_py.mojo
 
 Exposes opaque `Circuit` and `Program` handles plus free functions. Kept
 deliberately small and stable: build/load circuits, compile them for any target
@@ -28,14 +28,14 @@ from qumo.ir.circuit import Circuit
 from qumo.ir.mc import append_mcx
 from qumo.sim.ptsbe import sample_ptsbe, plan_trajectories
 from qumo.ir.noise_inject import inject_noise
-from qumo.exec.qbraid_api import qbraid_devices, qbraid_device, qbraid_cost_estimate, qbraid_submit, qbraid_job, qbraid_result_counts, qbraid_cancel, QbraidDevice
-from qumo.exec.quantinuum_api import qtm_native_circuit, qtm_hqc, qtm_submit, qtm_status, qtm_result, qtm_devices
-from qumo.exec.ibm_api import ibm_backends, ibm_target, ibm_isa_payload, ibm_submit, ibm_status, ibm_result
-from qumo.exec.speqtrum_api import (
+from qumo_hw.qbraid_api import qbraid_devices, qbraid_device, qbraid_cost_estimate, qbraid_submit, qbraid_job, qbraid_result_counts, qbraid_cancel, QbraidDevice
+from qumo_hw.quantinuum_api import qtm_native_circuit, qtm_hqc, qtm_submit, qtm_status, qtm_result, qtm_devices
+from qumo_hw.ibm_api import ibm_backends, ibm_target, ibm_isa_payload, ibm_submit, ibm_status, ibm_result
+from qumo_hw.speqtrum_api import (
     SpeQtrumAuth, checked_base, payload_document, unsafe_construct, decode_result,
     speqtrum_devices, speqtrum_execute, speqtrum_status, speqtrum_result,
 )
-from qumo.exec.ionq_api import ionq_request, ionq_counts, ionq_submit, ionq_status, ionq_result, ionq_backends
+from qumo_hw.ionq_api import ionq_request, ionq_counts, ionq_submit, ionq_status, ionq_result, ionq_backends
 from qumo.sim.runner import SampleResult
 from qumo.sim.branching import sample_branching
 from qumo.sim.density import density_evolve

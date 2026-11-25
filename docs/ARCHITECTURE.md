@@ -3,7 +3,8 @@
 QUMO is one Mojo code base with five layers (the diagram) over a shared base (`core`, `ir`, `device`),
 plus three side packages (`ft`, `gpu`, `net`). Everything above the IR is optional; everything shares the
 same `Circuit` value and the same error-code, seeding and JSON conventions. The import rules between
-packages are in [Package layering](#package-layering).
+packages are in [Package layering](#package-layering). Vendor code (the clients of hardware services and
+their wire formats) is not in `qumo/`: see [Vendor code](#4c-vendor-code-outside-qumo).
 
 ```
             ┌────────────────────────────── front ends ──────────────────────────────┐
@@ -45,9 +46,9 @@ today (`qumo/*/*.mojo`, `from qumo.X` lines; the re-export shims for old paths a
 | 3 | `compiler` | pass manager, routing, synthesis, `Program` compilation | `core`, `ir`, `device`, `sim` |
 | 3 | `qec` | codes, DEM, decoders, sweeps | `core`, `ir`, `sim` |
 | 3 | `gpu` | vendor-neutral GPU state-vector and frame back ends (`-D QUMO_GPU`) | `core`, `ir`, `sim` |
-| 3 | `net` | HTTP/1.1 + TLS client for hardware and LLM endpoints (no QUMO imports) | nothing from QUMO |
+| 3 | `net` | HTTP/1.1 + TLS client (no QUMO imports). No package of `qumo/` imports it: its users are the vendor clients outside the core | nothing from QUMO |
 | 4 | `algorithms` | kernels, gradients, optimizers, VQE/QAOA, mitigation | `core`, `ir`, `sim`, `noise`, `qec`, `gpu`, `exec` (one file) |
-| 4 | `exec` | primitives, dispatch, orchestrator, emulate, resources | `core`, `ir`, `device`, `sim`, `noise`, `compiler`, `gpu`, `net` |
+| 4 | `exec` | primitives, dispatch, orchestrator, emulate, resources | `ir`, `device`, `sim`, `noise`, `compiler`, `gpu` |
 | 4 | `ft` | fault-tolerant programming layer (Steane, Iceberg, Rz synthesis) | `core`, `ir`, `sim`, `qec` |
 | 5 | `ai` | tool registry, the tool handlers of every module, diagnostics, describe, MCP | `core`, `ir`, `device`, `sim`, `compiler`, `qec`, `gpu`, `algorithms`, `exec`, `ft` |
 | - | `bench`, `testing` | benchmark circuits, test helpers | `core`, `ir` (`testing`: nothing from QUMO) |
@@ -233,8 +234,35 @@ independent of the core count (fixed seed tree and reduction order). Design: `rl
   in `qumo/ai/ft_tools.mojo`. Imports are listed in the docstring of `qumo/ft/__init__.mojo`.
 * **`qumo/gpu`**: vendor-neutral GPU state-vector and Pauli-frame back ends on MAX (NVIDIA, AMD, Apple),
   compiled only with `-D QUMO_GPU`; `make gpu-check` cross-compiles them without a device.
-* **`qumo/net`**: native HTTP/1.1 and TLS client (OpenSSL 3 loaded at run time) used by the hardware and
-  LLM clients in `exec`; it imports nothing from QUMO.
+* **`qumo/net`**: native HTTP/1.1 and TLS client (OpenSSL 3 loaded at run time). It imports nothing from
+  QUMO and names no vendor. Nothing else in `qumo/` imports it: its only users are the vendor clients of
+  `plugins/hardware/native/qumo_hw` (the Mojo agents have their own client, `agents/mojo/qumo_agent/net`).
+
+## 4c. Vendor code (outside `qumo/`)
+
+**Rule: nothing under `qumo/` imports a vendor module.** The core has no client of a hardware service and
+no vendor wire format; `make check-neutrality` (`tests/check_neutrality.sh`, part of `make test` and of
+the CI checks job) fails if a file under `qumo/` or `cli/` imports the vendor package or is named after
+one of its clients.
+
+Vendor code is in `plugins/hardware`:
+
+* `plugins/hardware/native/qumo_hw` (Mojo): one REST client per service (`ionq_api`, `ibm_api`,
+  `quantinuum_api`, `speqtrum_api`, `qbraid_api`, `pasqal_api`; they were `qumo/exec/*_api.mojo`),
+  `pasqal_pulser` (Pulser's abstract representation of an analog program and the device specs Pasqal
+  Cloud returns; it was in `qumo/ir/analog.mojo`) and `common` (the one loopback-host test they share).
+  The package imports `qumo.core`, `qumo.ir` and `qumo.net`, never the other way round.
+* `plugins/hardware/qumo_hardware` (Python): the provider interface, the CLI `qumo-hardware` and the
+  optional vendor-SDK fallbacks ([HARDWARE_PLUGINS.md](HARDWARE_PLUGINS.md)).
+
+`qumo_hw` is not on the import path of the core: `make cli` and `make test` build with `-I .` alone, so
+a vendor import in `qumo/` does not compile there. Only the builds that bind or use the clients add
+`-I plugins/hardware/native`: the `qumo_py` extension (`make py`, `make py-gpu`; `python/qumo_py.mojo`
+exports the clients to the Python plugins) and the Mojo examples under `examples/hardware`.
+
+What stays in the core is neutral: `qumo/ir/analog.mojo` is the program model of any analog Rydberg
+device (register, pulses, waveforms; `qumo.sim.rydberg` simulates it) and imports nothing, `Target` is
+data with presets named by modality and topology, and `qumo/net` is a generic HTTP client.
 
 ## 5. Algorithms (`qumo/algorithms`) and QEC (`qumo/qec`)
 
@@ -263,5 +291,5 @@ detector error model → swappable decoders → Sinter-style statistics.
 | Qubit order | little-endian (bit k of a basis index = qubit k); bitstrings Qiskit-style (leftmost = highest clbit) |
 | Errors | `QM-E0xx` circuit · `E1xx` params · `E2xx` functors · `E3xx` Pauli · `E4xx` simulation/execution · `E5xx` QASM · `E6xx` compiler · `E7xx` QEC · `E8xx` algorithms · `E9xx` interface · `W0xx` lint |
 | Randomness | explicit `seed` everywhere; identical inputs → identical outputs |
-| Neutrality | no vendor default; modality presets; benchmarks weigh all modalities |
+| Neutrality | no vendor default; modality presets; benchmarks weigh all modalities; nothing under `qumo/` imports a vendor module (`make check-neutrality`) |
 | Mojo dialect | pinned in [MOJO_GUIDE.md](MOJO_GUIDE.md) |

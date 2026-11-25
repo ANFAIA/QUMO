@@ -150,12 +150,17 @@ Each provider has up to two client implementations:
 
 | Provider | `native` (default) | `python` (fallback) |
 |---|---|---|
-| `ionq` | `qumo/exec/ionq_api.mojo` | `ionq_sdk.py` (qiskit-ionq) |
-| `speqtrum` | `qumo/exec/speqtrum_api.mojo` | `speqtrum.py` (urllib) |
-| `ibm` | `qumo/exec/ibm_api.mojo` (real backends) | `ibm.py` (qiskit-ibm-runtime) |
+| `ionq` | `plugins/hardware/native/qumo_hw/ionq_api.mojo` | `ionq_sdk.py` (qiskit-ionq) |
+| `speqtrum` | `plugins/hardware/native/qumo_hw/speqtrum_api.mojo` | `speqtrum.py` (urllib) |
+| `ibm` | `plugins/hardware/native/qumo_hw/ibm_api.mojo` (real backends) | `ibm.py` (qiskit-ibm-runtime) |
 | `local` | QUMO's Mojo simulator | none |
-| `qbraid` | `qumo/exec/qbraid_api.mojo` (aggregator: device QRNs, credits) | none |
-| `quantinuum` | `qumo/exec/quantinuum_api.mojo` (H2 devices in Nexus) | `quantinuum.py` (qnexus, pytket, guppylang) |
+| `qbraid` | `plugins/hardware/native/qumo_hw/qbraid_api.mojo` (aggregator: device QRNs, credits) | none |
+| `quantinuum` | `plugins/hardware/native/qumo_hw/quantinuum_api.mojo` (H2 devices in Nexus) | `quantinuum.py` (qnexus, pytket, guppylang) |
+
+The native clients are the Mojo package `qumo_hw` in `plugins/hardware/native`. It is outside `qumo/`
+and no core module imports it (`make check-neutrality`); `make py` adds `-I plugins/hardware/native` so
+that `python/qumo_py.mojo` can bind them. They share one loopback test (`qumo_hw.common.loopback_host`:
+127.0.0.1, localhost, ::1), the only hosts a client reaches over plain http.
 
 Native clients run the whole provider protocol inside the `qumo_py` extension
 (`make py`): request bodies, QUMO's HTTP/1.1 + TLS stack (`qumo/net`, OpenSSL 3
@@ -200,7 +205,7 @@ export QISKIT_IBM_INSTANCE=<instance CRN or name>
 python -c "from qiskit_ibm_runtime import QiskitRuntimeService as S; S.save_account(token='...', instance='...', set_as_default=True)"
 ```
 
-**Native client (default, `qumo/exec/ibm_api.mojo`).** It reads the same
+**Native client (default, `plugins/hardware/native/qumo_hw/ibm_api.mojo`).** It reads the same
 credentials itself: `QISKIT_IBM_TOKEN` + `QISKIT_IBM_INSTANCE`, else the account
 saved in `~/.qiskit/qiskit-ibm.json` (`--account NAME`, or the default one). The
 instance must be a CRN, and `--instance` overrides it. The client then works as follows:
@@ -307,7 +312,7 @@ Pay-As-You-Go list price USD 1.60/s; override with `QUMO_IBM_USD_PER_SECOND`.
 
 ## 5. Quantinuum
 
-**Native client (default, `qumo/exec/quantinuum_api.mojo`), H2 devices.** Nexus has no
+**Native client (default, `plugins/hardware/native/qumo_hw/quantinuum_api.mojo`), H2 devices.** Nexus has no
 published REST reference, so the client speaks the protocol qnexus 0.51 uses. Its request
 bodies were taken from qnexus itself, and the offline tests compare against qnexus and pytket.
 * **Login.** It stays with Quantinuum's own tool: run `qnx login` once (`pip install qnexus`,
@@ -405,7 +410,7 @@ the syntax checker). Set `QUMO_QUANTINUUM_USD_PER_HQC` to get a USD figure
 ## 5b. IonQ (`-p ionq`)
 
 **Native client.** The IonQ path has no vendor SDK and no Python HTTP or JSON.
-`qumo/exec/ionq_api.mojo` builds the request, calls the IonQ API v0.4 over QUMO's
+`plugins/hardware/native/qumo_hw/ionq_api.mojo` builds the request, calls the IonQ API v0.4 over QUMO's
 own HTTP/1.1 + TLS stack (`qumo/net`, OpenSSL 3 loaded at run time with `dlopen`;
 `QUMO_LIBSSL` / `QUMO_LIBCRYPTO` select the library), parses the JSON with
 `qumo/core/json.mojo` and samples the counts with QUMO's seeded RNG.
