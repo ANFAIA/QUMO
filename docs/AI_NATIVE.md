@@ -102,7 +102,10 @@ other QUMO modules plug their features into it.
   Modifiers `inv @`, `ctrl @`, `ctrl(n) @`, `negctrl @` and `pow(k) @` are
   applied through the IR functors `inverse()`, `controlled()` and `power()`.
 * Register broadcast (`h q;`, `cx q[0], q;`, `measure q -> c;`), inclusive
-  slices `q[0:2]`, index sets `q[{0,2}]` and negative indices.
+  slices `q[0:2]`, index sets `q[{0,2}]` and negative indices. Negative bounds count
+  from the end before the range is walked (`q[0:-1]` is the whole register, `q[-3:-1]` the last three
+  qubits), a negative step counts down (`q[3:-1:0]`), and a range that selects nothing (`q[2:1]`)
+  is error `QM-E521`.
 * `c = measure q;`, `c[0] = measure q[0];`, `measure q[0] -> c[0];`,
   `bit[2] c = measure q;`, `reset`, `barrier`.
 * Feed-forward on one bit: `if (c[0]) x q[1];`, `if (c[0] == 1) { ... } else { ... }`,

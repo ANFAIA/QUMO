@@ -148,6 +148,34 @@ measure b -> cb;
     assert_equal(hw.num_qubits, 3)
 
 
+def test_slice_bounds() raises:
+    # negative bounds count from the end, both ends inclusive
+    var a = parse_qasm("qubit[4] q; h q[0:-1];")
+    assert_equal(a.count(Op.H), 4, "q[0:-1] is the whole register")
+    for k in range(4):
+        assert_equal(a.ops[k].q0, k)
+    var b = parse_qasm("qubit[4] q; x q[-3:-1];")
+    assert_equal(b.count(Op.X), 3)
+    assert_equal(b.ops[0].q0, 1)
+    assert_equal(b.ops[2].q0, 3)
+    var c = parse_qasm("qubit[6] q; x q[0:2:5];")  # step 2: 0, 2, 4
+    assert_equal(c.count(Op.X), 3)
+    assert_equal(c.ops[2].q0, 4)
+    var d = parse_qasm("qubit[4] q; x q[3:-1:0];")  # negative step counts down
+    assert_equal(d.count(Op.X), 4)
+    assert_equal(d.ops[0].q0, 3)
+    assert_equal(d.ops[3].q0, 0)
+    # a range that selects nothing is an error, not a crash
+    expect_error("qubit[4] q; h q[2:1];", "QM-E521", "1:")
+    expect_error("qubit[4] q; cx q[2:1], q[0];", "QM-E521")
+    expect_error("qubit[4] q; bit[4] c; measure q[2:1] -> c[0];", "QM-E521")
+    expect_error("qubit[4] q; bit[4] c; measure q[0] -> c[3:2];", "QM-E521")
+    expect_error("qubit[4] q; reset q[2:1];", "QM-E521")
+    expect_error("qubit[4] q; barrier q[2:1];", "QM-E521")
+    expect_error("qubit[4] q; h q[0:4];", "QM-E521")
+    print("  slice bounds")
+
+
 def test_aliases_and_params() raises:
     var src = head(3) + """
 cnot q[0], q[1];
@@ -771,6 +799,7 @@ def test_box_and_annotations() raises:
 def main() raises:
     test_bell_qasm2_qasm3()
     test_registers_and_broadcast()
+    test_slice_bounds()
     test_aliases_and_params()
     test_input_params()
     test_gate_defs_and_modifiers()

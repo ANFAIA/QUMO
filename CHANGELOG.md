@@ -38,6 +38,7 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 
 ### Fixed
 
+- OpenQASM slices: negative bounds are normalised before the range is walked, so `q[0:-1]` is the whole register and `q[-3:-1]` the last three qubits (it used to select nothing); a range that selects no qubits, bits or elements (`q[2:1]`) is now error `QM-E521` with line and column instead of aborting the process ("index 0 is out of bounds") or reading the next operand's qubit. Out-of-range slice bounds are reported even when the range is empty.
 - The resource estimator counted three synthesised rotations for every constant `U` gate, so `U(pi/2, 0, pi)` (H) and `U(0, 0, pi/4)` (T) were reported as non-Clifford rotations. Constant angles are now classified as for `RZ`/`RY`: a multiple of pi/2 is free, an odd multiple of pi/4 is one T, and when theta is a multiple of pi the two Rz merge into one rotation by phi + lambda (phi - lambda for an odd multiple). Symbolic angles still count three. `recommended_method` and `is_clifford()` are unchanged (they still treat `U` as non-Clifford). (`qumo/exec/resources.mojo`, `tests/test_orchestrator.mojo`)om/ANFAIA/QUMO/pull/1), 2026-11-03)
 
 ### Fixed
