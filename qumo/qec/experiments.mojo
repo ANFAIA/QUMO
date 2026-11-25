@@ -22,6 +22,7 @@ CSV (or `threshold_sweep_results` for structured results).
 Decoder registry (`canonical_decoder_name`): 'mwpm' = exact minimum-weight
 perfect matching by sparse blossom (`qumo.qec.sparse_blossom`, the algorithm
 of PyMatching 2) - the default; 'sparse_blossom' (same decoder);
+'mwpm_correlated' = two-pass correlated matching (`CorrelatedMatchingDecoder`);
 'mwpm_dense' = the older exact APSP + dense-blossom `MwpmDecoder`;
 'uf' = union-find; 'lookup' = lookup table.
 
@@ -215,8 +216,12 @@ def sample_and_decode[D: Decoder](prog: FrameProgram, dec: D, shots: Int, seed: 
 
 def canonical_decoder_name(name: String) -> String:
     """Registry of decoder names: 'mwpm' (sparse blossom, the default exact
-    matcher), 'sparse_blossom', 'mwpm_dense', 'uf', 'lookup' and their aliases.
-    Returns "" for an unknown name."""
+    matcher; aliases 'matching', 'pymatching'), 'sparse_blossom' (aliases
+    'sparse-blossom', 'sparseblossom', 'sb'), 'mwpm_correlated' (aliases
+    'correlated', 'pymatching-correlated'), 'mwpm_dense' (aliases 'mwpm-dense',
+    'dense_mwpm', 'dense'), 'uf' (aliases 'union_find', 'unionfind') and
+    'lookup' (aliases 'lut', 'table'); case-insensitive. Returns the first name
+    of the group, or "" for an unknown name."""
     var k = name.lower()
     if k == "mwpm" or k == "matching" or k == "pymatching":
         return "mwpm"
@@ -238,6 +243,7 @@ def make_decoder_and_run(name: String, dem: DetectorErrorModel, prog: FrameProgr
 
     'mwpm' / 'sparse_blossom': exact MWPM by sparse blossom
     (`qumo.qec.sparse_blossom`, PyMatching 2's algorithm) - the default;
+    'mwpm_correlated': two-pass correlated matching (`CorrelatedMatchingDecoder`);
     'mwpm_dense': exact MWPM by all-pairs shortest paths + dense blossom
     (`MwpmDecoder`); 'uf': union-find; 'lookup': lookup table.
     """
@@ -296,7 +302,7 @@ def memory_experiment(code: String = "surface_z", distance: Int = 3, rounds: Int
     """Memory experiment under uniform circuit-level noise p (rounds = d if < 1).
 
     code: 'surface_z' | 'surface_x' | 'repetition'; decoder: 'mwpm' (sparse
-    blossom) | 'sparse_blossom' | 'mwpm_dense' | 'uf' | 'lookup'.
+    blossom) | 'sparse_blossom' | 'mwpm_correlated' | 'mwpm_dense' | 'uf' | 'lookup'.
     """
     var r = rounds if rounds >= 1 else distance
     var cc = generate_code(code, distance, r, NoiseParams.uniform(p))

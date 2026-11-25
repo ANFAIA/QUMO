@@ -733,7 +733,7 @@ Fix: Check code name, distance, rounds and basis.
 ### QM-E707
 
 **Unknown decoder name.**  
-Fix: Use 'mwpm' (exact matching by sparse blossom, the default; aliases 'matching', 'pymatching'), 'sparse_blossom' (same decoder), 'mwpm_dense' (dense-blossom MWPM, small codes), 'uf' (union-find) or 'lookup', or pass your own Decoder to sample_and_decode().
+Fix: Use 'mwpm' (exact matching by sparse blossom, the default; aliases 'matching', 'pymatching'), 'sparse_blossom' (same decoder; aliases 'sparse-blossom', 'sparseblossom', 'sb'), 'mwpm_correlated' (two-pass correlated matching, opt-in; aliases 'correlated', 'pymatching-correlated'), 'mwpm_dense' (dense-blossom MWPM, small codes; aliases 'mwpm-dense', 'dense_mwpm', 'dense'), 'uf' (union-find; aliases 'union_find', 'unionfind') or 'lookup' (aliases 'lut', 'table'), or pass your own Decoder to sample_and_decode().
 
 ### QM-E708
 
@@ -743,7 +743,7 @@ Fix: Check the detector error model / syndrome size.
 ### QM-E709
 
 **Invalid calibration data or noise model.**  
-Fix: Check T1/T2 > 0, T2 <= 2*T1, error probabilities in [0, 1].
+Fix: Check T2 <= 2*T1 (T1 <= 0 or T2 <= 0 means no decay in that channel), readout and one-qubit gate errors in [0, 0.5], the two-qubit gate error in [0, 0.75], a model as wide as the circuit, and non-empty calibration counts.
 
 ### QM-E710
 
@@ -778,7 +778,7 @@ Fix: List n-k independent commuting generators and k X/Z logicals with canonical
 ### QM-E722
 
 **Unknown code name or invalid code parameter (e.g. odd k for an Iceberg code).**  
-Fix: Use steane, five_qubit, css_422, noncss_422, iceberg_<even k>, surface_<d>, repetition_<d> (qumo_ft_codes lists them).
+Fix: Use steane, five_qubit, css_422, noncss_422, helix, helix_10_2_3, iceberg_<even k>, surface_<d>, repetition_<d>, identity_<k> (qumo_ft_codes describes them).
 
 ### QM-E723
 
@@ -838,7 +838,7 @@ Fix: Use Stim's format: error(p) D0 D1 ^ D2 L0, detector, logical_observable, sh
 ### QM-E736
 
 **Invalid sliding-window setup: window, step, or missing detector round data.**  
-Fix: 0 < step <= window <= rounds and (rounds - window) % step == 0; the DEM needs detector coordinates or an explicit round per detector.
+Fix: 0 < step <= window, and (rounds - window) % step == 0 when window < rounds (a window of rounds or more is one window); the DEM needs detector coordinates or an explicit round per detector.
 
 ### QM-E737
 
