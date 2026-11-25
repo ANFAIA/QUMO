@@ -32,6 +32,18 @@ comptime TWO_PI = 6.283185307179586476925
 comptime FOUR_PI = 12.56637061435917295385
 
 # per-wire action axis
+# Block kinds of the collect-and-resynthesise passes. This is the only
+# definition: collect.KIND_*, blockalg.BlockKind and policy.MODEL_KIND_* are
+# these values, and the pass table (pass_manager.pass_decl) names the pass
+# of each kind.
+struct BlockKind:
+    comptime CLIFFORD = 0
+    comptime LINEAR = 1
+    comptime PERM = 2
+    comptime PAULI = 3
+    comptime NUM = 4
+
+
 comptime AX_OTHER = 0
 comptime AX_Z = 1
 comptime AX_X = 2
