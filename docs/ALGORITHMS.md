@@ -295,7 +295,7 @@ right sector, tested at four values of U.
 ## Dynamical Lie algebras
 
 `lie_closure(generators, max_dim)` in `qumo.algorithms.qgeometry` closes a set of Pauli
-strings under commutators, the Qibo 0.3.6 API for Pauli generators. The open
+strings under commutators (strings up to 64 qubits; distinct strings are never merged), the Qibo 0.3.6 API for Pauli generators. The open
 transverse-field chain has dimension n (2n - 1) for n = 2..8. Generators are Pauli
 strings only, not sums.
 
