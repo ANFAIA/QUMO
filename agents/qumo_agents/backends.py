@@ -206,9 +206,11 @@ CLI_OWN_ENV = {"claude_code": ("ANTHROPIC_", "CLAUDE_", "ALPHAXIV_"), "codex": (
 
 def scrub_env(env: dict[str, str], section: str) -> dict[str, str]:
     """`env` without credential-looking variables of other services (OPENROUTER_API_KEY,
-    GITHUB_TOKEN, cloud and quantum-vendor tokens, ...); the CLI's own prefixes stay."""
+    GITHUB_TOKEN, cloud and quantum-vendor tokens, ...); the CLI's own prefixes stay. Git
+    configuration injected through the environment is dropped as a group (see repo.py)."""
     own = CLI_OWN_ENV[section]
-    return {k: v for k, v in env.items() if k.startswith(own) or not CLI_SECRET_ENV.search(k)}
+    return {k: v for k, v in env.items()
+            if not repo.GIT_INJECTED_ENV.match(k) and (k.startswith(own) or not CLI_SECRET_ENV.search(k))}
 
 
 def codex_env(settings: Settings, environ: dict[str, str] | None = None) -> dict[str, str]:

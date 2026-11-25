@@ -3,12 +3,33 @@ addresses are numeric or loopback names, which resolve without DNS."""
 
 from __future__ import annotations
 
+import os
+import subprocess
 import urllib.request
 
 import pytest
 
 from qumo_agents import registry
 from qumo_agents.tools import repo, research
+
+
+@pytest.fixture(autouse=True)
+def _no_dns(monkeypatch):
+    """No test here may need a resolver: host names get a fixed public address, IP
+    literals are parsed locally, and anything else fails as an unknown host."""
+    import socket
+    real = socket.getaddrinfo
+    public = {"api.github.com", "pypi.org", "export.arxiv.org", "example.com"}
+
+    def fake(host, port, *args, **kwargs):
+        if host in public:
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port))]
+        try:
+            return real(host, port, *args, **{**kwargs, "flags": socket.AI_NUMERICHOST})
+        except socket.gaierror:
+            raise socket.gaierror(socket.EAI_NONAME, "no DNS in tests") from None
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake)
 
 
 @pytest.mark.parametrize("url", [
@@ -314,7 +335,7 @@ def test_reports_reach_the_sandbox_and_the_reader_wrapped_and_bounded(tmp_path, 
     (reports / "2026-01-01-watch.md").write_text(hostile)
     (root / "agents" / ".gitignore").write_text("reports/*\n")
     for cmd in (["git", "init", "-q"], ["git", "add", "agents/.gitignore"],
-                ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "i"]):
+                ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", "commit", "-qm", "i"]):
         subprocess.run(cmd, cwd=root, check=True)
     monkeypatch.setattr(repo, "REPO_ROOT", root)
     monkeypatch.setattr(repo, "REPORTS_DIR", reports)
@@ -355,3 +376,21 @@ def test_search_and_list_skip_secret_files(tmp_path, monkeypatch):
     assert "fake-" not in found
     for p in (".env", "sub/secrets.yaml", "x.pem", "secrets_dir/plain.txt", "link_to_env.txt"):
         assert repo.read_file.invoke({"path": p}).startswith("error:")
+
+
+def test_env_scrub_keeps_git_usable(monkeypatch):
+    """GIT_CONFIG_KEY_n matches the secret pattern; dropping it and keeping GIT_CONFIG_COUNT
+    made every git command exit 128 ("missing config key GIT_CONFIG_KEY_0")."""
+    from qumo_agents import backends
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "http.extraheader")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "Authorization: Bearer abc")
+    monkeypatch.setenv("GIT_CONFIG_PARAMETERS", "'http.extraheader=Authorization: Bearer abc'")
+    env = repo._check_env()
+    assert not [k for k in env if k.startswith("GIT_CONFIG_")]
+    r = subprocess.run(["git", "--version"], env=env, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    r = subprocess.run(["git", "config", "--list"], env=env, capture_output=True, text=True)
+    assert r.returncode == 0 and "Bearer abc" not in r.stdout, r.stderr
+    cli = backends.scrub_env(dict(os.environ), "codex")
+    assert not [k for k in cli if k.startswith("GIT_CONFIG_")]

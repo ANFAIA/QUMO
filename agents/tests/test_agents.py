@@ -228,7 +228,7 @@ def test_open_sandbox_copies_reports_but_not_symlinks(tmp_path, monkeypatch):
     (root / "agents" / ".gitignore").write_text("reports/*\n")
     (root / "f.txt").write_text("x")
     for cmd in (["git", "init", "-q"], ["git", "add", "f.txt", "agents/.gitignore"],
-                ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "init"]):
+                ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", "commit", "-qm", "init"]):
         subprocess.run(cmd, cwd=root, check=True)
     monkeypatch.setattr(repo, "REPO_ROOT", root)
     monkeypatch.setattr(repo, "SANDBOX_ROOT", tmp_path / "sandboxes")

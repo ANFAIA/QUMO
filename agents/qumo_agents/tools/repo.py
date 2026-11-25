@@ -157,8 +157,16 @@ QUMO_OPTIONS = frozenset({
 SECRET_ENV = re.compile(r"TOKEN|SECRET|KEY|PASSWORD|CREDENTIAL|AUTH|COOKIE|SESSION", re.I)
 
 
+# Git configuration passed through the environment comes as a group (GIT_CONFIG_COUNT with
+# GIT_CONFIG_KEY_n / GIT_CONFIG_VALUE_n, or GIT_CONFIG_PARAMETERS). The secret pattern removes
+# the KEY_n names only, and git then stops with "missing config key GIT_CONFIG_KEY_0"; the
+# values can also carry credentials (http.extraheader). The whole group is dropped.
+GIT_INJECTED_ENV = re.compile(r"GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+|PARAMETERS)\Z")
+
+
 def _check_env() -> dict[str, str]:
-    return {k: v for k, v in os.environ.items() if not SECRET_ENV.search(k)}
+    return {k: v for k, v in os.environ.items()
+            if not SECRET_ENV.search(k) and not GIT_INJECTED_ENV.match(k)}
 
 
 def _qumo_refusal(args: list[str]) -> str:
