@@ -486,6 +486,37 @@ def test_confined_check(base: String) raises:
     var env_out = tool_run_check(st, ["/usr/bin/env"], 30)
     assert_true(env_out.find("MODULAR_CACHE_DIR=" + st.repo_root + "/build/agent-sandbox-cache") >= 0, env_out)
     assert_true(env_out.find("TMPDIR=") >= 0, env_out)
+    test_confined_mojo_run(tramp, kind)
+
+
+def test_confined_mojo_run(tramp: String, kind: String) raises:
+    """A real `.venv/bin/mojo run` from a sandbox of this checkout: the toolchain is
+    readable, the files of the main checkout and the rest of $HOME are not (macOS; the
+    Linux rule is not run here)."""
+    if kind != "sandbox-exec":
+        return
+    var real_root = realpath_strict(".")
+    var home = realpath_strict(getenv("HOME", "/"))
+    if not real_root.startswith(home + "/"):
+        print("test_tools_repo: repository not under $HOME; confined mojo run not checked")
+        return
+    var sandbox = real_root + "/build/test-fixtures/confined-sandbox"
+    if exists(sandbox):
+        remove_tree(sandbox)
+    make_dirs(sandbox)
+    symlink(real_root + "/.venv", sandbox + "/.venv")
+    write_text(sandbox + "/ok.mojo", "def main():\n    print(\"mojo ran\")\n")
+    var peek = String("def peek(path: String):\n    try:\n        with open(path, \"r\") as f:\n            print(\"LEAK\", f.read().byte_length())\n    except:\n        print(\"denied\")\n\n\n")
+    peek += "def main():\n    peek(\"" + real_root + "/CHANGELOG.md\")\n    peek(\"" + real_root + "/agents/agents.json\")\n"
+    write_text(sandbox + "/peek.mojo", peek)
+    var allowed = List[List[String]]()
+    allowed.append([".venv/bin/mojo", "run", "-I", "."])
+    var st = RepoState(real_root, sandbox, [".git"], 60000, 12000, allowed^, tramp, kind, False)
+    var ok = tool_run_check(st, [".venv/bin/mojo", "run", "-I", ".", "ok.mojo"], 300)
+    assert_true(ok.startswith("exit 0\n") and ok.find("mojo ran\n") >= 0, ok)
+    var out = tool_run_check(st, [".venv/bin/mojo", "run", "-I", ".", "peek.mojo"], 300)
+    assert_true(out.startswith("exit 0\n") and out.find("denied\ndenied\n") >= 0 and out.find("LEAK") < 0, out)
+    remove_tree(sandbox)
 
 
 # --------------------------------------------------------------------------- writing

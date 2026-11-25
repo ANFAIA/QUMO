@@ -17,10 +17,11 @@ shell): `confine(spec, c, self)` rewrites a `SpawnSpec` into
 
 Profiles (6.8): `CONF_TOOL` (generated tool binaries: writes only to `write_dirs`,
 no reads under `$HOME` except `read_allow`, no network, no fork on macOS),
-`CONF_BUILD` and `CONF_CHECK` (writes only to `write_dirs`, no network, no reads of
-`sensitive_home_paths` on macOS: named credential stores plus every other top-level
-dot entry of `$HOME` except a few toolchain locations). Any failure in the trampoline prints
-`QA-E163: OS confinement failed: <detail>` on stderr and exits 125.
+`CONF_BUILD` and `CONF_CHECK` (writes only to `write_dirs`, no network, and below
+`$HOME` reads only of `write_dirs`, `read_allow` and the listing of `list_dirs`:
+`$HOME` is denied by default and the caller names what the child needs). Any failure
+in the trampoline prints `QA-E163: OS confinement failed: <detail>` on stderr and
+exits 125.
 
 RLIMIT_CPU caveat (measured on macOS 26 with Mojo 1.2): a Mojo-built program
 installs a SIGXCPU handler (the runtime's crash reporter prints a stack dump and the
@@ -83,7 +84,7 @@ from qumo_agent.native.spawn import (
     environ_list,
     which,
 )
-from qumo_agent.native.fs import exists, realpath_strict
+from qumo_agent.native.fs import _dirname, _readlink, is_symlink, normpath, realpath_strict
 
 
 comptime CONF_CHECK = 1     # run_check whose cwd is the sandbox
@@ -111,18 +112,20 @@ comptime _LL_RULE_PATH_BENEATH = 1
 struct Confinement(Copyable):
     var profile: Int               # CONF_*
     var write_dirs: List[String]   # realpaths of the only subtrees the child may write (plus /dev/null)
-    var read_allow: List[String]   # CONF_TOOL: the only subtrees readable below `home`; CONF_CHECK/CONF_BUILD: kept readable inside a denied dir
+    var read_allow: List[String]   # with `write_dirs`, the only subtrees readable below `home`
+    var list_dirs: List[String]    # CONF_CHECK/CONF_BUILD: directories below `home` whose entries may be listed (not read)
     var home: String               # realpath of $HOME of this process ("" when unset)
     var cpu_s: Int                 # RLIMIT_CPU soft and hard, 0 = unchanged
     var fsize_bytes: Int           # RLIMIT_FSIZE soft and hard, 0 = unchanged
 
     def to_json(self) -> String:
-        """`{"profile":..,"write_dirs":[..],"read_allow":[..],"home":"..","cpu_s":..,"fsize_bytes":..}`."""
+        """`{"profile":..,"write_dirs":[..],"read_allow":[..],"list_dirs":[..],"home":"..","cpu_s":..,"fsize_bytes":..}`."""
         var w = JsonWriter()
         w.begin_object()
         w.kv_int("profile", self.profile)
         w.kv_string_list("write_dirs", self.write_dirs)
         w.kv_string_list("read_allow", self.read_allow)
+        w.kv_string_list("list_dirs", self.list_dirs)
         w.kv_string("home", self.home)
         w.kv_int("cpu_s", self.cpu_s)
         w.kv_int("fsize_bytes", self.fsize_bytes)
@@ -146,7 +149,7 @@ def confinement_from_json(text: String) raises -> Confinement:
     if p != CONF_CHECK and p != CONF_BUILD and p != CONF_TOOL:
         raise _bad_conf("unknown profile " + String(p))
     var lists = List[List[String]]()
-    for key in ["write_dirs", "read_allow"]:
+    for key in ["write_dirs", "read_allow", "list_dirs"]:
         var arr = v.get(key)
         if not arr.is_array():
             raise _bad_conf(key)
@@ -168,73 +171,111 @@ def confinement_from_json(text: String) raises -> Confinement:
     var fsize_bytes = fsize.as_int()
     if cpu_s < 0 or fsize_bytes < 0:
         raise _bad_conf("negative limit")
-    return Confinement(p, lists[0].copy(), lists[1].copy(), home.as_string(), cpu_s, fsize_bytes)
+    return Confinement(p, lists[0].copy(), lists[1].copy(), lists[2].copy(), home.as_string(), cpu_s, fsize_bytes)
 
 
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-comptime _SENSITIVE_HOME_NAMES: List[String] = [
-    ".ssh", ".aws", ".azure", ".gnupg", ".config", ".docker", ".kube", ".netrc",
-    ".git-credentials", ".pypirc", ".npmrc", ".zsh_history", ".bash_history", "Library/Keychains",
-    # Credential stores of other CLIs and shells (found readable on a typical developer Mac).
-    ".codex", ".claude", ".claude.json", ".claude.json.backup", ".gemini", ".hf-cli", ".huggingface",
-    ".qiskit", ".cache", ".cargo", ".gitconfig", ".zshrc", ".zprofile", ".zshenv", ".profile",
-    ".bashrc", ".bash_profile",
-    "Library/Application Support", "Library/Cookies", "Library/Safari", "Library/Mail",
-    "Library/Messages", "Library/Containers", "Library/Group Containers",
-]
-
-# Top-level entries of $HOME that start with "." and are not denied: language and
-# toolchain locations a confined build or check has to read (uv-managed Python lives in
-# ~/.local/share/uv) and a file CoreFoundation reads.
-comptime _HOME_DOT_ALLOWED: List[String] = [".local", ".modular", ".pixi", ".pyenv", ".rustup", ".CFUserTextEncoding"]
+def _strip_slash(path: String) -> String:
+    if path.byte_length() > 1 and path.endswith("/"):
+        return String(path[byte = 0 : path.byte_length() - 1])
+    return path
 
 
-def _home_deny_entry(base: String, rel: String, mut out: List[String]):
-    var p = base + "/" + rel
-    var shown = p
-    if exists(p):
-        try:
-            shown = realpath_strict(p)
-        except:
-            pass
-    out.append(shown)
-    if shown != p:
-        out.append(p)
+def _add_unique(mut items: List[String], p: String):
+    for i in items:
+        if i == p:
+            return
+    items.append(p)
 
 
-def sensitive_home_paths(home: String) -> List[String]:
-    """Paths under `home` denied for reads under CONF_CHECK and CONF_BUILD (macOS):
-    the named credential stores and shell files in `_SENSITIVE_HOME_NAMES` (.ssh .aws
-    .config .codex .claude .gemini .cache ... Library/Keychains ...), then every other
-    existing top-level dotfile or dot directory of `home` except `_HOME_DOT_ALLOWED`
-    (deny by default for the places CLIs keep tokens). An existing path is given as
-    its realpath (the sandbox matches resolved paths); a missing one as `home/name`."""
+def home_read_rules(c: Confinement) -> Tuple[List[String], List[String], List[String]]:
+    """What a CONF_CHECK or CONF_BUILD child may read below `c.home`, everything else
+    there being denied: (subtrees, listable directories, ancestors). Subtrees are the
+    `write_dirs` and `read_allow` entries strictly below `home`; listable directories the
+    `list_dirs` entries strictly below `home`; ancestors every directory from `home` down
+    to the parent of one of those, then the listable directories: the child may stat
+    them and their direct entries (Python and pytest stat files beside each parent
+    directory and stop on EPERM), not list or read them. An entry equal to `home` or
+    above it is left out, so it cannot open `home` up."""
+    var subtrees = List[String]()
+    var listable = List[String]()
+    var ancestors = List[String]()
+    var base = _strip_slash(c.home)
+    if base.byte_length() == 0 or base == "/":
+        return (subtrees^, listable^, ancestors^)
+    var prefix = base + "/"
+    for w in c.write_dirs:
+        if w.startswith(prefix):
+            _add_unique(subtrees, _strip_slash(w))
+    for r in c.read_allow:
+        if r.startswith(prefix):
+            _add_unique(subtrees, _strip_slash(r))
+    for d in c.list_dirs:
+        if d.startswith(prefix):
+            _add_unique(listable, _strip_slash(d))
+    for group in [subtrees.copy(), listable.copy()]:
+        for p in group:
+            var chain = List[String]()
+            var a = _dirname(p)
+            while a.startswith(prefix):
+                chain.append(a)
+                a = _dirname(a)
+            _add_unique(ancestors, base)
+            for i in range(len(chain) - 1, -1, -1):
+                _add_unique(ancestors, chain[i])
+    for d in listable:
+        _add_unique(ancestors, d)
+    return (subtrees^, listable^, ancestors^)
+
+
+def venv_read_paths(venv: String) -> List[String]:
+    """`read_allow` entries for a child that runs the virtualenv `venv`: its realpath,
+    every symbolic link met while resolving `<venv>/bin/python` from `venv` as given
+    when it is absolute (`.venv` itself is often a link; the child has to read each
+    link) and the interpreter's installation prefix, the parent of the `bin`
+    directory the last link ends in (uv, pyenv and pixi keep interpreters below `$HOME`).
+    Empty when `venv` does not exist."""
     var out = List[String]()
-    if home.byte_length() == 0:
-        return out^
-    var base = home if not home.endswith("/") else String(home[byte = 0 : home.byte_length() - 1])
-    for n in materialize[_SENSITIVE_HOME_NAMES]():
-        _home_deny_entry(base, n, out)
-    var names: List[String]
+    var root: String
     try:
-        names = listdir(base)
+        root = realpath_strict(venv)
     except:
-        names = List[String]()
-    sort(names)
-    for n in names:
-        if not n.startswith("."):
-            continue
-        var known = False
-        for k in materialize[_SENSITIVE_HOME_NAMES]():
-            if k == n:
-                known = True
-        for k in materialize[_HOME_DOT_ALLOWED]():
-            if k == n:
-                known = True
-        if not known:
-            _home_deny_entry(base, n, out)
+        return out^
+    out.append(root)
+    var cur = (normpath(venv) if venv.startswith("/") else root) + "/bin/python"
+    for _ in range(40):
+        var acc = String()
+        var hop = False
+        var parts = cur.split("/")
+        for i in range(len(parts)):
+            var part = String(parts[i])
+            if part.byte_length() == 0:
+                continue
+            acc += "/" + part
+            if not is_symlink(acc):
+                continue
+            var target = _readlink(acc)
+            if not target:
+                return out^
+            var t = target.value()
+            if not t.startswith("/"):
+                t = _dirname(acc) + "/" + t
+            for k in range(i + 1, len(parts)):
+                t += "/" + String(parts[k])
+            _add_unique(out, acc)
+            cur = normpath(t)
+            hop = True
+            break
+        if not hop:
+            break
+    try:
+        var prefix = _dirname(_dirname(realpath_strict(cur)))
+        if prefix.byte_length() > 1:
+            _add_unique(out, prefix)
+    except:
+        pass
     return out^
 
 
@@ -280,14 +321,34 @@ def _sbpl_string(path: String) raises -> String:
     return out^
 
 
+def _sbpl_child_regex(dir: String) raises -> String:
+    """`#"^<dir>/[^/]+$"`: an SBPL regex for the direct entries of `dir`. A control
+    character or a `"` in `dir` raises QA-E163."""
+    _ = _sbpl_string(dir)
+    var out = String('#"^')
+    for ch in dir.codepoint_slices():
+        var s = String(ch)
+        if s == '"':
+            raise Error(_CONFINE_FAILED + "path with a double quote: " + dir)
+        if s.byte_length() == 1 and String("\\.^$*+?()[]{}|").find(s) >= 0:
+            out += "\\"
+        out += s
+    out += '/[^/]+$"'
+    return out^
+
+
 def macos_profile(c: Confinement) raises -> String:
     """The sandbox-exec (SBPL) profile for `c` (DESIGN.md 2.1.8):
     `(version 1)(allow default)(deny network*)(deny file-write*)(allow file-write*
     (literal "/dev/null") (subpath "<w>")...)`, then for CONF_TOOL `(deny
     process-fork)(deny file-read* (subpath "<home>"))(allow file-read* (subpath
-    "<r>")...)`, for CONF_CHECK and CONF_BUILD `(deny file-read* (subpath "<p>")...)`
-    over `sensitive_home_paths(home)`, then `(allow file-read* ...)` for the `write_dirs` and
-    `read_allow` entries below `home`."""
+    "<r>")...)`, and for CONF_CHECK and CONF_BUILD, from `home_read_rules(c)`, `(deny
+    file-read* (subpath "<home>"))(allow file-read* (subpath "<s>")... (literal
+    "<d>")...)(allow file-read-metadata (literal "<home>") (regex #"^<a>/[^/]+$")...)`:
+    nothing below `home` is readable except the named subtrees, the listing of
+    `list_dirs`, and the metadata (not the content or the listing) of their ancestors and
+    of those ancestors' direct entries (the last matching rule wins). An empty `home`
+    adds no read rule."""
     if c.profile != CONF_CHECK and c.profile != CONF_BUILD and c.profile != CONF_TOOL:
         raise Error(_CONFINE_FAILED + "unknown profile " + String(c.profile))
     var s = String("(version 1)(allow default)(deny network*)(deny file-write*)")
@@ -304,28 +365,20 @@ def macos_profile(c: Confinement) raises -> String:
                 for r in c.read_allow:
                     s += " (subpath " + _sbpl_string(r) + ")"
                 s += ")"
-    else:
-        var paths = sensitive_home_paths(c.home)
-        if len(paths) > 0:
-            s += "(deny file-read*"
-            for p in paths:
+    elif c.home.byte_length() > 0:
+        var rules = home_read_rules(c)
+        s += "(deny file-read* (subpath " + _sbpl_string(_strip_slash(c.home)) + "))"
+        if len(rules[0]) + len(rules[1]) > 0:
+            s += "(allow file-read*"
+            for p in rules[0]:
                 s += " (subpath " + _sbpl_string(p) + ")"
+            for p in rules[1]:
+                s += " (literal " + _sbpl_string(p) + ")"
             s += ")"
-            # What the caller names (the sandbox, temp and cache dirs, the toolchain) stays
-            # readable even when it lies inside a denied directory; the last rule wins.
-            var reallow = List[String]()
-            var prefix = c.home if c.home.endswith("/") else c.home + "/"
-            for w in c.write_dirs:
-                if w.startswith(prefix):
-                    reallow.append(w)
-            for r in c.read_allow:
-                if r.startswith(prefix):
-                    reallow.append(r)
-            if len(reallow) > 0:
-                s += "(allow file-read*"
-                for r in reallow:
-                    s += " (subpath " + _sbpl_string(r) + ")"
-                s += ")"
+            s += "(allow file-read-metadata (literal " + _sbpl_string(_strip_slash(c.home)) + ")"
+            for p in rules[2]:
+                s += " (regex " + _sbpl_child_regex(p) + ")"
+            s += ")"
     return s^
 
 
@@ -363,7 +416,7 @@ def sandbox_kind(self_binary: String) -> String:
     var true_bin = which("true", "/usr/bin:/bin")
     if true_bin.byte_length() == 0:
         return String("none")
-    var probe = Confinement(CONF_TOOL, List[String](), List[String](), String(), 0, 0)
+    var probe = Confinement(CONF_TOOL, List[String](), List[String](), List[String](), String(), 0, 0)
     var argv: List[String] = [self_binary, "__confine", probe.to_json(), true_bin]
     var spec = SpawnSpec(self_binary, argv^, List[String](), String(), STDIO_NULL, STDIO_NULL, STDIO_NULL, True)
     try:
@@ -465,6 +518,43 @@ def _landlock_rule(ruleset: Int, path: String, access: Int, handled: Int, option
         raise Error(_errno_text("landlock_add_rule(" + path + ")", e2))
 
 
+def _reads_outside_home(home: String, mut out: List[String]):
+    """Linux, CONF_CHECK and CONF_BUILD: the paths to allow for reading so that
+    everything outside `home` is readable and nothing inside it is (Landlock has no deny
+    rule): every entry of `/` and of each ancestor of `home`, except the next ancestor
+    and `home` itself. Symbolic links are skipped (a rule would cover their target). `/`
+    alone when `home` is empty; nothing when `home` is `/` or an ancestor cannot be
+    listed. The ancestors themselves are then not listable."""
+    var base = _strip_slash(home)
+    if base.byte_length() == 0:
+        out.append("/")
+        return
+    if base == "/":
+        return
+    var cur = String("/")
+    while True:
+        var names: List[String]
+        try:
+            names = listdir(cur)
+        except:
+            return
+        sort(names)
+        var next = String()
+        for n in names:
+            var p = "/" + n if cur == "/" else cur + "/" + n
+            if p == base:
+                continue
+            if base.startswith(p + "/"):
+                next = p
+                continue
+            if is_symlink(p):
+                continue
+            out.append(p)
+        if next.byte_length() == 0:
+            return
+        cur = next
+
+
 def _linux_confine(c: Confinement) raises:
     if c_unshare(CLONE_NEWUSER | CLONE_NEWNET) != 0:
         raise Error(_errno_text("unshare(CLONE_NEWUSER | CLONE_NEWNET)", errno()))
@@ -498,9 +588,15 @@ def _linux_confine(c: Confinement) raises:
         for r in c.read_allow:
             reads.append(r)
     else:
-        reads.append("/")
+        _reads_outside_home(c.home, reads)
+        for r in c.read_allow:
+            reads.append(r)
     for r in reads:
         _landlock_rule(ruleset, r, rx, handled, True)
+    if c.profile != CONF_TOOL:
+        # Listing only (no file reads); a Landlock rule covers the whole subtree.
+        for d in c.list_dirs:
+            _landlock_rule(ruleset, d, _LL_READ_DIR, handled, True)
     for w in c.write_dirs:
         _landlock_rule(ruleset, w, handled, handled, False)
     _landlock_rule(ruleset, "/dev/null", handled, handled, False)

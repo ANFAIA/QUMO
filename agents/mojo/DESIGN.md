@@ -594,7 +594,8 @@ comptime CONF_TOOL = 3      # a generated tool binary (toolsmith_test, calls, re
 struct Confinement(Copyable):
     var profile: Int               # CONF_*
     var write_dirs: List[String]   # realpaths of the only subtrees the child may write (plus /dev/null)
-    var read_allow: List[String]   # CONF_TOOL: the only subtrees readable below `home`
+    var read_allow: List[String]   # with `write_dirs`, the only subtrees readable below `home`
+    var list_dirs: List[String]    # CONF_CHECK/CONF_BUILD: directories below `home` whose entries may be listed (not read)
     var home: String               # realpath of $HOME of this process ("" when unset)
     var cpu_s: Int                 # RLIMIT_CPU soft and hard, 0 = unchanged
     var fsize_bytes: Int           # RLIMIT_FSIZE soft and hard, 0 = unchanged
@@ -603,7 +604,8 @@ struct Confinement(Copyable):
 def confinement_from_json(text: String) raises -> Confinement
 def sandbox_kind(self_binary: String) -> String         # "sandbox-exec" | "landlock" | "none"; probes once, callers cache it
 def macos_profile(c: Confinement) raises -> String       # SBPL text; raises QA-E163 for a path with a control character
-def sensitive_home_paths(home: String) -> List[String]   # denied for reads under CONF_CHECK and CONF_BUILD
+def home_read_rules(c: Confinement) -> Tuple[List[String], List[String], List[String]]   # CONF_CHECK/CONF_BUILD: (subtrees, listable dirs, ancestors) allowed back below `home`
+def venv_read_paths(venv: String) -> List[String]        # realpath of a virtualenv, the links from <venv>/bin/python to its interpreter, the interpreter's prefix
 def modular_lib_dir(repo_root: String) raises -> String  # realpath of <repo_root>/.venv/lib/python3.*/site-packages/modular/lib
 def confine(spec: SpawnSpec, c: Confinement, self_binary: String) raises -> SpawnSpec   # wraps spec in the trampoline
 def confine_main(args: List[String]) -> Int              # body of `qumo-agent __confine CONF_JSON PATH ARGV...`; returns only on failure
@@ -627,25 +629,35 @@ def confine_main(args: List[String]) -> Int              # body of `qumo-agent _
     `unshare(CLONE_NEWUSER | CLONE_NEWNET)` (the new network namespace has only a down
     loopback, so no network), `prctl(PR_SET_NO_NEW_PRIVS, 1)`, a Landlock ruleset handling every
     file-system right of the running ABI (>= 1) with `LANDLOCK_RULE_PATH_BENEATH` rules: read and
-    execute on `/` (`CONF_CHECK`, `CONF_BUILD`) or only on `/usr /lib /lib64 /bin /etc /proc
-    /sys/devices/system/cpu` plus `read_allow` (`CONF_TOOL`); all rights on `write_dirs` and
+    execute on `/usr /lib /lib64 /bin /etc /proc /sys/devices/system/cpu` plus `read_allow`
+    (`CONF_TOOL`), or (`CONF_CHECK`, `CONF_BUILD`) on every entry of `/` and of each ancestor of
+    `home` except the next ancestor and `home` itself (Landlock has no deny rule, so "everything
+    outside `home`" is spelled out; symbolic links are skipped; `/` when `home` is empty) plus
+    `read_allow`, and `READ_DIR` alone on `list_dirs` (a Landlock rule covers the subtree, so on
+    Linux the names below a listable directory are visible, not the file contents); all rights on `write_dirs` and
     `/dev/null`; `landlock_restrict_self`; then `execve(PATH, ARGV, environ)`. The parent trampoline waits and
     ends with the child's exit code, or with the signal that killed it (`wait_and_mirror`).
   Any failure prints `QA-E163: OS confinement failed: <detail>` on stderr and exits 125.
 - `macos_profile`: `(version 1)(allow default)(deny network*)(deny file-write*)(allow
   file-write* (literal "/dev/null") (subpath "<w>")...)`; `CONF_TOOL` adds `(deny
   process-fork)(deny file-read* (subpath "<home>"))(allow file-read* (subpath "<r>")...)`;
-  `CONF_CHECK` and `CONF_BUILD` add `(deny file-read* (subpath "<p>")...)` for
-  `sensitive_home_paths(home)` = the named credential stores and shell files (`.ssh .aws .azure
-  .gnupg .config .docker .kube .netrc .git-credentials .pypirc .npmrc .zsh_history .bash_history
-  .codex .claude .claude.json .gemini .hf-cli .huggingface .qiskit .cache .cargo .gitconfig .zshrc
-  .zprofile .zshenv .profile .bashrc .bash_profile Library/Keychains Library/Application Support
-  Library/Cookies Library/Safari Library/Mail Library/Messages Library/Containers Library/Group
-  Containers`) plus every other existing top-level dot entry of `home` except the toolchain
-  locations `.local .modular .pixi .pyenv .rustup .CFUserTextEncoding` (deny by default for the
-  places CLIs keep tokens), followed by `(allow file-read* ...)` for the `write_dirs` and
-  `read_allow` entries below `home` (the caller passes the main checkout and its `.venv`; the last
-  rule wins).
+  `CONF_CHECK` and `CONF_BUILD` add, when `home` is not empty, `(deny file-read* (subpath
+  "<home>"))(allow file-read* (subpath "<s>")... (literal "<d>")...)(allow file-read-metadata
+  (literal "<home>") (regex #"^<a>/[^/]+$")...)` from `home_read_rules(c)`: `$HOME` is denied by
+  default and only what the caller names is allowed back (the last rule wins). `<s>` are the
+  `write_dirs` and `read_allow` entries strictly below `home`, `<d>` the `list_dirs` entries
+  (the directory can be listed, its files cannot be read), `<a>` every directory from `home`
+  down to the parent of one of those, and the `list_dirs`: the child may stat those
+  directories and their direct entries, because Python and pytest stat files beside each
+  parent directory and stop on `EPERM`; it cannot list them or read anything there. An entry
+  equal to `home` or above it is ignored. Callers pass: `run_check`, the main checkout's
+  `.git` and `build` and `venv_read_paths` of `.venv` and `bench/.venv` (the sandbox itself
+  is a write dir); the hermetic build, `<repo_root>/qumo`, `<repo_root>/agents/mojo` and
+  `venv_read_paths(<repo_root>/.venv)`, with `list_dirs = [<repo_root>]` because the compiler
+  lists the `-I` directory. `venv_read_paths` is the virtualenv's realpath, each symbolic link
+  between `<venv>/bin/python` and the interpreter, and the interpreter's installation prefix
+  (uv keeps it in `~/.local/share/uv/python`). The rest of the main checkout (`.env`,
+  `agents/agents.local.json`, reports, sources) and of `$HOME` is not readable.
   Paths are realpaths (the sandbox matches resolved vnodes, so writes through the sandbox's
   `.venv`/`build` symlinks land outside `write_dirs` and are refused); `"` and `\` are escaped.
 - `sandbox_kind`: macOS: `/usr/bin/sandbox-exec` is executable. Linux: spawns
@@ -2042,7 +2054,8 @@ Exact behaviour and texts (`W/agents/qumo_agents/tools/repo.py`, [gaps §2]):
   and `MODULAR_CACHE_DIR=<repo_root>/build/agent-sandbox-cache` (also in `write_dirs`; created
   on first use), so `mojo run`, pytest or `build/qumo` launched from the sandbox cannot write
   the tool store, `build/qumo-agent`, the main checkout or anything outside the sandbox, cannot
-  read `sensitive_home_paths`, and have no network (6.8). `sandbox_kind == "none"` returns
+  read anything below `$HOME` except the sandbox, the main checkout's `.git` and `build`, and
+  the two virtualenvs with their interpreters (`read_allow`, 2.1.8), and have no network (6.8). `sandbox_kind == "none"` returns
   `refused: no OS sandbox on this machine; run_check inside a sandbox needs one. Hint: pass
   --allow-unsandboxed-tool-tests to run it unconfined` unless that flag was given. Without an
   open sandbox the command runs unconfined in the main checkout (parity).
@@ -2957,7 +2970,7 @@ agent with `offset`/`limit`, as the stubs instruct (the critic A1 bug is fixed);
 | repository `read_file` | `_resolve` (skip dirs, secret names, inside root after symlinks); `max_lines` 1..2000 | 60,000 + footer |
 | `list_files` | same path rules; skip dirs pruned | 300 entries |
 | `search_code` | same path rules; secret-looking names (any path component) and outside-root symlinks skipped, as in `list_files` (X5); POSIX ERE subset | 200 hits, 200 per line |
-| `run_check` | allow-list prefixes; ASCII path-like arguments, no `..`, no trailing newline, no `git diff --output*`/`--no-index` (X5); minimal env without secrets (D2b); cwd = sandbox or repo; process group killed on timeout; inside a sandbox: `CONF_CHECK` confinement (writes only to the sandbox, a per-call temp dir and the sandbox build cache; no network; no reads of `sensitive_home_paths`) | timeout 10..1800 s; output tail 12,000; 4 MiB bytes per stream kept |
+| `run_check` | allow-list prefixes; ASCII path-like arguments, no `..`, no trailing newline, no `git diff --output*`/`--no-index` (X5); minimal env without secrets (D2b); cwd = sandbox or repo; process group killed on timeout; inside a sandbox: `CONF_CHECK` confinement (writes only to the sandbox, a per-call temp dir and the sandbox build cache; no network; no reads below `$HOME` except `read_allow`, 6.8) | timeout 10..1800 s; output tail 12,000; 4 MiB bytes per stream kept |
 | repository paths | skip directories compared case-insensitively (X14) | - |
 | `write_report` | only `agents/reports/` of the main repository; ASCII slug | slug 80 |
 | `open_sandbox` | once per process tree; new branch from HEAD; nothing committed or pushed | stderr tail 500 |
@@ -3192,18 +3205,19 @@ pytest, `examples/run_examples.py`, `build/qumo` with sandbox inputs, `git`). Ea
 | Profile | Used by | Writes | Reads | Network | Other |
 |---|---|---|---|---|---|
 | `CONF_TOOL` | `toolsmith_test`, generated-tool calls and `tools/list`, review re-test | the per-call temp dir, `/dev/null` | everything outside `$HOME`; under `$HOME` only `modular_lib_dir(repo_root)` (the binary's `LC_RPATH`/`RUNPATH` libraries) | denied | `(deny process-fork)` on macOS; `RLIMIT_CPU = 4 * timeout_s + 10`, `RLIMIT_FSIZE = 64 MiB` |
-| `CONF_BUILD` | `toolsmith_build`, review rebuild | the build temp dir, the build cache dir | all except `sensitive_home_paths` | denied | `RLIMIT_FSIZE = 1 GiB` |
-| `CONF_CHECK` | `run_check` with cwd = sandbox | the sandbox (realpath), a per-call temp dir (`TMPDIR`), `build/agent-sandbox-cache` | all except `sensitive_home_paths` | denied | `RLIMIT_FSIZE = 1 GiB` |
+| `CONF_BUILD` | `toolsmith_build`, review rebuild | the build temp dir, the build cache dir | everything outside `$HOME`; under `$HOME` only `<repo_root>/qumo`, `<repo_root>/agents/mojo`, `venv_read_paths(<repo_root>/.venv)` and the listing of `<repo_root>` | denied | `RLIMIT_FSIZE = 1 GiB` |
+| `CONF_CHECK` | `run_check` with cwd = sandbox | the sandbox (realpath), a per-call temp dir (`TMPDIR`), `build/agent-sandbox-cache` | everything outside `$HOME`; under `$HOME` only the write dirs, the main checkout's `.git` and `build`, and `venv_read_paths` of `.venv` and `bench/.venv` | denied | `RLIMIT_FSIZE = 1 GiB` |
 
 Consequences: no confined process can write `<store>/manifest.json`, a store binary,
 `build/qumo-agent`, the main checkout or anything else outside its write list, so it cannot
 mark a tool reviewed, swap a reviewed binary or run a privileged `qumo-agent tools review`
-that persists anything; it cannot exfiltrate over the network. Residual exposure: `CONF_CHECK`
-and `CONF_BUILD` can still read files under `$HOME` that are neither a top-level dot entry nor on
-the named `Library` list (the repository lives there; ordinary documents), and their output
-reaches the model; on Linux, Landlock is an allow-list, so reads are allowed
-on `/` for those two profiles and `sensitive_home_paths` are not denied there (documented in
-risk 10.1.8). Without any OS sandbox (`sandbox_kind == "none"`), confined runs are refused unless
+that persists anything; it cannot exfiltrate over the network. Residual exposure: a `CONF_CHECK`
+run reads the main checkout's `.git` (history, `config`) and `build`, and both profiles read
+everything outside `$HOME`; a child can learn whether a name exists directly inside `$HOME` or
+a directory between `$HOME` and an allowed path (stat only), and the hermetic build can list
+`<repo_root>`. Commands that need other files below `$HOME` fail under confinement: `git`
+when `~/.gitconfig` exists, a Python package that reads `~/.config`. The Linux rules are
+compile-checked only, not run (risk 10.1.8). Without any OS sandbox (`sandbox_kind == "none"`), confined runs are refused unless
 a human passes `--allow-unsandboxed-tool-tests` on the command line (it is never accepted from
 the environment, the specs or a tool argument).
 
@@ -3328,7 +3342,7 @@ retyped). Goldens are committed; regenerating them needs `agents/.venv`.
 |---|---|---|
 | F | `test_native_lint` | `external_call` only in `native/libc.mojo`; no `std.subprocess`, `std.os.process`, `/bin/sh`, `curl`, `mktemp`, `date ` in `qumo_agent/`; every file with ported text has the MIT header |
 | F | `test_native_spawn` | argv regression (`/bin/echo ab lit` prints `ab lit`); explicit env (`/usr/bin/env` prints exactly the given entries; empty env prints nothing); cwd (`/bin/pwd`); stdin/stdout pipes (`/bin/cat`); `run_capture` timeout kills within 1 s; process-group kill reaches a grandchild (`/bin/sh -c 'sleep 30 & echo $!; wait'`); writing to a dead child raises `QA-E160` instead of killing the test (SIGPIPE ignored); `minimal_child_env()` drops `X_API_KEY`, `GITHUB_TOKEN`, `MY_SECRET` set with `setenv`; `mcp_server_env()` has only the six names; `harness_child_env("OPENROUTER_API_KEY")` keeps the listed keys and `QUMO_*` names and drops `AWS_SECRET_ACCESS_KEY`, `X_API_KEY`; a child writing 1 MiB to a piped stderr before its stdout line does not block `read_line`, and `stderr_tail()` holds its last 64 KiB; `which` |
-| F | `test_native_sandbox` | `macos_profile` text for each profile (escaping, realpaths); `confine` argv shape; on a machine with a sandbox: a confined `/usr/bin/touch` outside `write_dirs` fails and inside succeeds, `CONF_TOOL` cannot read a file under `$HOME` outside `read_allow` nor connect to `127.0.0.1:<listener>`, a reference Mojo binary copied to a temp dir runs under `CONF_TOOL`, `RLIMIT_CPU` kills a busy loop; `sandbox_kind` probe; `__confine` failure exits 125 with `QA-E163` |
+| F | `test_native_sandbox` | `macos_profile` text for each profile (escaping, realpaths, `$HOME` denied by default with the named paths allowed back); `venv_read_paths`; `confine` argv shape; on a machine with a sandbox: a confined `/usr/bin/touch` outside `write_dirs` fails and inside succeeds, `CONF_CHECK` and `CONF_BUILD` with a fake `$HOME` cannot read or list `code/other/.env`, `Documents`, a checkout's `.env` or a dot directory but can read a `read_allow` subtree and list a `list_dirs` directory (macOS), `CONF_TOOL` cannot read a file under `$HOME` outside `read_allow` nor connect to `127.0.0.1:<listener>`, a reference Mojo binary copied to a temp dir runs under `CONF_TOOL`, `RLIMIT_CPU` kills a busy loop; `sandbox_kind` probe; `__confine` failure exits 125 with `QA-E163` |
 | F | `test_native_clock`, `test_native_fs`, `test_native_rand` | `utc_iso` with and without microseconds; local date formats; `http_date_to_unix` (3 forms); `normpath`/`resolve_nonstrict`/`join_path` against Python vectors; `walk` with a symlinked directory not followed; `make_temp_dir` mode 0700; atomic write; uuid4 version and variant bits |
 | F | `test_native_regex`, `test_native_fnmatch` | translation table (2.1.5) incl. refusals; search on platform constants; `fnmatch_py` (`[^a]`, `\`, dot files); `wc_glob_match` vectors from deepagents (`*.py` matches `src/app/main.py`, `src/**/*.py`, `/*.py` top-level only, `**` not into `.github`, `.github/**/*.yml`, `*.{yml,yaml}`, `..` refused); `pathlib_glob_match` |
 | F | `test_util_pyfmt`, `test_util_jsonx`, `test_util_sha256`, `test_util_redact` | `pyfmt.json` vectors; lenient parse with a raw newline and tab inside strings; B2 table (empty, null, `[]`, `0`, object, `[1]`, `5`, `"x"`, invalid; the truthy non-objects give `arguments must be a JSON object`, X13); NIST SHA-256 vectors (`""`, `"abc"`, one million `a`); `redact_all` removes the values of three set variables in JSON bodies and plain text, ignores unset ones |
@@ -3473,7 +3487,7 @@ Makefile changes (I): `test-agents-mojo` builds `build/qumo-agent` and
 | 5 | Concurrency differs: tools of one turn run sequentially; only `task` fans out (processes). Wall time can exceed Python for turns with several slow network tools. | Results are identical by construction (X1); a later version can fan out other slow tools to children the same way. |
 | 6 | Persistent QUMO MCP session (X3) could diverge from Python if the server ever keeps state between calls. | Test 8.2 compares results of the same call sequence with a fresh session per call. |
 | 7 | Subagent children cost a process start and a fresh QUMO MCP server each. | Small next to model latency; `--parallel 1` falls back to inline. |
-| 8 | Model-written code runs before any human review: `toolsmith_test` runs the binary the agent just built, `toolsmith_build` runs the compiler over agent-written source, and `run_check` inside a sandbox runs agent-written files (`mojo run`, pytest). Unconfined, that code could rewrite the manifest (`reviewed: true`), run `tools review`, replace store binaries or `build/qumo-agent`, read dotfiles and use the network. Reviewed tools also run with the user's privileges. | K5/6.8: the toolsmith has no `run_check`; every such run is confined (`sandbox-exec` on macOS, user+network namespaces and Landlock on Linux) with writes limited to temp dirs (and the sandbox for `run_check`), no network, no fork for tools, CPU/file-size rlimits; hermetic builds against the main checkout; review rebuilds the binary from the displayed source; private hashed copies are executed. Residual: on a machine without either sandbox, unreviewed code runs only with the human flag `--allow-unsandboxed-tool-tests` and reviewed tools run unconfined; `CONF_CHECK`/`CONF_BUILD` can read ordinary files under `$HOME` that are not top-level dot entries or the named `Library` directories (and on Linux the sensitive ones too) and return them to the model; `sandbox-exec` is deprecated by Apple and could disappear (then `sandbox_kind` is `none`). |
+| 8 | Model-written code runs before any human review: `toolsmith_test` runs the binary the agent just built, `toolsmith_build` runs the compiler over agent-written source, and `run_check` inside a sandbox runs agent-written files (`mojo run`, pytest). Unconfined, that code could rewrite the manifest (`reviewed: true`), run `tools review`, replace store binaries or `build/qumo-agent`, read dotfiles and use the network. Reviewed tools also run with the user's privileges. | K5/6.8: the toolsmith has no `run_check`; every such run is confined (`sandbox-exec` on macOS, user+network namespaces and Landlock on Linux) with writes limited to temp dirs (and the sandbox for `run_check`), no network, no fork for tools, CPU/file-size rlimits; hermetic builds against the main checkout; review rebuilds the binary from the displayed source; private hashed copies are executed. Residual: on a machine without either sandbox, unreviewed code runs only with the human flag `--allow-unsandboxed-tool-tests` and reviewed tools run unconfined; `CONF_CHECK`/`CONF_BUILD` read nothing below `$HOME` except what the caller names (6.8), but everything outside it, and a `run_check` reads the main checkout's `.git` and `build`; the Linux rules for this are compile-checked only; `sandbox-exec` is deprecated by Apple and could disappear (then `sandbox_kind` is `none`). |
 | 9 | Recursion limit 9999 for subagents allows very long, costly runs (parity). | Stats on stderr; a cost cap is an open question. |
 | 10 | Mojo dialect drift (1.2 pinned) and the "one FFI signature per symbol" rule: a std module could bind a libc symbol differently. | Harness no longer uses `std.os.process`/`std.subprocess`; lint test; the guide is pinned. |
 | 11 | The token heuristic must count tools as Python's `tool_call_schema` form, which differs from the wire form for every tool (property `title`s of pydantic tools, raw MCP `inputSchema`). | `ToolSpec.count_json` (2.7.6) from the export's `count_parameters`, the golden `COUNT_PARAMETERS` and the raw MCP schemas; `token_counts.json` includes tools. Remaining gap: a QUMO MCP or alphaXiv server whose `tool.description` differs from the guided wire description in Python (not observed); bounded and harmless at 170,000. |
@@ -4762,7 +4776,7 @@ the QUMO code or a probe before deciding. One line per objection.
 | 8 | Subagent and `serve` children inherit the full environment despite D2b (minor) | Accepted: flagged as K4 (0.3); `harness_child_env(api_key_env)` with the exact allow-list (2.1.2, 1.1, 2.10, B.7). |
 | 9 | `mutation_key` for V0 relative paths is ambiguous (minor) | Accepted: the key follows the routing decision, so V0 `notes.md` and `/notes.md` both give `vfs:/notes.md` (2.7.4); test added. |
 | 10 | Per-agent filtering of generated tools has no owner (minor) | Accepted: one process-wide `GeneratedTools` with every loadable tool and `specs_for(allow_all, names)`; `AppEnv` passes the filtered list, and `tool_node_names()` refuses other names (2.9, 2.10, 2.8.2, 6.7). |
-| 11 | Unreviewed model-written code runs with the user's privileges; the review gate can be bypassed (blocking) | Accepted: verified that the toolsmith had `check`, that the allow-list holds `.venv/bin/mojo run -I .`, and (probe) that `sandbox-exec` confines a Mojo binary on this Mac. Flagged as K5; `check` removed from the toolsmith (6.1, 5.1); `native/sandbox.mojo` with `CONF_TOOL`/`CONF_BUILD`/`CONF_CHECK` through a native `__confine` trampoline (2.1.8, 6.8); `run_check` confined whenever its cwd is the sandbox (2.8.3); `--allow-unsandboxed-tool-tests` as the only escape (7.1); `tools review --yes` needs `isatty(0)` (6.6); risk 10.1.8 rewritten. Partly modified: `RLIMIT_NPROC` is not used (it counts all of the user's processes, and threads on Linux, so it would break the Mojo runtime or the user's session); forks are denied by the macOS profile instead. The Linux profile cannot deny reads of `sensitive_home_paths` for `CONF_CHECK`/`CONF_BUILD` (Landlock is an allow-list and those runs must read the repository under `$HOME`); recorded as residual risk. |
+| 11 | Unreviewed model-written code runs with the user's privileges; the review gate can be bypassed (blocking) | Accepted: verified that the toolsmith had `check`, that the allow-list holds `.venv/bin/mojo run -I .`, and (probe) that `sandbox-exec` confines a Mojo binary on this Mac. Flagged as K5; `check` removed from the toolsmith (6.1, 5.1); `native/sandbox.mojo` with `CONF_TOOL`/`CONF_BUILD`/`CONF_CHECK` through a native `__confine` trampoline (2.1.8, 6.8); `run_check` confined whenever its cwd is the sandbox (2.8.3); `--allow-unsandboxed-tool-tests` as the only escape (7.1); `tools review --yes` needs `isatty(0)` (6.6); risk 10.1.8 rewritten. Partly modified: `RLIMIT_NPROC` is not used (it counts all of the user's processes, and threads on Linux, so it would break the Mojo runtime or the user's session); forks are denied by the macOS profile instead. The Linux profile cannot deny reads of the sensitive paths under `$HOME` for `CONF_CHECK`/`CONF_BUILD` (Landlock is an allow-list and those runs must read the repository under `$HOME`); recorded as residual risk. Superseded on 2026-11-25: both systems now deny `$HOME` by default for those profiles and allow the named paths (2.1.8, 6.8). |
 | 12 | The reviewed source is not guaranteed to be the compiled source (blocking) | Accepted: hermetic `toolsmith_build` (only `tool.mojo`, main-checkout include paths, never `-I <sandbox>`), a `BuildRecord` with `source_sha256`/`sdk_sha256`/`binary_sha256`, publish refuses changed source or cases (6.3, 6.4, 2.9), and `tools review` rebuilds and re-tests from the displayed source and replaces the binary (6.6). Modified on one point: review does not refuse when `sdk_sha256` differs from the current SDK; it reports the difference, and since the binary is rebuilt against the current SDK and the cases re-run, the reviewed binary always matches the current SDK, so refusing would add nothing. |
 | 13 | Unvalidated `version` is a path-traversal write outside the store; `tools remove` trusts `dir` (major) | Accepted: `valid_tool_version`, `entry_dir`, `check_entry_shape` (realpath inside the store, no `..`, no leading `/`, `dir` equals the derived value) in publish, load, verify and every `tools` command; `tools remove` never deletes a malformed entry's directory (2.9, 6.4, 6.6, B.4). |
 | 14 | Case-sensitive skip-directory checks expose `.GIT/config` etc. on macOS (major) | Accepted: X14, ASCII case folding in `resolve_repo_path` (plus a realpath-based check) and in the `list_files`/`search_code` walk filters (2.8.3, 5.4); test vectors added. |
