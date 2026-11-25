@@ -45,8 +45,10 @@ struct PauliTerm(ImplicitlyCopyable, Writable):
         var supp = (self.x | self.z) & (o.x | o.z)
         return ((self.x ^ o.x) & supp) == 0 and ((self.z ^ o.z) & supp) == 0
 
-    def label(self, n: Int) -> String:
-        """Dense label, leftmost = qubit n-1."""
+    def label(self, n: Int) raises -> String:
+        """Dense label, leftmost = qubit n-1 (n <= 64)."""
+        if n > 64:
+            raise Error("QM-E302: a dense Pauli label of " + String(n) + " qubits is not supported (limit 64). Hint: QUMO Pauli strings are bit-packed into 64 qubits.")
         var s = String()
         var q = n - 1
         while q >= 0:
@@ -93,6 +95,8 @@ struct PauliSum(Copyable, Writable, Sized):
     def add_label(mut self, coeff: Float64, label: String) raises:
         """Add a dense label term, e.g. add_label(0.5, "XZI")."""
         var n = label.byte_length()
+        if n > 64:
+            raise Error("QM-E302: Pauli label of " + String(n) + " characters is longer than 64, so its qubits do not fit. Hint: QUMO Pauli strings are bit-packed into 64 qubits; use at most 64 characters.")
         var bs = label.as_bytes()
         var x: UInt64 = 0
         var z: UInt64 = 0
@@ -175,6 +179,15 @@ def _is_space(c: Int) -> Bool:
     return c == 32 or c == 9 or c == 10 or c == 13
 
 
+def _repeated_qubit(q: Int, text: String, start: Int, n: Int) -> Error:
+    var bs = text.as_bytes()
+    var e = start
+    while e < n and Int(bs[e]) != ord("+") and Int(bs[e]) != ord("-"):
+        e += 1
+    var term = String(String(unsafe_from_utf8=bs[start:e]).strip())
+    return Error("QM-E301: qubit " + String(q) + " appears more than once in the term '" + term + "'. Hint: name each qubit once per term (X0 Z0 is the product -i*Y0, so write the one operator you mean).")
+
+
 def parse_pauli_sum(text: String) raises -> PauliSum:
     """Parse "0.5 * Z0 Z1 - 1.2 * X0 Y2 + 0.3" or "0.5*ZZI + XIX"."""
     var out = PauliSum()
@@ -209,6 +222,9 @@ def parse_pauli_sum(text: String) raises -> PauliSum:
         # Pauli factors until next top-level + / -
         var x: UInt64 = 0
         var z: UInt64 = 0
+        var used: UInt64 = 0  # qubits carrying a non-identity factor so far
+        var has_factor = False
+        var term_start = i
         var dense = String()
         while i < n and Int(bs[i]) != ord("+") and Int(bs[i]) != ord("-"):
             var ch = Int(bs[i])
@@ -225,6 +241,11 @@ def parse_pauli_sum(text: String) raises -> PauliSum:
                     if q >= 64:
                         raise Error("QM-E302: Pauli index " + String(q) + " >= 64 is not supported.")
                     var b = UInt64(1) << UInt64(q)
+                    has_factor = True
+                    if ch != ord("I"):
+                        if (used & b) != 0:
+                            raise _repeated_qubit(q, text, term_start, n)
+                        used |= b
                     if ch == ord("X"): x |= b
                     elif ch == ord("Z"): z |= b
                     elif ch == ord("Y"):
@@ -233,13 +254,23 @@ def parse_pauli_sum(text: String) raises -> PauliSum:
                     i = j
                 else:
                     dense += String(unsafe_from_utf8=bs[i:i + 1])
+                    has_factor = True
                     i += 1
                 continue
             raise Error("QM-E301: unexpected character at offset " + String(i) + " in Pauli expression. Hint: write e.g. '0.5*Z0 Z1 + 0.2*X0'.")
         if dense.byte_length() > 0:
             var tmp = PauliSum()
             tmp.add_label(1.0, dense)
+            var dm = tmp.terms[0].x | tmp.terms[0].z
+            var clash = used & dm
+            if clash != 0:
+                var q = 0
+                while ((clash >> UInt64(q)) & 1) == 0:
+                    q += 1
+                raise _repeated_qubit(q, text, term_start, n)
             x |= tmp.terms[0].x
             z |= tmp.terms[0].z
+        if not has_factor and i == start:
+            raise Error("QM-E301: a sign at offset " + String(start) + " in the Pauli expression has no term after it. Hint: write e.g. '0.5*Z0 Z1 - 1.2*X0'; remove a trailing or doubled sign.")
         out.add(sign * coeff, x, z)
     return out^
