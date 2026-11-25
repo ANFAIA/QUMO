@@ -1,5 +1,8 @@
 """AI-native surface of `qumo.ft`: JSON descriptions and MCP tools.
 
+The file is in `qumo/ai` (it was `qumo/ft/tools.mojo`) so that `ft` does not
+import `ai`.
+
 Tools (registered by `register_ft_tools`, listed by MCP `tools/list`,
 callable as `build/qumo tool <name> '<json>'`):
 

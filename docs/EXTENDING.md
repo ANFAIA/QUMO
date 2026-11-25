@@ -339,7 +339,7 @@ Notes:
 
 1. `canonical_decoder_name`: add the name and its aliases.
 2. `make_decoder_and_run`: add the branch that builds your decoder from the `DetectorErrorModel` and calls `sample_and_decode`. Update the hint of error QM-E707 in the same function.
-3. The text of QM-E707 in `qumo/ai/diagnostics.mojo` and the decoder list in the `qumo_qec_memory` tool description (`qumo/exec/tools.mojo`), so that agents see the new name. Regenerate [ERRORS.md](ERRORS.md) afterwards (it is generated from the catalogue).
+3. The text of QM-E707 in `qumo/ai/diagnostics.mojo` and the decoder list in the `qumo_qec_memory` tool description (`qumo/ai/exec_tools.mojo`), so that agents see the new name. Regenerate [ERRORS.md](ERRORS.md) afterwards (it is generated from the catalogue).
 
 This procedure was read from the source, not exercised for this page.
 

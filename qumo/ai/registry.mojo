@@ -1,15 +1,16 @@
 """Full tool registry: core interface tools + tools contributed by every module.
 
 `qumo.ai.tools.default_registry()` only holds the core (circuit I/O,
-simulation, description) tools so that low-level modules can import the
-registry types without import cycles. Front ends (MCP server, CLI) use
-`full_registry()`, which adds one line per module.
+simulation, description) tools. Front ends (MCP server, CLI) use
+`full_registry()`, which adds one line per module. The handlers of every
+module live in `qumo/ai` (`exec_tools`, `algorithm_tools`, `ft_tools`): `ai` is
+the top package, and `exec`, `ft` and `algorithms` never import it.
 """
 
 from qumo.ai.tools import ToolRegistry, default_registry
-from qumo.exec.tools import register_exec_tools
+from qumo.ai.exec_tools import register_exec_tools
 from qumo.ai.algorithm_tools import register_algorithm_tools
-from qumo.ft.tools import register_ft_tools
+from qumo.ai.ft_tools import register_ft_tools
 
 
 def full_registry() -> ToolRegistry:

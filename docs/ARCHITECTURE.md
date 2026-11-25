@@ -14,7 +14,7 @@ packages are in [Package layering](#package-layering).
    │ qumo.algorithms                   │  │ qumo.exec           │  │ qumo.qec          │
    │ kernels, gradients, optimizers,   │  │ PUB primitives,     │  │ codes, DEM,       │
    │ VQE/QAOA, Hamiltonians            │  │ HEFT orchestrator,  │  │ decoders, sweeps, │
-   └───────────────┬───────────────────┘  │ resources, tools    │  │ characterization  │
+   └───────────────┬───────────────────┘  │ resources           │  │ characterization  │
                    │                      └───────┬─────────────┘  └──────┬────────────┘
    ┌───────────────┴──────────────────────────────┴───────────────────────┴────────────┐
    │ qumo.compiler: pass pipeline (text spec), routing, synthesis (targets: qumo.device)│
@@ -47,21 +47,26 @@ today (`qumo/*/*.mojo`, `from qumo.X` lines; the re-export shims for old paths a
 | 3 | `gpu` | vendor-neutral GPU state-vector and frame back ends (`-D QUMO_GPU`) | `core`, `ir`, `sim` |
 | 3 | `net` | HTTP/1.1 + TLS client for hardware and LLM endpoints (no QUMO imports) | nothing from QUMO |
 | 4 | `algorithms` | kernels, gradients, optimizers, VQE/QAOA, mitigation | `core`, `ir`, `sim`, `noise`, `qec`, `gpu`, `exec` (one file) |
-| 4 | `exec` | primitives, dispatch, orchestrator, emulate, resources | `core`, `ir`, `device`, `sim`, `noise`, `qec`, `compiler`, `gpu`, `net`, `algorithms`, `ai` (tools only) |
-| 4 | `ft` | fault-tolerant programming layer (Steane, Iceberg, Rz synthesis) | `core`, `ir`, `sim`, `qec`, `exec`, `ai` (tools only) |
-| 5 | `ai` | tool registry, diagnostics, describe, MCP | `core`, `ir`, `sim`, `compiler`, `algorithms`, `exec`, `ft` |
+| 4 | `exec` | primitives, dispatch, orchestrator, emulate, resources | `core`, `ir`, `device`, `sim`, `noise`, `compiler`, `gpu`, `net` |
+| 4 | `ft` | fault-tolerant programming layer (Steane, Iceberg, Rz synthesis) | `core`, `ir`, `sim`, `qec` |
+| 5 | `ai` | tool registry, the tool handlers of every module, diagnostics, describe, MCP | `core`, `ir`, `device`, `sim`, `compiler`, `qec`, `gpu`, `algorithms`, `exec`, `ft` |
 | - | `bench`, `testing` | benchmark circuits, test helpers | `core`, `ir` (`testing`: nothing from QUMO) |
 
 `core`, `ir`, `device`, `sim` and `noise` import none of `compiler`, `qec`, `ai`, `exec`, `algorithms`.
-Known exceptions to a strict stack, all in the upper rows: `algorithms/mitigation.mojo` imports
-`exec.primitives`, and the tool files `exec/tools.mojo` and `ft/tools.mojo` import `ai.tools` (to register
-tools) while `ai` imports `exec` and `ft` back, so `exec`, `ft`, `algorithms` and `ai` are one strongly
-connected group today. `compiler` imports `sim` (for `program_compile` and `resynth`).
+`ai` is the top row: no other package imports it, and the package graph has no cycle. The agent-tool
+handlers of every module are in `qumo/ai` (`exec_tools.mojo`, `algorithm_tools.mojo`, `ft_tools.mojo`;
+the first and the last were `qumo/exec/tools.mojo` and `qumo/ft/tools.mojo`), so `exec`, `ft` and
+`algorithms` do not import `ai`, and `exec` no longer imports `algorithms`. Two imports go sideways or
+up inside the stack, neither closes a cycle: `algorithms/mitigation.mojo` imports `exec.primitives` (the
+QWC measurement helpers; `exec.primitives` itself imports only `core`, `ir` and `sim`), and `compiler`
+imports `sim` (for `program_compile` and `resynth`).
 
 Old import paths are kept for one release as one-line re-exports: `qumo.sim.rng` (now `qumo.core.rng`),
 `qumo.compiler.target` and the `basis_str` / `fmt_num` names of `qumo.compiler.common` (now `qumo.device`),
 `qumo.qec.characterization` and `qumo.qec.mthree` (now `qumo.noise`), and the circuit and program JSON
-functions of `qumo.ai.describe` (now `qumo.ir.json`).
+functions of `qumo.ai.describe` (now `qumo.ir.json`). `qumo.exec.tools` and `qumo.ft.tools` have no
+re-export: one inside `exec` or `ft` would import `ai` again. Import `qumo.ai.exec_tools` and
+`qumo.ai.ft_tools`.
 
 ## 1. IR (`qumo/ir`)
 
@@ -225,7 +230,7 @@ independent of the core count (fixed seed tree and reduction order). Design: `rl
   See [QEC.md](QEC.md) (Characterization).
 * **`qumo/ft`**: the fault-tolerant programming layer: `LogicalProgram`, stabilizer codes, Steane and
   Iceberg architectures, factories, Clifford+T `Rz` synthesis, verification on the tableau; its tools are
-  registered in the `ai` registry. Imports are listed in the docstring of `qumo/ft/__init__.mojo`.
+  in `qumo/ai/ft_tools.mojo`. Imports are listed in the docstring of `qumo/ft/__init__.mojo`.
 * **`qumo/gpu`**: vendor-neutral GPU state-vector and Pauli-frame back ends on MAX (NVIDIA, AMD, Apple),
   compiled only with `-D QUMO_GPU`; `make gpu-check` cross-compiles them without a device.
 * **`qumo/net`**: native HTTP/1.1 and TLS client (OpenSSL 3 loaded at run time) used by the hardware and
@@ -242,8 +247,8 @@ detector error model → swappable decoders → Sinter-style statistics.
 
 * **Tool registry**: every agent-facing operation is a tool (JSON Schema input,
   JSON output) available identically through MCP (`qumo mcp`), the CLI
-  (`qumo tool <name> '<json>'`) and tests. Module tools are added in
-  `qumo/ai/registry.mojo`.
+  (`qumo tool <name> '<json>'`) and tests. The tools over `exec`, `algorithms` and `ft` are
+  `qumo/ai/exec_tools.mojo`, `algorithm_tools.mojo` and `ft_tools.mojo`, added in `qumo/ai/registry.mojo`.
 * **Diagnostics**: every error is `QM-Exxx: message. Hint: …`; the registry
   turns them into structured `Diagnostic` JSON (`docs/ERRORS.md`).
 * **Self-description**: `qumo describe gates|errors|capabilities`, `llms.txt`.
