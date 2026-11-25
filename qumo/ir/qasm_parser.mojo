@@ -718,14 +718,22 @@ struct QasmParser(Movable):
             _ = self.expect_punct(Punct.RBRACK, "']'")
             if step == 0:
                 raise self.err("QM-E530", "slice step must be non-zero", t, "write q[0:2] (inclusive) or q[0:2:6]")
-            var i = a
-            while (step > 0 and i <= b) or (step < 0 and i >= b):
-                out.append(self.norm_index(i, size, reg_t, t))
+            # both bounds are inclusive and negative ones count from the end (q[0:-1] is the
+            # whole register); the step then walks the normalised bounds, up or down
+            var i = self.norm_index(a, size, reg_t, t)
+            var stop = self.norm_index(b, size, reg_t, t)
+            while (step > 0 and i <= stop) or (step < 0 and i >= stop):
+                out.append(i)
                 i += step
             return False
         _ = self.expect_punct(Punct.RBRACK, "']'")
         out.append(self.norm_index(a, size, reg_t, t))
         return True
+
+    def require_selection(self, n: Int, reg_t: Token) raises:
+        """A slice such as q[2:1] can select nothing; no operand may be empty."""
+        if n == 0:
+            raise self.err("QM-E521", "the index range of '" + self.text(reg_t) + "' selects no elements", reg_t, "ranges are inclusive and run in the direction of the step: write q[1:2], or q[2:-1:1] (start:step:stop) to count down")
 
     def norm_index(self, v: Int, size: Int, reg_t: Token, t: Token) raises -> Int:
         var i = v
@@ -804,6 +812,7 @@ struct QasmParser(Movable):
             _ = self.next()
             var rel = List[Int]()
             _ = self.parse_index_set(size, t, rel)
+            self.require_selection(len(rel), t)
             if len(rel) > 1:
                 self.charge(len(rel), t)
             for x in rel:
@@ -840,6 +849,7 @@ struct QasmParser(Movable):
             _ = self.next()
             var rel = List[Int]()
             _ = self.parse_index_set(reg.size, t, rel)
+            self.require_selection(len(rel), t)
             if len(rel) > 1:
                 self.charge(len(rel), t)
             for r in rel:
