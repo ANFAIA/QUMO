@@ -38,6 +38,7 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 
 ### Fixed
 
+- `circuit_from_json` checks the values an instruction carries, not only the sizes (QM-E911): a negative `clbit` on a measure (it loaded and returned counts `{"": 1024}`), an observable `index` outside 0 to 63 (the simulators hold observables in a 64-bit mask; `99999999999` made `num_observables` 1e11 and hung), a record that does not exist yet (negative counts back from the latest measurement, as in the pragma), a condition bit below 0 (it meant "no condition") or a value other than 0 or 1, a qubit outside the register, a probability outside [0, 1] or a channel that adds past 1, a Pauli letter outside 1 to 3, and a Kraus matrix of the wrong size. Documents the writer produces still load. `tests/test_circuit_json_bounds.mojo`. (project review, 2026-11-25)
 - The resource estimator counted three synthesised rotations for every constant `U` gate, so `U(pi/2, 0, pi)` (H) and `U(0, 0, pi/4)` (T) were reported as non-Clifford rotations. Constant angles are now classified as for `RZ`/`RY`: a multiple of pi/2 is free, an odd multiple of pi/4 is one T, and when theta is a multiple of pi the two Rz merge into one rotation by phi + lambda (phi - lambda for an odd multiple). Symbolic angles still count three. `recommended_method` and `is_clifford()` are unchanged (they still treat `U` as non-Clifford). (`qumo/exec/resources.mojo`, `tests/test_orchestrator.mojo`)om/ANFAIA/QUMO/pull/1), 2026-11-03)
 
 ### Fixed

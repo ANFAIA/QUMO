@@ -249,6 +249,12 @@ cannot drift from the implementation:
 * **Circuit JSON** (`qumo.circuit.v1`): `circuit_to_json` and
   `circuit_from_json` round-trip. Every tool accepts `circuit` (JSON) instead
   of `qasm`, for agents that prefer structured input.
+  The loader bounds sizes (QM-E911, the wire rule under "Size limits") and the values
+  in each instruction: qubits and clbits against the register, records against the
+  measurements made so far (absolute from 0, or negative to count back), an observable
+  index in 0 to 63, probabilities in [0, 1] (a channel's branches add up to at most 1),
+  Pauli letters 1 to 3, Kraus matrices of 2 x 2^n x 2^n numbers, condition bits of 0 or
+  more and condition values of 0 or 1.
 * **Program JSON** (`qumo.program.v1`): `program_to_json` and `program_from_json`
   round-trip, wrapping circuit JSON. Malformed input is QM-E587, or QM-E583 for a
   wrong nesting; every index is checked before anything runs.
