@@ -234,7 +234,12 @@ independent of the core count (fixed seed tree and reduction order). Design: `rl
 * **`qumo/gpu`**: vendor-neutral GPU state-vector and Pauli-frame back ends on MAX (NVIDIA, AMD, Apple),
   compiled only with `-D QUMO_GPU`; `make gpu-check` cross-compiles them without a device.
 * **`qumo/net`**: native HTTP/1.1 and TLS client (OpenSSL 3 loaded at run time) used by the hardware and
-  LLM clients in `exec`; it imports nothing from QUMO.
+  LLM clients in `exec`; it imports nothing from QUMO. It is the one implementation of the stack (libc
+  bindings, sockets, TLS, URLs, HTTP/1.1, the URL guard, SSE). The agent harness re-exports `libc` and
+  `fdutil` from it; the modules that raise coded errors are generated into
+  `agents/mojo/qumo_agent/net/` with the harness's codes (`QA-E104`/`QA-E105` for `QM-E959`/`QM-E951`)
+  and `tests/test_net_mirror.mojo` fails when a generated file differs. Edit `qumo/net`, then run
+  `QUMO_UPDATE_NET=1 .venv/bin/mojo run -I . tests/test_net_mirror.mojo`.
 
 ## 5. Algorithms (`qumo/algorithms`) and QEC (`qumo/qec`)
 

@@ -1,3 +1,5 @@
+# GENERATED from qumo/net/socket.mojo by tests/test_net_mirror.mojo. Do not edit:
+# change that file, then run QUMO_UPDATE_NET=1 .venv/bin/mojo run -I . tests/test_net_mirror.mojo
 """TCP and TLS byte streams over libc sockets (DESIGN.md 2.4.2).
 
 `tcp_connect` resolves with `getaddrinfo` and tries the addresses in order with a

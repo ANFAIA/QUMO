@@ -1,3 +1,5 @@
+# GENERATED from qumo/net/http.mojo by tests/test_net_mirror.mojo. Do not edit:
+# change that file, then run QUMO_UPDATE_NET=1 .venv/bin/mojo run -I . tests/test_net_mirror.mojo
 """HTTP/1.1 client: request heads, response framing, redirects (DESIGN.md 2.4.5).
 
 Every request is sent with `Connection: close` (one request per connection) and
@@ -37,6 +39,7 @@ comptime REDIRECT_KEEP_METHOD = 3   # model POST: 307/308, method and body kept,
 
 comptime MAX_HEADER_BYTES = 65536
 comptime MAX_HEADER_LINES = 100
+comptime MAX_INTERIM_RESPONSES = 16   # 1xx responses skipped before the final one
 comptime MAX_VISITS_PER_URL = 4
 comptime _MAX_CHUNK_LINE = 4096
 
@@ -275,7 +278,9 @@ def _parse_status(line: String) raises -> Tuple[Int, String]:
 
 
 def _read_head[S: ByteStream](mut s: S, mut r: _Reader, timeout_ms: Int) raises -> _Head:
-    """Status line and headers of the final (non-1xx) response."""
+    """Status line and headers of the final (non-1xx) response. At most
+    `MAX_INTERIM_RESPONSES` 1xx responses are skipped before it; one more raises QA-E104."""
+    var interim = 0
     while True:
         var line = String()
         var used = 0
@@ -308,6 +313,9 @@ def _read_head[S: ByteStream](mut s: S, mut r: _Reader, timeout_ms: Int) raises 
             names.append(_lower(String(String(h[byte=0:colon]).strip())))
             values.append(String(String(h[byte=colon + 1:]).strip()))
         if st[0] >= 100 and st[0] < 200:
+            interim += 1
+            if interim > MAX_INTERIM_RESPONSES:
+                raise Error(E_NETWORK + ": more than " + String(MAX_INTERIM_RESPONSES) + " interim (1xx) responses")
             continue
         return _Head(st[0], st[1], names^, values^)
 
