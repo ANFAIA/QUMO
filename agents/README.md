@@ -43,6 +43,16 @@ Environment (keys are read from the environment only, never written):
 | `QUMO_AGENTS_LOCAL_URL` | optional: base URL of the `local` back end (default `http://localhost:11434/v1`) |
 | `QUMO_AGENTS_LOCAL_API_KEY` | optional: key for a local server that asks for one; never read from `agents.json` |
 
+What a check command can do: `run_check` (and the same rule in the native harness) runs only
+allow-listed commands with path-like, relative arguments. `build/qumo` takes the `run`,
+`statevector`, `expect`, `transpile`, `emulate`, `validate`, `info`, `draw`, `convert`, `vqe` and
+`describe` subcommands; file arguments follow the `read_file` rules, and `-o` / `--output` works
+only inside an open sandbox. On the `claude-code` back end `convert` and `transpile` are not
+allowed (use the MCP tools). Checks on the API back ends and the Mojo harness do not see
+variables named like a token, key or secret; the Claude Code and Codex CLIs pass your whole
+environment unless `agents.local.json` sets `"claude_code": {"env": "scrub"}` or
+`"codex": {"env": "scrub"}` (see [docs/AGENTS.md](../docs/AGENTS.md), section 7).
+
 ## Use
 
 ```bash
