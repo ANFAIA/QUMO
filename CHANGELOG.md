@@ -8,6 +8,7 @@ QUMO is a research prototype. Its version string is `0.1.0` (`build/qumo version
 
 ### Fixed
 
+- `sample_ptsbe` mis-simulated PAULI_CHANNEL_2 (it read the table offset as a probability, so `t(0); pauli_channel_2` with XX certain gave `{"00": 200}` where `sample` gives `{"11": 200}`) and CORRELATED_ERROR / ELSE_CORRELATED_ERROR (it read the Pauli-table offset as a qubit, a possible out-of-range write). PAULI_CHANNEL_2 now uses its table and matches `sample`; E and ELSE are refused with QM-E414, as is any noise instruction the sampler does not know. This also reaches `emulate`. Tests in `tests/test_noise_sim.mojo`.
 - Agent tools `list_files` and `search_code` (`agents/qumo_agents/tools/repo.py`) no longer list or return lines of secret-looking files (`.env`, `secrets.yaml`, `*.pem`, `*.key`, anything under a secret-named directory) or of symlinks that leave the repository; `read_file`, `write_file`, `edit_file`, `list_files` and `search_code` now share one path rule (`_forbidden`), as the Mojo port already did.
 
 ### Added
