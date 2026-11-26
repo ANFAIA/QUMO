@@ -1,9 +1,10 @@
 # qumo-hardware
 
 Run QUMO-compiled circuits on real quantum hardware through one vendor-neutral
-provider interface. First providers: **IBM Quantum** (qiskit-ibm-runtime,
-client-side Sampler) and **Quantinuum** (Nexus via qnexus; H2 and Helios), plus
-offline emulators for both.
+provider interface. Providers: **IBM Quantum**, **Quantinuum** (Nexus; H2 and Helios), **IonQ** (cloud
+simulator), **qBraid**, **SpeQtrum** and `local` offline emulators. The default clients
+are native Mojo, in [native/](native/README.md); the vendor Python SDKs are optional
+fallbacks.
 
 ```bash
 make py                                            # build/qumo_py.so (the compiler) at the repo root

@@ -4,8 +4,9 @@
 runs circuits compiled by QUMO on real quantum computers. The remote providers
 are **IBM Quantum** (Qiskit Runtime / IBM Quantum Compute API),
 **Quantinuum** (Quantinuum Nexus: System Model H2 and Helios) and **IonQ**
-(IonQ cloud simulator; QPUs are not enabled yet). A `local` provider runs the
-same payloads offline, so you can test everything without an account.
+(IonQ cloud simulator; QPUs are not enabled yet). There are also providers for
+**qBraid** (an aggregator) and **SpeQtrum** (section 10). A `local` provider runs
+payloads offline, so you can test without an account.
 
 ```bash
 make py                                                    # build/qumo_py.so: the QUMO compiler used by the plugins
@@ -157,10 +158,14 @@ Each provider has up to two client implementations:
 | `qbraid` | `plugins/hardware/native/qumo_hw/qbraid_api.mojo` (aggregator: device QRNs, credits) | none |
 | `quantinuum` | `plugins/hardware/native/qumo_hw/quantinuum_api.mojo` (H2 devices in Nexus) | `quantinuum.py` (qnexus, pytket, guppylang) |
 
-The native clients are the Mojo package `qumo_hw` in `plugins/hardware/native`. It is outside `qumo/`
-and no core module imports it (`make check-neutrality`); `make py` adds `-I plugins/hardware/native` so
-that `python/qumo_py.mojo` can bind them. They share one loopback test (`qumo_hw.common.loopback_host`:
-127.0.0.1, localhost, ::1), the only hosts a client reaches over plain http.
+The native clients are the Mojo package `qumo_hw` in `plugins/hardware/native`
+([README](../plugins/hardware/native/README.md): build commands and environment variables). It is
+outside `qumo/` and no core module imports it (`make check-neutrality`); `make py` adds
+`-I plugins/hardware/native` so that `python/qumo_py.mojo` can bind them. They share one loopback test
+(`qumo_hw.common.loopback_host`: 127.0.0.1, localhost, ::1), the only hosts a client reaches over plain
+http. The package also holds a Pasqal Cloud client for analog programs (`pasqal_api`,
+`pasqal_pulser`), which has no provider in this plugin and is not bound: it is called from Mojo
+(`examples/hardware/pasqal_mis.mojo`).
 
 Native clients run the whole provider protocol inside the `qumo_py` extension
 (`make py`): request bodies, QUMO's HTTP/1.1 + TLS stack (`qumo/net`, OpenSSL 3
@@ -194,9 +199,10 @@ instance and an API key. Plans (IBM pricing page, checked 2026-10-12): Open
 Plan, free, "up to 10 minutes of runtime per month" (IBM's documentation
 describes it as 10 QPU minutes per 28-day rolling window); Pay-As-You-Go
 "starts at $96 USD / minute", billed per second of QPU usage; Flex and
-Premium are contracts with lower per-minute prices. Credentials are read **only**
-through qiskit-ibm-runtime's standard mechanisms; the plugin never reads, stores
-or prints a token:
+Premium are contracts with lower per-minute prices. Credentials come from
+qiskit-ibm-runtime's standard places: the SDK reads them on the `--client python`
+path, and the native client reads the same ones in Mojo (below). The plugin never
+stores or prints a token:
 
 ```bash
 export QISKIT_IBM_TOKEN=<api key>              # environment (CI, containers)
@@ -569,8 +575,9 @@ free).
   untrusted directory cannot load a planted extension. A non-editable
   `pip install` of the plugin therefore needs `QUMO_PY_PATH`.
 * Credentials only through the providers' standard mechanisms (IBM env vars or
-  saved account; qnexus login store; IonQ `IONQ_API_KEY`, passed explicitly to
-  the SDK). No token is read, written or printed by the plugins, and none is
+  saved account; qnexus login store; IonQ `IONQ_API_KEY`, which the native client
+  reads in Mojo and the fallback passes explicitly to the SDK). The plugins write
+  or print no token, and none is
   stored in the repository or in job records
   (`$QUMO_HARDWARE_HOME/jobs`, default `~/.qumo/hardware/jobs`, holds job ids,
   backend names, layouts and counts).
@@ -629,8 +636,8 @@ uv pip install --python bench/.venv/bin/python qnexus pytket-quantinuum         
 uv pip install --python bench/.venv/bin/python "guppylang>=1.2"                  # Helios / Selene path
 # or, in another venv, for the H2-1LE emulator:
 # uv pip install --prerelease=allow --python <venv>/bin/python "pytket-quantinuum[pecos]==0.59.3" "pytket==2.18.5"
-bench/.venv/bin/python -m pytest plugins/hardware/tests -q                        # 160 tests (156 run, 4 slow skipped), no accounts
-QUMO_HW_SLOW=1 bench/.venv/bin/python -m pytest plugins/hardware/tests -q -m slow # + the 4 slow H2-1LE / Selene emulator tests
+bench/.venv/bin/python -m pytest plugins/hardware/tests -q                        # no accounts; slow tests, and tests whose SDK is missing, skip
+QUMO_HW_SLOW=1 bench/.venv/bin/python -m pytest plugins/hardware/tests -q -m slow # only the slow H2-1LE / Selene emulator tests
 ```
 
 Pin `pytket` when adding the `pecos` extra: an unpinned resolve can downgrade
@@ -668,6 +675,22 @@ without tracebacks, no `fake_nighthawk` warning.
 4. Register it, either in `registry.BUILTIN` or from a separate package:
    `[project.entry-points."qumo_hardware.providers"] braket = "qumo_braket:BraketProvider"`.
 5. Add tests with mocked SDK calls (see `tests/test_quantinuum.py`).
+
+Vendor code goes in `plugins/hardware`, never under `qumo/` (`make check-neutrality`;
+[ARCHITECTURE.md](ARCHITECTURE.md#4c-vendor-code-outside-qumo)). A provider that only
+calls a vendor SDK needs the steps above and no Mojo. For a built-in provider with a
+native Mojo client:
+
+1. Write `plugins/hardware/native/qumo_hw/<vendor>_api.mojo` over `qumo.net`, and use
+   `qumo_hw.common.loopback_host` as the only exception to https. The file scan of
+   `check-neutrality` takes the vendor names from the `*_api.mojo` files, so the new
+   name is covered.
+2. Import it in `python/qumo_py.mojo` and register its functions there with
+   `m.def_function`. `make py` already has `-I plugins/hardware/native`.
+3. Add the provider class under `qumo_hardware/`, and its loaders in `registry.py`:
+   `BUILTIN`, `NATIVE` and, if there is an SDK fallback, `PYTHON`.
+4. Test the client against a fake server on 127.0.0.1 (see `tests/test_ionq.py`), and
+   add it to the table of [plugins/hardware/native/README.md](../plugins/hardware/native/README.md).
 
 Notes for the next ones:
 

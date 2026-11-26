@@ -252,7 +252,7 @@ xcrun metal --version                                         # must print a ver
 
 ## Quantum hardware
 
-`plugins/hardware` (`qumo_hardware`) runs QUMO-compiled circuits on IBM Quantum and Quantinuum (Nexus) behind one provider interface. Offline emulators need no account; remote submission only happens with `--yes`.
+`plugins/hardware` (`qumo_hardware`) runs QUMO-compiled circuits on IBM Quantum, Quantinuum (Nexus), IonQ (simulator), qBraid and SpeQtrum behind one provider interface; the default clients are native Mojo ([plugins/hardware/native](../plugins/hardware/native/README.md)). Offline emulators need no account; remote submission only happens with `--yes`.
 
 ```bash
 export PYTHONPATH=plugins/hardware        # after `make py`
