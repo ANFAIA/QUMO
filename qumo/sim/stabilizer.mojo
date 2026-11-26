@@ -35,6 +35,7 @@ from qumo.ir.circuit import Circuit, Instruction, QUARTER_TURN_LIMIT, check_shot
 from qumo.ir.param import Param
 from qumo.ir.pauli import PauliTerm
 from qumo.core.rng import Rng
+from qumo.ir.pauli_noise import draw_pauli_noise, draw_pauli_channel_2, correlated_error_fires
 from qumo.sim.runner import SampleResult
 
 comptime WPtr = MutPointer[UInt64, MutAnyOrigin]
@@ -540,50 +541,22 @@ struct TableauSimulator(Copyable):
         elif which == 2: self.y(q)
         elif which == 3: self.z(q)
 
+    def _pauli_code(mut self, code: Int, q0: Int, q1: Int):
+        if code != 0:
+            self._pauli(code & 3, q0)
+            self._pauli(code >> 2, q1)
+
     def apply_noise(mut self, g: Instruction):
-        var k = g.kind
-        var p = g.p0.value()
-        if k == Op.X_ERROR:
-            if self.rng.uniform() < p: self.x(g.q0)
-        elif k == Op.Y_ERROR:
-            if self.rng.uniform() < p: self.y(g.q0)
-        elif k == Op.Z_ERROR:
-            if self.rng.uniform() < p: self.z(g.q0)
-        elif k == Op.DEPOLARIZE1:
-            if self.rng.uniform() < p: self._pauli(1 + self.rng.below(3), g.q0)
-        elif k == Op.PAULI_CHANNEL_1:
-            var u = self.rng.uniform()
-            var px = g.p0.value()
-            var py = g.p1.value()
-            var pz = g.p2.value()
-            if u < px: self.x(g.q0)
-            elif u < px + py: self.y(g.q0)
-            elif u < px + py + pz: self.z(g.q0)
-        elif k == Op.DEPOLARIZE2:
-            if self.rng.uniform() < p:
-                var r = 1 + self.rng.below(15)
-                self._pauli(r & 3, g.q0)
-                self._pauli(r >> 2, g.q1)
+        # semantics and draw order: qumo.ir.pauli_noise
+        self._pauli_code(draw_pauli_noise(g, self.rng), g.q0, g.q1)
 
     def apply_noise_in(mut self, circuit: Circuit, g: Instruction) raises:
         """`apply_noise`, plus the channels stored in the circuit's side tables."""
         var k = g.kind
         if k == Op.PAULI_CHANNEL_2:
-            var off = Int(g.p0.value())
-            var u = self.rng.uniform()
-            for i in range(15):
-                var p = circuit.noise_table[off + i]
-                if u < p:
-                    # i + 1 = (first letter) * 4 + second letter
-                    self._pauli((i + 1) >> 2, g.q0)
-                    self._pauli((i + 1) & 3, g.q1)
-                    return
-                u -= p
+            self._pauli_code(draw_pauli_channel_2(circuit, g, self.rng), g.q0, g.q1)
         elif k == Op.CORRELATED_ERROR:
-            if g.q2 == 0:
-                self.chain_fired = False
-            if not self.chain_fired and self.rng.uniform() < g.p0.value():
-                self.chain_fired = True
+            if correlated_error_fires(g, self.rng, self.chain_fired):
                 for i in range(g.q1):
                     self._pauli(circuit.pauli_table[g.q0 + 2 * i + 1], circuit.pauli_table[g.q0 + 2 * i])
         elif k == Op.KRAUS1 or k == Op.KRAUS2:

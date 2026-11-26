@@ -36,6 +36,7 @@ from qumo.sim.stabilizer import TableauSimulator
 from qumo.sim.statevector import StateVector
 from qumo.sim.runner import apply_instruction, sample
 from qumo.core.rng import Rng
+from qumo.ir.pauli_noise import draw_pauli_noise, draw_pauli_channel_2, correlated_error_fires
 from qumo.sim.branching import BranchingSimulator
 from qumo.qec.codes import NoiseParams
 from qumo.ft.classical import XorExpr
@@ -216,35 +217,29 @@ def _pauli_sv(mut sv: StateVector, which: Int, q: Int):
         sv.apply_diag_1q(1.0, 0.0, -1.0, 0.0, q)
 
 
-def _noise_sv(mut sv: StateVector, g: Instruction, mut rng: Rng):
+def _pauli_code_sv(mut sv: StateVector, code: Int, q0: Int, q1: Int):
+    if code != 0:
+        _pauli_sv(sv, code & 3, q0)
+        _pauli_sv(sv, code >> 2, q1)
+
+
+def _noise_sv(c: Circuit, mut sv: StateVector, g: Instruction, mut rng: Rng, mut fired: Bool):
+    # semantics and draw order: qumo.ir.pauli_noise (Kraus channels are not Pauli noise and stay ignored here)
     var k = g.kind
-    var p = g.p0.value()
-    if k == Op.X_ERROR:
-        if rng.uniform() < p: _pauli_sv(sv, 1, g.q0)
-    elif k == Op.Y_ERROR:
-        if rng.uniform() < p: _pauli_sv(sv, 2, g.q0)
-    elif k == Op.Z_ERROR:
-        if rng.uniform() < p: _pauli_sv(sv, 3, g.q0)
-    elif k == Op.DEPOLARIZE1:
-        if rng.uniform() < p: _pauli_sv(sv, 1 + rng.below(3), g.q0)
-    elif k == Op.DEPOLARIZE2:
-        if rng.uniform() < p:
-            var r = 1 + rng.below(15)
-            _pauli_sv(sv, r & 3, g.q0)
-            _pauli_sv(sv, r >> 2, g.q1)
-    elif k == Op.PAULI_CHANNEL_1:
-        var u = rng.uniform()
-        var px = g.p0.value()
-        var py = g.p1.value()
-        var pz = g.p2.value()
-        if u < px: _pauli_sv(sv, 1, g.q0)
-        elif u < px + py: _pauli_sv(sv, 2, g.q0)
-        elif u < px + py + pz: _pauli_sv(sv, 3, g.q0)
+    if k == Op.PAULI_CHANNEL_2:
+        _pauli_code_sv(sv, draw_pauli_channel_2(c, g, rng), g.q0, g.q1)
+    elif k == Op.CORRELATED_ERROR:
+        if correlated_error_fires(g, rng, fired):
+            for i in range(g.q1):
+                _pauli_sv(sv, c.pauli_table[g.q0 + 2 * i + 1], c.pauli_table[g.q0 + 2 * i])
+    else:
+        _pauli_code_sv(sv, draw_pauli_noise(g, rng), g.q0, g.q1)
 
 
 def sv_trajectory(c: Circuit, mut sv: StateVector, mut rng: Rng, mut creg: List[UInt8]) raises:
     """One shot on a state vector with List-based classical register (no 62-bit limit)."""
     var empty = List[Float64]()
+    var fired = False
     for g in c.ops:
         if g.cond >= 0 and not condition_holds(c, g, creg):
             continue
@@ -258,7 +253,7 @@ def sv_trajectory(c: Circuit, mut sv: StateVector, mut rng: Rng, mut creg: List[
         elif k == Op.RESET:
             sv.reset_qubit(g.q0, rng)
         elif op_is_noise(k):
-            _noise_sv(sv, g, rng)
+            _noise_sv(c, sv, g, rng, fired)
 
 
 def _accepted(creg: List[UInt8], post: List[Int]) -> Bool:
