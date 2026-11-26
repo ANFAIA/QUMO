@@ -108,7 +108,8 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--dry-run", action="store_true", help="compile, validate and estimate only")
     r.add_argument("--yes", "-y", action="store_true", help="confirm submission to a remote/billable backend")
     r.add_argument("--max-cost", type=float,
-                   help="refuse if the estimate exceeds this (Quantinuum: HQC/eHQC, IBM: QPU seconds); "
+                   help="refuse if the estimate exceeds this (Quantinuum: HQC/eHQC, IBM: QPU seconds, "
+                        "qBraid: credits) or if the backend has no estimate to compare it with; "
                         "also sent as the server-side cap (max_cost / max_execution_time)")
     r.add_argument("--no-wait", action="store_true", help="return right after submission")
     r.add_argument("--timeout", type=float, default=600.0, help="seconds to wait for a remote result")

@@ -404,6 +404,29 @@ def test_submit_refuses_qpu_and_out_of_range_shots(ionq, compiled_bell):
     assert ionq.requests() == []
 
 
+def test_max_cost_without_a_quote_is_refused(ionq, compiled_bell):
+    """IonQ quotes nothing for the simulator, so a cap has nothing to be compared with: refuse, do not submit."""
+    with pytest.raises(HardwareError) as exc:
+        IonQProvider().submit(compiled_bell, 100, ARIA1, max_cost=5.0, confirm=True)
+    assert exc.value.code == E_LIMIT and "--max-cost" in exc.value.message
+    assert "drop --max-cost" in exc.value.hint
+    with pytest.raises(HardwareError) as exc:
+        runner.run(BELL, IonQProvider(), ARIA1, shots=100, confirm=True, max_cost=5.0, wait=False)
+    assert exc.value.code == E_LIMIT
+    assert ionq.requests() == []
+    job = IonQProvider().submit(compiled_bell, 100, ARIA1, confirm=True)  # no cap: the unquoted job is accepted
+    assert job.job_id == JOB_ID
+
+
+def test_max_cost_without_a_quote_is_refused_by_the_sdk_client_too(ionq, compiled_bell):
+    from qumo_hardware.ionq_sdk import IonQSdkProvider
+
+    with pytest.raises(HardwareError) as exc:  # refused before qiskit-ionq is imported or anything is sent
+        IonQSdkProvider().submit(compiled_bell, 100, ARIA1, max_cost=5.0, confirm=True)
+    assert exc.value.code == E_LIMIT and "drop --max-cost" in exc.value.hint
+    assert ionq.requests() == []
+
+
 # ----------------------------------------------------------------- submit, status, result
 def test_submit_posts_the_bell_job(ionq, compiled_bell):
     job = IonQProvider().submit(compiled_bell, 500, ARIA1, seed=7, confirm=True)
