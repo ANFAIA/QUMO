@@ -432,7 +432,8 @@ decoder copies the integer graph, while plain sparse blossom threads share it.
 
 `plan_windows(dem, rounds_of, window, step)` cuts a model into overlapping windows
 and `SlidingWindowDecoder[D]` runs any `Decoder` over them, committing only the first
-`step` rounds of each. `(rounds - window) % step == 0`, cudaq-qec's rule (QM-E736).
+`step` rounds of each. `0 < step <= window`, and `(rounds - window) % step == 0` when
+`window < rounds` (cudaq-qec's rule); a window of `rounds` or more is one window (QM-E736).
 The `Decoder` trait returns an observable mask and says nothing about edges, so each
 window's model adds virtual observables on the detectors a committed error touches
 past the commit region; with more of those than free mask bits a window has several

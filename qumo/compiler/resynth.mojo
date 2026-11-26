@@ -1324,6 +1324,8 @@ def resynthesize_blocks(mut c: Circuit, target: Target, physical: Bool, opts: Sy
     if errors > 0:
         note += " synth_errors=" + String(errors)
     note += policy_note
+    if sess_ready and sess.index_problem.byte_length() > 0:
+        note += " model_index_warning(" + sess.index_problem + ")"
     stats.note = note
     _ = len(dirs)
     return total

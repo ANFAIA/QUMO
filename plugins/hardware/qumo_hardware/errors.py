@@ -83,6 +83,8 @@ CATALOG: dict[str, tuple[str, str]] = {
 # Cause-specific hints for QM-E956 (one code, several limits).
 HINT_SHOTS = "lower --shots, or split the run into several jobs and add the counts"
 HINT_COST = "raise --max-cost if this cost is intended, or lower --shots / simplify the circuit"
+HINT_NO_QUOTE = ("drop --max-cost to accept the unquoted job, or pick a backend whose cost estimate "
+                 "has a unit (`estimate` shows it)")
 HINT_LOCAL_QUBITS = ("local emulation needs memory exponential in the number of active qubits; reduce the circuit, "
                      "or use a provider's cloud emulator or hardware (e.g. -p quantinuum -b H2-1E, -p ibm -b <device>)")
 
