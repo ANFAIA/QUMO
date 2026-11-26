@@ -132,12 +132,6 @@ Each SDK in its own container, built the way it would ship: a scratch image with
 
 ![Benchpress two-qubit gates, QUMO against Qiskit](bench/results/charts/benchpress_2q_ratio.png)
 
-Benchpress's own Cirq gym implements very little: of its 1066 tests, 10 run (circuit build, QASM import and manipulation), 1054 are skipped as "Not implemented" and 2 fail, so there is no Cirq transpile comparison to draw from Benchpress. The 10 tests that do run, timed for QUMO, Qiskit and Cirq:
-
-![Benchpress tests implemented by the Cirq gym](bench/results/charts/benchpress_cirq_tests.png)
-
-TKET has no Benchpress gym here. Benchpress published its own Qiskit against TKET run (560 tests; [bench/results/benchpress_published_qiskit_vs_tket.txt](bench/results/benchpress_published_qiskit_vs_tket.txt)); that is not a measurement of this repository.
-
 ## Documentation
 
 The full map is [docs/README.md](docs/README.md). Common entry points:
