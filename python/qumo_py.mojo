@@ -615,7 +615,7 @@ def py_hamiltonian_circuit(labels: PythonObject, coeffs: PythonObject, time: Pyt
     return _wrap(hamiltonian_circuit_from_labels(ls, cs, Float64(py=time)))
 
 
-comptime QUMO_VERSION = "0.2.0"
+comptime QUMO_VERSION = "0.3.0"
 
 
 def py_version() raises -> PythonObject:

@@ -141,9 +141,57 @@ def test_m3_wide() raises:
     print("  40 qubits:", len(counts), "strings, P(0..0) + P(1..1): raw", raw0 + raw1, "M3", v0 + v1)
 
 
+def _ideal(c: Circuit, shots: Int, seed: UInt64) raises -> SampleResult:
+    return sample(c, shots, seed)
+
+
+def test_trex_std_uses_the_covariance() raises:
+    """Terms of one QWC group come from the same shots. On a Bell pair with a perfect
+    readout Z0 - Z1 is 0 on every shot and Z0 + Z1 is +-2 on every shot."""
+    var bell = Circuit(2)
+    bell.h(0)
+    bell.cx(0, 1)
+    var shots = 40000
+    var diff = trex_expectation(_ideal, bell, parse_pauli_sum("Z0 - Z1"), shots, 3)
+    assert_almost_equal(diff.value, 0.0)
+    assert_true(diff.std < 1e-12, "Z0 - Z1 has no shot noise, got std " + String(diff.std))
+    var summ = trex_expectation(_ideal, bell, parse_pauli_sum("Z0 + Z1"), shots, 3)
+    var exact_std = 2.0 / sqrt(Float64(shots))
+    assert_true(abs(summ.std - exact_std) < 0.02 * exact_std, "Z0 + Z1 std is 2/sqrt(S), got " + String(summ.std))
+    # one term: the same number as the per-term formula (1 - m^2) / S
+    var c = Circuit(1)
+    c.ry(0.7, 0)
+    var one = trex_expectation(_ideal, c, parse_pauli_sum("Z0"), shots, 3)
+    assert_almost_equal(one.std, sqrt((1.0 - one.raw * one.raw) / Float64(shots)), atol=1e-12)
+    print("  covariance: Z0 - Z1 std", diff.std, "| Z0 + Z1 std", summ.std)
+
+
+def test_trex_measures_like_the_estimator() raises:
+    """The setting is the shared one: terminal measurements are replaced, so the basis
+    change is not applied to a collapsed state; reset and mid-circuit measurement run."""
+    var hm = Circuit(1, 1)
+    hm.h(0)
+    hm.measure(0, 0)
+    var x = trex_expectation(_ideal, hm, parse_pauli_sum("X0"), 4000, 3)
+    assert_almost_equal(x.value, 1.0)  # <X> of |+>
+    var xr = Circuit(1)
+    xr.x(0)
+    xr.reset(0)
+    assert_almost_equal(trex_expectation(_ideal, xr, parse_pauli_sum("Z0"), 4000, 3).value, 1.0)
+    # mid-circuit measurement, then CX: Z0 Z1 = +1 on every shot; the circuit keeps its own bit
+    var mm = Circuit(2, 1)
+    mm.h(0)
+    mm.measure(0, 0)
+    mm.cx(0, 1)
+    var zz = trex_expectation(_ideal, mm, parse_pauli_sum("Z0 Z1 + X0"), 4000, 3)
+    assert_true(abs(zz.value - 1.0) < 5 * zz.std + 1e-12, "collapsed: <Z0 Z1> = 1, <X0> = 0: " + String(zz))
+
+
 def main() raises:
     test_trex_symmetric()
     test_trex_asymmetric()
+    test_trex_std_uses_the_covariance()
+    test_trex_measures_like_the_estimator()
     test_m3_equals_dense()
     test_m3_wide()
     print("test_readout_mitigation OK")
