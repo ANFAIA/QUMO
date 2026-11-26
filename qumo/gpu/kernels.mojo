@@ -876,7 +876,7 @@ def gk_tile[dt: DType, FULL: Bool, HEAVY: Bool](
     guards compiled out), HEAVY (the run has SWAP / dense 4x4 ops). Register
     pressure is kept low: the local-index map (`lid`) is rebuilt only around
     transposes, from the packed register set of the current segment."""
-    comptime assert REG_BITS >= 1 and REG_BITS <= 4, "QUMO_GPU_REG_BITS must be 1..4 (4-bit register fields)"
+    comptime assert REG_BITS >= 2 and REG_BITS <= 4, "QUMO_GPU_REG_BITS must be 2..4 (SWAP and dense 4x4 gates need two register qubits per thread; 4-bit register fields)"
     # One dynamic shared region, sized per launch by the host
     # (tile_smem_bytes): [re tile | im tile | matrices | op records | segment
     # records | offsets]. Runs carry only the cache they need (a typical run

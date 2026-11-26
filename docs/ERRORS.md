@@ -323,6 +323,16 @@ Fix: Allocate GpuStateVector(circuit.num_qubits).
 **The GPU executor has no kernel for an operation of the execution plan.**  
 Fix: Run this circuit on the CPU state vector (qumo.sim.runner).
 
+### QM-E476
+
+**An argument of a direct GpuStateVector call is not valid for the state: a qubit index that is negative or not below num_qubits, the same qubit twice in one multi-qubit gate, a Pauli mask (pauli_sums) that is negative or has a bit at or above num_qubits, X and Z mask lists of different lengths, a segment size that does not divide the state, or a negative width.**  
+Fix: Use distinct qubits 0 <= q < num_qubits, masks below 2^num_qubits and one Z mask per X mask. Circuits are checked by circuit.validate() before they reach the GPU.
+
+### QM-E477
+
+**A GPU state does not fit the memory that can be queried: the free memory the device reports for a GPU state, the machine's physical memory for a host-emulated one. The message gives the bytes needed (2 arrays of 2^n x 4 bytes in fp32, x 8 in fp64) and the bytes found.**  
+Fix: Use fewer qubits, fp32 instead of fp64, a device with more memory, or the stabilizer simulator for Clifford circuits.
+
 ## QM-E5xx — OpenQASM
 
 ### QM-E500
