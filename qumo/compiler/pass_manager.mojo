@@ -40,7 +40,7 @@ from qumo.compiler.basis import translate_to_basis, unroll_3q, first_inexpressib
 from qumo.compiler.routing import (
     RouteOptions, RoutePlan, route_circuit, star_preroute, plan_route, finish_route, has_exact_layout,
 )
-from qumo.compiler.resynth import SynthOptions, SynthStats, resynthesize_blocks
+from qumo.compiler.resynth import SynthOptions, SynthStats, resynthesize_blocks, DEFAULT_MAX_ROTATIONS
 from qumo.compiler.ai_route import AIRouteOptions, ai_route, routed_cost, route_index_warning
 from qumo.compiler.wrap import wrap_angles
 from qumo.compiler.layout_fidelity import post_layout
@@ -474,6 +474,7 @@ def pass_decl(id: Int, names_only: Bool = False) -> PassDecl:
                 "collect Pauli-rotation networks (Clifford + rx/ry/rz/rzz/rxx/ryy; <= 6 qubits) and resynthesise rotations + Clifford tail topology-aware; replaced only when verified equal (unitary) and cheaper")
         d.block_kind = BlockKind.PAULI
         _synth_args(d, "6", "4")
+        d.int_arg("max_rotations", String(DEFAULT_MAX_ROTATIONS), "most non-Clifford rotations of a collected block; a longer run is split into consecutive blocks (synthesis time grows with the square of it); 0 = no cap", lo=0)
     elif id == PassId.WRAP_ANGLES:
         d.named("wrap_angles", "wrap|fold_angles",
                 "bring constant angles into the target's angle bounds (spec gate[min:max]) with Pauli corrections, exact up to the tracked global phase")
@@ -1364,6 +1365,8 @@ def synth_options_from_args(id: Int, args: List[String], seed: Int) raises -> Sy
     opts.method = a.get_text("method")
     opts.max_qubits = a.get_int("max_qubits")
     opts.min_block = a.get_int("min_block")
+    if a.decl.block_kind == BlockKind.PAULI:
+        opts.max_rotations = a.get_int("max_rotations")
     opts.direction = a.get_text("direction")
     opts.commute = a.get_flag("commute")
     opts.reps = a.get_int("reps")

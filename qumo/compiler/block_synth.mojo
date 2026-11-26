@@ -1565,6 +1565,26 @@ struct _PNState(Copyable):
         self.r = copy.r.copy()
 
 
+def _pn_blockers(anti: List[Bool], m: Int) -> List[Int]:
+    """blockers[k] = number of pending rotations j < k that anticommute with
+    rotation k. Rotation k is in the front layer (may be emitted next) exactly
+    when blockers[k] == 0; `_pn_release` keeps the counts current, so the
+    front test is O(1) instead of a scan over the earlier rotations."""
+    var blockers = List[Int](length=m, fill=0)
+    for j in range(m):
+        for k in range(j + 1, m):
+            if anti[j * m + k]:
+                blockers[k] += 1
+    return blockers^
+
+
+def _pn_release(anti: List[Bool], m: Int, j: Int, mut blockers: List[Int]):
+    """Rotation j has been emitted: it no longer blocks the later ones."""
+    for k in range(j + 1, m):
+        if anti[j * m + k]:
+            blockers[k] -= 1
+
+
 def _pn_greedy(pn: PauliNet, g: SubGraph, adj: _Adj, src_ops: List[Instruction], mut rng: Rng, randomize: Bool, cliff_method: String, budget: Int, seed: Int, mut out: List[Instruction]) raises -> Bool:
     var n = pn.n
     var m = len(pn.rots)
@@ -1577,6 +1597,7 @@ def _pn_greedy(pn: PauliNet, g: SubGraph, adj: _Adj, src_ops: List[Instruction],
     for j in range(m):
         for k in range(m):
             anti[j * m + k] = paulis_anticommute(pn.rots[j].x, pn.rots[j].z, pn.rots[k].x, pn.rots[k].z)
+    var blockers = _pn_blockers(anti, m)
     var v = SympTab(n)
     out.clear()
     var remaining = m
@@ -1591,12 +1612,7 @@ def _pn_greedy(pn: PauliNet, g: SubGraph, adj: _Adj, src_ops: List[Instruction],
             for k in range(m):
                 if done[k]:
                     continue
-                var front = True
-                for j in range(k):
-                    if not done[j] and anti[j * m + k]:
-                        front = False
-                        break
-                if not front:
+                if blockers[k] != 0:
                     continue
                 var sup = st.x[k] | st.z[k]
                 if pop_count(sup) == 1:
@@ -1608,6 +1624,7 @@ def _pn_greedy(pn: PauliNet, g: SubGraph, adj: _Adj, src_ops: List[Instruction],
                     var axis = 1 if (xb and zb) else (0 if xb else 2)
                     out.append(emit_rotation(pn.rots[k], src_ops, q, axis, -1 if st.r[k] != 0 else 1))
                     done[k] = True
+                    _pn_release(anti, m, k, blockers)
                     remaining -= 1
                     progress = True
                     if k == target:
@@ -1624,12 +1641,7 @@ def _pn_greedy(pn: PauliNet, g: SubGraph, adj: _Adj, src_ops: List[Instruction],
             for k in range(m):
                 if done[k]:
                     continue
-                var front = True
-                for j in range(k):
-                    if not done[j] and anti[j * m + k]:
-                        front = False
-                        break
-                if not front:
+                if blockers[k] != 0:
                     continue
                 var terms = List[Int]()
                 var sup = st.x[k] | st.z[k]
@@ -1710,13 +1722,8 @@ def _pn_greedy(pn: PauliNet, g: SubGraph, adj: _Adj, src_ops: List[Instruction],
                 var r = st.r[k]
                 for gt in cands[ci]:
                     _conj_row(x, z, r, gt)
-                var front = True
-                for j in range(k):
-                    if not done[j] and anti[j * m + k]:
-                        front = False
-                        break
                 var wgt = Int(pop_count(x | z))
-                s += 3 * wgt if front else wgt
+                s += 3 * wgt if blockers[k] == 0 else wgt
             if s < bests:
                 bests = s
                 pick = ci
@@ -1852,6 +1859,7 @@ def _pn_gadgets(pn: PauliNet, g: SubGraph, adj: _Adj, src_ops: List[Instruction]
     for j in range(m):
         for k in range(m):
             anti[j * m + k] = paulis_anticommute(pn.rots[j].x, pn.rots[j].z, pn.rots[k].x, pn.rots[k].z)
+    var blockers = _pn_blockers(anti, m)
     var px: UInt64 = 0
     var pz: UInt64 = 0
     var proot = -1
@@ -1863,12 +1871,7 @@ def _pn_gadgets(pn: PauliNet, g: SubGraph, adj: _Adj, src_ops: List[Instruction]
         for k in range(m):
             if done[k]:
                 continue
-            var front = True
-            for j in range(k):
-                if not done[j] and anti[j * m + k]:
-                    front = False
-                    break
-            if not front:
+            if blockers[k] != 0:
                 continue
             var rx = pn.rots[k].x
             var rz = pn.rots[k].z
@@ -1909,6 +1912,7 @@ def _pn_gadgets(pn: PauliNet, g: SubGraph, adj: _Adj, src_ops: List[Instruction]
         for o in inverse_ops(pre):
             raw.append(o)
         done[pick] = True
+        _pn_release(anti, m, pick, blockers)
         px = rot.x
         pz = rot.z
         proot = root
