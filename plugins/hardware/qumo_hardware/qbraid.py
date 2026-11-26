@@ -17,7 +17,8 @@ Backends are qBraid device QRNs, vendor:provider:type:name, for example:
   coupling map or native gates, so QUMO compiles all-to-all to a generic basis and qBraid /
   the vendor compiles for the device. A warning in the target says so for QPUs.
 * Cost: qBraid's own quote (GET /jobs/cost-estimate), in credits (1 credit = 0.01 USD).
-  --max-cost is in credits and is checked against the quote before submission.
+  --max-cost is in credits and is checked against the quote before submission; when qBraid
+  gives no quote the cap cannot be enforced and the submission is refused (QM-E956).
 * Results: measurementCounts come back with the leftmost character = highest clbit (verified
   with an asymmetric circuit on qir-sv, 2026-11-09), QUMO's order; widths are checked.
 """
@@ -27,7 +28,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from .base import QUEUED, BackendInfo, CostEstimate, JobHandle, TargetSpec, check_confirmed
+from .base import QUEUED, BackendInfo, CostEstimate, JobHandle, TargetSpec, check_confirmed, check_cost_cap
 from .compile import CompiledCircuit, load_qumo_py
 from .errors import E_INVALID_PAYLOAD, E_JOB, E_LIMIT, E_UNKNOWN_BACKEND, HINT_COST, HINT_SHOTS, HardwareError
 
@@ -173,6 +174,7 @@ class QbraidProvider:
             raise HardwareError(E_LIMIT, f"shots must be in 1..{MAX_SHOTS} for {backend}", HINT_SHOTS)
         fmt, text = self._payload(compiled, backend)
         est = self.estimate_cost(compiled, shots, backend)
+        check_cost_cap(est, max_cost)  # no quote: the cap cannot be compared with anything
         if max_cost is not None and est.unit == "credits" and est.amount > max_cost:
             raise HardwareError(E_LIMIT, f"qBraid quotes {est.amount} credits, above --max-cost {max_cost}", HINT_COST)
         name = f"qumo-{int(time.time())}"

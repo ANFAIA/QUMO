@@ -34,6 +34,7 @@ from .base import (
     UNKNOWN,
     JobHandle,
     check_confirmed,
+    check_cost_cap,
     new_local_job_id,
 )
 from .compile import CompiledCircuit
@@ -186,6 +187,7 @@ class IonQSdkProvider(IonQProvider):
         noise = _parse_backend(backend)
         if shots < 1 or shots > MAX_SHOTS:
             raise HardwareError(E_LIMIT, f"shots must be in 1..{MAX_SHOTS} for {backend}", HINT_SHOTS)
+        check_cost_cap(self.estimate_cost(compiled, shots, backend), max_cost)  # no quote, so no cap
         if payload is None or isinstance(payload, str):
             payload, report = self.prepare(compiled, backend)
         else:

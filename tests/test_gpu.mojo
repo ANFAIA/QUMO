@@ -20,7 +20,7 @@ vendor (fp64 kernels everywhere except Apple).
 """
 
 from std.math import cos, sin, sqrt
-from std.sys.info import size_of
+from std.sys.info import size_of, CompilationTarget
 from std.sys.defines import is_defined
 from std.os import getenv, setenv, unsetenv
 from std.testing import assert_equal, assert_true, assert_almost_equal
@@ -45,6 +45,7 @@ from qumo.gpu.device import (
     gpu_compiled, gpu_available, gpu_info, query_gpu, GPU_DEFAULT_DTYPE, GPU_FP64_SUPPORTED, GPU_FP64_RUNTIME,
     GPU_MIN_QUBITS, GpuProfile, TileKernelLimits, parse_gpu_precision, resolve_gpu_precision, gpu_build_precision,
     gpu_precision_available, check_gpu_precision, GPU_PRECISION_ENV,
+    gpu_state_bytes, host_memory_bytes, check_gpu_state_memory,
 )
 from qumo.gpu.dispatch import choose_method, sample_auto, sample_on
 from qumo.exec.orchestrator import Workflow, Device
@@ -715,7 +716,16 @@ def check_errors() raises:
     assert_true(pe.low[DType.float32]() >= 3 and pe.low[DType.float32]() <= 5)
     assert_true(pe.to_json().find("\"low_bits_fp32\":") >= 0)
     assert_true(pe.to_json().find("\"tile_bits_fp64\":") >= 0)
-    # tile size policy from reported shared memory (no device needed)
+    comptime if REG_BITS >= 3:
+        check_tile_policy()
+    print(gpu_info())
+
+
+def check_tile_policy() raises:
+    """Tile size policy from reported shared memory (no device needed). The
+    figures are for 8 or 16 amplitudes per thread (QUMO_GPU_REG_BITS 3 / 4,
+    the defaults): with 4 per thread the default tile is already a block of
+    512 threads and the policy shrinks it."""
     var t4 = GpuProfile("nvidia")  # T4: 64 KiB per block (opt-in) and per SM
     t4.smem_per_block = 48 * 1024
     t4.smem_per_block_optin = 64 * 1024
@@ -775,7 +785,178 @@ def check_errors() raises:
     assert_equal(apple._pick_tile_bits(4, tile_bits[DType.float32]()), tile_bits[DType.float32]())
     assert_true(not apple._tile_fits(4, tile_bits[DType.float32]() + 1))
     assert_true(apple._tile_fits(4, tile_bits[DType.float32]()))
-    print(gpu_info())
+
+
+def expect_code(code: String, what: String, e: Error) raises:
+    assert_true(String(e).startswith(code + ":"), what + ": expected " + code + ", got: " + String(e))
+
+
+def check_operands[dt: DType]() raises:
+    """Every direct call checks its qubits and masks on the host (QM-E476)
+    before anything is scheduled, and leaves the state untouched."""
+    var g = GpuStateVector[dt].emulator(3)
+    g.apply_x(0)
+    var x = M2.identity()
+    x.re[0] = 0.0
+    x.re[3] = 0.0
+    x.re[1] = 1.0
+    x.re[2] = 1.0
+    var m4 = dense_m4()
+    var launches = g.launches
+    # (gk, a, b, c): out-of-range, negative and repeated qubits for every single-gate call
+    var bad: List[Tuple[Int, Int, Int]] = [(-1, 0, 1), (3, 0, 1), (1 << 40, 0, 1), (0, -1, 1), (0, 3, 1), (0, 1, -1),
+                                           (0, 1, 3), (1, 1, 0), (0, 2, 2), (2, 1, 2)]
+    for gk in range(12):
+        for t in bad:
+            var a = t[0]
+            var b = t[1]
+            var c = t[2]
+            var arity = 1 if gk < 3 else (2 if gk < 9 else 3)
+            # skip operand triples that are valid for this arity
+            var ok = a >= 0 and a < 3
+            if arity >= 2:
+                ok = ok and b >= 0 and b < 3 and a != b
+            if arity == 3:
+                ok = ok and c >= 0 and c < 3 and a != c and b != c
+            if ok:
+                continue
+            var raised = False
+            try:
+                if gk == 0:
+                    g.apply_1q(x, a)
+                elif gk == 1:
+                    g.apply_diag_1q(1.0, 0.0, 0.0, 1.0, a)
+                elif gk == 2:
+                    g.apply_x(a)
+                elif gk == 3:
+                    g.apply_cx(a, b)
+                elif gk == 4:
+                    g.apply_cphase(0.0, 1.0, a, b)
+                elif gk == 5:
+                    g.apply_controlled_1q(x, a, b)
+                elif gk == 6:
+                    g.apply_rzz(0.3, a, b)
+                elif gk == 7:
+                    g.apply_swap(a, b)
+                elif gk == 8:
+                    g.apply_2q(m4, a, b)
+                elif gk == 9:
+                    g.apply_ccx(a, b, c)
+                elif gk == 10:
+                    g.apply_ccz(a, b, c)
+                else:
+                    g.apply_cswap(a, b, c)
+            except e:
+                raised = True
+                expect_code("QM-E476", "case " + String(gk) + " qubits " + String(a) + "," + String(b) + "," + String(c), e)
+            assert_true(raised, "case " + String(gk) + " accepted qubits " + String(a) + "," + String(b) + "," + String(c))
+    # plans: one bad op refuses the whole flush
+    var plan = build_plan(prep_circuit(3), List[Float64]())
+    var op = plan[0]
+    op.a = 5
+    op.b = 5 if op.b >= 0 else op.b
+    plan.append(op)
+    var raised = False
+    try:
+        g.execute_plan(plan)
+    except e:
+        raised = True
+        expect_code("QM-E476", "execute_plan", e)
+    assert_true(raised, "execute_plan accepted qubit 5 on 3 qubits")
+    raised = False
+    try:
+        g.apply_kop(op)
+    except e:
+        raised = True
+        expect_code("QM-E476", "apply_kop", e)
+    assert_true(raised, "apply_kop accepted qubit 5 on 3 qubits")
+    raised = False
+    try:
+        g.run_program(TileProgram[dt](4, tile_bits[dt]()))
+    except e:
+        raised = True
+        expect_code("QM-E474", "run_program", e)
+    assert_true(raised, "run_program accepted a 4-qubit program on 3 qubits")
+    assert_equal(g.launches, launches, "a refused call must not launch")
+    # Pauli masks and list lengths
+    var masks: List[Tuple[Int, Int]] = [(8, 0), (0, 8), (-1, 0), (0, -1), (1 << 40, 1)]
+    for mz in masks:
+        raised = False
+        try:
+            var xs: List[Int] = [1, mz[0]]
+            var zs: List[Int] = [0, mz[1]]
+            _ = g.pauli_sums(xs, zs)
+        except e:
+            raised = True
+            expect_code("QM-E476", "pauli_sums mask", e)
+        assert_true(raised, "pauli_sums accepted masks " + String(mz[0]) + "," + String(mz[1]))
+    for lens in [(2, 1), (1, 2), (0, 1)]:
+        raised = False
+        try:
+            _ = g.pauli_sums(List[Int](length=lens[0], fill=0), List[Int](length=lens[1], fill=0))
+        except e:
+            raised = True
+            expect_code("QM-E476", "pauli_sums lengths", e)
+        assert_true(raised, "pauli_sums accepted lists of different lengths")
+    for seg in [0, -4, 3, 16]:
+        raised = False
+        try:
+            _ = g.segment_sums(seg)
+        except e:
+            raised = True
+            expect_code("QM-E476", "segment_sums", e)
+        assert_true(raised, "segment_sums accepted " + String(seg))
+    raised = False
+    try:
+        _ = GpuStateVector[dt].emulator(-1)
+    except e:
+        raised = True
+        expect_code("QM-E476", "negative width", e)
+    assert_true(raised, "negative width accepted")
+    # the state is still X|000> = |001>, and valid edge operands still run
+    var p = g.probabilities()
+    assert_true(abs(p[1] - 1.0) < 1e-6, "state changed by refused calls")
+    g.apply_swap(0, 2)
+    g.apply_cx(2, 0)
+    p = g.probabilities()
+    assert_true(abs(p[5] - 1.0) < 1e-6, "swap(0, 2); cx(2, 0) on |001> must give |101>")
+    var xs: List[Int] = [7, 0]
+    var zs: List[Int] = [0, 7]
+    var r = g.pauli_sums(xs, zs)
+    assert_true(abs(r[0]) < 1e-6 and abs(r[2] - 1.0) < 1e-6, "pauli_sums with full masks")
+
+
+def check_memory() raises:
+    """QM-E477 names the bytes needed when a state cannot fit the memory
+    that can be queried; an unknown size (-1) is not a refusal."""
+    assert_equal(gpu_state_bytes(3, 8), 128)
+    assert_equal(gpu_state_bytes(28, 4), 1 << 31)
+    assert_equal(gpu_state_bytes(32, 8), 1 << 36)
+    check_gpu_state_memory(28, 4, 1 << 31, "test memory")  # exactly fits
+    check_gpu_state_memory(32, 8, -1, "test memory")  # unknown: no check
+    var raised = False
+    try:
+        check_gpu_state_memory(28, 4, (1 << 31) - 1, "test memory")
+    except e:
+        raised = True
+        expect_code("QM-E477", "28 qubits fp32 in 2 GiB - 1", e)
+        assert_true(String(e).find("needs 2147483648 bytes") >= 0 and String(e).find("test memory is 2147483647 bytes") >= 0,
+                    String(e))
+    assert_true(raised, "QM-E477 expected")
+    var hm = host_memory_bytes()
+    comptime if CompilationTarget.is_macos() or CompilationTarget.is_linux():
+        assert_true(hm > (1 << 28), "host memory not reported: " + String(hm))
+    # the emulator refuses a state larger than the machine's RAM before it
+    # allocates (only tried where that is certain: never allocate 64 GiB here)
+    if hm > 0 and hm < gpu_state_bytes(32, 8):
+        raised = False
+        try:
+            _ = GpuStateVector[DType.float64].emulator(32)
+        except e:
+            raised = True
+            expect_code("QM-E477", "32-qubit fp64 emulator", e)
+            assert_true(String(e).find("needs 68719476736 bytes") >= 0, String(e))
+        assert_true(raised, "QM-E477 expected for a 64 GiB emulated state")
 
 
 def check_integration() raises:
@@ -1189,6 +1370,9 @@ def main() raises:
     run_suite[DType.float64](True, 1e-12, True, True)
     run_suite[DType.float32](True, 2e-5, True, False)
     check_errors()
+    check_operands[DType.float64]()
+    check_operands[DType.float32]()
+    check_memory()
     check_integration()
     check_tools()
     check_precision()

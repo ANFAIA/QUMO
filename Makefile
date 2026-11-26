@@ -258,9 +258,10 @@ test-gpu:  ## GPU test suites on the real device (+ emulation suites, both regis
 	fi; exit $$fail
 
 # The default register-blocking width is per target (QUMO_GPU_REG_BITS: 4 on
-# Apple, 3 elsewhere): run the emulated engine with both, on every machine.
-test-gpu-regbits:  ## tests/test_gpu.mojo in emulation with 8 and 16 amplitudes per thread
-	@fail=0; for rb in 3 4; do \
+# Apple, 3 elsewhere): run the emulated engine with both, and with the smallest
+# legal width (2), on every machine.
+test-gpu-regbits:  ## tests/test_gpu.mojo in emulation with 4, 8 and 16 amplitudes per thread
+	@fail=0; for rb in 2 3 4; do \
 		out=$$($(MOJO) run -I . -D QUMO_GPU_REG_BITS=$$rb tests/test_gpu.mojo 2>&1 | grep -v Crashpad | tail -1); \
 		case "$$out" in *OK*) echo "PASS tests/test_gpu.mojo (emulation, QUMO_GPU_REG_BITS=$$rb)";; \
 		*) echo "FAIL tests/test_gpu.mojo (emulation, QUMO_GPU_REG_BITS=$$rb): $$out"; fail=1;; esac; \

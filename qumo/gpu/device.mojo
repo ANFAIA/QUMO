@@ -47,6 +47,8 @@ Per-device tuning of the tile engine (`GpuProfile`): see the struct below.
 from std.sys.defines import is_defined, get_defined_int
 from qumo.gpu.vendor import gpu_target_is_apple, gpu_target_is_nvidia, gpu_target_is_amd
 from std.os import getenv
+from std.ffi import external_call, c_int, c_long
+from std.sys.info import CompilationTarget
 from max.gpu.host import DeviceContext, DeviceAttribute
 
 from qumo.gpu.kernels import (
@@ -347,7 +349,7 @@ struct GpuProfile(Copyable, Writable):
         _thread_cap(es)) with >= 2 resident blocks when the occupancy
         calculator was asked (kl.two_block_threads). tb0 when the shared
         memory is not reported; below tb0 only if tb0's block cannot launch
-        (QUMO_GPU_REG_BITS < 3 builds)."""
+        (QUMO_GPU_REG_BITS=2 builds)."""
         var cap = thread_cap if thread_cap > 0 else self._thread_cap(es)
         var best = tb0
         while best > LOW_MIN + REG_BITS and (1 << (best - REG_BITS)) > cap:
@@ -517,6 +519,59 @@ def gpu_not_compiled_error() -> Error:
 
 def gpu_fp64_error() -> Error:
     return Error("QM-E472: float64 is not supported on Apple GPUs (Metal has no double precision). Hint: use precision 'fp32' or 'auto' (GpuStateVector[DType.float32], the default on every GPU), or the CPU simulators, which run in fp64.")
+
+
+def gpu_operand_error(what: String) -> Error:
+    """QM-E476: an argument of a direct GPU state call is not valid for the
+    state (`what` says which: qubit out of range, repeated qubit, Pauli mask
+    with bits at or above num_qubits, lists of different lengths, ...)."""
+    return Error("QM-E476: " + what + ". Hint: qubits are 0 <= q < num_qubits and distinct within one gate; Pauli masks have no bit at or above num_qubits; xs and zs have one entry per term.")
+
+
+def gpu_state_bytes(num_qubits: Int, elem_bytes: Int) -> Int:
+    """Bytes of a GPU state: two arrays (re, im) of 2^num_qubits elements of
+    `elem_bytes` bytes (4 = fp32, 8 = fp64)."""
+    return 2 * elem_bytes * (1 << num_qubits)
+
+
+def host_memory_bytes() -> Int:
+    """Physical memory of this machine in bytes (sysconf on macOS and Linux),
+    or -1 when it cannot be queried (other systems, or sysconf fails). This
+    is the installed RAM, not what is free now: an allocation above it can
+    never fit, one below it may still fail."""
+    var pages = -1
+    var page = -1
+    comptime if CompilationTarget.is_macos():
+        pages = Int(external_call["sysconf", c_long](c_int(200)))  # _SC_PHYS_PAGES
+        page = Int(external_call["sysconf", c_long](c_int(29)))  # _SC_PAGESIZE
+    elif CompilationTarget.is_linux():
+        pages = Int(external_call["sysconf", c_long](c_int(85)))  # _SC_PHYS_PAGES
+        page = Int(external_call["sysconf", c_long](c_int(30)))  # _SC_PAGESIZE
+    if pages <= 0 or page <= 0:
+        return -1
+    return pages * page
+
+
+def device_free_memory_bytes(ctx: DeviceContext) -> Int:
+    """Free memory the device behind `ctx` reports now (MAX
+    `DeviceContext.get_memory_info`), or -1 when the query fails."""
+    try:
+        var fi = ctx.get_memory_info()
+        var free = Int(fi[0])
+        return free if free > 0 else -1
+    except:
+        return -1
+
+
+def check_gpu_state_memory(num_qubits: Int, elem_bytes: Int, available: Int, where: String) raises:
+    """QM-E477 when a GPU state of `num_qubits` qubits (gpu_state_bytes) is
+    larger than `available` bytes of `where` ("device memory free now",
+    "host physical memory"). available < 0 means unknown: no check."""
+    var need = gpu_state_bytes(num_qubits, elem_bytes)
+    if available >= 0 and need > available:
+        raise Error("QM-E477: a " + String(num_qubits) + "-qubit GPU state in " + ("fp32" if elem_bytes == 4 else "fp64")
+                    + " needs " + String(need) + " bytes (2 arrays of 2^" + String(num_qubits) + " x " + String(elem_bytes)
+                    + " bytes) but the " + where + " is " + String(available) + " bytes. Hint: use fewer qubits, fp32 instead of fp64, a device with more memory, or the stabilizer simulator for Clifford circuits.")
 
 
 def gpu_precision_error(value: String, source: String) -> Error:

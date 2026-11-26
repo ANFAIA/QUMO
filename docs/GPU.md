@@ -102,15 +102,17 @@ comptime if is_defined["QUMO_GPU"]():
   build or machine without a usable device FAILS instead of reporting PASS
   for the emulation part; `make test-gpu QUMO_GPU_REQUIRE_DEVICE=0` allows
   the skip), then `make test-gpu-regbits`
-  (`tests/test_gpu.mojo` in emulation with 8 and with 16 amplitudes per
-  thread, so both register-blocking widths stay covered on every machine)
+  (`tests/test_gpu.mojo` in emulation with 4, 8 and 16 amplitudes per
+  thread, so the smallest legal register-blocking width and both defaults
+  stay covered on every machine)
   and, on macOS, the device suite once more with
   `-D QUMO_GPU_TILE_SMEM_DYNAMIC=1` (the shared-memory layout of NVIDIA /
   AMD, exercised on Metal).
 
 Compile-time knobs (`-D NAME=value`, defaults in brackets):
 `QUMO_GPU_MIN_QUBITS` [16 Apple / 20 other], `QUMO_GPU_REG_BITS` (log2
-amplitudes per thread) [4 Apple / 3 other], `QUMO_GPU_TILE_SMEM_DYNAMIC`
+amplitudes per thread, 2..4; anything else is a compile-time error) [4 Apple /
+3 other], `QUMO_GPU_TILE_SMEM_DYNAMIC`
 [0 Apple / 1 other], `QUMO_GPU_TILE_LAUNCH_BOUND` (max threads per block
 the tile kernel is compiled for; 0 = none) [256 AMD / 0 other],
 `QUMO_GPU_TILE_LOG2_BYTES` [14], `QUMO_GPU_LOG_TPB` [8], `QUMO_GPU_FP64`
@@ -241,7 +243,21 @@ measured: `gfx942` and other NVIDIA targets (`make gpu-check` compiles both
 precisions for them).
 
 Memory: `2^n * 8 B` (fp32) or `2^n * 16 B` (fp64); 28 qubits in fp32 = 2 GiB.
-The hard cap is the CPU simulator's 32 qubits (`check_statevector_size`).
+The hard cap is the CPU simulator's 32 qubits (`check_statevector_size`,
+QM-E404). Below it, `GpuStateVector` refuses a state that cannot fit the
+memory it can query, with QM-E477 naming the bytes needed and the bytes found:
+
+* a GPU state against the free memory the device reports when the state is
+  created (MAX `DeviceContext.get_memory_info`; on the M5 it returns 26.8 GB
+  of the 32 GB of unified memory; not run on NVIDIA / AMD);
+* a host-emulated state against the machine's physical memory (`sysconf`, on
+  macOS and Linux). This is the installed RAM, not what is free: it stops a
+  request that can never fit (32 qubits in fp64 = 64 GiB on a 32 GB machine),
+  not one that fits the machine but not what other processes left.
+
+Where a query fails or does not exist (other systems, a driver error) there
+is no check. Only the two state arrays are counted: `to_host` and
+`probabilities` allocate as much again when they are called.
 
 ## State-vector engine
 
@@ -284,7 +300,10 @@ k = 12 12; k = 13 11.
 
 **Register blocking inside a tile.** Each thread keeps 2^REG_BITS
 amplitudes in registers: 16 on Apple GPUs, 8 elsewhere (block = 2^(k -
-REG_BITS) threads). A gate whose targets are in the thread's current
+REG_BITS) threads). `QUMO_GPU_REG_BITS` is 2, 3 or 4. 1 does not compile:
+SWAP, CSWAP and dense 4x4 gates run only in registers and need both target
+qubits in one thread's register set, which one register qubit cannot hold
+(such a build used to compile and return wrong amplitudes for them). A gate whose targets are in the thread's current
 *register set* runs in registers: no shared memory, no barrier. The host
 cuts each run into *segments* with a register set each (greedy with
 lookahead); changing the register set is one transpose through shared
@@ -396,9 +415,11 @@ device run (`QUMO_GPU_FP64_LEAN=1` vs `0`).
 * 32-bit index arithmetic in the kernels (amplitude indices < 2^32 for the
   <= 32 qubits QUMO allows); GPUs emulate 64-bit integer ALU work.
 * Launch sizes stay below 2^31 threads at 32 qubits (AMD's HSA grid limit
-  is 2^32 work items): tile launches have 2^(n-k) blocks, elementwise kernels
-  (`gk_prob`, `gk_init`) use a capped grid (2^16 blocks) with grid-stride
-  loops.
+  is 2^32 work items): a tile launch has 2^(n-k) blocks of 2^(k - REG_BITS)
+  threads, i.e. 2^(n - REG_BITS) threads, at most 2^30 because REG_BITS >= 2
+  is enforced at compile time (2^29 / 2^28 with the defaults 3 / 4);
+  elementwise kernels (`gk_prob`, `gk_init`) use a capped grid (2^16 blocks)
+  with grid-stride loops.
 * Launches are asynchronous on one in-order stream; the host synchronises
   only when it reads results. Kernel parameters are DevicePassable only
   (pointers and fixed-width scalars).
@@ -543,8 +564,12 @@ the real device in `-D QUMO_GPU` builds:
   sampler exactly, reproducible shots, no zero-probability states, the last
   of several MEASUREs into one clbit wins, as in `runner.sample`); a
   24-qubit random circuit with probabilities, 19-term expectation and 20k
-  shots on the device; error codes, dispatch, orchestrator, MCP tools.
+  shots on the device; error codes, dispatch, orchestrator, MCP tools; the
+  operand checks of every direct call (QM-E476: negative, out-of-range and
+  repeated qubits, Pauli masks, list lengths; a refused call launches
+  nothing) and the memory check (QM-E477), in emulation.
 * `tests/test_gpu_frame.mojo` (emulation, then device): threshold tables,
+  the skip lookup at the largest draw (a "probability one" threshold),
   noiseless codes, deterministic injected Paulis = CPU for every shot,
   circuit-level noise statistics, feed-forward / reset / reference XOR,
   chunk invariance, dispatch, device == emulator bit for bit.
@@ -917,6 +942,8 @@ faster, and an optimiser on fp32 gradients needs a looser tolerance
 | QM-E473 | Sampling a zero-norm state |
 | QM-E474 | Circuit, host state or basis index out of range for the GPU state |
 | QM-E475 | Plan op without a GPU kernel |
+| QM-E476 | Invalid operand of a direct `GpuStateVector` call: qubit negative or >= `num_qubits`, a qubit repeated in one gate, a Pauli mask with bits at or above `num_qubits`, X / Z mask lists of different lengths |
+| QM-E477 | The state does not fit the memory the device (or, emulated, the host) reports; the message gives the bytes needed |
 | QM-E940 | Unknown device name (`auto`, `cpu`, `gpu`) |
 | QM-E941 | Unknown GPU precision (`auto`, `fp32`, `fp64`; argument or `QUMO_GPU_PRECISION`) |
 | QM-W020 | `device: "gpu"` requested but the run fell back to the CPU (reason given) |
