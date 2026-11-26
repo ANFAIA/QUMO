@@ -21,7 +21,7 @@ example-meta: {"framework": "braket", "tier": "fast", "timeout": 120, "requires"
 from qumo.ir.circuit import Circuit
 from qumo.device.target import parse_target
 from qumo.compiler.pass_manager import transpile
-from qumo.exec.emulate import emulate
+from qumo.noise.emulate import emulate
 from qumo.exec.primitives import SamplerPub, run_sampler, split_pub, PubSlot
 from qumo.testing.checks import CheckLog
 

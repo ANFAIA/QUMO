@@ -34,6 +34,7 @@ from qumo.ir.gates import Op, op_arity
 from qumo.ir.qasm import parse_qasm
 from qumo.net.http import HttpClient, HttpOptions, HttpRequest, HttpResponse, REDIRECT_NONE
 from qumo.net.url import Url, parse_url
+from qumo_hw.common import loopback_host
 from qumo.core.rng import Rng
 
 comptime DEFAULT_API_URL = "https://api.ionq.co/v0.4"
@@ -245,13 +246,9 @@ def ionq_api_url() raises -> String:
         u = parse_url(base + "/")
     except e:
         raise Error(E_CONFIG + ": " + API_URL_VAR + " is not a valid http(s) URL: " + _printable(String(e), 200))
-    if u.scheme != "https" and not _loopback(u.host):
+    if u.scheme != "https" and not loopback_host(u.host):
         raise Error(E_CONFIG + ": " + API_URL_VAR + " must be an https URL (plain http only for a loopback host)")
     return base^
-
-
-def _loopback(host: String) -> Bool:
-    return host == "127.0.0.1" or host == "localhost" or host == "::1"
 
 
 def _api_key() raises -> String:
@@ -319,7 +316,7 @@ def _call(method: String, path: String, body: String, what: String, authenticate
     var base = ionq_api_url()
     var url = base + "/" + path
     var u = parse_url(url)
-    var opts = HttpOptions(15000, 60000, MAX_RESPONSE_BYTES, False, REDIRECT_NONE, 0, _loopback(u.host), False)
+    var opts = HttpOptions(15000, 60000, MAX_RESPONSE_BYTES, False, REDIRECT_NONE, 0, loopback_host(u.host), False)
     var attempts = 3 if method == "GET" else 1
     var attempt = 0
     while True:

@@ -1,4 +1,4 @@
-"""SpeQtrum provider, native client (default): the protocol runs in Mojo (qumo/exec/speqtrum_api.mojo).
+"""SpeQtrum provider, native client (default): the protocol runs in Mojo (plugins/hardware/native/qumo_hw/speqtrum_api.mojo).
 
 Login, device list, execute, job status and result decoding (base64, refusal rule, strict JSON)
 all run in the qumo_py extension over QUMO's own HTTP/TLS stack (qumo/net). This adapter keeps
@@ -19,7 +19,7 @@ from .compile import CompiledCircuit, load_qumo_py
 from .errors import E_INVALID_PAYLOAD, E_JOB, E_LIMIT, HINT_SHOTS, HardwareError
 from .speqtrum import SpeQtrumProvider, UnsafeFormatWarning
 
-NATIVE = "qumo/exec/speqtrum_api.mojo"
+NATIVE = "plugins/hardware/native/qumo_hw/speqtrum_api.mojo"
 
 
 def _native_error(exc: Exception) -> HardwareError:

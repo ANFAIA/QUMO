@@ -22,7 +22,7 @@ What is here, and where it lives (import from there for anything else):
 * build and read circuits - `Circuit`, `Op` (`qumo.ir.circuit`, `qumo.ir.gates`),
   `parse_qasm`, `to_qasm` (`qumo.ir.qasm`; `c.draw()` draws a circuit), `PauliSum`, `parse_pauli_sum`
   (`qumo.ir.pauli`);
-* simulate - `sample_auto` (`qumo.exec.dispatch`: picks the simulator), `sample`,
+* simulate - `sample_auto` (`qumo.gpu.dispatch`: picks the simulator), `sample`,
   `evolve`, `statevector` (the same function as `evolve`, under the name the CLI
   uses), `expectation` (`qumo.sim.runner`), with the result types `SampleResult`
   and `StateVector`;
@@ -45,7 +45,7 @@ from qumo.ir.pauli import PauliSum, parse_pauli_sum
 from qumo.ir.qasm import parse_qasm, to_qasm
 from qumo.sim.statevector import StateVector
 from qumo.sim.runner import SampleResult, sample, evolve, expectation
-from qumo.exec.dispatch import sample_auto
+from qumo.gpu.dispatch import sample_auto
 from qumo.device.target import Target, parse_target
 from qumo.compiler.pass_manager import CompileResult, transpile
 

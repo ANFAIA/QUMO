@@ -37,7 +37,7 @@ from qumo.ir.circuit import Circuit
 from qumo.ir.pauli import PauliSum
 from qumo.sim.runner import evolve
 from qumo.sim.statevector import StateVector
-from qumo.exec.resources import HardwareProfile
+from qumo.compiler.resources import HardwareProfile
 from qumo.noise.characterization import NoiseModel
 from qumo.algorithms.mitigation import (
     fold_gates_global, fold_gates_at_random, folded_scale, zne_expectation,

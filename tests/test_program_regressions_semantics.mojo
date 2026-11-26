@@ -7,7 +7,7 @@ commit a55628b they raise, or pass a wrong value.
 from std.math import pi
 from std.testing import assert_equal, assert_true, assert_raises
 
-from qumo.exec.dispatch import choose_method_cpu
+from qumo.sim.dispatch import choose_method_cpu
 from qumo.ir.classical import CExpr, CNodeOp, CStore, ce_binary, ce_cast, ce_lnot, int_type
 from qumo.ir.gates import Op
 from qumo.ir.program import ProgramBuilder

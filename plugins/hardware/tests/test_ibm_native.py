@@ -1,4 +1,4 @@
-"""IBM native client (qumo/exec/ibm_api.mojo) against a fake IAM + Runtime API on 127.0.0.1.
+"""IBM native client (plugins/hardware/native/qumo_hw/ibm_api.mojo) against a fake IAM + Runtime API on 127.0.0.1.
 
 No qiskit is used on this path. The fake backend is a 5-qubit Heron-like line (cz, rz, sx, x).
 """

@@ -126,7 +126,7 @@ sandbox applies.
 ```
 main.mojo               exit(main_entry(args))
 qumo_agent/native/      libc bindings, spawn, files, regex, sandbox (the only place with external_call)
-qumo_agent/net/         URL, sockets, HTTP/1.1, TLS (OpenSSL), SSE
+qumo_agent/net/         URL, sockets, HTTP/1.1, TLS (OpenSSL), SSE (generated from qumo/net: DESIGN.md 2.4)
 qumo_agent/llm/         the OpenAI-compatible model client
 qumo_agent/mcp/         MCP over stdio and HTTP; the stdio server
 qumo_agent/harness/     the deepagents port: loop, file tools, eviction, summarization, subagents

@@ -1,5 +1,5 @@
 from qumo.ir.circuit import Circuit
-from qumo.exec.dispatch import sample_auto, choose_method, sample_on
+from qumo.gpu.dispatch import sample_auto, choose_method, sample_on
 from qumo.sim.runner import sample
 from qumo.gpu.device import gpu_compiled, GPU_PRECISION_ENV
 from std.os import setenv, unsetenv

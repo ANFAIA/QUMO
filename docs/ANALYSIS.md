@@ -251,8 +251,8 @@ Scale: ★ basic · ★★ solid · ★★★ industry reference.
 | Simulator choice by circuit structure | Qibo/QDK (Clifford → stabilizer) | auto-dispatch: Clifford → tableau/frame, else statevector |
 | Static sampling vs. trajectories | CUDA-Q `sample` vs `run`, PennyLane mcm_method | `qumo.sim.runner.sample` decides and reports `method` |
 | OpenQASM 3 as wire format | Braket, IBM | `qumo.ir.qasm` (parser + emitter) |
-| Emulator from device calibration | Braket emulator, Cirq virtual engine | `NoiseModel.from_target` + `emulate` (`qumo.exec.emulate`) |
-| Resource estimation before running | Q# QRE, PennyLane `specs`, Braket `Tracker` | `qumo.exec.resources` (logical, NISQ hardware, fault-tolerant) |
+| Emulator from device calibration | Braket emulator, Cirq virtual engine | `NoiseModel.from_target` + `emulate` (`qumo.noise.emulate`) |
+| Resource estimation before running | Q# QRE, PennyLane `specs`, Braket `Tracker` | `qumo.compiler.resources` (logical, NISQ hardware, fault-tolerant) |
 
 ### 11.4 Error correction (experimentalist)
 

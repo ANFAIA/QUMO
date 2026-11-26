@@ -11,6 +11,7 @@ Modules:
   routing       VF2 exact layout + LightSABRE routing
   synth         basis-aware single-qubit synthesis
   common        gate sets, commutation rules, wire lists
+  resources     estimate_resources / estimate_hardware / estimate_fault_tolerant (static analysis)
 
 `Target` itself is defined in qumo.device.target.
 

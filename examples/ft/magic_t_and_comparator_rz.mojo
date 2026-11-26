@@ -36,7 +36,7 @@ example-meta: {"framework": "guppyft", "tier": "slow", "timeout": 1200, "require
 from std.math import pi, cos
 
 from qumo.ir.circuit import Circuit
-from qumo.exec.resources import estimate_resources
+from qumo.compiler.resources import estimate_resources
 from qumo.ft.logical import LogicalProgram
 from qumo.ft.arch import SteaneBuilder
 from qumo.ft.encode import compile, encode

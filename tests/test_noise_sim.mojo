@@ -13,7 +13,7 @@ from qumo.sim.ptsbe import sample_ptsbe, plan_trajectories
 from qumo.compiler.target import Target, parse_target
 from qumo.compiler.pass_manager import transpile
 from qumo.qec.characterization import NoiseModel
-from qumo.exec.emulate import emulate, noisy_circuit, active_qubits
+from qumo.noise.emulate import emulate, noisy_circuit, active_qubits
 
 
 def expect_code(code: String, err: Error) raises:

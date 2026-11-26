@@ -28,6 +28,7 @@ from qumo.core.json import JsonValue, parse_json
 from qumo.net.http import HttpClient, HttpOptions, HttpRequest, HttpResponse, REDIRECT_NONE
 from qumo.net.libc import c_time
 from qumo.net.url import Url, parse_url
+from qumo_hw.common import loopback_host
 
 comptime GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-bearer"
 comptime PAYLOAD_TYPE = "digital_propagation"
@@ -497,10 +498,6 @@ struct SpeQtrumAuth(Copyable):
         return out^
 
 
-def _loopback(host: String) -> Bool:
-    return host == "127.0.0.1" or host == "localhost" or host == "::1"
-
-
 def checked_base(url: String) raises -> String:
     """https, or http only for a loopback host. No user information. Trailing '/' removed."""
     var text = String(url.strip())
@@ -514,7 +511,7 @@ def checked_base(url: String) raises -> String:
         u = parse_url(text)
     except e:
         raise Error(E_CREDENTIALS + ": " + ENV_URL + " is not a valid URL")
-    if not (u.scheme == "https" or (u.scheme == "http" and _loopback(u.host))):
+    if not (u.scheme == "https" or (u.scheme == "http" and loopback_host(u.host))):
         raise Error(E_CREDENTIALS + ": " + ENV_URL + " must be an https URL (plain http is accepted only for "
                     + "localhost, 127.0.0.1 or [::1], for tests)")
     while text.endswith("/"):
@@ -537,7 +534,7 @@ def _send(auth: SpeQtrumAuth, method: String, url: String, body: String, token: 
         names.append("Authorization")
         values.append("Bearer " + token)
     var u = parse_url(url)
-    var opts = HttpOptions(TIMEOUT_MS, TIMEOUT_MS, MAX_RESPONSE_BYTES, False, REDIRECT_NONE, 0, _loopback(u.host), False)
+    var opts = HttpOptions(TIMEOUT_MS, TIMEOUT_MS, MAX_RESPONSE_BYTES, False, REDIRECT_NONE, 0, loopback_host(u.host), False)
     var client = HttpClient(None)
     try:
         return client.request(HttpRequest(method, url, names^, values^, body), opts)

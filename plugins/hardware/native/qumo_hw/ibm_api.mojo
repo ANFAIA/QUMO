@@ -36,6 +36,7 @@ from qumo.ir.gates import Op, op_arity
 from qumo.ir.qasm import parse_qasm
 from qumo.net.http import HttpClient, HttpOptions, HttpRequest, HttpResponse, REDIRECT_NONE
 from qumo.net.url import Url, parse_url, quote
+from qumo_hw.common import loopback_host
 
 comptime USER_AGENT = "qumo-hardware/1.0 (native Mojo client; +https://github.com/ANFAIA/QUMO)"
 comptime API_VERSION = "2026-04-15"  # IBM-API-Version sent by qiskit-ibm-runtime 0.45-0.50
@@ -60,10 +61,6 @@ def _printable(s: String, limit: Int) -> String:
     return String(from_utf8_lossy=Span(out))
 
 
-def _loopback(host: String) -> Bool:
-    return host == "127.0.0.1" or host == "localhost" or host == "::1"
-
-
 def _trim_slash(s: String) -> String:
     var t = String(s.strip())
     while t.endswith("/"):
@@ -78,7 +75,7 @@ def _checked(url: String, what: String) raises -> Url:
         u = parse_url(url)
     except e:
         raise Error(E_CREDENTIALS + ": " + what + " is not a valid URL")
-    if u.scheme != "https" and not _loopback(u.host):
+    if u.scheme != "https" and not loopback_host(u.host):
         raise Error(E_CREDENTIALS + ": " + what + " must be https (plain http only for a loopback host)")
     return u^
 
@@ -212,7 +209,7 @@ def _request(method: String, url: String, var names: List[String], var values: L
     names.append("User-Agent")
     values.append(USER_AGENT)
     var u = parse_url(url)
-    var opts = HttpOptions(15000, 120000, MAX_RESPONSE_BYTES, False, REDIRECT_NONE, 0, _loopback(u.host), False)
+    var opts = HttpOptions(15000, 120000, MAX_RESPONSE_BYTES, False, REDIRECT_NONE, 0, loopback_host(u.host), False)
     var client = HttpClient(None)
     try:
         return client.request(HttpRequest(method, url, names^, values^, body), opts)
@@ -226,7 +223,7 @@ def _request(method: String, url: String, var names: List[String], var values: L
 def _iam_token(acc: IbmAccount) raises -> String:
     var iam = _trim_slash(String(getenv("IAM_URL", DEFAULT_IAM)))
     var iu = _checked(iam, "IAM_URL")
-    if not (_loopback(iu.host) or iu.host == "iam.cloud.ibm.com" or iu.host.endswith(".cloud.ibm.com")):
+    if not (loopback_host(iu.host) or iu.host == "iam.cloud.ibm.com" or iu.host.endswith(".cloud.ibm.com")):
         raise Error(E_CREDENTIALS + ": IAM_URL host '" + iu.host + "' is not an IBM Cloud host; QUMO sends the API "
                     + "key only to *.cloud.ibm.com")
     var names = List[String]()

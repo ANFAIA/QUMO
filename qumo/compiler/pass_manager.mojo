@@ -28,6 +28,7 @@ from qumo.ir.circuit import Circuit, Instruction
 from qumo.compiler.common import fmt_num, basis_str, reduce_large_angles, wrap_angle, TWO_PI, BlockKind
 from qumo.ir.gateset import GateSet
 from qumo.device.target import Target, parse_basis, parse_angle_bound
+from qumo.device.conformance import conformance_error  # defined there; importable from here as before
 from qumo.compiler.optimize import (
     remove_identities, cancel_inverses, merge_rotations, commute_rotations,
     fuse_1q, eject_z, elide_swaps,
@@ -1091,30 +1092,6 @@ struct CompileResult(Copyable, Writable):
 
     def write_to(self, mut w: Some[Writer]):
         w.write(self.summary())
-
-
-def conformance_error(c: Circuit, target: Target) -> String:
-    """First violation of basis / connectivity, or "" when the circuit conforms."""
-    for i in range(len(c.ops)):
-        var g = c.ops[i]
-        if not op_is_unitary(g.kind):
-            continue
-        if not target.supports(g.kind):
-            return "instruction #" + String(i) + " '" + String(g) + "' is not in the basis [" + basis_str(target.basis) + "]"
-        var a = op_arity(g.kind)
-        if a >= 2 and not target.full:
-            if a > 2:
-                return "instruction #" + String(i) + " '" + String(g) + "' acts on 3 qubits (no 3q coupling)"
-            if not target.are_connected(g.q0, g.q1):
-                return "instruction #" + String(i) + " '" + String(g) + "' is not on a coupling edge of " + target.name
-        if target.angle_bound[g.kind] and not g.p0.is_symbolic():
-            var v = g.p0.value()
-            if v < target.angle_lo[g.kind] - 1e-9 or v > target.angle_hi[g.kind] + 1e-9:
-                return "instruction #" + String(i) + " '" + String(g) + "' has its angle outside [" + String(target.angle_lo[g.kind]) + ", " + String(target.angle_hi[g.kind]) + "]"
-        for s in range(a):
-            if g.qubit(s) >= target.num_qubits:
-                return "instruction #" + String(i) + " uses qubit " + String(g.qubit(s)) + " beyond the target size"
-    return ""
 
 
 # ----------------------------------------------------------------------------

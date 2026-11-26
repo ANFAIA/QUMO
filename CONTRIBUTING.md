@@ -1,6 +1,6 @@
 # Contributing to QUMO
 
-QUMO is a research prototype (v0.2.0, Apache-2.0). Bug reports, examples, benchmark results and code are welcome. This page says how to set up, how to check your change, and what a reproducible report looks like.
+QUMO is a research prototype (v0.3.0, Apache-2.0). Bug reports, examples, benchmark results and code are welcome. This page says how to set up, how to check your change, and what a reproducible report looks like.
 
 ## Ways to contribute
 
@@ -58,6 +58,7 @@ make test-py                                    # every Python test: the package
 - Tests of numerical code compare against an independent reference (state vectors, an analytic value, another simulator), not against QUMO's own earlier output.
 - Mojo prints `Failed to initialize Crashpad...` first; ignore it.
 - If you add or change an error code, or a compiler pass, its aliases or its arguments, regenerate [docs/ERRORS.md](docs/ERRORS.md) and [docs/PASSES.md](docs/PASSES.md): `QUMO_UPDATE_DOCS=1 .venv/bin/mojo run -I . tests/test_mcp.mojo`. Do not edit those files by hand; the same test fails when one of them is stale.
+- The network stack is edited in `qumo/net` only. `agents/mojo/qumo_agent/net/{url,ossl,tls,socket,http,guard,sse}.mojo` are generated from it (first line "GENERATED"): after a change run `QUMO_UPDATE_NET=1 .venv/bin/mojo run -I . tests/test_net_mirror.mojo` and commit both; the same test fails when a generated file differs.
 - GPU code is compiled only with `-D QUMO_GPU`. `make gpu-check` cross-compiles the kernels without a GPU; `make test-gpu` needs one.
 
 ## Adding an example
@@ -111,7 +112,7 @@ Do not copy text or code from another project's tutorial beyond what its licence
 
 ## Changing the library
 
-- Keep QUMO vendor-neutral. No vendor is a default; presets are named by modality or topology. Vendor-specific code belongs in `plugins/hardware`.
+- Keep QUMO vendor-neutral. No vendor is a default; presets are named by modality or topology. Vendor-specific code belongs in `plugins/hardware`: the Python providers in `qumo_hardware`, the native Mojo clients in `native/qumo_hw`. Nothing under `qumo/` imports a vendor module (`make check-neutrality`, part of `make test`).
 - Compiler passes must keep the unitary exact (global phase tracked) and are tested by state vector. A pass is declared once, in `pass_decl` (`qumo/compiler/pass_manager.mojo`): name, aliases, description and arguments; the steps are in [docs/EXTENDING.md](docs/EXTENDING.md), section 3, with the other extension points and which of them need core edits.
 - Put a type in the package its role belongs to, and import only from lower rows of the table in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#package-layering) (`core`, `ir`, `device`, `sim`, `noise` import nothing from the compiler, QEC, the algorithms, the execution layer or the AI layer). New code imports `Rng` from `qumo.core.rng`, `Target` from `qumo.device.target`, the noise model from `qumo.noise` and circuit JSON from `qumo.ir.json`; the old paths are re-exports kept for one release.
 - Every change shows up where a user looks. A new capability comes with a runnable example under `examples/` (with `CHECK` lines, see "Adding an example") and a section in the module's doc. An improvement to something that exists is recorded in that module's doc and in `CHANGELOG.md`. A capability taken from a paper or another SDK also gets its row in [docs/FRAMEWORK_UPDATES.md](docs/FRAMEWORK_UPDATES.md), with the source. This holds for changes written by the agents too.

@@ -43,7 +43,7 @@ from qumo.ir.qasm2 import to_qasm2
 from qumo.sim.runner import sample, evolve, expectation
 from qumo.device.target import parse_target
 from qumo.compiler.pass_manager import transpile
-from qumo.exec.emulate import emulate
+from qumo.noise.emulate import emulate
 ```
 
 Notes on the Qiskit and Cirq cells: `qasm3.loads` needs the `qiskit-qasm3-import` package; `qc` in the "Sample counts" row must have measurements (`measure_all` names the register `meas`).

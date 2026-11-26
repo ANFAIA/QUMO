@@ -40,6 +40,11 @@ group of `h` -> extrapolation. The exact Estimator primitive
 (`qumo.exec.primitives.run_estimator`) evolves only the unitary part of a
 circuit and therefore cannot see noise channels; this module samples instead.
 
+Every shot estimate here (`sampled_expectation`, `noisy_expectation`,
+`trex_expectation`) goes through `qumo.sim.qwc`, the estimator the Estimator
+primitive also uses: one setting per QWC group, standard error of the per-shot
+weighted sum of the group's terms.
+
 Error codes: QM-E801 (invalid option: scale < 1, unfoldable circuit, unknown
 method, data that cannot be fitted), QM-E802 (invalid size: mismatched or too
 few points, duplicate scales, shots < 1).
@@ -55,7 +60,7 @@ from qumo.ir.pauli import PauliSum
 from qumo.sim.runner import sample
 from qumo.core.rng import Rng
 from qumo.noise.characterization import NoiseModel, apply_noise_model
-from qumo.exec.primitives import qwc_setting, qwc_group_stats
+from qumo.sim.qwc import qwc_setting, qwc_estimate, qwc_moments, moments_variance_of_mean, pop_parity
 
 
 # ---------------------------------------------------------------------------
@@ -350,34 +355,14 @@ def _estimate(circuit: Circuit, h: PauliSum, shots: Int, seed: UInt64, use_model
     var n = circuit.num_qubits
     if h.num_qubits() > n:
         raise Error("QM-E802: the observable acts on " + String(h.num_qubits()) + " qubits but the circuit has " + String(n) + ".")
-    # unitary + noise part (terminal measurements are replaced by our own)
-    var body = circuit.empty_like()
-    for g in circuit.ops:
-        if g.kind != Op.MEASURE:
-            body.append(g)
-    var groups = h.group_qwc()
-    var ev = 0.0
-    var var_total = 0.0
-    for gi in range(len(groups)):
-        ref grp = groups[gi]
-        var has_support = False
-        for ti in grp:
-            var t = h.terms[ti]
-            if (t.x | t.z) == 0:
-                ev += t.coeff
-            else:
-                has_support = True
-        if not has_support:
-            continue
-        var base = 0
-        var m = qwc_setting(body, h, grp, base)
+    # qwc_setting replaces the terminal measurements by its own; the noise model goes
+    # on the whole setting, so basis changes and readout are noisy too
+    def run(m: Circuit, k: Int, s: UInt64) raises {imm noise, imm use_model} -> SampleResult:
         if use_model:
-            m = apply_noise_model(m, noise)
-        var res = sample(m, shots, seed + UInt64(gi) * 1000003)
-        var st = qwc_group_stats(res, h, grp, base)
-        ev += st[0]
-        var_total += st[1]
-    return (ev, sqrt(var_total))
+            return sample(apply_noise_model(m, noise), k, s)
+        return sample(m, k, s)
+
+    return qwc_estimate(run, circuit, h, shots, seed)
 
 
 def sampled_expectation(circuit: Circuit, h: PauliSum, shots: Int, seed: UInt64 = 1234) raises -> Tuple[Float64, Float64]:
@@ -471,41 +456,12 @@ struct TrexResult(ImplicitlyCopyable, Writable):
         w.write("TrexResult(value=", self.value, ", raw=", self.raw, ", std=", self.std, ")")
 
 
-def _setting(c: Circuit, gx: UInt64, gz: UInt64, mask: UInt64) -> Circuit:
-    """`c` with a basis change for the QWC group, X on `mask`, measure all."""
-    var n = c.num_qubits
-    var m = c.copy()
-    for q in range(n):
-        var b = UInt64(1) << UInt64(q)
-        if (gx & b) != 0:
-            if (gz & b) != 0:
-                m.sdg(q)
-            m.h(q)
-    for q in range(n):
-        if (mask & (UInt64(1) << UInt64(q))) != 0:
-            m.x(q)
-    for q in range(n):
-        m.measure(q, q)
-    return m^
-
-
-def _parity_mean(r: SampleResult, support: UInt64, mask: UInt64) -> Float64:
+def _parity_mean(r: SampleResult, support: UInt64, mask: UInt64, base: Int = 0) -> Float64:
     """<Z_support> of one twirled setting: flip the recorded bits back through `mask`."""
     var s = 0
-    var odd_mask = _parity(mask & support)
     for creg in r.memory:
-        var odd = _parity(UInt64(creg) & support) != odd_mask
-        s += -1 if odd else 1
+        s += -1 if pop_parity(((creg >> base) ^ Int(mask)) & Int(support)) else 1
     return Float64(s) / Float64(max(len(r.memory), 1))
-
-
-def _parity(v: UInt64) -> Bool:
-    var x = v
-    var odd = False
-    while x != 0:
-        x &= x - 1
-        odd = not odd
-    return odd
 
 
 def trex_expectation[S: def(Circuit, Int, UInt64) raises -> SampleResult](
@@ -519,11 +475,11 @@ def trex_expectation[S: def(Circuit, Int, UInt64) raises -> SampleResult](
     <Z_S>. The same twirl on |0...0> measures that factor, and each Pauli is
     divided by it. Cost grows with the number of terms, not with 2^n, and only
     the readout is corrected. `shots` is per QWC group, split over `num_twirls`."""
-    if c.num_qubits > 62:
+    var n = c.num_qubits
+    if n + (c.num_clbits if c.is_dynamic() else 0) > 62:
         raise Error("QM-E815: trex_expectation packs results into 62 bits. Hint: measure at most 62 qubits.")
     if num_twirls < 1 or shots < num_twirls:
         raise Error("QM-E815: trex_expectation needs num_twirls >= 1 and shots >= num_twirls, got " + String(num_twirls) + " and " + String(shots) + ". Hint: raise shots.")
-    var n = c.num_qubits
     var rng = Rng(seed)
     var per = shots // num_twirls
     var cal_per = max((calibration_shots if calibration_shots > 0 else shots) // num_twirls, 1)
@@ -542,17 +498,20 @@ def trex_expectation[S: def(Circuit, Int, UInt64) raises -> SampleResult](
                 m |= UInt64(1) << UInt64(q)
         masks.append(m)
     var cal = List[SampleResult]()
+    var no_terms = List[Int]()
+    var cal_base = 0
     for t in range(num_twirls):
-        cal.append(run(_setting(empty, 0, 0, masks[t]), cal_per, seed ^ UInt64(1000003 + t)))
+        cal.append(run(qwc_setting(empty, h, no_terms, cal_base, masks[t]), cal_per, seed ^ UInt64(1000003 + t)))
+    # the calibration factors are shared by every term: their error is one weighted sum too
+    var cal_supports = List[Int]()
+    var cal_weights = List[Float64]()
     for gi in range(len(groups)):
-        var gx = UInt64(0)
-        var gz = UInt64(0)
-        for ti in groups[gi]:
-            gx |= h.terms[ti].x
-            gz |= h.terms[ti].z & h.terms[ti].x
         var results = List[SampleResult]()
+        var base_bit = 0
         for t in range(num_twirls):
-            results.append(run(_setting(c, gx, gz, masks[t]), per, seed ^ UInt64(gi * 7919 + t + 1)))
+            results.append(run(qwc_setting(c, h, groups[gi], base_bit, masks[t]), per, seed ^ UInt64(gi * 7919 + t + 1)))
+        var supports = List[Int]()
+        var weights = List[Float64]()
         for ti in groups[gi]:
             var term = h.terms[ti]
             var support = term.x | term.z
@@ -563,8 +522,8 @@ def trex_expectation[S: def(Circuit, Int, UInt64) raises -> SampleResult](
             var mean = 0.0
             var base = 0.0
             for t in range(num_twirls):
-                mean += _parity_mean(results[t], support, masks[t])
-                base += _parity_mean(cal[t], support, masks[t])
+                mean += _parity_mean(results[t], support, masks[t], base_bit)
+                base += _parity_mean(cal[t], support, masks[t], cal_base)
             mean /= Float64(num_twirls)
             base /= Float64(num_twirls)
             if abs(base) < 1e-3:
@@ -572,7 +531,27 @@ def trex_expectation[S: def(Circuit, Int, UInt64) raises -> SampleResult](
             cal_min = min(cal_min, abs(base))
             value += term.coeff * mean / base
             raw += term.coeff * mean
-            var v = (1.0 - mean * mean) / Float64(per * num_twirls)
-            var vb = (1.0 - base * base) / Float64(cal_per * num_twirls)
-            variance += term.coeff * term.coeff * (v + (mean * mean / (base * base)) * vb) / (base * base)
+            supports.append(Int(support))
+            weights.append(term.coeff / base)
+            cal_supports.append(Int(support))
+            cal_weights.append(term.coeff * mean / (base * base))
+        if len(supports) == 0:
+            continue
+        # shot noise of the group: the terms share their shots (qumo.sim.qwc)
+        var s1 = 0.0
+        var s2 = 0.0
+        var count = 0
+        for t in range(num_twirls):
+            qwc_moments(results[t], supports, weights, base_bit, Int(masks[t]), s1, s2)
+            count += len(results[t].memory)
+        variance += moments_variance_of_mean(s1, s2, count)
+    if len(cal_supports) > 0:
+        # d value / d base_t = -coeff_t mean_t / base_t^2, on the shared calibration shots
+        var c1 = 0.0
+        var c2 = 0.0
+        var cal_count = 0
+        for t in range(num_twirls):
+            qwc_moments(cal[t], cal_supports, cal_weights, cal_base, Int(masks[t]), c1, c2)
+            cal_count += len(cal[t].memory)
+        variance += moments_variance_of_mean(c1, c2, cal_count)
     return TrexResult(value, raw, sqrt(variance), cal_min)
