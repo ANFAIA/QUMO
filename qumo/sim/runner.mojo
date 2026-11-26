@@ -25,6 +25,7 @@ from qumo.sim.statevector import (
     kcphase_range, krzz_range, kswap_range, k2_range, kscale_range,
 )
 from qumo.core.rng import Rng
+from qumo.ir.pauli_noise import draw_pauli_noise, draw_pauli_channel_2, correlated_error_fires
 from max.algorithm import parallelize
 
 
@@ -1011,51 +1012,25 @@ def _apply_kraus(mut sv: StateVector, ch: KrausChannel, q0: Int, q1: Int, mut rn
         u -= w
 
 
+def _apply_pauli_code(mut sv: StateVector, code: Int, q0: Int, q1: Int):
+    if code != 0:
+        _apply_pauli(sv, code & 3, q0)
+        _apply_pauli(sv, code >> 2, q1)
+
+
 def _apply_table_noise(mut sv: StateVector, c: Circuit, g: Instruction, mut rng: Rng, mut fired: Bool):
     """PAULI_CHANNEL_2 and E; `fired` tracks the E / ELSE chain."""
     if g.kind == Op.PAULI_CHANNEL_2:
-        var off = Int(g.p0.value())
-        var u = rng.uniform()
-        for i in range(15):
-            var p = c.noise_table[off + i]
-            if u < p:
-                _apply_pauli(sv, (i + 1) >> 2, g.q0)
-                _apply_pauli(sv, (i + 1) & 3, g.q1)
-                return
-            u -= p
+        _apply_pauli_code(sv, draw_pauli_channel_2(c, g, rng), g.q0, g.q1)
         return
-    if g.q2 == 0:
-        fired = False
-    if not fired and rng.uniform() < g.p0.value():
-        fired = True
+    if correlated_error_fires(g, rng, fired):
         for i in range(g.q1):
             _apply_pauli(sv, c.pauli_table[g.q0 + 2 * i + 1], c.pauli_table[g.q0 + 2 * i])
 
 
 def _apply_noise(mut sv: StateVector, g: Instruction, mut rng: Rng, params: List[Float64]):
-    var k = g.kind
-    var p = g.p0.resolve(params)
-    if k == Op.X_ERROR:
-        if rng.uniform() < p: _apply_pauli(sv, 1, g.q0)
-    elif k == Op.Y_ERROR:
-        if rng.uniform() < p: _apply_pauli(sv, 2, g.q0)
-    elif k == Op.Z_ERROR:
-        if rng.uniform() < p: _apply_pauli(sv, 3, g.q0)
-    elif k == Op.DEPOLARIZE1:
-        if rng.uniform() < p: _apply_pauli(sv, 1 + rng.below(3), g.q0)
-    elif k == Op.PAULI_CHANNEL_1:
-        var u = rng.uniform()
-        var px = g.p0.resolve(params)
-        var py = g.p1.resolve(params)
-        var pz = g.p2.resolve(params)
-        if u < px: _apply_pauli(sv, 1, g.q0)
-        elif u < px + py: _apply_pauli(sv, 2, g.q0)
-        elif u < px + py + pz: _apply_pauli(sv, 3, g.q0)
-    elif k == Op.DEPOLARIZE2:
-        if rng.uniform() < p:
-            var r = 1 + rng.below(15)
-            _apply_pauli(sv, r & 3, g.q0)
-            _apply_pauli(sv, r >> 2, g.q1)
+    # semantics and draw order: qumo.ir.pauli_noise
+    _apply_pauli_code(sv, draw_pauli_noise(g, rng, params), g.q0, g.q1)
 
 
 struct TerminalMeasureMap(Copyable, Movable):

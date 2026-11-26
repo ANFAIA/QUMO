@@ -31,7 +31,7 @@ from qumo.ir.pauli import PauliSum
 from qumo.core.rng import Rng
 from qumo.sim.statevector import run_chunks
 from qumo.algorithms.hamiltonians import check_fits
-from qumo.algorithms.linalg import jacobi_eigh
+from qumo.algorithms.linalg import HermitianOperator, lanczos, vec_dot, vec_norm
 
 comptime SQD_MAX_STATES = 1 << 21
 
@@ -67,7 +67,7 @@ struct SubspaceGroundState(Movable, Writable):
                 ", residual=", self.residual, ", converged=", self.converged, ")")
 
 
-struct _Ell(Movable):
+struct _Ell(Movable, HermitianOperator):
     """Projected Hamiltonian, row-wise: slot (i, g) = <b_i| sum_{t in group g} P_t |b_col>."""
 
     var m: Int
@@ -210,7 +210,7 @@ struct _Ell(Movable):
                 c += 1
         return c
 
-    def apply(self, xr: List[Float64], xi: List[Float64], mut yr: List[Float64], mut yi: List[Float64]):
+    def apply_vec(self, xr: List[Float64], xi: List[Float64], mut yr: List[Float64], mut yi: List[Float64]):
         """y <- H x (rows in parallel)."""
         var cp = self.col.unsafe_ptr().as_unsafe_any_origin()
         var rp = self.vre.unsafe_ptr().as_unsafe_any_origin()
@@ -246,23 +246,6 @@ struct _Ell(Movable):
         _ = len(yi)
 
 
-def _dot(ar: List[Float64], ai: List[Float64], br: List[Float64], bi: List[Float64]) -> Tuple[Float64, Float64]:
-    """<a|b> (conjugate-linear in a)."""
-    var sr = 0.0
-    var si = 0.0
-    for k in range(len(ar)):
-        sr += ar[k] * br[k] + ai[k] * bi[k]
-        si += ar[k] * bi[k] - ai[k] * br[k]
-    return (sr, si)
-
-
-def _norm(ar: List[Float64], ai: List[Float64]) -> Float64:
-    var s = 0.0
-    for k in range(len(ar)):
-        s += ar[k] * ar[k] + ai[k] * ai[k]
-    return sqrt(s)
-
-
 def subspace_ground_state(h: PauliSum, basis_states: List[Int], num_qubits: Int, tol: Float64 = 1e-9,
                           krylov: Int = 40, max_restarts: Int = 60, seed: UInt64 = 2024) raises -> SubspaceGroundState:
     """Lowest eigenpair of H restricted to span{|b> : b in basis_states}
@@ -286,7 +269,7 @@ def subspace_ground_state(h: PauliSum, basis_states: List[Int], num_qubits: Int,
     for k in range(m):
         xr[k] = rng.uniform() - 0.5
         xi[k] = rng.uniform() - 0.5
-    var nrm = _norm(xr, xi)
+    var nrm = vec_norm(xr, xi)
     for k in range(m):
         xr[k] /= nrm
         xi[k] /= nrm
@@ -296,65 +279,17 @@ def subspace_ground_state(h: PauliSum, basis_states: List[Int], num_qubits: Int,
     var theta = 0.0
     for restart in range(max_restarts):
         res.restarts = restart + 1
-        var Vr = List[List[Float64]]()
-        var Vi = List[List[Float64]]()
-        Vr.append(xr.copy())
-        Vi.append(xi.copy())
-        var alpha = List[Float64]()
-        var beta = List[Float64]()
-        for k in range(K):
-            A.apply(Vr[k], Vi[k], wr, wi)
-            res.matvecs += 1
-            var a = _dot(Vr[k], Vi[k], wr, wi)[0]
-            alpha.append(a)
-            for t in range(m):
-                wr[t] -= a * Vr[k][t]
-                wi[t] -= a * Vi[k][t]
-                if k > 0:
-                    wr[t] -= beta[k - 1] * Vr[k - 1][t]
-                    wi[t] -= beta[k - 1] * Vi[k - 1][t]
-            for _ in range(2):  # full re-orthogonalisation
-                for j in range(k + 1):
-                    var c = _dot(Vr[j], Vi[j], wr, wi)
-                    for t in range(m):
-                        var ur = Vr[j][t]
-                        var ui = Vi[j][t]
-                        wr[t] -= c[0] * ur - c[1] * ui
-                        wi[t] -= c[0] * ui + c[1] * ur
-            var b = _norm(wr, wi)
-            if k == K - 1 or b < 1e-12:
-                break
-            beta.append(b)
-            var nr = List[Float64](length=m, fill=0.0)
-            var ni = List[Float64](length=m, fill=0.0)
-            for t in range(m):
-                nr[t] = wr[t] / b
-                ni[t] = wi[t] / b
-            Vr.append(nr^)
-            Vi.append(ni^)
-        var kk = len(alpha)
-        var T = List[Float64](length=kk * kk, fill=0.0)
-        for j in range(kk):
-            T[j * kk + j] = alpha[j]
-            if j + 1 < kk:
-                T[j * kk + j + 1] = beta[j]
-                T[(j + 1) * kk + j] = beta[j]
-        var eig = jacobi_eigh(T, kk)
-        for t in range(m):
-            xr[t] = 0.0
-            xi[t] = 0.0
-        for j in range(kk):
-            var y = eig.vectors[j * kk + 0]
-            for t in range(m):
-                xr[t] += y * Vr[j][t]
-                xi[t] += y * Vi[j][t]
-        nrm = _norm(xr, xi)
+        var run = lanczos(A, xr.copy(), xi.copy(), K, 1e-12)
+        var kk = run.steps
+        res.matvecs += kk
+        run.ritz_vector(xr, xi)
+        nrm = vec_norm(xr, xi)
         for t in range(m):
             xr[t] /= nrm
             xi[t] /= nrm
-        A.apply(xr, xi, wr, wi)
+        A.apply_vec(xr, xi, wr, wi)
         res.matvecs += 1
-        var rq = _dot(xr, xi, wr, wi)[0]
+        var rq = vec_dot(xr, xi, wr, wi)[0]
         theta = rq
         var r2 = 0.0
         for t in range(m):

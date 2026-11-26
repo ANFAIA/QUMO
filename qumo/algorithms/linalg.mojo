@@ -1,10 +1,13 @@
 """Small linear-algebra kernels for the algorithm layer.
 
-Two families, both allocation-free in their hot loops:
+Three families, the first two allocation-free in their hot loops:
   * BLAS-1 style operations on `StateVector`s (split re/im storage, raw
     pointers) used by Lanczos, exact time evolution and adjoint gradients.
   * Dense real-symmetric eigensolver (cyclic Jacobi) and a Sturm-sequence
     bisection for symmetric tridiagonal matrices (Lanczos projections).
+  * The Lanczos recurrence itself (`lanczos`, `HermitianOperator`,
+    `LanczosRun`): one definition for `ground_state`,
+    `subspace_ground_energy` and `subspace_ground_state`.
 
 Jacobi is O(m^3) per sweep but unconditionally stable and gives orthonormal
 eigenvectors - the right trade-off for the <= 256 x 256 reference problems
@@ -233,3 +236,151 @@ def tridiag_lowest(alpha: List[Float64], beta: List[Float64], m: Int) -> Float64
         if hi - lo <= 1e-15 * max(1.0, abs(lo)):
             break
     return 0.5 * (lo + hi)
+
+
+# ---------------------------------------------------------------------------
+# Lanczos: the one Krylov recurrence of the algorithm layer
+#
+# `ground_state` (2^n amplitudes, `PauliOperator`), `subspace_ground_energy`
+# (sparse projected matrix, eigenvalue only) and `subspace_ground_state`
+# (restarted, ELL matrix, Ritz vector) all run `lanczos` below and differ only
+# in the operator, the breakdown threshold, the stopping rule and what they do
+# with the projection. Vectors are complex, split in two `List[Float64]`.
+# ---------------------------------------------------------------------------
+trait HermitianOperator:
+    """y <- H x on a complex vector stored as (re, im). y is overwritten and
+    never aliases x."""
+
+    def apply_vec(self, xr: List[Float64], xi: List[Float64], mut yr: List[Float64], mut yi: List[Float64]):
+        ...
+
+
+def vec_dot(ar: List[Float64], ai: List[Float64], br: List[Float64], bi: List[Float64]) -> Tuple[Float64, Float64]:
+    """<a|b> as (re, im), conjugate-linear in a. Serial, in index order, so the
+    sum is the same on any thread count."""
+    var sr = 0.0
+    var si = 0.0
+    for k in range(len(ar)):
+        sr += ar[k] * br[k] + ai[k] * bi[k]
+        si += ar[k] * bi[k] - ai[k] * br[k]
+    return (sr, si)
+
+
+def vec_norm(ar: List[Float64], ai: List[Float64]) -> Float64:
+    var s = 0.0
+    for k in range(len(ar)):
+        s += ar[k] * ar[k] + ai[k] * ai[k]
+    return sqrt(s)
+
+
+def vec_axpy(mut yr: List[Float64], mut yi: List[Float64], ar: Float64, ai: Float64, xr: List[Float64], xi: List[Float64]):
+    """y <- y + (ar + i ai) x, element-wise (parallel above PAR_MIN_ITEMS; the
+    result does not depend on the thread count)."""
+    var yrp = yr.unsafe_ptr().as_unsafe_any_origin()
+    var yip = yi.unsafe_ptr().as_unsafe_any_origin()
+    var xrp = xr.unsafe_ptr().as_unsafe_any_origin()
+    var xip = xi.unsafe_ptr().as_unsafe_any_origin()
+
+    def body(lo: Int, hi: Int) {imm yrp, imm yip, imm xrp, imm xip, imm ar, imm ai}:
+        for i in range(lo, hi):
+            var a = xrp[unsafe_offset=i]
+            var b = xip[unsafe_offset=i]
+            yrp[unsafe_offset=i] = yrp[unsafe_offset=i] + ar * a - ai * b
+            yip[unsafe_offset=i] = yip[unsafe_offset=i] + ar * b + ai * a
+
+    run_chunks(body, len(yr))
+    _ = len(yi)
+    _ = len(xr)
+    _ = len(xi)
+
+
+struct LanczosRun(Movable):
+    """One Lanczos block: T = tridiag(alpha, beta) of size `steps` in the
+    orthonormal basis (vr[k], vi[k]), k < steps. len(beta) == steps - 1."""
+
+    var alpha: List[Float64]
+    var beta: List[Float64]
+    var vr: List[List[Float64]]
+    var vi: List[List[Float64]]
+    var steps: Int
+
+    def __init__(out self):
+        self.alpha = List[Float64]()
+        self.beta = List[Float64]()
+        self.vr = List[List[Float64]]()
+        self.vi = List[List[Float64]]()
+        self.steps = 0
+
+    def lowest(self) -> Float64:
+        """Smallest Ritz value (Sturm bisection on T)."""
+        return tridiag_lowest(self.alpha, self.beta, self.steps)
+
+    def ritz_vector(self, mut xr: List[Float64], mut xi: List[Float64]):
+        """x <- sum_k y_k v_k for the lowest eigenvector y of T (Jacobi).
+        Not normalised: y is a unit vector and the basis orthonormal, so the
+        norm is 1 up to rounding and each caller normalises as it always did."""
+        var m = self.steps
+        var t = List[Float64](length=m * m, fill=0.0)
+        for i in range(m):
+            t[i * m + i] = self.alpha[i]
+            if i + 1 < m:
+                t[i * m + i + 1] = self.beta[i]
+                t[(i + 1) * m + i] = self.beta[i]
+        var eig = jacobi_eigh(t, m)
+        for i in range(len(xr)):
+            xr[i] = 0.0
+            xi[i] = 0.0
+        for k in range(m):
+            vec_axpy(xr, xi, eig.vectors[k * m + 0], 0.0, self.vr[k], self.vi[k])
+
+
+def lanczos[Op: HermitianOperator](op: Op, var x0r: List[Float64], var x0i: List[Float64], max_steps: Int,
+                                   breakdown: Float64, conv_tol: Float64 = 0.0, check_every: Int = 4) -> LanczosRun:
+    """Lanczos with full re-orthogonalisation (two passes, Kahan/Parlett) from
+    the unit vector x0, at most `max_steps` steps.
+
+    Stops early when the next residual norm is below `breakdown` (an invariant
+    subspace was found) or, if `conv_tol > 0`, when the lowest Ritz value moved
+    by less than `conv_tol * max(1, |theta|)` between two checks, made every
+    `check_every` steps. Memory: `steps` vectors plus one work vector.
+    """
+    var run = LanczosRun()
+    var n = len(x0r)
+    var wr = List[Float64](length=n, fill=0.0)
+    var wi = List[Float64](length=n, fill=0.0)
+    run.vr.append(x0r^)
+    run.vi.append(x0i^)
+    var theta_old = 1e300
+    var k = 0
+    while k < max_steps:
+        op.apply_vec(run.vr[k], run.vi[k], wr, wi)
+        var a = vec_dot(run.vr[k], run.vi[k], wr, wi)[0]
+        run.alpha.append(a)
+        vec_axpy(wr, wi, -a, 0.0, run.vr[k], run.vi[k])
+        if k > 0:
+            vec_axpy(wr, wi, -run.beta[k - 1], 0.0, run.vr[k - 1], run.vi[k - 1])
+        for _ in range(2):
+            for j in range(k + 1):
+                var c = vec_dot(run.vr[j], run.vi[j], wr, wi)
+                vec_axpy(wr, wi, -c[0], -c[1], run.vr[j], run.vi[j])
+        var b = vec_norm(wr, wi)
+        k += 1
+        var done = b < breakdown or k >= max_steps
+        if not done and conv_tol > 0.0 and (k % check_every == 0):
+            var th = tridiag_lowest(run.alpha, run.beta, k)
+            if abs(th - theta_old) < conv_tol * max(1.0, abs(th)):
+                done = True
+            theta_old = th
+        if done:
+            break
+        run.beta.append(b)
+        var s = 1.0 / b
+        var nr = List[Float64](length=n, fill=0.0)
+        var ni = List[Float64](length=n, fill=0.0)
+        for i in range(n):
+            nr[i] = wr[i] * s
+            ni[i] = wi[i] * s
+        run.vr.append(nr^)
+        run.vi.append(ni^)
+    run.steps = k
+    return run^
