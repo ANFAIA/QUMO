@@ -194,7 +194,7 @@ collect Pauli-rotation networks (Clifford + rx/ry/rz/rzz/rxx/ryy; <= 6 qubits) a
 | `budget` | `budget=...` | `N` | `0` | search node cap (0 = the method's own) |
 | `model_dir` | `model_dir=...` | `<model_dir>` |  | model directory, searched first |
 | `seed` | `seed=...` | `N` |  | default: the compile seed |
-| `max_rotations` | `max_rotations=...` | `N` | `1024` | most non-Clifford rotations of a collected block; a longer run is split into consecutive blocks (synthesis time grows with the square of it); 0 = no cap |
+| `max_rotations` | `max_rotations=...` | `N` | `2048` | most non-Clifford rotations of a collected block; a longer run is split into consecutive blocks (synthesis time grows with the square of it); 0 = no cap |
 
 ## wrap_angles
 

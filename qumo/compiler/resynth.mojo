@@ -95,11 +95,11 @@ comptime MAX_W_PERM = 64
 # is quadratic in its rotations (block_synth._pn_greedy scores every pending
 # rotation for every emitted gate), so an uncapped run of rotations on <= 6
 # qubits (a Trotter circuit) made the pass quadratic in the circuit length.
-# 1024 keeps a block under about a second and is above every block of the
-# tests, examples and benchmark circuits, whose output it does not change; a
-# smaller cap costs 2q gates on long narrow circuits (measured in the pull
-# request that added it).
-comptime DEFAULT_MAX_ROTATIONS = 1024
+# 2048 keeps a 6-qubit block to a few seconds and is above every block of
+# the tests and benchmark circuits, whose output it does not change. Measured
+# on 6-qubit circuits of 7000 to 8000 rotations: 1024 takes the same time and
+# gives more 2q gates, 4096 takes 2 to 3 times longer.
+comptime DEFAULT_MAX_ROTATIONS = 2048
 
 # method ids (winner bookkeeping)
 comptime _M_EXACT = 0
