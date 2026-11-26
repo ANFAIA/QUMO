@@ -271,6 +271,23 @@ def requires_confirmation(provider: Provider, backend: str) -> bool:
     return not provider.is_local(backend)
 
 
+def check_cost_cap(est: CostEstimate, max_cost: float | None) -> None:
+    """Refuse a cost cap that nothing can be compared with.
+
+    An "unknown" estimate has amount 0 and is not a price, so `amount > max_cost` is
+    always false: the job would be submitted as if it were under the cap. Called by
+    `runner.run` for every provider and by the providers that can return "unknown"."""
+    if max_cost is not None and est.unit == "unknown":
+        from .errors import E_LIMIT, HINT_NO_QUOTE, HardwareError
+
+        raise HardwareError(
+            E_LIMIT,
+            f"--max-cost {max_cost} cannot be enforced for {est.provider} backend '{est.backend}': "
+            f"there is no cost estimate to compare it with ({est.formula})",
+            HINT_NO_QUOTE,
+        )
+
+
 def check_confirmed(provider: Provider, backend: str, confirm: bool) -> None:
     """Provider-side safety gate (defence in depth behind `runner.run`)."""
     if requires_confirmation(provider, backend) and not confirm:

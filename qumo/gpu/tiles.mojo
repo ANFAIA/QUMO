@@ -54,6 +54,7 @@ from std.math import cos, sin, atan2
 
 from qumo.ir.gates import Op, M2, M4
 from qumo.sim.runner import KOp, KernelKind
+from qumo.gpu.device import gpu_operand_error
 from qumo.gpu.kernels import (
     TileKind, TOP, DOP, CODE_CTRL, DIAG_MAX_WIDTH, LOW_BITS, LOW_MIN, REG_BITS, SEG_W, SEG_FLAG_SHIFT, SEG_TRANSPOSE, SEG_DIRECT, FIN_NATURAL,
     FIN_TRANSPOSE, FIN_DIRECT, RUN_MAX_OPS, RUN_MAX_MATS,
@@ -176,6 +177,37 @@ def kop_qubits(op: KOp) raises -> Int:
     return (1 << op.a) | (1 << op.b)
 
 
+def _bad_operand(what: String, n: Int) -> Error:
+    return gpu_operand_error(what + " on a " + String(n) + "-qubit GPU state")
+
+
+def check_kop_qubits(op: KOp, n: Int) raises:
+    """QM-E476 unless every qubit of `op` is in [0, n) and a multi-qubit op
+    names distinct qubits (QM-E475 for ops without a kernel). Host side,
+    once per op when a flush is scheduled: the kernels trust their tables."""
+    var k = op.kind
+    if k == KernelKind.ONE:
+        if op.a < 0 or op.a >= n:
+            raise _bad_operand("qubit " + String(op.a) + " is out of range", n)
+        return
+    if k == KernelKind.OTHER:
+        var g = op.inst
+        if g.kind != Op.CCX and g.kind != Op.CCZ and g.kind != Op.CSWAP:
+            raise Error("QM-E475: the GPU executor has no kernel for opcode " + String(g.kind) + ". Hint: run this circuit on the CPU state vector (qumo.sim.runner).")
+        for q in [g.q0, g.q1, g.q2]:
+            if q < 0 or q >= n:
+                raise _bad_operand("qubit " + String(q) + " of a 3-qubit gate is out of range", n)
+        if g.q0 == g.q1 or g.q0 == g.q2 or g.q1 == g.q2:
+            raise _bad_operand("a 3-qubit gate repeats a qubit (" + String(g.q0) + ", " + String(g.q1) + ", " + String(g.q2) + ")", n)
+        return
+    if k < KernelKind.ONE or k > KernelKind.OTHER:
+        raise Error("QM-E475: the GPU executor has no kernel for plan op kind " + String(k) + ". Hint: run this circuit on the CPU state vector (qumo.sim.runner).")
+    if op.a < 0 or op.a >= n or op.b < 0 or op.b >= n:
+        raise _bad_operand("qubit " + String(op.a if (op.a < 0 or op.a >= n) else op.b) + " of a 2-qubit gate is out of range", n)
+    if op.a == op.b:
+        raise _bad_operand("a 2-qubit gate names qubit " + String(op.a) + " twice", n)
+
+
 def kop_targets(op: KOp) -> Int:
     """Mask of the qubits the op needs inside the tile (non-diagonal targets)."""
     var k = op.kind
@@ -216,7 +248,7 @@ struct TileProgram[dt: DType](Movable):
 
     def __init__(out self, n: Int, tb: Int, low_bits: Int = LOW_BITS, diag_width: Int = DIAG_MAX_WIDTH,
                  split_1q: Bool = False):
-        comptime assert REG_BITS >= 1 and REG_BITS <= 4, "QUMO_GPU_REG_BITS must be 1..4 (4-bit register fields)"
+        comptime assert REG_BITS >= 2 and REG_BITS <= 4, "QUMO_GPU_REG_BITS must be 2..4 (SWAP and dense 4x4 gates need two register qubits per thread; 4-bit register fields)"
         var g = tile_geometry(n, tb, low_bits)
         self.n = n
         self.k = g[0]
@@ -819,10 +851,8 @@ def build_tile_program[dt: DType](plan: List[KOp], n: Int, phase: Float64, tb: I
     var qmasks = List[Int](capacity=np_)
     var tmasks = List[Int](capacity=np_)
     for op in plan:
-        var m = kop_qubits(op)
-        if m >= (1 << n):
-            raise Error("QM-E474: plan op acts on a qubit >= " + String(n) + ". Hint: allocate GpuStateVector(circuit.num_qubits).")
-        qmasks.append(m)
+        check_kop_qubits(op, n)  # once per op, before any mask is built from a qubit index
+        qmasks.append(kop_qubits(op))
         tmasks.append(kop_targets(op))
     var done = List[Bool](length=np_, fill=False)
     var cap = prog.k - prog.low
