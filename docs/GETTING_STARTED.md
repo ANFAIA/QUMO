@@ -20,8 +20,7 @@ The pinned toolchain (`mojo==1.2.0`, `max-core==26.7.0`) is published on PyPI fo
 |---|---|
 | macOS on Apple silicon (arm64) | Supported. The wheels are tagged macOS 13+; QUMO is developed and tested on macOS 15 and later. |
 | Linux x86-64 and aarch64, glibc 2.34 or newer (Ubuntu 22.04+, Debian 12+) | Toolchain available. QUMO's GPU benchmarks ran on Linux (Colab, see [BENCHMARKING_ON_CLOUD_GPUS.md](BENCHMARKING_ON_CLOUD_GPUS.md)); the full `make test` suite is not run regularly on Linux. |
-| macOS on Intel | Not supported: there is no Mojo wheel for Intel Macs. |
-| Windows | Not supported natively: there is no Windows wheel. WSL2 with a recent Ubuntu is a Linux x86-64 system and should work, but nobody has verified QUMO there. |
+| Windows, through WSL2 | Works: a user has run QUMO on Windows with WSL. Use a recent Ubuntu in WSL2 and follow the Linux row above. There is no native Windows wheel, and the full `make test` suite has not been run under WSL by the project. |
 
 ### How long things take
 
