@@ -1,3 +1,5 @@
+# GENERATED from qumo/net/ossl.mojo by tests/test_net_mirror.mojo. Do not edit:
+# change that file, then run QUMO_UPDATE_NET=1 .venv/bin/mojo run -I . tests/test_net_mirror.mojo
 """OpenSSL 3, loaded at run time with `dlopen` (DESIGN.md 4.3 and 4.4).
 
 OpenSSL is never linked: a direct libc-style FFI call to its symbols fails under `mojo run` and

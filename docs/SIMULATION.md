@@ -48,7 +48,7 @@ gives `01` on every shot. All samplers agree:
 |---|---|---|
 | static (terminal measurements only) | `statevector:static` | `terminal_measure_map(circuit)` keeps one source qubit per clbit (the last MEASURE into it); `TerminalMeasureMap.pack(index)` ORs those bits (`outcome & mask` when every pair is qubit k -> clbit k) |
 | per-shot trajectories | `statevector:trajectories` | each MEASURE sets or clears its clbit |
-| stabilizer / Pauli frames | `stabilizer`, `pauli_frame` | per-clbit store / records replayed in order (`qumo.sim.stabilizer`, `qumo.exec.dispatch.counts_from_measurements`) |
+| stabilizer / Pauli frames | `stabilizer`, `pauli_frame` | per-clbit store / records replayed in order (`qumo.sim.stabilizer`, `qumo.sim.dispatch.counts_from_measurements`) |
 
 `terminal_measure_map` is public so that other static samplers (the GPU
 state vector) can share the exact semantics. Before 2026-10-12 the static
@@ -376,7 +376,7 @@ and a custom Kraus channel in [EXTENDING.md](EXTENDING.md#2-a-custom-noise-chann
 
 Which sampler runs a noisy circuit: `sample()` always uses state-vector trajectories
 (one error pattern per shot) and accepts every channel above. `sample_auto`
-(`qumo.exec.dispatch`) and the CLI switch to Pauli frames or the tableau when the
+(`qumo.gpu.dispatch`) and the CLI switch to Pauli frames or the tableau when the
 circuit is Clifford with Pauli noise; those refuse Kraus channels (QM-E414). To
 derive channels from a device's error rates instead of writing them by hand, use
 `NoiseModel` + `apply_noise_model` (`qumo.noise.characterization`) or `emulate` below.
@@ -409,7 +409,7 @@ layered circuit with 20000 shots (`bench/crosscheck/tier1.py ptsbe`):
 | 1e-3 | 939 | 17403 | 94x |
 | 1e-2 | 9189 | 4757 | 5x |
 
-Nothing changes for callers of `sample()`. `qumo.exec.emulate` uses this path.
+Nothing changes for callers of `sample()`. `qumo.noise.emulate` uses this path.
 
 **Density matrix.** Entry i + 2^n j of a 2n-qubit `StateVector` is rho_ij, so a gate
 is U on qubit q and conj(U) on q + n with the same kernels. A channel is one dense
@@ -432,7 +432,7 @@ at 2 branches to the last measurement. Every Pauli expectation matches the state
 vector on random Clifford + rotation circuits to 1e-9. 200 shots of 400 qubits with
 12 T take about 0.01 s. `qumo.ft.emulate.run_physical` picks it past 26 qubits.
 
-`qumo.exec.emulate.emulate(circuit, target, shots, seed)` is the device-level entry
+`qumo.noise.emulate.emulate(circuit, target, shots, seed)` is the device-level entry
 point: it checks conformance, builds `NoiseModel.from_target`, drops unused physical
 qubits and runs the cheapest exact sampler; `method` in the result says which.
 

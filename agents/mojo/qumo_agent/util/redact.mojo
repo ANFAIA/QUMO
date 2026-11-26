@@ -165,7 +165,7 @@ def secret_env_names(api_key_env: String) -> List[String]:
 def redact_all(s: String, env_names: List[String]) -> String:
     """Hides the current value (read with getenv at each call, never cached) of every
     variable in `env_names` and of every variable of this process whose name looks secret
-    (`is_secret_env_name`: `*_API_KEY`, `*_TOKEN`, `*SECRET*`, `*PASSWORD*`), longest value
+    (`is_secret_env_name`: it holds TOKEN, SECRET, KEY, PASSWORD, CREDENTIAL or COOKIE), longest value
     first, each also in its JSON-escaped form; then the `sk-`/`Bearer `/`Basic ` patterns."""
     var names = List[String]()
     for name in env_names:

@@ -45,6 +45,9 @@ def server_config() -> dict:
     key = os.environ.get(KEY_ENV)
     if not key:
         raise RuntimeError(f"set {KEY_ENV} to use alphaXiv (Settings > API Keys on alphaxiv.org)")
+    from qumo_agents.config import check_key_url
+
+    check_key_url(ALPHAXIV_URL, KEY_ENV, key)  # never the bearer token in clear text to another host
     return {"alphaxiv": {"transport": "streamable_http", "url": ALPHAXIV_URL,
                          "headers": {"Authorization": f"Bearer {key}"}}}
 

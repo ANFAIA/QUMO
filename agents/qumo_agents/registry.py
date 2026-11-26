@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from qumo_agents import prompts
+from qumo_agents import guard_spec, prompts
 from qumo_agents.tools import repo, research
 
 ALL_MCP = None  # every QUMO MCP tool
@@ -95,8 +95,8 @@ AGENTS: dict[str, AgentSpec] = {a.name: a for a in [
 ]}
 
 
-WEB_GROUPS = frozenset({"research"})  # fetch_page reaches any public https host
-EXEC_GROUPS = frozenset({"check"})  # run_check runs code, including code the agent wrote
+WEB_GROUPS = frozenset(guard_spec.DELEGATION["web_groups"])  # fetch_page reaches any public https host
+EXEC_GROUPS = frozenset(guard_spec.DELEGATION["exec_groups"])  # run_check runs code, including code the agent wrote
 
 
 def closure(name: str, agents: dict[str, AgentSpec]) -> set[str]:

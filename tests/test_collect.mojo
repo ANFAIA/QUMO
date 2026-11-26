@@ -12,6 +12,7 @@ guarded by `stats.proposed > 0`, so the suite passes with stub synthesizers.
 
 from std.math import pi, sqrt, atan2
 from std.testing import assert_equal, assert_true, assert_false
+from std.time import perf_counter_ns
 from qumo.ir.circuit import Circuit, Instruction
 from qumo.ir.gates import Op, op_arity
 from qumo.ir.qasm import to_qasm
@@ -28,7 +29,7 @@ from qumo.compiler.collect import (
 )
 from qumo.compiler.resynth import (
     SynthOptions, SynthStats, resynthesize_blocks, verify_candidate, score_cost, score_depth2q,
-    _lower_bound, _clifford_dep,
+    _lower_bound, _clifford_dep, DEFAULT_MAX_ROTATIONS,
 )
 from qumo.compiler.blockalg import SubGraph, Perm, GF2Mat, SympTab
 from qumo.compiler.block_synth import synth_perm, synth_linear, synth_clifford
@@ -310,6 +311,137 @@ def test_order_is_topological() raises:
             for x in bl:
                 for k in range(1, len(x.ops)):
                     assert_true(pos[x.ops[k]] > pos[x.ops[k - 1]], "block ops in order")
+
+
+# ----------------------------------------------------------------------------
+# cap on the rotations of a Pauli-network block
+# ----------------------------------------------------------------------------
+def trotter_line(n: Int, steps: Int) -> Circuit:
+    """First-order Trotter steps of a transverse-field Ising chain: one run of
+    (2n - 1) * steps rotations on n qubits, nothing in it closes a block."""
+    var c = Circuit(n, name="trotter")
+    for _ in range(steps):
+        for q in range(n - 1):
+            c.rzz(0.137, q, q + 1)
+        for q in range(n):
+            c.rx(0.211, q)
+    return c^
+
+
+def block_rotations(c: Circuit, b: Block) -> Int:
+    var k = 0
+    for i in b.ops:
+        var g = c.ops[i]
+        var kd = g.kind
+        if (kd == Op.RX or kd == Op.RY or kd == Op.RZ or kd == Op.RZZ or kd == Op.RXX or kd == Op.RYY) and not g.is_clifford():
+            k += 1
+    return k
+
+
+def check_capped_collection(c: Circuit, max_width: Int, cap: Int, label: String) raises:
+    """Blocks hold <= cap rotations, no op is lost, and the collection order
+    is still a topological order in which every block is in order."""
+    for fb in range(2):
+        var order = List[Int]()
+        var bl = collect_blocks_ordered(c, KIND_PAULI, 1, max_width, fb == 1, True, order, cap)
+        assert_equal(len(order), len(c.ops), label + ": order length")
+        var pos = List[Int](length=len(c.ops), fill=-1)
+        for k in range(len(order)):
+            assert_equal(pos[order[k]], -1, label + ": op twice in the order")
+            pos[order[k]] = k
+        var seen = 0
+        for x in bl:
+            assert_true(block_rotations(c, x) <= cap, label + ": block above the cap")
+            seen += len(x.ops)
+            for k in range(1, len(x.ops)):
+                assert_true(pos[x.ops[k]] > pos[x.ops[k - 1]], label + ": block ops in order")
+        var matching = 0
+        for g in c.ops:
+            if block_gate_ok(g, KIND_PAULI):
+                matching += 1
+        assert_equal(seen, matching, label + ": every Pauli-network gate is in one block")
+        var d = c.empty_like()
+        for i in order:
+            d.append(c.ops[i])
+        assert_equiv(c, d, label + ": collection order")
+
+
+def test_rotation_cap() raises:
+    # the collector: a 440-rotation run is one block without the cap
+    var c = trotter_line(6, 40)
+    var o0 = List[Int]()
+    var b0 = collect_blocks_ordered(c, KIND_PAULI, 4, 6, False, True, o0)
+    assert_equal(len(b0), 1, "uncapped: one block")
+    assert_equal(block_rotations(c, b0[0]), 440, "uncapped: all the rotations in it")
+    for cap in [1, 7, 64, 256]:
+        check_capped_collection(c, 6, cap, "trotter cap " + String(cap))
+    var o1 = List[Int]()
+    var b1 = collect_blocks_ordered(c, KIND_PAULI, 4, 6, False, True, o1, 64)
+    assert_equal(len(b1), 7, "440 rotations / 64 = 7 consecutive blocks")
+    # a cap the circuit does not reach changes nothing
+    var o2 = List[Int]()
+    var b2 = collect_blocks_ordered(c, KIND_PAULI, 4, 6, False, True, o2, 440)
+    assert_equal(len(b2), 1, "cap not reached: same block")
+    assert_true(same_list(o0, o2), "cap not reached: same order")
+    var t9 = Target.grid(3, 3)
+    for seed in range(3):
+        var r = random_kind_circuit(KIND_PAULI, t9, 160, UInt64(900 + seed))
+        check_capped_collection(r, 4, 3, "random cap 3 seed " + String(seed))
+        check_capped_collection(r, 6, 10, "random cap 10 seed " + String(seed))
+    # Clifford rotations are not counted, and the other kinds have none
+    var cl = Circuit(3)
+    for _ in range(20):
+        cl.rz(pi / 2, 0); cl.cx(0, 1); cl.rx(pi, 2); cl.cx(1, 2)
+    var o3 = List[Int]()
+    assert_equal(len(collect_blocks_ordered(cl, KIND_PAULI, 4, 6, False, True, o3, 1)), 1, "quarter turns are Clifford")
+    # the driver: the default is the declared cap, only for Pauli networks
+    assert_equal(SynthOptions.default(KIND_PAULI).max_rotations, DEFAULT_MAX_ROTATIONS, "pauli default cap")
+    assert_equal(SynthOptions.default(KIND_CLIFFORD).max_rotations, 0, "no cap for the other kinds")
+    var t = Target.line(6)
+    var gs = GateSet(t.basis)
+    for cap in [0, 16, 64, DEFAULT_MAX_ROTATIONS]:
+        var o = SynthOptions.default(KIND_PAULI)
+        o.max_rotations = cap
+        o.model = "off"
+        var d = trotter_line(6, 24)
+        var st = SynthStats()
+        var saved = resynthesize_blocks(d, t, True, o, st)
+        assert_equiv(trotter_line(6, 24), d, "driver cap " + String(cap))
+        assert_true(saved >= 0, "driver cap " + String(cap) + ": never worse")
+        assert_true(total_cost(d, gs) <= total_cost(trotter_line(6, 24), gs), "driver cap " + String(cap) + ": 2q cost")
+        if cap == 16:
+            assert_true(st.blocks >= 264 // 16, "driver: the run was split")
+    print("  rotation cap: collector splits, order kept, driver exact")
+
+
+def pauli_pass_ms(steps: Int, cap: Int) raises -> Float64:
+    var t = Target.line(6)
+    var o = SynthOptions.default(KIND_PAULI)
+    o.model = "off"
+    o.max_rotations = cap
+    var best = 1e30
+    for _ in range(2):
+        var d = trotter_line(6, steps)
+        var st = SynthStats()
+        var t0 = Int(perf_counter_ns())
+        _ = resynthesize_blocks(d, t, True, o, st)
+        best = min(best, Float64(Int(perf_counter_ns()) - t0) / 1e6)
+    return best
+
+
+def test_rotation_cap_scaling() raises:
+    """Past the cap the pass is linear in the length of a run of rotations:
+    4x the Trotter steps cost at most about 4x the time (asserted: under 12x;
+    equal blocks are synthesised once, so it is often less). It was
+    cubic with no cap: 40x measured for these two circuits (0.7 s and 29 s),
+    and the synthesis alone, now quadratic, gives 9x without a cap. The cap is
+    set to 100 here so that both circuits are well past it; the default
+    (DEFAULT_MAX_ROTATIONS) only moves the point where the growth turns
+    linear."""
+    var a = pauli_pass_ms(40, 100)
+    var b = pauli_pass_ms(160, 100)
+    print("  pauli_network(max_rotations=100) on line:6, 440 rotations", a, "ms, 1760 rotations", b, "ms, ratio", b / a)
+    assert_true(b < 12.0 * a, "pauli_network time is not linear in the rotations past the cap")
 
 
 # ----------------------------------------------------------------------------
@@ -751,6 +883,8 @@ def main() raises:
     test_commutation()
     test_split_barrier_cond_back()
     test_order_is_topological()
+    test_rotation_cap()
+    test_rotation_cap_scaling()
     test_verifier_fuzz()
     test_validation()
     test_identity_blocks()

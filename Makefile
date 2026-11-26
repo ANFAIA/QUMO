@@ -1,6 +1,8 @@
 # QUMO build & test entry points.
 MOJO ?= .venv/bin/mojo
 PY ?= bench/.venv/bin/python
+# vendor clients (Mojo package qumo_hw): on the import path of the qumo_py extension only, never of the core
+HW_NATIVE := plugins/hardware/native
 # the RL tests live in rl/ (make test runs the fast ones once, via make test-rl; make test-rl-slow runs the rest)
 # GPU test files need a device; `make test` leaves them out and `make test-gpu-fallback` runs them on the CPU
 TESTS := $(filter-out tests/test_gpu%,$(wildcard tests/test_*.mojo))
@@ -41,8 +43,8 @@ setup-py-locked:  ## bench/.venv from bench/requirements.lock: the exact version
 	uv pip install --python bench/.venv/bin/python -r bench/requirements.lock
 	uv pip install --python bench/.venv/bin/python "./plugins/hardware[all]"
 
-test:  ## run every Mojo test file (tests/ and, once, the fast RL tests of rl/ through make test-rl)
-	@fail=0; for t in $(TESTS); do \
+test:  ## run every Mojo test file (tests/ and, once, the fast RL tests of rl/ through make test-rl) and check-neutrality
+	@fail=0; $(MAKE) --no-print-directory check-neutrality || fail=1; for t in $(TESTS); do \
 		log=$$(mktemp); $(MOJO) run -I . $$t > $$log 2>&1; \
 		out=$$(grep -v Crashpad $$log | tail -1); \
 		case "$$out" in *OK*) echo "PASS $$t";; *) echo "FAIL $$t: $$out"; grep -v Crashpad $$log | tail -25; fail=1;; esac; \
@@ -68,7 +70,7 @@ cli:  ## native CLI + MCP server (build/qumo)
 
 py:  ## CPython extension (build/qumo_py.so)
 	@mkdir -p build
-	$(MOJO) build -I . --emit shared-lib -o build/qumo_py.so python/qumo_py.mojo
+	$(MOJO) build -I . -I $(HW_NATIVE) --emit shared-lib -o build/qumo_py.so python/qumo_py.mojo
 
 bench-sv:  ## state-vector throughput vs Qiskit Aer
 	@mkdir -p build
@@ -156,7 +158,7 @@ RL_ARGS = --no-print-directory -C rl QUMO_ROOT=$(CURDIR) \
 	AI_ROUTE_ID=$(AI_ROUTE_ID)
 
 .PHONY: models-verify train-ai train-ai-synth train-ai-route train-ai-smoke train-ai-route-ppo ai-tools bench-ai \
-	test-rl test-rl-slow check-pure-mojo check-independence bench-rl
+	test-rl test-rl-slow check-pure-mojo check-independence check-neutrality bench-rl
 
 # one tool per main (core mains in rl/drivers, QUMO glue mains in rl/qumo_bridge/drivers); kept here so that
 # `make $(AI_BUILD)/bin/<tool>` works from the QUMO root (the e2e test builds missing tools that way)
@@ -196,6 +198,9 @@ test-rl-slow:  ## statistical and end-to-end RL tests (core *_slow, smoke; bridg
 docker-test:  ## the Mojo suite and the fast RL tests on Linux, in a minimal Ubuntu 24.04 container (docker/linux-test.Dockerfile); needs Docker running
 	docker build -f docker/linux-test.Dockerfile -t qumo-linux-test .
 	docker run --rm qumo-linux-test sh -c 'make cli && make test'
+
+check-neutrality:  ## fails if anything under qumo/ or cli/ imports a vendor module (tests/check_neutrality.sh)
+	@sh tests/check_neutrality.sh
 
 check-independence:  ## fails if anything under rl/qrl, rl/drivers or rl/tests imports qumo.* (rl/check_independence.sh)
 	@$(MAKE) $(RL_ARGS) check-independence
@@ -268,7 +273,7 @@ cli-gpu:  ## CLI + MCP server with GPU dispatch (build/gpu/qumo)
 
 py-gpu:  ## CPython extension with GPU dispatch (build/gpu/qumo_py.so)
 	@mkdir -p build/gpu
-	$(MOJO) build -I . -D QUMO_GPU --emit shared-lib -o build/gpu/qumo_py.so python/qumo_py.mojo
+	$(MOJO) build -I . -I $(HW_NATIVE) -D QUMO_GPU --emit shared-lib -o build/gpu/qumo_py.so python/qumo_py.mojo
 
 # BENCH_GPU_ARGS: "nmax reps [families nmin cpu_max | crossover nmin | frames shots]" (bench/bench_gpu.mojo)
 BENCH_GPU_ARGS ?= 26

@@ -20,6 +20,7 @@ from qumo.core.json import JsonValue, JsonWriter, parse_json
 
 from qumo_agent.core.endpoint import ModelEndpoint
 from qumo_agent.core.errors import E_CONFIG, qa_error
+from qumo_agent.core.guard_rules import exec_groups, web_groups
 from qumo_agent.core.toolspec import ToolSpec, TOOL_LOCAL
 from qumo_agent.harness.env import AgentDef
 from qumo_agent.util.pyfmt import py_str_repr
@@ -91,6 +92,8 @@ struct AgentSpecData(Copyable):
     var prompt: String
     var model_hint: String            # Mojo-only specs may name a model
     var mojo_only: Bool
+    # Subagents whose answers may carry web text into this agent (see check_web_exec).
+    var untrusted_subagents: List[String]
 
 
 def _all_or_list(v: JsonValue) raises -> Tuple[Bool, List[String]]:
@@ -116,6 +119,9 @@ def _spec_from_json(name: String, v: JsonValue, prompt: String, mojo_only: Bool)
     var model = String()
     if v.has("model") and not v.get("model").is_null():
         model = v.get("model").as_string()
+    var untrusted = List[String]()
+    if v.has("untrusted_subagents"):
+        untrusted = _string_list(v.get("untrusted_subagents"))
     return AgentSpecData(
         name,
         v.get("description").as_string(),
@@ -129,7 +135,90 @@ def _spec_from_json(name: String, v: JsonValue, prompt: String, mojo_only: Bool)
         prompt,
         model,
         mojo_only,
+        untrusted.copy(),
     )
+
+
+# --------------------------------------------------------------------------- web + exec
+def _spec_named(specs: List[AgentSpecData], name: String) -> Int:
+    for i in range(len(specs)):
+        if specs[i].name == name:
+            return i
+    return -1
+
+
+def _closure(specs: List[AgentSpecData], name: String) -> List[String]:
+    """`name` and every agent reachable from it through delegation (registry.py closure)."""
+    var seen = List[String]()
+    var stack: List[String] = [name]
+    while len(stack) > 0:
+        var n = stack.pop()
+        if _contains(seen, n):
+            continue
+        var i = _spec_named(specs, n)
+        if i < 0:
+            continue   # a name with no spec cannot run
+        seen.append(n)
+        for s in specs[i].subagents:
+            stack.append(s)
+    return seen^
+
+
+def _has_group(groups: List[String], wanted: List[String]) -> Bool:
+    for g in groups:
+        if _contains(wanted, g):
+            return True
+    return False
+
+
+def _reach(specs: List[AgentSpecData], name: String) -> Tuple[Bool, Bool]:
+    """Whether the delegation closure of `name` holds a web-fetch tool, a code-execution tool."""
+    var web = False
+    var exec = False
+    for n in _closure(specs, name):
+        var groups = specs[_spec_named(specs, n)].tool_groups.copy()
+        web = web or _has_group(groups, web_groups())
+        exec = exec or _has_group(groups, exec_groups())
+    return (web, exec)
+
+
+def check_web_exec(specs: List[AgentSpecData]) raises:
+    """The invariant of registry.py `check_web_exec`, with its texts:
+    1. no agent has web fetch and code execution among its own tool groups;
+    2. every agent that reaches both through delegation declares, for each subagent that
+       reaches web fetch, that its answer is web-derived (`untrusted_subagents`), and declares
+       nothing else;
+    the loop turns each declared edge into a wrapped, size-bounded answer. The tool groups
+    are `lists.delegation` of agents/spec/guard_rules.json."""
+    for spec in specs:
+        if _has_group(spec.tool_groups, web_groups()) and _has_group(spec.tool_groups, exec_groups()):
+            raise Error(spec.name + ": research and check tools may not be combined")
+        for s in spec.untrusted_subagents:
+            if not _contains(spec.subagents, s):
+                raise Error(spec.name + ": untrusted_subagents names " + py_str_repr(s) + ", which is not a subagent")
+    for spec in specs:
+        var r = _reach(specs, spec.name)
+        if not (r[0] and r[1]):
+            continue
+        var missing = List[String]()
+        var extra = List[String]()
+        for s in spec.subagents:
+            if _reach(specs, s)[0] and not _contains(spec.untrusted_subagents, s) and not _contains(missing, s):
+                missing.append(s)
+        for s in spec.untrusted_subagents:
+            if not _reach(specs, s)[0] and not _contains(extra, s):
+                extra.append(s)
+        if len(missing) > 0:
+            sort(missing)
+            raise Error(spec.name + ": reaches web fetch and code execution; its answers from " + _join(missing, ", ")
+                        + " carry web text and must be in untrusted_subagents")
+        if len(extra) > 0:
+            sort(extra)
+            raise Error(spec.name + ": untrusted_subagents lists " + _join(extra, ", ") + ", which do not reach web fetch")
+    for spec in specs:
+        var r = _reach(specs, spec.name)
+        if not (r[0] and r[1]) and len(spec.untrusted_subagents) > 0:
+            raise Error(spec.name + ": declares untrusted_subagents but does not reach both web and exec")
 
 
 struct Registry(Copyable):
@@ -168,6 +257,11 @@ struct Registry(Copyable):
         if self.config.get_string("schema", "") != AGENTS_SCHEMA:
             raise qa_error(E_CONFIG, self.config_path + ": expected schema " + AGENTS_SCHEMA, "")
         self._load_mojo_only()
+        try:
+            check_web_exec(self.specs)
+        except e:
+            raise qa_error(E_CONFIG, "agent specs break the web/exec rule: " + String(e),
+                           "see agents/spec/README.md (rule delegation)")
 
     def _load_mojo_only(mut self) raises:
         var dir = self.root + "/agents/mojo/specs"
@@ -264,7 +358,13 @@ struct Registry(Copyable):
         for s in spec.subagents:
             if s != name and not _contains(ancestors, s):
                 subs.append(s)
-        return AgentDef(name, spec.description, spec.prompt, self.model_for(name, model_override), subs^, recursion_limit)
+        # a subagent dropped from the list (an ancestor) answers nothing, so it needs no wrapper
+        var untrusted = List[String]()
+        for s in spec.untrusted_subagents:
+            if _contains(subs, s):
+                untrusted.append(s)
+        return AgentDef(name, spec.description, spec.prompt, self.model_for(name, model_override), subs^, recursion_limit,
+                        untrusted^)
 
 
 @fieldwise_init

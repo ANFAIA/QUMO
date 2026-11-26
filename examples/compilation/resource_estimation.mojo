@@ -12,7 +12,7 @@ Ising evolution (N x N lattice, J = g = 1, dt = 0.9, 4th-order product
 formula, error budget 0.01). Neither prints its results in the repository.
 
 QUMO estimates explicit circuits with three read-only estimators from
-qumo/exec/resources.mojo:
+qumo/compiler/resources.mojo:
 - `estimate_resources`: logical counts, depth, T-count (T/Tdg, 7 per
   Toffoli-class gate, a synthesised sequence per arbitrary rotation),
   recommended simulator;
@@ -32,7 +32,7 @@ two-qubit error (3e-3, 1e-3, 5e-3) and a surface-code cycle of
 4 t_2q + t_meas; error budgets 1e-2, 1e-3 and 1e-4.
 
 Out of scope, stated: count-only (circuit-free) estimates in the style of
-RSA-2048 would need a counts-based estimator in qumo/exec/resources.mojo,
+RSA-2048 would need a counts-based estimator in qumo/compiler/resources.mojo,
 a file owned by another workstream; and the Q# qubit models (Majorana,
 floquet codes) are not modelled.
 
@@ -55,7 +55,7 @@ from qumo.ir.gates import Op
 from qumo.core.rng import Rng
 from qumo.sim.runner import evolve
 from qumo.sim.statevector import StateVector
-from qumo.exec.resources import (
+from qumo.compiler.resources import (
     estimate_resources, estimate_hardware, estimate_fault_tolerant, HardwareProfile,
 )
 from qumo.algorithms.library import append_controlled_modmul, order_finding, qft, num_mcz_ancillas

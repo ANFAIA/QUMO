@@ -1,3 +1,5 @@
+# GENERATED from qumo/net/tls.mojo by tests/test_net_mirror.mojo. Do not edit:
+# change that file, then run QUMO_UPDATE_NET=1 .venv/bin/mojo run -I . tests/test_net_mirror.mojo
 """TLS client context and handshake with strict verification (DESIGN.md 4.5).
 
 One `TlsContext` per process: TLS 1.2 minimum, no compression, no renegotiation, peer

@@ -285,7 +285,7 @@ post-selection. `logical_to_circuit(lp)` gives the semantics of a logical
 program as an unencoded circuit, `reference_counts` samples the source
 circuit, `error_rate_sweep` compares logical and physical error rates.
 `qumo.ai.ft_tools.resource_report_json` combines encoder statistics with
-`qumo.exec.resources.estimate_resources` of the physical circuit.
+`qumo.compiler.resources.estimate_resources` of the physical circuit.
 
 Measured with `examples/ft/logical_error_sweep.mojo` (3-qubit deterministic
 Clifford program, Steane, no EC cycles, flagged |0>_L preparations

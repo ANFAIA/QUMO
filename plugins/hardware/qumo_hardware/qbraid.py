@@ -1,4 +1,4 @@
-"""qBraid plugin: native Mojo client for the qBraid Runtime API v2 (qumo/exec/qbraid_api.mojo).
+"""qBraid plugin: native Mojo client for the qBraid Runtime API v2 (plugins/hardware/native/qumo_hw/qbraid_api.mojo).
 
 qBraid is an aggregator: one API key reaches simulators and QPUs of many vendors (qBraid's own
 simulators, AWS Braket, Azure, IBM, IonQ; providers AQT, IQM, OQC, Pasqal, QuEra, Rigetti, ...).
@@ -32,7 +32,7 @@ from .base import QUEUED, BackendInfo, CostEstimate, JobHandle, TargetSpec, chec
 from .compile import CompiledCircuit, load_qumo_py
 from .errors import E_INVALID_PAYLOAD, E_JOB, E_LIMIT, E_UNKNOWN_BACKEND, HINT_COST, HINT_SHOTS, HardwareError
 
-NATIVE = "qumo/exec/qbraid_api.mojo"
+NATIVE = "plugins/hardware/native/qumo_hw/qbraid_api.mojo"
 MAX_SHOTS = 100_000  # qBraid does not publish a global cap; vendors enforce their own
 GENERIC_BASIS = ["h", "x", "y", "z", "s", "sdg", "t", "tdg", "sx", "rx", "ry", "rz", "cx", "cz", "swap"]
 FREE_SIM = "qbraid:qbraid:sim:qir-sv"

@@ -28,6 +28,7 @@ from std.time import sleep
 from qumo.core.json import JsonValue, json_quote, parse_json
 from qumo.net.http import HttpClient, HttpOptions, HttpRequest, HttpResponse, REDIRECT_NONE
 from qumo.net.url import Url, parse_url, quote
+from qumo_hw.common import loopback_host
 
 comptime DEFAULT_API = "https://api-v2.qbraid.com/api/v1"
 comptime USER_AGENT = "qumo-hardware/1.0 (native Mojo client; +https://github.com/ANFAIA/QUMO)"
@@ -48,10 +49,6 @@ def _printable(s: String, limit: Int) -> String:
             break
         out.append(b if (b >= 32 and b < 127) else UInt8(63))
     return String(from_utf8_lossy=Span(out))
-
-
-def _loopback(host: String) -> Bool:
-    return host == "127.0.0.1" or host == "localhost" or host == "::1"
 
 
 def check_qrn(qrn: String, what: String, code: String) raises:
@@ -79,7 +76,7 @@ struct QbraidSession(Copyable):
             u = parse_url(base + "/")
         except e:
             raise Error(E_CREDENTIALS + ": QUMO_QBRAID_URL is not a valid URL")
-        if u.scheme != "https" and not _loopback(u.host):
+        if u.scheme != "https" and not loopback_host(u.host):
             raise Error(E_CREDENTIALS + ": the qBraid API URL must be https (plain http only for a loopback host)")
         self.base = base^
         var key = String(getenv(KEY_VAR, "").strip())
@@ -109,7 +106,7 @@ struct QbraidSession(Copyable):
                 values.append("application/json")
             var url = self.base + path
             var u = parse_url(url)
-            var opts = HttpOptions(15000, 120000, MAX_RESPONSE_BYTES, False, REDIRECT_NONE, 0, _loopback(u.host), False)
+            var opts = HttpOptions(15000, 120000, MAX_RESPONSE_BYTES, False, REDIRECT_NONE, 0, loopback_host(u.host), False)
             var client = HttpClient(None)
             var r: HttpResponse
             try:

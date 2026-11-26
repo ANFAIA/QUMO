@@ -31,6 +31,9 @@ struct AgentDef(Copyable):
     var model: String
     var subagents: List[String]      # named subagents, already without self and ancestors
     var recursion_limit: Int
+    # Subagents whose answers may carry web text into this agent: the loop hands them over
+    # inside the untrusted-data wrapper (harness/untrusted.mojo). Empty for most agents.
+    var untrusted_subagents: List[String]
 
 
 @fieldwise_init

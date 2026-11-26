@@ -7,7 +7,7 @@ Toolchain lives in `.venv/` (`make setup`; versions pinned in the Makefile).
 ```bash
 .venv/bin/mojo run -I . tests/test_ir.mojo        # run a test
 .venv/bin/mojo build -I . -o build/qumo cli/main.mojo   # build CLI (a main file named qumo.mojo would shadow the package)
-.venv/bin/mojo build -I . --emit shared-lib -o build/qumo_py.so python/qumo_py.mojo   # Python extension
+.venv/bin/mojo build -I . -I plugins/hardware/native --emit shared-lib -o build/qumo_py.so python/qumo_py.mojo   # Python extension
 make test                                         # all tests
 ```
 

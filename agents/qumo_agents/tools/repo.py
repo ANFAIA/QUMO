@@ -20,11 +20,16 @@ from pathlib import Path
 
 from langchain_core.tools import tool
 
-from qumo_agents import untrusted
+from qumo_agents import guard_spec, untrusted
 from qumo_agents.config import REPO_ROOT, REPORTS_DIR
 
-SKIP_DIRS = {".git", ".venv", "build", "node_modules", "__pycache__", ".worktrees", ".pixi", "models"}
-SECRET_NAMES = re.compile(r"(^\.env|secret|credential|\.pem$|\.key$|id_rsa)", re.I)
+# The lists of this module come from agents/spec/guard_rules.json (guard_spec), the one
+# specification the Mojo harness reads too.
+SKIP_DIRS = set(guard_spec.REPO["skip_dirs"])
+SECRET_NAMES = re.compile(guard_spec.secret_names_pattern(), re.I)
+# Skip directories are compared case-folded: on a case-insensitive file system (macOS)
+# `.GIT/config` is `.git/config`, and so are `model\u017f` and `.wor\u212atrees`.
+_SKIP_FOLDED = frozenset(d.casefold() for d in SKIP_DIRS)
 MAX_READ = 60_000
 MAX_OUTPUT = 12_000
 SANDBOX_ROOT = REPO_ROOT / ".worktrees"
@@ -33,9 +38,10 @@ _state = {"sandbox": None}  # Path of the sandbox worktree opened in this proces
 
 
 def _forbidden(parts) -> bool:
-    """True when any path component is a skipped directory or a secret-looking name.
+    """True when any path component is a skipped directory (in any letter case) or a
+    secret-looking name.
     The one rule behind _resolve, list_files and search_code, so they cannot drift."""
-    return any(part in SKIP_DIRS or SECRET_NAMES.search(part) for part in parts)
+    return any(part.casefold() in _SKIP_FOLDED or SECRET_NAMES.search(part) for part in parts)
 
 
 def _walkable(p: Path, root: Path) -> bool:
@@ -130,38 +136,29 @@ def search_code(regex: str, path: str = ".", glob: str = "*.mojo") -> str:
 
 
 # ----------------------------------------------------------------------------- commands
-ALLOWED = [
-    # (description, argv prefix pattern); every argument after the prefix is checked below.
-    ("run one Mojo test or example", [".venv/bin/mojo", "run", "-I", "."]),
-    ("run one example with its checks", ["bench/.venv/bin/python", "examples/run_examples.py", "--only"]),
-    ("run the hardware plugin tests", ["bench/.venv/bin/python", "-m", "pytest", "-q", "plugins/hardware/tests"]),
-    ("QUMO CLI", ["build/qumo"]),
-    ("git status or diff of the sandbox", ["git", "diff"]),
-    ("git status of the sandbox", ["git", "status", "--short"]),
-]
-ARG_OK = re.compile(r"^[\w./:=,@+-]+$")
-GIT_FLAGS = frozenset({"--stat", "--name-only", "--name-status", "--cached", "--staged", "--"})
+# (description, argv prefix pattern); every argument after the prefix is checked below.
+ALLOWED = [(desc, list(prefix)) for desc, prefix in guard_spec.REPO["run_check_allowed"]]
+# ASCII only, and the whole argument (fullmatch): `\w` took any Unicode letter or digit, and
+# `$` let a trailing newline through.
+ARG_OK = re.compile("[" + "".join(guard_spec.REPO["arg_chars"]["ranges"])
+                    + re.escape(guard_spec.REPO["arg_chars"]["others"]) + "]+")
+GIT_FLAGS = frozenset(guard_spec.REPO["git_flags"])
 # `build/qumo` takes subcommands and options from these lists only. `tool` and `mcp` are left
 # out (they call any registered tool). Output options write a file, so they are refused unless
 # a sandbox is open and the path resolves inside it.
-QUMO_SUBCOMMANDS = frozenset({"run", "statevector", "expect", "transpile", "emulate", "validate", "info",
-                              "draw", "convert", "vqe", "describe", "version", "help"})
-QUMO_OUTPUT_OPTIONS = frozenset({"-o", "--output"})
-QUMO_OPTIONS = frozenset({
-    "--shots", "--seed", "--params", "--max-qubits", "--max-iterations", "--device", "--precision",
-    "--json", "--pretty", "--max-amplitudes", "--observable", "--target", "--level", "--basis",
-    "--pipeline", "--qasm", "--compile", "--no-compile", "--width", "--unicode", "--to",
-    "--instructions", "--layers", "--entanglement", "--optimizer", "--gradient", "--maxiter",
-    "--qubits", "-h", "--help"})
+QUMO_SUBCOMMANDS = frozenset(guard_spec.REPO["qumo_subcommands"])
+QUMO_OUTPUT_OPTIONS = frozenset(guard_spec.REPO["qumo_output_options"])
+QUMO_OPTIONS = frozenset(guard_spec.REPO["qumo_options"])
 # Checks run code the agent may have written, so they do not inherit credentials.
-SECRET_ENV = re.compile(r"TOKEN|SECRET|KEY|PASSWORD|CREDENTIAL|AUTH|COOKIE|SESSION", re.I)
+SECRET_ENV = re.compile(guard_spec.substrings_pattern(
+    guard_spec.ENV["secret_name_substrings"] + guard_spec.ENV["check_env_extra_substrings"]), re.I)
 
 
 # Git configuration passed through the environment comes as a group (GIT_CONFIG_COUNT with
 # GIT_CONFIG_KEY_n / GIT_CONFIG_VALUE_n, or GIT_CONFIG_PARAMETERS). The secret pattern removes
 # the KEY_n names only, and git then stops with "missing config key GIT_CONFIG_KEY_0"; the
 # values can also carry credentials (http.extraheader). The whole group is dropped.
-GIT_INJECTED_ENV = re.compile(r"GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+|PARAMETERS)\Z")
+GIT_INJECTED_ENV = re.compile(guard_spec.git_injected_pattern())
 
 
 def _check_env() -> dict[str, str]:
@@ -221,9 +218,25 @@ def run_check(argv: list[str], timeout_s: int = 600) -> str:
     emulate, validate, info, draw, convert, vqe and describe subcommands; its file arguments follow
     the read_file rules, and -o/--output needs an open sandbox and a path inside it.
     Returns exit code and the output tail."""
+    why = _run_check_refusal(argv)
+    if why:
+        return why
+    try:
+        r = subprocess.run(argv, cwd=_root(), env=_check_env(), capture_output=True, text=True,
+                           timeout=max(10, min(timeout_s, 1800)))
+    except subprocess.TimeoutExpired:
+        return f"timeout after {timeout_s}s"
+    except OSError as e:
+        return f"error: {e}"
+    out = (r.stdout + r.stderr)[-MAX_OUTPUT:]
+    return f"exit {r.returncode}\n{out}"
+
+
+def _run_check_refusal(argv: list[str]) -> str:
+    """Why run_check refuses argv, or "" when it may run (the whole decision, no side effect)."""
     if not any(argv[:len(prefix)] == prefix for _, prefix in ALLOWED):
         return "refused: not on the allow-list. Allowed: " + "; ".join(" ".join(p) for _, p in ALLOWED)
-    if any(not ARG_OK.match(a) or ".." in a for a in argv):
+    if any(not ARG_OK.fullmatch(a) or ".." in a for a in argv):
         return "refused: arguments may only hold path-like characters"
     # Paths stay inside the working tree: no absolute path, bare or as an option value.
     if any(a.startswith("/") or "=/" in a for a in argv):
@@ -237,15 +250,7 @@ def run_check(argv: list[str], timeout_s: int = 600) -> str:
         extra = argv[2:] if argv[1] == "diff" else argv[3:]
         if any(a.startswith("-") and a not in GIT_FLAGS for a in extra):
             return "refused: git options allowed here: " + " ".join(sorted(GIT_FLAGS))
-    try:
-        r = subprocess.run(argv, cwd=_root(), env=_check_env(), capture_output=True, text=True,
-                           timeout=max(10, min(timeout_s, 1800)))
-    except subprocess.TimeoutExpired:
-        return f"timeout after {timeout_s}s"
-    except OSError as e:
-        return f"error: {e}"
-    out = (r.stdout + r.stderr)[-MAX_OUTPUT:]
-    return f"exit {r.returncode}\n{out}"
+    return ""
 
 
 # ----------------------------------------------------------------------------- writing

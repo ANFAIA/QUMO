@@ -1,7 +1,7 @@
 """IonQ plugin, Python fallback (qiskit-ionq >= 1.1.1, IonQ cloud API v0.4).
 
 Not the default. The default IonQ client is native Mojo (qumo_hardware/ionq.py over
-qumo/exec/ionq_api.mojo). Select this one with `--client python`, QUMO_HW_CLIENT=python
+plugins/hardware/native/qumo_hw/ionq_api.mojo). Select this one with `--client python`, QUMO_HW_CLIENT=python
 or QUMO_HW_CLIENT_IONQ=python; it needs `pip install qiskit-ionq`.
 
 * Credentials: only the IONQ_API_KEY environment variable. The key is passed to

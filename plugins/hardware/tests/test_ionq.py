@@ -1,4 +1,4 @@
-"""IonQ plugin over the native Mojo client (qumo/exec/ionq_api.mojo), fully offline.
+"""IonQ plugin over the native Mojo client (plugins/hardware/native/qumo_hw/ionq_api.mojo), fully offline.
 
 Every request goes through QUMO's own HTTP/TLS stack to a fake IonQ API
 (tests/ionq_fake_server.py) on 127.0.0.1, so the real request bodies, headers, status

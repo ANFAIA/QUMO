@@ -169,6 +169,11 @@ def test_errors() raises:
     # A complete Content-Length or chunked body is fine even if the TLS EOF is ragged afterwards.
     var ok = _read("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok", 4, "GET", strict, True)
     assert_equal(ok.text(), "ok")
+    # Interim responses: 16 skipped, the 17th refused (a server cannot keep the client in the head loop).
+    var interim16 = String("HTTP/1.1 100 Continue\r\n\r\n") * 16
+    _body_all_splits(interim16 + "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok", "GET", 200, "ok")
+    _error_all_splits(interim16 + "HTTP/1.1 102 Processing\r\n\r\nHTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok", "GET", strict, False,
+                      "QA-E104: more than 16 interim (1xx) responses")
     # Header caps: 100 lines allowed, 101 refused; 64 KiB block.
     var head100 = String("HTTP/1.1 200 OK\r\n")
     for i in range(99):

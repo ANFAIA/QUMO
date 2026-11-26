@@ -28,6 +28,7 @@ from qumo.ir.circuit import Circuit, Instruction
 from qumo.compiler.common import fmt_num, basis_str, reduce_large_angles, wrap_angle, TWO_PI, BlockKind
 from qumo.ir.gateset import GateSet
 from qumo.device.target import Target, parse_basis, parse_angle_bound
+from qumo.device.conformance import conformance_error  # defined there; importable from here as before
 from qumo.compiler.optimize import (
     remove_identities, cancel_inverses, merge_rotations, commute_rotations,
     fuse_1q, eject_z, elide_swaps,
@@ -39,7 +40,7 @@ from qumo.compiler.basis import translate_to_basis, unroll_3q, first_inexpressib
 from qumo.compiler.routing import (
     RouteOptions, RoutePlan, route_circuit, star_preroute, plan_route, finish_route, has_exact_layout,
 )
-from qumo.compiler.resynth import SynthOptions, SynthStats, resynthesize_blocks
+from qumo.compiler.resynth import SynthOptions, SynthStats, resynthesize_blocks, DEFAULT_MAX_ROTATIONS
 from qumo.compiler.ai_route import AIRouteOptions, ai_route, routed_cost, route_index_warning
 from qumo.compiler.wrap import wrap_angles
 from qumo.compiler.layout_fidelity import post_layout
@@ -473,6 +474,7 @@ def pass_decl(id: Int, names_only: Bool = False) -> PassDecl:
                 "collect Pauli-rotation networks (Clifford + rx/ry/rz/rzz/rxx/ryy; <= 6 qubits) and resynthesise rotations + Clifford tail topology-aware; replaced only when verified equal (unitary) and cheaper")
         d.block_kind = BlockKind.PAULI
         _synth_args(d, "6", "4")
+        d.int_arg("max_rotations", String(DEFAULT_MAX_ROTATIONS), "most non-Clifford rotations of a collected block; a longer run is split into consecutive blocks (synthesis time grows with the square of it); 0 = no cap", lo=0)
     elif id == PassId.WRAP_ANGLES:
         d.named("wrap_angles", "wrap|fold_angles",
                 "bring constant angles into the target's angle bounds (spec gate[min:max]) with Pauli corrections, exact up to the tracked global phase")
@@ -1092,30 +1094,6 @@ struct CompileResult(Copyable, Writable):
         w.write(self.summary())
 
 
-def conformance_error(c: Circuit, target: Target) -> String:
-    """First violation of basis / connectivity, or "" when the circuit conforms."""
-    for i in range(len(c.ops)):
-        var g = c.ops[i]
-        if not op_is_unitary(g.kind):
-            continue
-        if not target.supports(g.kind):
-            return "instruction #" + String(i) + " '" + String(g) + "' is not in the basis [" + basis_str(target.basis) + "]"
-        var a = op_arity(g.kind)
-        if a >= 2 and not target.full:
-            if a > 2:
-                return "instruction #" + String(i) + " '" + String(g) + "' acts on 3 qubits (no 3q coupling)"
-            if not target.are_connected(g.q0, g.q1):
-                return "instruction #" + String(i) + " '" + String(g) + "' is not on a coupling edge of " + target.name
-        if target.angle_bound[g.kind] and not g.p0.is_symbolic():
-            var v = g.p0.value()
-            if v < target.angle_lo[g.kind] - 1e-9 or v > target.angle_hi[g.kind] + 1e-9:
-                return "instruction #" + String(i) + " '" + String(g) + "' has its angle outside [" + String(target.angle_lo[g.kind]) + ", " + String(target.angle_hi[g.kind]) + "]"
-        for s in range(a):
-            if g.qubit(s) >= target.num_qubits:
-                return "instruction #" + String(i) + " uses qubit " + String(g.qubit(s)) + " beyond the target size"
-    return ""
-
-
 # ----------------------------------------------------------------------------
 # Running
 # ----------------------------------------------------------------------------
@@ -1387,6 +1365,8 @@ def synth_options_from_args(id: Int, args: List[String], seed: Int) raises -> Sy
     opts.method = a.get_text("method")
     opts.max_qubits = a.get_int("max_qubits")
     opts.min_block = a.get_int("min_block")
+    if a.decl.block_kind == BlockKind.PAULI:
+        opts.max_rotations = a.get_int("max_rotations")
     opts.direction = a.get_text("direction")
     opts.commute = a.get_flag("commute")
     opts.reps = a.get_int("reps")

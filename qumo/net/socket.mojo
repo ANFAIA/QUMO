@@ -3,6 +3,8 @@
 `tcp_connect` resolves with `getaddrinfo` and tries the addresses in order with a
 non-blocking `connect` + `poll`; every attempt but the last gets at most 10 s of the
 connect budget (openrouter.ai resolves to IPv6 first). DNS itself has no timeout.
+With `public_only` (research GETs, net/guard.mojo) the connection is refused when any
+resolved address is not globally routable, before a socket is opened.
 
 `read_some`/`write_all` set `SO_RCVTIMEO`/`SO_SNDTIMEO` before each call: the timeout
 is per operation (httpx's semantics), not a total deadline. An expiry raises
@@ -18,10 +20,10 @@ from std.memory import ArcPointer
 
 from qumo.net.errors import E_NETWORK, E_TLS_SETUP
 from qumo.net.libc import (
-    CStr, buf_addr, load_i32, load_i64, load_u16, load_u32, store_u32, c_string_at, errno, strerror_text,
+    CStr, buf_addr, load_u8, load_i32, load_i64, load_u16, load_u32, store_u32, c_string_at, errno, strerror_text,
     c_getaddrinfo, c_freeaddrinfo, c_gai_strerror, c_socket, c_connect, c_close, c_fcntl,
     c_getsockopt, c_setsockopt, c_read, c_write, c_bind, c_listen, c_accept, c_getsockname,
-    AF_UNSPEC, SOCK_STREAM, SOL_SOCKET, SO_ERROR, SO_REUSEADDR, F_GETFL, F_SETFL, O_NONBLOCK,
+    AF_UNSPEC, AF_INET, AF_INET6, SOCK_STREAM, SOL_SOCKET, SO_ERROR, SO_REUSEADDR, F_GETFL, F_SETFL, O_NONBLOCK,
     POLLIN, POLLOUT, EINTR, EAGAIN, EINPROGRESS, ECONNRESET, EPIPE,
     SIZEOF_ADDRINFO, AI_FAMILY_OFFSET, AI_SOCKTYPE_OFFSET, AI_PROTOCOL_OFFSET, AI_ADDRLEN_OFFSET,
     AI_ADDR_OFFSET, AI_NEXT_OFFSET,
@@ -32,6 +34,7 @@ from qumo.net.ossl import (
 )
 from qumo.net.tls import TlsContext, tls_handshake
 from qumo.net.url import Url
+from qumo.net.guard import ipv4_is_global, ipv6_is_global, refusal
 from qumo.net.fdutil import now_ms, set_io_timeouts, set_cloexec, set_nosigpipe, poll_one, ip_literal_family
 
 comptime READ_CHUNK = 65536
@@ -262,9 +265,41 @@ def _connect_one(fd: Int, addr: Int, addrlen: Int, budget_ms: Int) -> String:
     return reason^
 
 
-def tcp_connect(host: String, port: Int, timeout_ms: Int) raises -> Int:
-    """A connected TCP socket to `host:port` (FD_CLOEXEC, SO_NOSIGPIPE on macOS)."""
-    var head = _resolve(host, port, False)
+def _node_is_global(node: Int) -> Bool:
+    """Whether the address of one `addrinfo` entry is globally routable. `sin_addr` is at
+    offset 4 of a sockaddr_in and `sin6_addr` at offset 8 of a sockaddr_in6 (macOS and Linux)."""
+    var fam = load_i32(node + AI_FAMILY_OFFSET)
+    var sa = load_i64(node + AI_ADDR_OFFSET)
+    if sa == 0:
+        return False
+    if fam == AF_INET:
+        return ipv4_is_global((load_u8(sa + 4) << 24) | (load_u8(sa + 5) << 16) | (load_u8(sa + 6) << 8) | load_u8(sa + 7))
+    if fam == AF_INET6:
+        var b = List[UInt8](capacity=16)
+        for i in range(16):
+            b.append(UInt8(load_u8(sa + 8 + i)))
+        return ipv6_is_global(b)
+    return False
+
+
+def tcp_connect(host: String, port: Int, timeout_ms: Int, public_only: Bool = False) raises -> Int:
+    """A connected TCP socket to `host:port` (FD_CLOEXEC, SO_NOSIGPIPE on macOS). With
+    `public_only`, raises a refusal unless every resolved address is globally routable; the
+    addresses checked are the ones connected to."""
+    var head: Int
+    if public_only:
+        try:
+            head = _resolve(host, port, False)
+        except:
+            raise refusal("cannot resolve " + host)
+        var check = head
+        while check != 0:
+            if not _node_is_global(check):
+                c_freeaddrinfo(head)
+                raise refusal(host + " is not a public address")
+            check = load_i64(check + AI_NEXT_OFFSET)
+    else:
+        head = _resolve(host, port, False)
     var deadline = now_ms() + timeout_ms
     var last = String("no addresses")
     var node = head
@@ -297,11 +332,13 @@ def tcp_connect(host: String, port: Int, timeout_ms: Int) raises -> Int:
     return fd
 
 
-def connect_stream(url: Url, tls: Optional[ArcPointer[TlsContext]], connect_timeout_ms: Int) raises -> NetStream:
-    """TCP connection to `url`'s host and port, with the TLS handshake for https."""
+def connect_stream(url: Url, tls: Optional[ArcPointer[TlsContext]], connect_timeout_ms: Int,
+                   public_only: Bool = False) raises -> NetStream:
+    """TCP connection to `url`'s host and port, with the TLS handshake for https.
+    `public_only`: see `tcp_connect`."""
     if url.scheme == "https" and not tls:
         raise Error(E_TLS_SETUP + ": https://" + url.host_header() + " needs a TLS context")
-    var fd = tcp_connect(url.host, url.port, connect_timeout_ms)
+    var fd = tcp_connect(url.host, url.port, connect_timeout_ms, public_only)
     if url.scheme != "https":
         return NetStream(fd, 0, None)
     var ssl: Int

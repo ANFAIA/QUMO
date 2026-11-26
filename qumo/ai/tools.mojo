@@ -39,7 +39,7 @@ from qumo.ir.qasm import draw_program, load_any_with_warnings, to_qasm
 from qumo.ir.qasm2 import to_qasm2
 from qumo.sim.runner import sample, evolve, bitstring
 from qumo.sim.program_runner import DEFAULT_MAX_ITERATIONS, ProgramResult, is_clifford_program, sample_program
-from qumo.exec.dispatch import sample_auto, choose_method
+from qumo.gpu.dispatch import sample_auto, choose_method
 from qumo.compiler.program_compile import program_metrics
 from qumo.core.json import JsonWriter, JsonValue, JsonKind, parse_json, json_quote
 from qumo.ai.diagnostics import (

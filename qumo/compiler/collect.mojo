@@ -26,7 +26,10 @@ greedy LIFO `collect_matching_block`):
      node is accepted when `block_gate_ok` holds and the union of block qubits
      stays <= `max_width`; its successors whose in-degree drops to 0 are
      pushed; rejected nodes go back to the frontier. `from_back=True` runs the
-     same sweep on the reversed DAG.
+     same sweep on the reversed DAG. With `max_rotations` > 0 a non-Clifford
+     rotation is also rejected once the block holds that many (the cost of
+     Pauli-network synthesis grows with the square of the rotations of a
+     block; the cap is QUMO's, the IBM collector has none).
   3. Blocks are split into the connected components of their qubit-interaction
      graph, then blocks with fewer than `min_gates` gates are dropped.
 
@@ -110,6 +113,16 @@ def block_gate_ok(g: Instruction, kind: Int) -> Bool:
                 or k == Op.SX or k == Op.SXDG or k == Op.X or k == Op.Y or k == Op.Z
                 or k == Op.RZ or k == Op.RX or k == Op.RY
                 or k == Op.RZZ or k == Op.RXX or k == Op.RYY)
+    return False
+
+
+def _is_rotation(g: Instruction) -> Bool:
+    """A rotation of a Pauli network as `blockalg.PauliNet.from_ops` counts
+    them: rx / ry / rz / rzz / rxx / ryy by an angle that is not a multiple of
+    pi/2 (those are Clifford gates and cost the synthesis nothing)."""
+    var k = g.kind
+    if k == Op.RX or k == Op.RY or k == Op.RZ or k == Op.RZZ or k == Op.RXX or k == Op.RYY:
+        return not g.is_clifford()
     return False
 
 
@@ -202,10 +215,17 @@ struct _Dag(Movable):
 
 
 def collect_blocks_ordered(c: Circuit, kind: Int, min_gates: Int, max_width: Int,
-                           from_back: Bool, commute: Bool, mut order: List[Int]) -> List[Block]:
+                           from_back: Bool, commute: Bool, mut order: List[Int],
+                           max_rotations: Int = 0) -> List[Block]:
     """`collect_blocks`, also returning `order`: a topological order of all ops
     of `c` in which every returned block is contiguous (up to interleaving with
-    the other components split from the same sweep, on disjoint qubits)."""
+    the other components split from the same sweep, on disjoint qubits).
+
+    max_rotations > 0 caps the non-Clifford rotations of one block (see
+    `_is_rotation`): a rotation that would exceed the cap is rejected like a
+    gate that would exceed `max_width`, so it starts the next block. A long
+    Pauli network therefore becomes consecutive blocks, each one contiguous
+    in `order` as before. 0 = no cap."""
     var n = len(c.ops)
     var nq = c.num_qubits
     order = List[Int](capacity=n)
@@ -270,12 +290,17 @@ def collect_blocks_ordered(c: Circuit, kind: Int, min_gates: Int, max_width: Int
         stack.load(pending)
         var blk_lo = len(raw_flat)
         var width = 0
+        var nrot = 0
         while stack.size > 0:
             var i = stack.pop()
             if not ok[i]:
                 pending.append(i)
                 continue
             var g = c.ops[i]
+            var rot = max_rotations > 0 and _is_rotation(g)
+            if rot and nrot >= max_rotations:
+                pending.append(i)
+                continue
             var a = op_arity(g.kind)
             var add = 0
             for s in range(a):
@@ -296,6 +321,8 @@ def collect_blocks_ordered(c: Circuit, kind: Int, min_gates: Int, max_width: Int
                     inq[q] = True
                     touched.append(q)
             width += add
+            if rot:
+                nrot += 1
             raw_flat.append(i)
             order.append(i)
             done += 1

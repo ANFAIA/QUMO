@@ -1,4 +1,4 @@
-"""IBM Quantum plugin, native client (default): the REST protocol runs in Mojo (qumo/exec/ibm_api.mojo).
+"""IBM Quantum plugin, native client (default): the REST protocol runs in Mojo (plugins/hardware/native/qumo_hw/ibm_api.mojo).
 
 Account (QISKIT_IBM_TOKEN + QISKIT_IBM_INSTANCE, or the account saved by qiskit-ibm-runtime in
 ~/.qiskit/qiskit-ibm.json), IAM login, backend listing, the target (from /configuration and
@@ -24,7 +24,7 @@ from .compile import CompiledCircuit, load_qumo_py
 from .errors import E_INVALID_PAYLOAD, E_JOB, E_LIMIT, HINT_SHOTS, HardwareError
 from .ibm import DEFAULT_USD_PER_SECOND, JOB_OVERHEAD_S, IBMProvider
 
-NATIVE = "qumo/exec/ibm_api.mojo"
+NATIVE = "plugins/hardware/native/qumo_hw/ibm_api.mojo"
 HINT_PY = "use the Python fallback client: --client python (QUMO_HW_CLIENT_IBM=python)"
 
 
