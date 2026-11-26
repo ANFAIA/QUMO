@@ -22,7 +22,7 @@ For research use: the reference by module below, [EXTENDING](EXTENDING.md), the 
 | Add a gate, noise channel, compiler pass, decoder or target | [EXTENDING](EXTENDING.md) |
 | Browse runnable examples by topic | [examples/CATALOG.md](../examples/CATALOG.md), [examples/README.md](../examples/README.md) |
 | Drive QUMO from an LLM agent (MCP, JSON, error codes) | [AI_NATIVE](AI_NATIVE.md), [ERRORS](ERRORS.md), [llms.txt](../llms.txt) |
-| Run on IBM Quantum or Quantinuum | [HARDWARE_PLUGINS](HARDWARE_PLUGINS.md) |
+| Run on quantum hardware (IBM Quantum, Quantinuum and others) | [HARDWARE_PLUGINS](HARDWARE_PLUGINS.md) |
 | Run on NVIDIA, AMD or Apple GPUs | [GPU](GPU.md) |
 | Use the AI agents that keep QUMO current | [AGENTS](AGENTS.md) |
 

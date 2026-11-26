@@ -88,7 +88,7 @@ Full install, update, GPU and hardware steps: [docs/GETTING_STARTED.md](docs/GET
 | `qumo.qec`, `qumo.ft` | Surface codes, decoders, detector error models; fault-tolerant programming |
 | `qumo.ai`, `cli/` | JSON everywhere, stable `QM-Exxx` error codes with hints, MCP server, CLI |
 | `qumo.core`, `qumo.net`, `qumo.bench`, `qumo.testing` | Support code: JSON and the seeded `Rng`, native HTTP/TLS client used by the vendor clients of `plugins/hardware/native`, benchmark circuit generators, `CheckLog` for machine-checked examples |
-| `plugins/hardware` | Run compiled circuits on IBM Quantum and Quantinuum (dry-run by default) |
+| `plugins/hardware` | Run compiled circuits on IBM Quantum, Quantinuum, IonQ (simulator), qBraid and SpeQtrum (no remote submission without `--yes`); native Mojo vendor clients in `native/qumo_hw` |
 | `agents/` | AI agents that keep QUMO current: a Python package (`agents/qumo_agents`, on deepagents) and a native Mojo harness (`agents/mojo/`, from pull request #7) |
 
 ### What you need and what you can ignore

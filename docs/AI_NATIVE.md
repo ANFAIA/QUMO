@@ -430,8 +430,8 @@ Warnings in every tool result have the `Diagnostic` shape
 Running on quantum hardware is outside the Mojo core and the MCP server.
 `plugins/hardware` (Python package `qumo_hardware`) compiles with QUMO
 (`build/qumo_py.so`), translates the result 1:1 into the provider SDK, and
-submits it after explicit confirmation. The providers are IBM Quantum (Qiskit
-Runtime), Quantinuum (pytket and qnexus) and a `local` emulator. Its errors
+submits it after explicit confirmation. The providers are IBM Quantum, Quantinuum,
+IonQ, qBraid, SpeQtrum and a `local` emulator. Its errors
 use the same text and JSON shape, in range QM-E950..QM-E959 (listed in
 [ERRORS.md](ERRORS.md)). Submitting to a billable backend without
 confirmation is QM-E957. See [HARDWARE_PLUGINS.md](HARDWARE_PLUGINS.md).
