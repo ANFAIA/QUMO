@@ -186,6 +186,22 @@ host) to the model graph (WL hash prefilter, exact matcher). `make
 models-verify` checks sha256 against INDEX.json; the loader raises QM-E617 on
 a missing / corrupt / mismatching file and QM-E620 on an incompatible model.
 
+The fnv1a64 checksum covers `weights.bin`, not the manifest, so the loader
+checks the manifest's own numbers before using them (QM-E617 otherwise):
+`weights_file` is a plain file name inside the model directory (no path
+separator, no `..`, not absolute, not a symbolic link that leaves the
+directory); at most 4096 tensors of at most 8 dimensions; every dimension is
+positive; the shape product and `offset + bytes` are compared with the file
+length without overflow.
+
+An `INDEX.json` that cannot be read (bad JSON, a row without `id`, `kind`,
+`num_qubits`, `edges` or `dir`) contributes no models, and says so: with
+`policy=auto` / `model=auto` the pass note carries
+`warning: model index <path> is unreadable (row N), its models are ignored: <cause>`
+(`model_index_warning(...)` in the resynthesis note); with an explicit model
+id the QM-E617 (router) or QM-E616 (synthesis) error names the index and the
+cause.
+
 Shipped models (3.3 MB in total, trained locally by QUMO):
 
 | model | kind | qubits | topology |

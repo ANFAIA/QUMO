@@ -48,7 +48,7 @@ from qumo.compiler.routing import (
 )
 from qumo.core.json import parse_json, JsonValue
 from qumo.compiler.policy import (
-    load_model_file, model_search_dirs, read_model_index, MODEL_FORMAT_ROUTE, MODEL_KIND_ROUTING,
+    load_model_file, model_search_dirs, read_model_index, model_index_problems, MODEL_FORMAT_ROUTE, MODEL_KIND_ROUTING,
 )
 from qumo.core.rng import Rng
 from max.algorithm import parallelize
@@ -568,7 +568,9 @@ def find_route_model(request: String, dirs: List[String]) raises -> String:
 
     Rows of `<root>/route/INDEX.json` (kind "routing") in root order; 'auto'
     takes the first row marked "default" (else the first row); an id must
-    match a row (or name a model directory directly)."""
+    match a row (or name a model directory directly). An INDEX.json that
+    cannot be read contributes no rows; the QM-E617 of an id that is then not
+    found names that index and the cause (for 'auto' see `route_index_warning`)."""
     for d in dirs:
         var rows = read_model_index(d, "route")
         var first = String()
@@ -596,11 +598,32 @@ def find_route_model(request: String, dirs: List[String]) raises -> String:
         if i > 0:
             s += ", "
         s += dirs[i]
-    raise Error("QM-E617: router model '" + request + "' not found in model roots " + s + "]. Hint: list models/ai_transpiler/route/INDEX.json, pass model_dir=<root> or set QUMO_MODEL_DIR (policy=heuristic needs no model).")
+    var problem = model_index_problems(dirs, "route")
+    var cause = String()
+    if problem.byte_length() > 0:
+        cause = " (" + problem + ")"
+    raise Error("QM-E617: router model '" + request + "' not found in model roots " + s + "]" + cause + ". Hint: list models/ai_transpiler/route/INDEX.json, pass model_dir=<root> or set QUMO_MODEL_DIR (policy=heuristic needs no model).")
+
+
+def route_index_warning(aopts: AIRouteOptions) -> String:
+    """'' or a sentence for the pass note: a `route/INDEX.json` of the model
+    roots could not be read, so its models were not considered (policy=auto
+    then routes with another root's model or with SABRE). Empty when the
+    policy needs no model."""
+    var p = aopts.policy
+    if p == "off" or p == "heuristic":
+        return String()
+    var problem = model_index_problems(model_search_dirs(aopts.model_dir), "route")
+    if problem.byte_length() == 0:
+        return String()
+    return "warning: " + problem
 
 
 def _index_default(root: String) -> String:
-    """Path of the INDEX.json row marked "default": true under <root>/route."""
+    """Path of the INDEX.json row marked "default": true under <root>/route.
+    Reads the file on its own, so it can still return a default row that
+    precedes a malformed one; the malformed index is reported by
+    `model_index_problems` either way."""
     var ipath = root + "/route/INDEX.json"
     if not exists(ipath):
         return String()
@@ -1934,4 +1957,9 @@ def ai_route(c: Circuit, target: Target, ropts: RouteOptions, aopts: AIRouteOpti
     var model = RouteModel()
     if not target.full:
         model = resolve_route_model(aopts)
-    return ai_route_with_model(c, target, ropts, aopts, model, out, init_layout, final_layout, note)
+    var ok = ai_route_with_model(c, target, ropts, aopts, model, out, init_layout, final_layout, note)
+    if not target.full:
+        var warn = route_index_warning(aopts)
+        if warn.byte_length() > 0:
+            note += "; " + warn
+    return ok
