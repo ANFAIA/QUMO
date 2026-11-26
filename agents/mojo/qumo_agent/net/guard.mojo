@@ -1,3 +1,5 @@
+# GENERATED from qumo/net/guard.mojo by tests/test_net_mirror.mojo. Do not edit:
+# change that file, then run QUMO_UPDATE_NET=1 .venv/bin/mojo run -I . tests/test_net_mirror.mojo
 """Which URLs and addresses a research GET may reach (the rules of `_check_url` and
 `_public_host` in `qumo_agents/tools/research.py`).
 

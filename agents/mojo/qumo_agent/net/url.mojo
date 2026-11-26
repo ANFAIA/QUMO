@@ -1,3 +1,5 @@
+# GENERATED from qumo/net/url.mojo by tests/test_net_mirror.mojo. Do not edit:
+# change that file, then run QUMO_UPDATE_NET=1 .venv/bin/mojo run -I . tests/test_net_mirror.mojo
 """HTTP(S) URLs: parsing, reference resolution (redirect `Location`) and urllib quoting.
 
 Only `http` and `https` are accepted. A URL with user information (`user@host`) is

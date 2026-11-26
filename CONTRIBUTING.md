@@ -58,6 +58,7 @@ make test-py                                    # every Python test: the package
 - Tests of numerical code compare against an independent reference (state vectors, an analytic value, another simulator), not against QUMO's own earlier output.
 - Mojo prints `Failed to initialize Crashpad...` first; ignore it.
 - If you add or change an error code, or a compiler pass, its aliases or its arguments, regenerate [docs/ERRORS.md](docs/ERRORS.md) and [docs/PASSES.md](docs/PASSES.md): `QUMO_UPDATE_DOCS=1 .venv/bin/mojo run -I . tests/test_mcp.mojo`. Do not edit those files by hand; the same test fails when one of them is stale.
+- The network stack is edited in `qumo/net` only. `agents/mojo/qumo_agent/net/{url,ossl,tls,socket,http,guard,sse}.mojo` are generated from it (first line "GENERATED"): after a change run `QUMO_UPDATE_NET=1 .venv/bin/mojo run -I . tests/test_net_mirror.mojo` and commit both; the same test fails when a generated file differs.
 - GPU code is compiled only with `-D QUMO_GPU`. `make gpu-check` cross-compiles the kernels without a GPU; `make test-gpu` needs one.
 
 ## Adding an example
