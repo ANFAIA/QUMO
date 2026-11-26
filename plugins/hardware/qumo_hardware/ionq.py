@@ -1,4 +1,4 @@
-"""IonQ plugin: thin adapter over QUMO's native Mojo IonQ client (qumo/exec/ionq_api.mojo).
+"""IonQ plugin: thin adapter over QUMO's native Mojo IonQ client (plugins/hardware/native/qumo_hw/ionq_api.mojo).
 
 No vendor SDK, no Python HTTP and no Python JSON on the IonQ path. Everything that talks
 to IonQ runs in Mojo through the qumo_py extension:
@@ -57,11 +57,11 @@ NOISE_MODELS = ("aria-1", "aria-2", "forte-1", "forte-enterprise-1")
 # The noisy-simulator shot limit is not published; the QPU cap (10,000) is used.
 MAX_SHOTS = 10_000
 
-# QIS gates (qiskit names) the compiler may keep; qumo/exec/ionq_api.mojo maps each one.
+# QIS gates (qiskit names) the compiler may keep; plugins/hardware/native/qumo_hw/ionq_api.mojo maps each one.
 IONQ_BASIS = ["h", "x", "y", "z", "s", "sdg", "t", "tdg", "sx", "rx", "ry", "rz",
               "cx", "cy", "cz", "swap", "rxx", "ryy", "rzz"]
 
-NATIVE = "qumo/exec/ionq_api.mojo"
+NATIVE = "plugins/hardware/native/qumo_hw/ionq_api.mojo"
 
 
 def _native_error(exc: Exception, hint: str = "") -> HardwareError:

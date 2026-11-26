@@ -336,7 +336,8 @@ Unless stated otherwise, functions that can fail raise `Error` whose text starts
 
 #### 2.1.1 `native/libc.mojo`
 
-The single module that contains `external_call`. One Mojo wrapper per C symbol, one signature
+The single module that contains `external_call` is `qumo/net/libc.mojo`; `native/libc.mojo`
+re-exports it (`from qumo.net.libc import *`) and adds `fa_addchdir`. One Mojo wrapper per C symbol, one signature
 per symbol for the whole binary (Mojo 1.2 rejects two different signatures for one symbol,
 [tls §2 rule 2]). Pointers cross the boundary as `Int` addresses; strings are passed as
 NUL-terminated buffers built with `CStr`. The full table of functions, C prototypes, Mojo
@@ -988,6 +989,17 @@ only its own lines); running out raises `QA-E170: replay file exhausted at '<at>
 
 ### 2.4 `net/` (owner N)
 
+The source of this package is `qumo/net` (repository root), which the hardware clients import
+with the codes `QM-E959`/`QM-E951`. `url`, `ossl`, `tls`, `socket`, `http`, `guard` and `sse`
+here are generated from it with this harness's imports and codes (`QA-E104`/`QA-E105`); they
+carry a "GENERATED" first line and are not edited. `fdutil` and `native/libc.mojo` re-export
+`qumo.net.fdutil` and `qumo.net.libc` (`fa_addchdir`, with `QA-E162`, is defined in
+`native/libc.mojo`). To change the stack: edit `qumo/net/<module>.mojo`, run
+`QUMO_UPDATE_NET=1 .venv/bin/mojo run -I . tests/test_net_mirror.mojo`, commit both. That test
+is part of `make test` and fails when a generated file differs from its source. The reason for
+two compiled copies instead of one import is the error code: retries (`should_retry`), exit
+codes and docs/ERRORS.md depend on `QA-E104`/`QA-E105`.
+
 #### 2.4.1 `net/ossl.mojo`: OpenSSL 3 loader and bindings
 
 ```mojo
@@ -1157,7 +1169,8 @@ Request head: `METHOD path_query HTTP/1.1`, then `Host`, the caller's headers, t
 is a body or the method is POST/PUT/PATCH. CR or LF in any header name/value or the URL raises
 `QA-E104: header injection refused`.
 
-Response framing [tls §9]: skip `1xx`; no body for `HEAD`, `204`, `304`; `Transfer-Encoding`
+Response framing [tls §9]: skip `1xx` (at most 16 interim responses, then
+`QA-E104: more than 16 interim (1xx) responses`); no body for `HEAD`, `204`, `304`; `Transfer-Encoding`
 ending in `chunked` wins over `Content-Length` (hex size, `;` extensions ignored, trailers read
 to the empty line, then stop without waiting for close); `Content-Length` reads exactly that
 many bytes (EOF first raises truncation); otherwise read to end of stream, and when the

@@ -19,7 +19,7 @@ from qumo.ir.qasm import parse_qasm, to_qasm
 from qumo.sim.runner import sample
 from qumo.sim.stabilizer import sample_stabilizer
 from qumo.sim.branching import sample_branching
-from qumo.exec.dispatch import sample_frame
+from qumo.sim.dispatch import sample_frame
 
 comptime MANIFEST = "tests/fixtures/golden/manifest.txt"
 

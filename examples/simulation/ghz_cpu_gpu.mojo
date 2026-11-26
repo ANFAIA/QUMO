@@ -9,7 +9,7 @@ every other qubit, `mz` on all) with 1000 shots, first with 2 qubits on the
 CPU target (`qpp-cpu`: {00: 475, 11: 525}) and then with 25 qubits on the
 `nvidia` GPU target ({0...0: 510, 1...1: 490}). QUMO picks the device per
 call, without global target state: `sample_on(circuit, shots, seed, params,
-"cpu" | "gpu", note)` (qumo/exec/dispatch.mojo). Every row of the table below
+"cpu" | "gpu", note)` (qumo/gpu/dispatch.mojo). Every row of the table below
 prints the method that actually ran:
 - the GHZ circuit is Clifford: the CPU samples it from the state vector
   (small n) or the stabilizer tableau (n >= 16), and `device="gpu"` uses GPU
@@ -36,7 +36,7 @@ from std.sys import argv
 from std.time import perf_counter_ns
 from qumo.ir.circuit import Circuit
 from qumo.sim.runner import SampleResult
-from qumo.exec.dispatch import sample_on
+from qumo.gpu.dispatch import sample_on
 from qumo.testing.checks import CheckLog
 
 comptime SHOTS = 1000

@@ -362,7 +362,7 @@ def main() raises:
 {1: 708, 0: 292} statevector:trajectories
 ```
 
-The counts differ from the CLI run because `sample` always uses the state vector (one noisy trajectory per shot), and the CLI picks the simulator for you. Both are correct samples of the same distribution. To let Mojo choose as the CLI does, use `sample_auto` from `qumo.exec.dispatch` with the same arguments.
+The counts differ from the CLI run because `sample` always uses the state vector (one noisy trajectory per shot), and the CLI picks the simulator for you. Both are correct samples of the same distribution. To let Mojo choose as the CLI does, use `sample_auto` from `qumo.gpu.dispatch` with the same arguments.
 
 The second circuit uses a channel that is not a Pauli error (amplitude damping, the T1 decay of a qubit). Every noise instruction and the pragma syntax are listed in [SIMULATION.md](SIMULATION.md#noise-channels-and-the-pragma-syntax); how to define a channel of your own is in [EXTENDING.md](EXTENDING.md#2-a-custom-noise-channel).
 
@@ -500,7 +500,7 @@ True
 
 ```mojo
 from qumo import Circuit, parse_target, transpile
-from qumo.exec.emulate import emulate
+from qumo.noise.emulate import emulate
 
 
 def main() raises:

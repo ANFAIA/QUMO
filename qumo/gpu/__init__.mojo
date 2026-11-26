@@ -9,6 +9,8 @@
     64-shot word, integer-only kernel (bit-identical on every vendor).
   * `device`: availability, device info, precision policy, dispatch
     threshold; `emulate`: host emulation of the kernel bodies for tests.
+  * `dispatch`: `sample_auto` / `sample_on`, the simulator selection over CPU
+    and GPU (the CPU-only methods are `qumo.sim.dispatch`).
 
 Every kernel launch is compiled only with `-D QUMO_GPU`; default builds keep
 working on machines without a GPU toolchain and run the same kernel bodies

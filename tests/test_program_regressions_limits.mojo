@@ -15,8 +15,8 @@ from qumo.core.json import JsonWriter, parse_json
 from qumo.ai.mcp import McpServer
 from qumo.ai.tools import default_registry, write_program_outputs
 from qumo.compiler.pbc import to_pbc
-from qumo.exec.dispatch import sample_auto, sample_on
-from qumo.exec.resources import estimate_resources
+from qumo.gpu.dispatch import sample_auto, sample_on
+from qumo.compiler.resources import estimate_resources
 from qumo.ft.rz import exact_rz_sequence
 from qumo.ir.circuit import Circuit
 from qumo.ir.classical import float_mod, float_rem

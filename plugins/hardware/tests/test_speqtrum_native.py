@@ -1,4 +1,4 @@
-"""SpeQtrum native client (qumo/exec/speqtrum_api.mojo): protocol parity with the Python fallback.
+"""SpeQtrum native client (plugins/hardware/native/qumo_hw/speqtrum_api.mojo): protocol parity with the Python fallback.
 
 The server is tests/speqtrum_fake_server.py on 127.0.0.1 in its own process. Documents the
 native client sends are compared byte for byte with what the Python fallback would send.

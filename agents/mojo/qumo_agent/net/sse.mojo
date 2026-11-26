@@ -1,3 +1,5 @@
+# GENERATED from qumo/net/sse.mojo by tests/test_net_mirror.mojo. Do not edit:
+# change that file, then run QUMO_UPDATE_NET=1 .venv/bin/mojo run -I . tests/test_net_mirror.mojo
 """Server-sent events reader (WHATWG event-stream format), for MCP streamable HTTP.
 
 `SseParser.feed` accepts any split of the byte stream; lines end with CR, LF or CRLF
