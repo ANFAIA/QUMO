@@ -39,6 +39,9 @@ Read the matching skill before undertaking a substantial task:
 | Runnable examples, docs, generated indexes or error/pass catalogues | `skills/qumo-examples-docs/SKILL.md` |
 | Performance claims and benchmark changes | `skills/qumo-benchmarking/SKILL.md` |
 | Python/Mojo agent harness, prompts, tools, or sandbox policy | `skills/qumo-agent-layer/SKILL.md` |
+| SOTA scans, paper/framework triage, and a ranked research backlog | `skills/qumo-sota-scout/SKILL.md` |
+| Investigating or implementing an approved research direction | `skills/qumo-research/SKILL.md` |
+| Optimising correctness-preserving code, compilation output, or runtime behaviour | `skills/qumo-optimize/SKILL.md` |
 
 ## Validation map
 
