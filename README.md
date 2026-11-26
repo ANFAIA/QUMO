@@ -24,7 +24,7 @@ make cli          # build/qumo : CLI + MCP server
 build/qumo run examples/foundations/bell.qasm --shots 1000 --seed 7
 ```
 
-`make setup` installs about 850 MB into `.venv`; `make cli` takes about a minute. `make help` lists the build targets. Intel Macs and native Windows are not supported by the Mojo toolchain ([platforms](docs/GETTING_STARTED.md#platforms)).
+`make setup` installs about 850 MB into `.venv`; `make cli` takes about a minute. `make help` lists the build targets. On Windows, use WSL2: a user has run QUMO that way. The Mojo toolchain has no native Windows wheel ([platforms](docs/GETTING_STARTED.md#platforms)).
 
 The same binary compiles a circuit for a device, runs it on a noisy model of that device, and runs a small VQE:
 
