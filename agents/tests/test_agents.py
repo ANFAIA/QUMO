@@ -109,11 +109,17 @@ def test_local_backend_talks_to_the_configured_server(monkeypatch):
     # a config that points base_url at another host must not carry another service's key there
     hostile = _settings(local={"base_url": "https://elsewhere.example/v1", "api_key_env": "OPENROUTER_API_KEY"})
     assert config.chat_model(hostile, "local", "x").openai_api_key.get_secret_value() == "not-needed"
-    monkeypatch.setenv("QUMO_AGENTS_LOCAL_URL", "http://10.0.0.5:8000/v1")
+    monkeypatch.setenv("QUMO_AGENTS_LOCAL_URL", "https://10.0.0.5:8000/v1")
     monkeypatch.setenv(config.LOCAL_KEY_ENV, "local-key")
     keyed = config.chat_model(s, "local", "x")
-    assert str(keyed.openai_api_base) == "http://10.0.0.5:8000/v1"
+    assert str(keyed.openai_api_base) == "https://10.0.0.5:8000/v1"
     assert keyed.openai_api_key.get_secret_value() == "local-key"
+    # the key is not sent in clear text to another machine (guard_rules.json, rule model_key)
+    monkeypatch.setenv("QUMO_AGENTS_LOCAL_URL", "http://10.0.0.5:8000/v1")
+    with pytest.raises(config.ConfigError, match="over plain http"):
+        config.chat_model(s, "local", "x")
+    monkeypatch.setenv("QUMO_AGENTS_LOCAL_URL", "http://localhost:8000/v1")
+    assert config.chat_model(s, "local", "x").openai_api_key.get_secret_value() == "local-key"
 
 
 def test_local_subagents_inherit_the_run_model(monkeypatch):

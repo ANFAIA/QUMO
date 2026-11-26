@@ -49,6 +49,7 @@ from qumo_agent.harness.subagents import (
     GENERAL_PURPOSE, task_tool_spec, general_purpose_def, unknown_subagent_text,
     child_replay_at, subagent_final_text, merge_subagent_files, count_json_for,
 )
+from qumo_agent.harness.untrusted import wrap_subagent_answer
 from qumo_agent.harness.summarize import (
     SummaryEvent, SUMMARY_TRIGGER_TOKENS, SUMMARY_KEEP_MESSAGES, apply_event,
     truncate_tool_args, reported_tokens_trigger, safe_cutoff, state_cutoff, xml_transcript,
@@ -541,7 +542,11 @@ struct Agent[E: AgentEnv](Movable):
                     merge_subagent_files(results[i], txs[k])
                     if results[i].sandbox.byte_length() > 0 and self.env.sandbox().byte_length() == 0:
                         self.env.adopt_sandbox(results[i].sandbox)
-                    outcomes[k] = text_outcome(results[i].content)
+                    var answer = results[i].content.copy()
+                    if _contains(self.spec.untrusted_subagents, reqs[i].subagent_type):
+                        # a web-reading subagent answering an agent that reaches code execution
+                        answer = wrap_subagent_answer(answer, reqs[i].subagent_type, self.env.new_uuid4_hex())
+                    outcomes[k] = text_outcome(answer)
                     ran_subagent[k] = True
                     st.stats.add(results[i].stats)
                     st.stats.subagent_runs += 1
@@ -582,7 +587,7 @@ def run_subagent_inline[E: AgentEnv](mut env: E, req: SubagentRequest) raises ->
         var spec: AgentDef
         var child_env: E
         if gp:
-            var parent = AgentDef(req.parent_agent, String(), String(), req.parent_model, List[String](), 0)
+            var parent = AgentDef(req.parent_agent, String(), String(), req.parent_model, List[String](), 0, List[String]())
             spec = general_purpose_def(parent)
             child_env = env.for_agent(req.parent_agent)
         else:

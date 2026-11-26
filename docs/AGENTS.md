@@ -194,14 +194,23 @@ the value.
 
 ## 7. What the agents may and may not do
 
-* Read the repository, except `.venv`, `build`, `.git`, `.worktrees` and secret-looking files (file or directory names; `read_file`, `list_files` and `search_code` share one rule, and symlinks leaving the repository are skipped; the native Mojo harness applies the same rule to every path component).
+The rules below are written once, in [`agents/spec/guard_rules.json`](../agents/spec/guard_rules.json):
+the lists (skip directories, secret-looking names, allowed commands and options, API hosts,
+environment-name patterns) and a table of test vectors (an input, and whether it is allowed
+or refused and why). The Python harness and the native Mojo harness both load the lists from
+that file and both run every vector through their own functions (`make test-agents`,
+`make test-agents-mojo`), so the two cannot drift apart.
+[`agents/spec/README.md`](../agents/spec/README.md) describes the file and lists the
+differences that remain between the harnesses, with the reason for each.
+
+* Read the repository, except `.venv`, `build`, `.git`, `.worktrees` and the other skip directories (in any letter case: `.GIT/config` is refused) and secret-looking files (file or directory names; `read_file`, `list_files` and `search_code` share one rule, and symlinks leaving the repository are skipped; both harnesses apply the same rule to every path component).
 * Run only allow-listed commands, without a shell: one Mojo test or example, one example
   through `examples/run_examples.py`, the hardware plugin tests, `build/qumo`, `git diff`
-  and `git status`. Arguments are path-like only, never absolute, and `git` takes only
+  and `git status`. Arguments are path-like only (ASCII letters, digits and `_./:=,@+-`), never absolute, and `git` takes only
   `--stat --name-only --name-status --cached --staged --`. `build/qumo` takes the `run`,
   `statevector`, `expect`, `transpile`, `emulate`, `validate`, `info`, `draw`, `convert`, `vqe`
   and `describe` subcommands (not `tool` or `mcp`) and the options listed in
-  `agents/qumo_agents/tools/repo.py`; every file argument follows the `read_file` rules (so
+  `agents/spec/guard_rules.json`; every file argument follows the `read_file` rules (so
   `validate .env` is refused), and `-o` / `--output` is refused unless a sandbox is open and the
   path is inside it. This holds in the Python tool and in the native Mojo harness.
 * On the `claude-code` back end a read-only agent may run `build/qumo` only with the
@@ -223,23 +232,34 @@ the value.
   setup keep `"inherit"`: the CLI needs its `AWS_` or `GOOGLE_` variables. The trade-off: a
   run that does not need your other credentials no longer holds them, and a run that does
   (for example a hardware plugin test with a vendor token) fails until you go back to `"inherit"`.
+* Fetch only `https` URLs on port 443, without credentials, whose host resolves to public
+  addresses only: loopback, private, link-local (cloud metadata), IPv4-compatible and
+  multicast addresses are refused, and an address that embeds an IPv4 address (IPv4-mapped,
+  NAT64 `64:ff9b::/96`) is judged as that address. The API tools reach `export.arxiv.org`,
+  `pypi.org` and `api.github.com` only. Every redirect target passes the same checks, at
+  most three times.
+* Send a model or alphaXiv key over plain `http` only to this machine (`localhost`,
+  `*.localhost`, `127.0.0.0/8`, `::1`). `"local": {"base_url": "http://192.168.1.20:11434/v1"}`
+  works without `QUMO_AGENTS_LOCAL_API_KEY`; with the key set it is refused, use `https`.
 * Write only `agents/reports/`, and (autoresearch) files inside its own sandbox worktree.
 * Use only alphaXiv's read tools. Its library, folder and follow tools are never loaded.
 * Treat fetched papers, release notes and pages as data. The prompts tell every agent to
   ignore instructions found in them and to report them.
-* Web text and code execution, enforced in `agents/qumo_agents/registry.py` at import:
+* Web text and code execution, enforced in `agents/qumo_agents/registry.py` at import and in
+  the Mojo harness when its registry loads (`check_web_exec` in `tools/config.mojo`):
   no agent has both `research` (web fetch) and `check` (`run_check`) tools; and every agent
   that reaches both through delegation (today `autoresearch` and `orchestrator`) must list,
   in `untrusted_subagents`, each subagent that reaches web fetch, and nothing else. In the
-  openrouter and local back ends the answer of a listed subagent is replaced by a copy cut to
+  openrouter, local and mojo back ends the answer of a listed subagent is replaced by a copy cut to
   6000 characters inside an `UNTRUSTED-DATA` block with a random closing token. Reports copied
   into a sandbox by `open_sandbox`, and reports read from `agents/reports/` with `read_file`,
   are wrapped the same way (cut at 60000 characters). What this does not do: the field format
   (source URL, claim, proposed change) is asked for in the prompts, not checked; a model can
   still obey wrapped text; `search_code` over `agents/reports/` returns raw lines; the task
-  text an agent writes for a subagent is not wrapped; the Claude Code, Codex and Mojo back ends
-  do not apply the wrapper.
-* What `run_check` does not confine: the command list is fixed and runs without a shell and
+  text an agent writes for a subagent is not wrapped; the Claude Code and Codex back ends
+  do not apply the wrapper, and the Mojo harness wraps subagent answers but not reports.
+* What `run_check` does not confine in the Python harness (the Mojo harness confines a check
+  run inside a sandbox with the operating system's sandbox, by design): the command list is fixed and runs without a shell and
   without credential-looking environment variables, but a test or example it runs is ordinary
   Python or Mojo code in your user account. It can read any file you can read, write outside
   the sandbox and open network connections. A sandbox worktree limits what the file tools
@@ -272,7 +292,8 @@ the value.
 make test-agents
 ```
 
-The tests run offline. They check the module table, the safety limits of the tools, the
+The tests run offline. They run every vector of `agents/spec/guard_rules.json` through the
+Python tools (`tests/test_guard_spec.py`), and check the module table, the safety limits of the tools, the
 Claude Code and Codex command lines (keys never appear), the arXiv parser, network
 failures, and that every agent compiles. A scripted model also drives the operator through
 QUMO's real MCP server.

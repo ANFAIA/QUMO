@@ -17,6 +17,10 @@ exceptions (X4).
 
 from std.os import getenv
 
+from qumo_agent.core.guard_rules import (
+    ARG_OTHER_CHARS, GIT_FLAGS_TEXT, QUMO_SUBCOMMANDS_TEXT, arg_ranges, git_flags, qumo_options,
+    qumo_output_options, qumo_subcommands, secret_name_contains, secret_name_prefixes, secret_name_suffixes,
+)
 from qumo_agent.native.clock import local_date, local_stamp
 from qumo_agent.native.fnmatch import fnmatch_py, pathlib_glob_match
 from qumo_agent.native.fs import (
@@ -82,14 +86,25 @@ def _strip_code(msg: String) -> String:
 
 
 def _ascii_lower(s: String) -> String:
+    """`s` case-folded for the comparison with a skip directory: ASCII letters lower-cased, and
+    the two other characters that fold to an ASCII letter, U+212A (Kelvin sign, k) and U+017F
+    (long s, s). A case-insensitive file system folds them too, so `model\u017f` is `models`."""
     var bs = s.as_bytes()
     var out = List[UInt8](capacity=len(bs))
-    for b in bs:
-        var c = Int(b)
+    var i = 0
+    while i < len(bs):
+        var c = Int(bs[i])
         if c >= 0x41 and c <= 0x5A:
             out.append(UInt8(c + 32))
+        elif c == 0xE2 and i + 2 < len(bs) and Int(bs[i + 1]) == 0x84 and Int(bs[i + 2]) == 0xAA:
+            out.append(UInt8(0x6B))
+            i += 2
+        elif c == 0xC5 and i + 1 < len(bs) and Int(bs[i + 1]) == 0xBF:
+            out.append(UInt8(0x73))
+            i += 1
         else:
-            out.append(b)
+            out.append(bs[i])
+        i += 1
     return String(unsafe_from_utf8=Span(out))
 
 
@@ -188,16 +203,20 @@ def _ci_match_at(bs: Span[Byte, _], at: Int, word: String) -> Int:
 
 
 def is_secret_name(name: String) -> Bool:
-    """SECRET_NAMES.search(name): `(^\\.env|secret|credential|\\.pem$|\\.key$|id_rsa)` with
-    re.I ($ also matches before a final newline)."""
+    """SECRET_NAMES.search(name) of repo.py, i.e. `(^\\.env|secret|credential|id_rsa|\\.pem$|\\.key$)`
+    with re.I ($ also matches before a final newline). The three lists are those of
+    agents/spec/guard_rules.json (`lists.repo.secret_names`)."""
     var bs = name.as_bytes()
-    if _ci_match_at(bs, 0, ".env") >= 0:
-        return True
-    var exts: List[String] = [".pem", ".key"]
+    for p in secret_name_prefixes():
+        if _ci_match_at(bs, 0, p) >= 0:
+            return True
+    var words = secret_name_contains()
+    var exts = secret_name_suffixes()
     var i = 0
     while i < len(bs):
-        if _ci_match_at(bs, i, "secret") >= 0 or _ci_match_at(bs, i, "credential") >= 0 or _ci_match_at(bs, i, "id_rsa") >= 0:
-            return True
+        for w in words:
+            if _ci_match_at(bs, i, w) >= 0:
+                return True
         for ext in exts:
             var e = _ci_match_at(bs, i, ext)
             if e >= 0 and (e == len(bs) or (e == len(bs) - 1 and Int(bs[e]) == 0x0A)):
@@ -468,50 +487,41 @@ def tool_search_code(st: RepoState, regex: String, path: String, glob: String) -
 
 # --------------------------------------------------------------------------- run_check
 def _arg_ok(a: String) -> Bool:
-    """ARG_OK = [A-Za-z0-9_./:=,@+-]+ (ASCII), no "..", no newline (X5)."""
+    """ARG_OK: one or more characters of `lists.repo.arg_chars` (ASCII letters, digits and
+    `_./:=,@+-`), no "..", no newline (X5)."""
     var bs = a.as_bytes()
     if len(bs) == 0:
         return False
+    var ranges = arg_ranges()
+    var others = ARG_OTHER_CHARS.as_bytes()
     for b in bs:
-        var c = Int(b)
-        var ok = (c >= 0x30 and c <= 0x39) or (c >= 0x41 and c <= 0x5A) or (c >= 0x61 and c <= 0x7A)
-        ok = ok or c == 0x5F or c == 0x2E or c == 0x2F or c == 0x3A or c == 0x3D or c == 0x2C or c == 0x40 or c == 0x2B or c == 0x2D
+        var ok = False
+        for r in ranges:
+            var rb = r.as_bytes()
+            if len(rb) == 3 and b >= rb[0] and b <= rb[2]:
+                ok = True
+                break
+        if not ok:
+            for o in others:
+                if o == b:
+                    ok = True
+                    break
         if not ok:
             return False
     return a.find("..") < 0
 
 
 comptime REFUSED_ABSOLUTE = "refused: absolute paths are not allowed"
-comptime REFUSED_GIT_OPTIONS = "refused: git options allowed here: -- --cached --name-only --name-status --staged --stat"
-comptime REFUSED_QUMO_SUBCOMMANDS = "refused: build/qumo subcommands allowed here: convert describe draw emulate expect help info run statevector transpile validate version vqe"
+comptime REFUSED_GIT_OPTIONS = "refused: git options allowed here: " + GIT_FLAGS_TEXT
+comptime REFUSED_QUMO_SUBCOMMANDS = "refused: build/qumo subcommands allowed here: " + QUMO_SUBCOMMANDS_TEXT
 comptime REFUSED_QUMO_OUTPUT = "refused: build/qumo output options write a file; open_sandbox first (the main checkout is read-only for agents)"
-
-
-def _git_flags() -> List[String]:
-    """repo.py GIT_FLAGS."""
-    return ["--stat", "--name-only", "--name-status", "--cached", "--staged", "--"]
-
-
-def _qumo_subcommands() -> List[String]:
-    """repo.py QUMO_SUBCOMMANDS (`tool` and `mcp` are left out: they call any tool)."""
-    return ["run", "statevector", "expect", "transpile", "emulate", "validate", "info", "draw",
-            "convert", "vqe", "describe", "version", "help"]
-
-
-def _qumo_options() -> List[String]:
-    """repo.py QUMO_OPTIONS."""
-    return ["--shots", "--seed", "--params", "--max-qubits", "--max-iterations", "--device", "--precision",
-            "--json", "--pretty", "--max-amplitudes", "--observable", "--target", "--level", "--basis",
-            "--pipeline", "--qasm", "--compile", "--no-compile", "--width", "--unicode", "--to",
-            "--instructions", "--layers", "--entanglement", "--optimizer", "--gradient", "--maxiter",
-            "--qubits", "-h", "--help"]
 
 
 def _qumo_refusal(args: List[String], root: String, sandbox: String, skip_dirs: List[String]) -> String:
     """repo.py _qumo_refusal: `args` are the arguments after `build/qumo`. Every file argument
     passes resolve_repo_path (the read_file rule); an output option needs an open sandbox and a
     path inside it."""
-    if len(args) == 0 or not _in(_qumo_subcommands(), args[0]):
+    if len(args) == 0 or not _in(qumo_subcommands(), args[0]):
         return REFUSED_QUMO_SUBCOMMANDS
     var i = 1
     while i < len(args):
@@ -526,7 +536,7 @@ def _qumo_refusal(args: List[String], root: String, sandbox: String, skip_dirs: 
                 name = String(a[byte=0:eq])
                 value = String(a[byte=eq + 1:])
                 has_eq = True
-            if name == "-o" or name == "--output":
+            if _in(qumo_output_options(), name):
                 if not has_eq:
                     if i < len(args):
                         value = args[i]
@@ -540,7 +550,7 @@ def _qumo_refusal(args: List[String], root: String, sandbox: String, skip_dirs: 
                 except e:
                     return "refused: " + _strip_code(String(e))
                 continue
-            if not _in(_qumo_options(), name):
+            if not _in(qumo_options(), name):
                 return "refused: build/qumo option " + name + " is not allowed here"
             if not has_eq:
                 continue
@@ -596,7 +606,7 @@ def run_check_refusal(argv: List[String], allowed: List[List[String]], root: Str
     if argv[0] == "git" and len(argv) >= 2:
         # `git diff` reads any two files with --no-index and writes one with --output.
         var first = 2 if argv[1] == "diff" else 3
-        var flags = _git_flags()
+        var flags = git_flags()
         for i in range(first, len(argv)):
             if argv[i].startswith("-") and not _in(flags, argv[i]):
                 return REFUSED_GIT_OPTIONS

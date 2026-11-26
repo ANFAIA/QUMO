@@ -30,6 +30,7 @@ from std.os import getenv
 
 from qumo.core.json import JsonValue, JsonWriter, parse_json
 
+from qumo_agent.core.guard_rules import MAX_REDIRECTS, api_hosts
 from qumo_agent.net.http import (
     HttpClient, HttpRequest, HttpResponse, HttpOptions, REDIRECT_URLLIB,
 )
@@ -42,7 +43,6 @@ from qumo_agent.util.pyfmt import cp_head, py_json_dumps
 from qumo_agent.util.redact import redact_all, secret_env_names
 
 comptime ARXIV_API = "https://export.arxiv.org/api/query"
-comptime MAX_REDIRECTS = 3
 comptime PYPI_BASE = "https://pypi.org/pypi/"
 comptime GITHUB_API = "https://api.github.com/repos/"
 # X6: sdk_releases reads whole PyPI JSON documents (qiskit's is several MiB).
@@ -112,11 +112,8 @@ def error_json(msg: String) -> String:
 # ---------------------------------------------------------------------------
 # HTTP GET
 # ---------------------------------------------------------------------------
-def api_hosts() -> List[String]:
-    """Hosts the API tools may call (Python's `API_HOSTS`). `fetch_page` reads any public https host."""
-    return ["export.arxiv.org", "pypi.org", "api.github.com"]
-
-
+# `api_hosts()` (the hosts the API tools may call; `fetch_page` reads any public https host)
+# and `MAX_REDIRECTS` come from core/guard_rules.mojo, generated from agents/spec/guard_rules.json.
 def research_get_prefixed(mut http: HttpClient, url: String, header_names: List[String], header_values: List[String],
                   max_bytes: Int, user_agent: String, timeout_s: Int, plain_prefix: String,
                   hosts: List[String]) raises -> List[UInt8]:
