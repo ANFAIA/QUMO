@@ -123,6 +123,46 @@ def _valid_host(host: String, bracketed: Bool) -> Bool:
     return True
 
 
+def _is_ipv4_loopback(host: String) -> Bool:
+    """Four decimal octets (1 to 3 digits, no leading zero, at most 255), the first 127."""
+    var bs = host.as_bytes()
+    var octets = 0
+    var digits = 0
+    var value = 0
+    for i in range(len(bs) + 1):
+        var c = Int(bs[i]) if i < len(bs) else 0x2E
+        if c == 0x2E:
+            if digits == 0 or value > 255:
+                return False
+            if octets == 0 and value != 127:
+                return False
+            octets += 1
+            digits = 0
+            value = 0
+        elif _is_digit(c):
+            if digits == 3 or (digits == 1 and value == 0):
+                return False
+            value = value * 10 + (c - 0x30)
+            digits += 1
+        else:
+            return False
+    return octets == 4
+
+
+def is_loopback_host(host: String) -> Bool:
+    """Whether `host` (a `Url.host`: lower-case, IPv6 without brackets) is this machine:
+    `localhost`, a name ending in `.localhost` (RFC 6761), a literal IPv4 address in
+    127.0.0.0/8 or `::1`. A name that only starts with `127.` (`127.attacker.example`,
+    `127.0.0.1.attacker.example`) is a remote host; so are the short and non-decimal
+    IPv4 spellings (`127.1`, `0x7f.0.0.1`), which are refused instead of guessed."""
+    var h = _lower_ascii(host)
+    if h == "localhost" or h == "::1":
+        return True
+    if h.endswith(".localhost") and h.byte_length() > 10:
+        return True
+    return _is_ipv4_loopback(h)
+
+
 def parse_url(url: String) raises -> Url:
     """Parses an absolute http(s) URL. Rejects user information, drops the fragment,
     refuses CR, LF, space and other control characters."""

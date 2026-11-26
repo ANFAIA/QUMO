@@ -450,7 +450,8 @@ def build_command(ex: Example, gpu: bool, python: str, repo: Path = REPO) -> tup
     env = dict(os.environ)
     env.setdefault("PYTHONUNBUFFERED", "1")
     if ex.kind == "mojo":
-        cmd = [str(MOJO), "run", "-I", "."] + (["-D", "QUMO_GPU"] if gpu else []) + [ex.path] + ex.args(gpu)
+        # plugins/hardware/native: the vendor clients (qumo_hw), used by examples/hardware/*.mojo only
+        cmd = [str(MOJO), "run", "-I", ".", "-I", "plugins/hardware/native"] + (["-D", "QUMO_GPU"] if gpu else []) + [ex.path] + ex.args(gpu)
     elif ex.kind == "qasm":
         override = LEGACY_OVERRIDES.get(ex.path) if ex.legacy else None
         if override:

@@ -1,6 +1,6 @@
 # Hardware examples
 
-Run QUMO-compiled circuits on IBM Quantum and Quantinuum hardware with the
+Run QUMO-compiled circuits on quantum hardware with the
 `qumo_hardware` plugins ([docs/HARDWARE_PLUGINS.md](../../docs/HARDWARE_PLUGINS.md)).
 Every script is **dry-run by default**: without flags it either runs on a local
 emulator or only prints the compiled plan and cost estimate. Submitting to a
@@ -22,6 +22,19 @@ bench/.venv/bin/python examples/hardware/ibm_bell.py
 bench/.venv/bin/python examples/hardware/quantinuum_ghz.py --backend H2-1LE --run   # offline H2 emulator
 bench/.venv/bin/python examples/hardware/quantinuum_ghz.py --backend selene --run   # offline Helios-style emulator
 bench/.venv/bin/python examples/hardware/compare_providers.py --qv 5 --provider-compilers
+```
+
+Two examples are Mojo only. They use the vendor clients of
+[plugins/hardware/native](../../plugins/hardware/native/README.md), so they need the second `-I`:
+
+| Example | Without credentials | With credentials |
+|---|---|---|
+| `pasqal_mis.mojo` | analog Rydberg sweep (maximum independent set), simulated locally | `--submit [DEVICE]` sends it to Pasqal Cloud (`EMU_FREE` by default; needs `PASQAL_USERNAME` / `PASQAL_PASSWORD` and `PASQAL_PROJECT_ID`) |
+| `qbraid_all.mojo` | none: it needs `QBRAID_API_KEY` and the network, also with `--list` | lists the devices; without `--list`, runs a Bell pair on each free one |
+
+```bash
+.venv/bin/mojo run -I . -I plugins/hardware/native examples/hardware/pasqal_mis.mojo
+.venv/bin/mojo run -I . -I plugins/hardware/native examples/hardware/qbraid_all.mojo --list
 ```
 
 When a job is submitted the scripts print its id first. They exit with 1 if

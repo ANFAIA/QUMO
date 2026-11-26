@@ -41,7 +41,7 @@ from qumo.core.rng import Rng
 from qumo.sim.runner import check_statevector_size
 from qumo.algorithms.linalg import (
     sv_dot, sv_norm, sv_zero, sv_assign, sv_scale, sv_axpy, sv_mul_minus_i,
-    jacobi_eigh, tridiag_lowest,
+    jacobi_eigh, tridiag_lowest, HermitianOperator, lanczos,
 )
 
 
@@ -372,7 +372,7 @@ def check_fits(h: PauliSum, num_qubits: Int) raises:
 # ---------------------------------------------------------------------------
 # PauliOperator: fast H|psi> and <psi|H|psi>
 # ---------------------------------------------------------------------------
-struct PauliOperator(Copyable):
+struct PauliOperator(Copyable, HermitianOperator):
     """A PauliSum prepared for repeated application to n-qubit states.
 
     Diagonal terms (pure Z strings + identity) are pre-summed into one dense
@@ -421,11 +421,15 @@ struct PauliOperator(Copyable):
 
     def apply(self, src: StateVector, mut dst: StateVector):
         """dst <- H src  (dst is overwritten and must not alias src)."""
-        var n = src.size()
-        var sr = src.re.unsafe_ptr().as_unsafe_any_origin()
-        var si = src.im.unsafe_ptr().as_unsafe_any_origin()
-        var dr = dst.re.unsafe_ptr().as_unsafe_any_origin()
-        var di = dst.im.unsafe_ptr().as_unsafe_any_origin()
+        self.apply_vec(src.re, src.im, dst.re, dst.im)
+
+    def apply_vec(self, xr: List[Float64], xi: List[Float64], mut yr: List[Float64], mut yi: List[Float64]):
+        """The same on split (re, im) lists of 2^n amplitudes (`HermitianOperator`, used by Lanczos)."""
+        var n = len(xr)
+        var sr = xr.unsafe_ptr().as_unsafe_any_origin()
+        var si = xi.unsafe_ptr().as_unsafe_any_origin()
+        var dr = yr.unsafe_ptr().as_unsafe_any_origin()
+        var di = yi.unsafe_ptr().as_unsafe_any_origin()
         if self.has_diag:
             var dp = self.diag.unsafe_ptr().as_unsafe_any_origin()
 
@@ -437,7 +441,13 @@ struct PauliOperator(Copyable):
 
             run_chunks(dbody, n)
         else:
-            sv_zero(dst)
+
+            def zbody(lo: Int, hi: Int) {imm dr, imm di}:
+                for i in range(lo, hi):
+                    dr[unsafe_offset=i] = 0.0
+                    di[unsafe_offset=i] = 0.0
+
+            run_chunks(zbody, n)
         for t in self.off:
             var xm = Int(t.x)
             var zm = Int(t.z)
@@ -547,53 +557,13 @@ def ground_state(h: PauliSum, num_qubits: Int, max_iter: Int = 160, tol: Float64
         v0.re[i] = rng.uniform() - 0.5
         v0.im[i] = rng.uniform() - 0.5
     sv_scale(v0, 1.0 / sv_norm(v0))
-    var basis = List[StateVector]()
-    basis.append(v0^)
-    var alpha = List[Float64]()
-    var beta = List[Float64]()
-    var w = StateVector(num_qubits)
-    var theta_old = 1e300
-    var m = 0
-    while m < m_max:
-        op.apply(basis[m], w)
-        var a = sv_dot(basis[m], w)[0]
-        alpha.append(a)
-        sv_axpy(w, -a, 0.0, basis[m])
-        if m > 0:
-            sv_axpy(w, -beta[m - 1], 0.0, basis[m - 1])
-        # full re-orthogonalisation (twice is enough - Kahan/Parlett)
-        for _ in range(2):
-            for k in range(m + 1):
-                var c = sv_dot(basis[k], w)
-                sv_axpy(w, -c[0], -c[1], basis[k])
-        var b = sv_norm(w)
-        m += 1
-        var done = b < 1e-10 or m >= m_max
-        if not done and (m % 4 == 0):
-            var th = tridiag_lowest(alpha, beta, m)
-            if abs(th - theta_old) < tol * max(1.0, abs(th)):
-                done = True
-            theta_old = th
-        if done:
-            break
-        beta.append(b)
-        var nv = StateVector(num_qubits)
-        sv_assign(nv, w)
-        sv_scale(nv, 1.0 / b)
-        basis.append(nv^)
+    var run = lanczos(op, v0.re.copy(), v0.im.copy(), m_max, 1e-10, tol)
+    var m = run.steps
     # Ritz vector from the projected tridiagonal matrix
-    var t = List[Float64](length=m * m, fill=0.0)
-    for i in range(m):
-        t[i * m + i] = alpha[i]
-        if i + 1 < m:
-            t[i * m + i + 1] = beta[i]
-            t[(i + 1) * m + i] = beta[i]
-    var eig = jacobi_eigh(t, m)
     var psi = StateVector(num_qubits)
-    sv_zero(psi)
-    for k in range(m):
-        sv_axpy(psi, eig.vectors[k * m + 0], 0.0, basis[k])
+    run.ritz_vector(psi.re, psi.im)
     sv_scale(psi, 1.0 / sv_norm(psi))
+    var w = StateVector(num_qubits)
     op.apply(psi, w)
     var e = sv_dot(psi, w)[0]
     sv_axpy(w, -e, 0.0, psi)
@@ -829,6 +799,33 @@ def _dense_lowest(re: List[Float64], im: List[Float64], m: Int) -> Float64:
     return jacobi_eigh(big, mm).values[0]
 
 
+struct _CooOperator(Movable, HermitianOperator):
+    """Sparse projected Hamiltonian in coordinate form (duplicates add up)."""
+
+    var rows: List[Int]
+    var cols: List[Int]
+    var vre: List[Float64]
+    var vim: List[Float64]
+
+    def __init__(out self, var rows: List[Int], var cols: List[Int], var vre: List[Float64], var vim: List[Float64]):
+        self.rows = rows^
+        self.cols = cols^
+        self.vre = vre^
+        self.vim = vim^
+
+    def apply_vec(self, xr: List[Float64], xi: List[Float64], mut yr: List[Float64], mut yi: List[Float64]):
+        for i in range(len(yr)):
+            yr[i] = 0.0
+            yi[i] = 0.0
+        for e in range(len(self.rows)):
+            var r = self.rows[e]
+            var c = self.cols[e]
+            var hr = self.vre[e]
+            var hi = self.vim[e]
+            yr[r] += hr * xr[c] - hi * xi[c]
+            yi[r] += hr * xi[c] + hi * xr[c]
+
+
 def subspace_ground_energy(h: PauliSum, basis_states: List[Int], num_qubits: Int,
                            max_iter: Int = 300, tol: Float64 = 1e-13) raises -> Float64:
     """Lowest eigenvalue of H projected onto span{|b> : b in basis_states}.
@@ -857,10 +854,7 @@ def subspace_ground_energy(h: PauliSum, basis_states: List[Int], num_qubits: Int
             im[rows[k] * m + cols[k]] += vim[k]
         return _dense_lowest(re, im, m)
     # --- sparse Lanczos (complex Hermitian), full re-orthogonalisation ---
-    var nnz = len(rows)
     var rng = Rng(2024)
-    var bre = List[List[Float64]]()
-    var bim = List[List[Float64]]()
     var x_re = List[Float64](length=m, fill=0.0)
     var x_im = List[Float64](length=m, fill=0.0)
     var nrm = 0.0
@@ -872,69 +866,5 @@ def subspace_ground_energy(h: PauliSum, basis_states: List[Int], num_qubits: Int
     for i in range(m):
         x_re[i] /= nrm
         x_im[i] /= nrm
-    bre.append(x_re^)
-    bim.append(x_im^)
-    var alpha = List[Float64]()
-    var beta = List[Float64]()
-    var w_re = List[Float64](length=m, fill=0.0)
-    var w_im = List[Float64](length=m, fill=0.0)
-    var m_max = min(max_iter, m)
-    var theta_old = 1e300
-    var k = 0
-    while k < m_max:
-        for i in range(m):
-            w_re[i] = 0.0
-            w_im[i] = 0.0
-        for e in range(nnz):
-            var r = rows[e]
-            var c = cols[e]
-            var hr = vre[e]
-            var hi = vim[e]
-            var xr = bre[k][c]
-            var xi = bim[k][c]
-            w_re[r] += hr * xr - hi * xi
-            w_im[r] += hr * xi + hi * xr
-        var a = 0.0
-        for i in range(m):
-            a += bre[k][i] * w_re[i] + bim[k][i] * w_im[i]
-        alpha.append(a)
-        for i in range(m):
-            w_re[i] -= a * bre[k][i]
-            w_im[i] -= a * bim[k][i]
-            if k > 0:
-                w_re[i] -= beta[k - 1] * bre[k - 1][i]
-                w_im[i] -= beta[k - 1] * bim[k - 1][i]
-        for _ in range(2):
-            for j in range(k + 1):
-                var cr = 0.0
-                var ci = 0.0
-                for i in range(m):
-                    cr += bre[j][i] * w_re[i] + bim[j][i] * w_im[i]
-                    ci += bre[j][i] * w_im[i] - bim[j][i] * w_re[i]
-                for i in range(m):
-                    var ur = bre[j][i]
-                    var ui = bim[j][i]
-                    w_re[i] -= cr * ur - ci * ui
-                    w_im[i] -= cr * ui + ci * ur
-        var b = 0.0
-        for i in range(m):
-            b += w_re[i] * w_re[i] + w_im[i] * w_im[i]
-        b = sqrt(b)
-        k += 1
-        var done = b < 1e-10 or k >= m_max
-        if not done and k % 4 == 0:
-            var th = tridiag_lowest(alpha, beta, k)
-            if abs(th - theta_old) < tol * max(1.0, abs(th)):
-                done = True
-            theta_old = th
-        if done:
-            break
-        beta.append(b)
-        var nr = List[Float64](length=m, fill=0.0)
-        var ni = List[Float64](length=m, fill=0.0)
-        for i in range(m):
-            nr[i] = w_re[i] / b
-            ni[i] = w_im[i] / b
-        bre.append(nr^)
-        bim.append(ni^)
-    return tridiag_lowest(alpha, beta, k)
+    var coo = _CooOperator(rows^, cols^, vre^, vim^)
+    return lanczos(coo, x_re^, x_im^, min(max_iter, m), 1e-10, tol).lowest()

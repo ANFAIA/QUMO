@@ -314,7 +314,7 @@ that bar, so every one is `readOnlyHint: true, destructiveHint: false,
 idempotentHint: true, openWorldHint: false`. This includes `qumo_run_device` and
 `qumo_gpu_info`, which select a local CPU/GPU *simulator* and never talk to a QPU.
 Hardware submission lives in the Python plugin layer (`plugins/hardware`) and in the
-native clients of `qumo/exec` (for example `ionq_api.mojo`, bound into `qumo_py`); neither
+native clients of `plugins/hardware/native/qumo_hw` (for example `ionq_api.mojo`, bound into `qumo_py`); neither
 is registered as an MCP tool. A tool that submits a job or writes a file must use `reg.add`
 with explicit hints, for example a submit tool: `readOnlyHint: false`,
 `destructiveHint: false`, `idempotentHint: false` (a retry submits a second job),
@@ -386,7 +386,7 @@ shortest paths plus a dense blossom; small codes and reference), `uf`
 (union-find; fast, slightly lower threshold) and `lookup` (lookup table;
 tiny codes with at most 64 detectors). See [QEC.md](QEC.md).
 
-`qumo_run_device` selects the simulator as follows (`qumo.exec.dispatch.sample_on`):
+`qumo_run_device` selects the simulator as follows (`qumo.gpu.dispatch.sample_on`):
 
 * `auto` uses the same dispatch as `qumo_run_qasm`. Noisy Clifford circuits
   without feed-forward go to CPU Pauli frames. Other wide, noisy or dynamic
@@ -430,8 +430,8 @@ Warnings in every tool result have the `Diagnostic` shape
 Running on quantum hardware is outside the Mojo core and the MCP server.
 `plugins/hardware` (Python package `qumo_hardware`) compiles with QUMO
 (`build/qumo_py.so`), translates the result 1:1 into the provider SDK, and
-submits it after explicit confirmation. The providers are IBM Quantum (Qiskit
-Runtime), Quantinuum (pytket and qnexus) and a `local` emulator. Its errors
+submits it after explicit confirmation. The providers are IBM Quantum, Quantinuum,
+IonQ, qBraid, SpeQtrum and a `local` emulator. Its errors
 use the same text and JSON shape, in range QM-E950..QM-E959 (listed in
 [ERRORS.md](ERRORS.md)). Submitting to a billable backend without
 confirmation is QM-E957. See [HARDWARE_PLUGINS.md](HARDWARE_PLUGINS.md).
@@ -454,7 +454,7 @@ or in `.mcp.json` / Claude Desktop / any MCP client:
 
 ```
 -> {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"x","version":"1"}}}
-<- {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"qumo","title":"QUMO quantum toolkit","version":"0.3.0"},"instructions":"..."}}
+<- {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"qumo","title":"QUMO quantum toolkit","version":"0.4.0"},"instructions":"..."}}
 -> {"jsonrpc":"2.0","method":"notifications/initialized"}
 -> {"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"qumo_run_qasm","arguments":{"qasm":"OPENQASM 3.0; include \"stdgates.inc\"; qubit[2] q; bit[2] c; h q[0]; cx q[0], q[1]; c = measure q;","shots":1000,"seed":7}}}
 <- {"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"counts\":{\"00\":484,\"11\":516},...}"}],"structuredContent":{"counts":{"00":484,"11":516},"shots":1000,"seed":7,"method":"statevector:static",...},"isError":false}}

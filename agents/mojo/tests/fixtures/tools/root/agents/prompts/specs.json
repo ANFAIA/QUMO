@@ -11,7 +11,7 @@
   },
   "beta": {
    "description": "Second agent.",
-   "tool_groups": ["research", "read", "check", "report", "sandbox"],
+   "tool_groups": ["read", "check", "report", "sandbox"],
    "mcp_tools": ["qumo_describe"],
    "subagents": ["alpha", "gamma"],
    "writes_code": true,

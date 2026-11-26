@@ -24,7 +24,7 @@ make cli          # build/qumo : CLI + MCP server
 build/qumo run examples/foundations/bell.qasm --shots 1000 --seed 7
 ```
 
-`make setup` installs about 850 MB into `.venv`; `make cli` takes about a minute. `make help` lists the build targets. Intel Macs and native Windows are not supported by the Mojo toolchain ([platforms](docs/GETTING_STARTED.md#platforms)).
+`make setup` installs about 850 MB into `.venv`; `make cli` takes about a minute. `make help` lists the build targets. On Windows, use WSL2: a user has run QUMO that way. The Mojo toolchain has no native Windows wheel ([platforms](docs/GETTING_STARTED.md#platforms)).
 
 The same binary compiles a circuit for a device, runs it on a noisy model of that device, and runs a small VQE:
 
@@ -83,12 +83,12 @@ Full install, update, GPU and hardware steps: [docs/GETTING_STARTED.md](docs/GET
 | `qumo.sim` | State vector (SIMD, threads), stabilizer tableau, Pauli-frame sampler, density matrix |
 | `qumo.noise` | `NoiseModel` from calibration data, randomized benchmarking, T1/Ramsey fits, readout mitigation (tensored and M3) |
 | `qumo.gpu` | One Mojo source for NVIDIA, AMD and Apple GPUs |
-| `qumo.exec` | Sampler/Estimator primitives, HEFT orchestration over CPU/GPU/QPU, resource estimation |
+| `qumo.exec` | Sampler/Estimator primitives, HEFT orchestration over CPU/GPU/QPU (resource estimation: `qumo.compiler.resources`; simulator selection: `qumo.gpu.dispatch`; device emulation: `qumo.noise.emulate`) |
 | `qumo.algorithms` | QFT, Grover, QPE, Trotter, UCCSD, gradients, VQE, QAOA, QML |
 | `qumo.qec`, `qumo.ft` | Surface codes, decoders, detector error models; fault-tolerant programming |
 | `qumo.ai`, `cli/` | JSON everywhere, stable `QM-Exxx` error codes with hints, MCP server, CLI |
-| `qumo.core`, `qumo.net`, `qumo.bench`, `qumo.testing` | Support code: JSON and the seeded `Rng`, native HTTP/TLS client used by the hardware clients, benchmark circuit generators, `CheckLog` for machine-checked examples |
-| `plugins/hardware` | Run compiled circuits on IBM Quantum and Quantinuum (dry-run by default) |
+| `qumo.core`, `qumo.net`, `qumo.bench`, `qumo.testing` | Support code: JSON and the seeded `Rng`, native HTTP/TLS client used by the vendor clients of `plugins/hardware/native`, benchmark circuit generators, `CheckLog` for machine-checked examples |
+| `plugins/hardware` | Run compiled circuits on IBM Quantum, Quantinuum, IonQ (simulator), qBraid and SpeQtrum (no remote submission without `--yes`); native Mojo vendor clients in `native/qumo_hw` |
 | `agents/` | AI agents that keep QUMO current: a Python package (`agents/qumo_agents`, on deepagents) and a native Mojo harness (`agents/mojo/`, from pull request #7) |
 
 ### What you need and what you can ignore
@@ -132,12 +132,6 @@ Each SDK in its own container, built the way it would ship: a scratch image with
 
 ![Benchpress two-qubit gates, QUMO against Qiskit](bench/results/charts/benchpress_2q_ratio.png)
 
-Benchpress's own Cirq gym implements very little: of its 1066 tests, 10 run (circuit build, QASM import and manipulation), 1054 are skipped as "Not implemented" and 2 fail, so there is no Cirq transpile comparison to draw from Benchpress. The 10 tests that do run, timed for QUMO, Qiskit and Cirq:
-
-![Benchpress tests implemented by the Cirq gym](bench/results/charts/benchpress_cirq_tests.png)
-
-TKET has no Benchpress gym here. Benchpress published its own Qiskit against TKET run (560 tests; [bench/results/benchpress_published_qiskit_vs_tket.txt](bench/results/benchpress_published_qiskit_vs_tket.txt)); that is not a measurement of this repository.
-
 ## Documentation
 
 The full map is [docs/README.md](docs/README.md). Common entry points:
@@ -155,7 +149,7 @@ The full map is [docs/README.md](docs/README.md). Common entry points:
 
 ## Status
 
-Research prototype (version string 0.3.0, no tagged release yet). APIs are small and documented but may change, and Mojo itself moves quickly. In progress: measuring the GPU engine on NVIDIA/AMD, parity with Qiskit on the densest 100+ qubit circuits, and real-hardware submission (the plugins are tested offline only).
+Research prototype (version string 0.4.0, no tagged release yet). APIs are small and documented but may change, and Mojo itself moves quickly. In progress: measuring the GPU engine on NVIDIA/AMD, parity with Qiskit on the densest 100+ qubit circuits, and real-hardware submission (the plugins are tested offline only).
 
 ## Citing and contributing
 

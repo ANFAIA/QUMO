@@ -7,9 +7,9 @@ behaviour changed. The first step was judged not clearly safe and was not implem
 
 Every provider exists twice:
 
-* **Mojo**: `qumo/exec/{ibm,ionq,quantinuum,speqtrum}_api.mojo` (878, 493, 705 and 756 lines). These are
-  exported to Python as `qumo_py` functions (`python/qumo_py.mojo`) and are what the CLI and the MCP server
-  call.
+* **Mojo**: `plugins/hardware/native/qumo_hw/{ibm,ionq,quantinuum,speqtrum}_api.mojo` (875, 490, 702 and 753 lines; they were in
+  `qumo/exec` until the vendor code left the core). These are exported to Python as `qumo_py` functions
+  (`python/qumo_py.mojo`) and are what the `qumo-hardware` CLI calls.
 * **Python**: `plugins/hardware/qumo_hardware/` (5,099 lines). The base classes (`ibm.py`, `ionq.py`,
   `quantinuum.py`, `speqtrum.py`) and the `*_native.py` subclasses. The registry (`registry.py`) makes the
   native subclass the default client: `NATIVE` maps `ibm`, `quantinuum`, `ionq` and `speqtrum` to a class
@@ -28,7 +28,7 @@ Two facts make this less than a clean "native plus fallback" split:
 
 ## 2. Inventory
 
-### 2.1 Mojo (`qumo/exec`)
+### 2.1 Mojo (`plugins/hardware/native/qumo_hw`)
 
 | Provider | Exported to `qumo_py` | Role |
 |---|---|---|
@@ -95,7 +95,7 @@ parity test must compare the decoded counts, not the input.
 
 ### 4.3 Quantinuum
 Two implementations of the same cost formula exist: `hqc_cost` in `quantinuum.py`, which
-`quantinuum_native.estimate_cost` calls, and `qtm_hqc` in `qumo/exec/quantinuum_api.mojo`. `qtm_hqc` is
+`quantinuum_native.estimate_cost` calls, and `qtm_hqc` in `plugins/hardware/native/qumo_hw/quantinuum_api.mojo`. `qtm_hqc` is
 imported into `python/qumo_py.mojo` but never registered, so the native client cannot reach it. The two
 formulas agree by inspection only. The gate translation also exists twice: `to_native` (pytket) in Python
 and `quantinuum_native_circuit` in Mojo; the native path uses Mojo for the circuit counts. Exporting

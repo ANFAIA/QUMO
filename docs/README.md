@@ -22,7 +22,7 @@ For research use: the reference by module below, [EXTENDING](EXTENDING.md), the 
 | Add a gate, noise channel, compiler pass, decoder or target | [EXTENDING](EXTENDING.md) |
 | Browse runnable examples by topic | [examples/CATALOG.md](../examples/CATALOG.md), [examples/README.md](../examples/README.md) |
 | Drive QUMO from an LLM agent (MCP, JSON, error codes) | [AI_NATIVE](AI_NATIVE.md), [ERRORS](ERRORS.md), [llms.txt](../llms.txt) |
-| Run on IBM Quantum or Quantinuum | [HARDWARE_PLUGINS](HARDWARE_PLUGINS.md) |
+| Run on quantum hardware (IBM Quantum, Quantinuum and others) | [HARDWARE_PLUGINS](HARDWARE_PLUGINS.md) |
 | Run on NVIDIA, AMD or Apple GPUs | [GPU](GPU.md) |
 | Use the AI agents that keep QUMO current | [AGENTS](AGENTS.md) |
 
@@ -75,18 +75,18 @@ qumo/
   sim/         state vector, stabilizer tableau + branching, Pauli frames, density matrix
   noise/       NoiseModel, characterization (RB, T1/Ramsey), readout mitigation, M3
   gpu/         MAX GPU kernels and state vector (opt-in: -D QUMO_GPU)
-  exec/        PUB primitives, HEFT orchestrator, resource estimation, auto dispatch, agent tools
+  exec/        orchestration: PUB primitives, HEFT orchestrator
   algorithms/  QFT, Grover, QPE, ansatze, Trotter, UCCSD, gradients, optimizers, VQE/QAOA
   ft/          stabilizer codes, logical programs, encoding passes, gadget verification
   qec/         codes, detector error models, decoders, Sinter-style experiments
   ai/          JSON, diagnostics, self-description, tool registry, MCP server
-  net/         native HTTP/1.1 + TLS client (used by the hardware clients)
+  net/         native HTTP/1.1 + TLS client (used by the vendor clients of plugins/hardware/native)
   bench/       benchmark circuit generators
   testing/     CheckLog: machine-readable CHECK lines for tests and examples
   prelude.mojo the names a first program needs, in one import
 cli/           qumo CLI: app.mojo (commands, options, help), main.mojo (entry point)
 python/        Python package qumo (python/qumo), its tests, and the CPython extension under it (qumo_py.mojo)
-plugins/       hardware providers (qumo_hardware)
+plugins/       hardware providers: Python package qumo_hardware and the native Mojo vendor clients (hardware/native/qumo_hw)
 agents/        deepagents-based agents and CLI (Python)
 examples/      runnable examples by category
 bench/         benchmarks and harnesses

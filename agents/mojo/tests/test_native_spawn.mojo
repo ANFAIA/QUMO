@@ -255,7 +255,10 @@ def test_envs() raises:
             n_path += 1
     assert_equal(n_path, 1)
     assert_true(is_secret_env_name("db_password") and is_secret_env_name("A_SECRET_X") and is_secret_env_name("x_token"))
-    assert_false(is_secret_env_name("TOKENS") or is_secret_env_name("PATH"))
+    # the substrings of agents/spec/guard_rules.json, as in the Python harness
+    assert_true(is_secret_env_name("TOKENS") and is_secret_env_name("X_APIKEY") and is_secret_env_name("SSH_KEY"))
+    assert_true(is_secret_env_name("GOOGLE_APPLICATION_CREDENTIALS") and is_secret_env_name("session_cookie"))
+    assert_false(is_secret_env_name("PATH") or is_secret_env_name("SSH_AUTH_SOCK") or is_secret_env_name("TERM_SESSION_ID"))
     var sub = env_subset(["QUMO_ROOT", "NOT_SET_QUMO_X", "QUMO_ROOT"])
     assert_equal(len(sub), 1)
     assert_equal(sub[0], "QUMO_ROOT=/r")

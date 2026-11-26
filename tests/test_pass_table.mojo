@@ -283,6 +283,7 @@ def test_rejections() raises:
         "perm_synth(max_qubits=0)", "perm_synth(reps=0)", "perm_synth(beams=0)", "perm_synth(searches=0)",
         "perm_synth(min_block=-1)", "perm_synth(budget=-1)", "pauli_network(direction=sideways)",
         "pauli_network(commute=maybe)", "pauli_network(strict=2)", "pauli_network(metric=fidelity)",
+        "pauli_network(max_rotations=-1)", "pauli_network(max_rotations=many)", "clifford_synth(max_rotations=8)",
     ]
     for s in bad602:
         assert_true(error_of(s).startswith("QM-E602"), s + " -> " + error_of(s))
@@ -303,7 +304,7 @@ def test_rejections() raises:
         "route(sabre,trials=-1)", "wrap_angles(rzz[0:pi/2])", "wrap_angles", "post_layout", "post_layout(1000)",
         "pauli_simp(objective=t)", "pauli_simp(objective=2q)", "linear_synth(greedy,direction=backward,commute=0)",
         "ai_pauli_network(model=off,beams=4,searches=2,metric=cost,strict=1,reps=3,model_dir=/tmp/models,seed=3)",
-        "perm_synth(max_qubits=64)", "clifford_synth(model_dir=)",
+        "perm_synth(max_qubits=64)", "clifford_synth(model_dir=)", "pauli_network(max_rotations=0)", "ai_pauli_network(max_rotations=64)",
     ]
     for s in ok:
         assert_equal(error_of(s), "", s)
@@ -396,6 +397,7 @@ def test_defaults_are_the_option_defaults() raises:
         assert_equal(s.method, w.method)
         assert_equal(s.max_qubits, w.max_qubits, pass_name(i))
         assert_equal(s.min_block, w.min_block, pass_name(i))
+        assert_equal(s.max_rotations, w.max_rotations, pass_name(i))
         assert_equal(s.direction, w.direction)
         assert_equal(s.commute, w.commute)
         assert_equal(s.reps, w.reps)

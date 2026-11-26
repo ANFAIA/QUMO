@@ -353,7 +353,7 @@ A target is data: number of qubits, coupling edges, basis gates and, optionally,
 from qumo.ir.circuit import Circuit
 from qumo.device.target import Target
 from qumo.compiler.pass_manager import transpile
-from qumo.exec.emulate import emulate
+from qumo.noise.emulate import emulate
 
 
 def main() raises:

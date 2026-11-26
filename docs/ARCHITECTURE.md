@@ -3,7 +3,8 @@
 QUMO is one Mojo code base with five layers (the diagram) over a shared base (`core`, `ir`, `device`),
 plus three side packages (`ft`, `gpu`, `net`). Everything above the IR is optional; everything shares the
 same `Circuit` value and the same error-code, seeding and JSON conventions. The import rules between
-packages are in [Package layering](#package-layering).
+packages are in [Package layering](#package-layering). Vendor code (the clients of hardware services and
+their wire formats) is not in `qumo/`: see [Vendor code](#4c-vendor-code-outside-qumo).
 
 ```
             ┌────────────────────────────── front ends ──────────────────────────────┐
@@ -13,8 +14,8 @@ packages are in [Package layering](#package-layering).
    ┌───────────────────────┴───────────┐  ┌───────┴─────────────┐  ┌──────┴────────────┐
    │ qumo.algorithms                   │  │ qumo.exec           │  │ qumo.qec          │
    │ kernels, gradients, optimizers,   │  │ PUB primitives,     │  │ codes, DEM,       │
-   │ VQE/QAOA, Hamiltonians            │  │ HEFT orchestrator,  │  │ decoders, sweeps, │
-   └───────────────┬───────────────────┘  │ resources           │  │ characterization  │
+   │ VQE/QAOA, Hamiltonians            │  │ HEFT orchestrator   │  │ decoders, sweeps, │
+   └───────────────┬───────────────────┘  │                     │  │ characterization  │
                    │                      └───────┬─────────────┘  └──────┬────────────┘
    ┌───────────────┴──────────────────────────────┴───────────────────────┴────────────┐
    │ qumo.compiler: pass pipeline (text spec), routing, synthesis (targets: qumo.device)│
@@ -39,34 +40,51 @@ today (`qumo/*/*.mojo`, `from qumo.X` lines; the re-export shims for old paths a
 |---|---|---|---|
 | 0 | `core` | JSON writer and parser, `Rng` | nothing from QUMO |
 | 1 | `ir` | gates, `Circuit`, `Program`, Pauli, QASM, circuit/program JSON (`ir/json.mojo`) | `core` |
-| 2 | `device` | `Target`: coupling graph, basis, errors, durations, presets, `parse_target` | `ir` |
-| 2 | `sim` | state vector, tableau, Pauli frames, runners, density, branching | `core`, `ir` |
-| 3 | `noise` | `NoiseModel`, `apply_noise_model`, RB, T1/Ramsey, readout mitigation, M3 | `core`, `ir`, `device`, `sim` |
-| 3 | `compiler` | pass manager, routing, synthesis, `Program` compilation | `core`, `ir`, `device`, `sim` |
+| 2 | `device` | `Target`: coupling graph, basis, errors, durations, presets, `parse_target`; `conformance_error` | `ir` |
+| 2 | `sim` | state vector, tableau, Pauli frames, runners, density, branching, CPU simulator selection (`dispatch`) | `core`, `ir` |
+| 3 | `noise` | `NoiseModel`, `apply_noise_model`, RB, T1/Ramsey, readout mitigation, M3, the device emulator (`emulate`) | `core`, `ir`, `device`, `sim` |
+| 3 | `compiler` | pass manager, routing, synthesis, `Program` compilation, static resource estimation (`resources`) | `core`, `ir`, `device`, `sim` |
 | 3 | `qec` | codes, DEM, decoders, sweeps | `core`, `ir`, `sim` |
-| 3 | `gpu` | vendor-neutral GPU state-vector and frame back ends (`-D QUMO_GPU`) | `core`, `ir`, `sim` |
-| 3 | `net` | HTTP/1.1 + TLS client for hardware and LLM endpoints (no QUMO imports) | nothing from QUMO |
-| 4 | `algorithms` | kernels, gradients, optimizers, VQE/QAOA, mitigation | `core`, `ir`, `sim`, `noise`, `qec`, `gpu`, `exec` (one file) |
-| 4 | `exec` | primitives, dispatch, orchestrator, emulate, resources | `core`, `ir`, `device`, `sim`, `noise`, `compiler`, `gpu`, `net` |
+| 3 | `gpu` | vendor-neutral GPU state-vector and frame back ends (`-D QUMO_GPU`); simulator selection over CPU and GPU (`dispatch`: `sample_auto`, `sample_on`) | `core`, `ir`, `sim` |
+| 3 | `net` | HTTP/1.1 + TLS client (no QUMO imports). No package of `qumo/` imports it: its users are the vendor clients outside the core | nothing from QUMO |
+| 4 | `algorithms` | kernels, gradients, optimizers, VQE/QAOA, mitigation | `core`, `ir`, `sim`, `noise`, `gpu` |
+| 4 | `exec` | orchestration only: PUB primitives and the HEFT orchestrator | `ir`, `sim`, `gpu` |
 | 4 | `ft` | fault-tolerant programming layer (Steane, Iceberg, Rz synthesis) | `core`, `ir`, `sim`, `qec` |
-| 5 | `ai` | tool registry, the tool handlers of every module, diagnostics, describe, MCP | `core`, `ir`, `device`, `sim`, `compiler`, `qec`, `gpu`, `algorithms`, `exec`, `ft` |
+| 5 | `ai` | tool registry, the tool handlers of every module, diagnostics, describe, MCP | `core`, `ir`, `device`, `sim`, `noise`, `compiler`, `qec`, `gpu`, `algorithms`, `ft` |
 | - | `bench`, `testing` | benchmark circuits, test helpers | `core`, `ir` (`testing`: nothing from QUMO) |
 
 `core`, `ir`, `device`, `sim` and `noise` import none of `compiler`, `qec`, `ai`, `exec`, `algorithms`.
 `ai` is the top row: no other package imports it, and the package graph has no cycle. The agent-tool
 handlers of every module are in `qumo/ai` (`exec_tools.mojo`, `algorithm_tools.mojo`, `ft_tools.mojo`;
 the first and the last were `qumo/exec/tools.mojo` and `qumo/ft/tools.mojo`), so `exec`, `ft` and
-`algorithms` do not import `ai`, and `exec` no longer imports `algorithms`. Two imports go sideways or
-up inside the stack, neither closes a cycle: `algorithms/mitigation.mojo` imports `exec.primitives` (the
-QWC measurement helpers; `exec.primitives` itself imports only `core`, `ir` and `sim`), and `compiler`
-imports `sim` (for `program_compile` and `resynth`).
+`algorithms` do not import `ai`, `exec` no longer imports `algorithms`, and `algorithms` no longer
+imports `exec`: the shot-based expectation estimator (QWC measurement settings, per-group statistics,
+the precision-to-shots rule) is `qumo/sim/qwc.mojo`, which `exec.primitives` and
+`algorithms/mitigation.mojo` both call. One import goes sideways inside the stack and closes no cycle:
+`compiler` imports `sim` (for `program_compile` and `resynth`).
 
 Old import paths are kept for one release as one-line re-exports: `qumo.sim.rng` (now `qumo.core.rng`),
 `qumo.compiler.target` and the `basis_str` / `fmt_num` names of `qumo.compiler.common` (now `qumo.device`),
 `qumo.qec.characterization` and `qumo.qec.mthree` (now `qumo.noise`), and the circuit and program JSON
-functions of `qumo.ai.describe` (now `qumo.ir.json`). `qumo.exec.tools` and `qumo.ft.tools` have no
+functions of `qumo.ai.describe` (now `qumo.ir.json`), and `qwc_setting`, `qwc_group_stats`, `pop_parity` and
+`MAX_ESTIMATOR_SHOTS` of `qumo.exec.primitives` (now `qumo.sim.qwc`). `qumo.exec.tools` and `qumo.ft.tools` have no
 re-export: one inside `exec` or `ft` would import `ai` again. Import `qumo.ai.exec_tools` and
 `qumo.ai.ft_tools`.
+
+`exec` holds orchestration only (`primitives`, `orchestrator`). What else was there went to the package
+its imports put it in, and `qumo.exec.dispatch`, `qumo.exec.emulate` and `qumo.exec.resources` are
+re-exports for one release (none closes a cycle; they are not counted in the table):
+
+| Was | Is | Why there |
+|---|---|---|
+| `exec/dispatch.mojo`: `choose_method_cpu`, `sample_frame`, `counts_from_measurements` | `sim/dispatch.mojo` | CPU simulator selection; imports `ir` and `sim` only |
+| `exec/dispatch.mojo`: `sample_auto`, `sample_on`, `choose_method`, `gpu_sample_route`, `sample_frame_gpu`, `gpu_eligible`, `frame_eligible_gpu` | `gpu/dispatch.mojo` | the selection that calls the GPU back ends; `gpu` imports `sim`, so in `sim` it would close a cycle |
+| `exec/emulate.mojo` | `noise/emulate.mojo` | it is `NoiseModel.from_target` plus a CPU sampler; `noise` imports `sim`, so it cannot be in `sim` |
+| `exec/resources.mojo` | `compiler/resources.mojo` | static analysis of a circuit; imports `ir` only |
+| `conformance_error` of `compiler/pass_manager.mojo` (still importable from there) | `device/conformance.mojo` | so that `noise.emulate` does not import the compiler |
+
+There are three files named `emulate.mojo`, each in its own package: `noise/emulate.mojo` (a device's
+noise on the CPU), `gpu/emulate.mojo` (host emulation of the GPU kernel bodies) and `ft/emulate.mojo`.
 
 ## 1. IR (`qumo/ir`)
 
@@ -127,7 +145,8 @@ The IR is self-contained: `qumo/ir` imports nothing from the simulators, the com
   **Pauli-frame sampler**: one reference run, then 512 shots per
   `SIMD[uint64, 8]` batch, parallel over batches (Stim's key idea; 3–4× Stim
   single-threaded on surface-code memory circuits).
-* **Automatic dispatch** (`qumo.exec.dispatch`): noisy Clifford circuits with
+* **Automatic dispatch** (`qumo.sim.dispatch` for the CPU methods, `qumo.gpu.dispatch` for `sample_auto` /
+  `sample_on`, which add the GPU): noisy Clifford circuits with
   many shots → Pauli frames; other Clifford circuits → tableau; everything else
   → state vector. Reported in `SampleResult.method`.
 * **Cache blocking**: for ≥ 19 qubits, consecutive kernels on qubits < 15 are
@@ -135,6 +154,11 @@ The IR is self-contained: `qumo/ir` imports nothing from the simulators, the com
   memory for the whole run of gates).
 * **Determinism**: xoshiro256** seeded by SplitMix64 (`Rng`, in `qumo/core/rng.mojo`); `split(k)` per worker.
 
+* **Shot estimator**: `qwc.mojo` is the one implementation of "<H> from shots": a measurement
+  setting per qubit-wise-commuting group (`qwc_setting`), the mean and the variance of the per-shot
+  weighted sum of the group's terms (`qwc_moments`, `qwc_group_stats`), the loop over groups through a
+  caller's `run(circuit, shots, seed)` closure (`qwc_estimate`) and `shots_for_precision`. The Estimator
+  primitive, `sampled_expectation` / `noisy_expectation` (so ZNE) and T-REX are callers.
 * **Programs**: `program_runner.mojo` walks the graph shot by shot through a static
   `ShotBackend` (state vector, tableau, branching). A program without runtime regions
   is a circuit and goes to `sample`, as a static circuit always did.
@@ -173,6 +197,9 @@ The IR is self-contained: `qumo/ir` imports nothing from the simulators, the com
 * **Programs**: `program_compile.mojo` runs the passes around `route` on each block
   and keeps one layout: a region exits with the layout it entered with, and
   `verify_program` checks the skeleton, every edge and the blocks it can.
+* **Resources** (`resources.mojo`): logical metrics + recommended simulator, NISQ duration /
+  success probability per modality profile, surface-code fault-tolerant
+  estimate (distance, factories, physical qubits, runtime).
 
 ## 3b. AI-transpiler training (`rl/`: `qrl` and `qumo_bridge`)
 
@@ -219,22 +246,61 @@ independent of the core count (fixed seed tree and reduction order). Design: `rl
   queue/shot/cost models. HEFT list scheduling assigns jobs (respecting
   capability constraints and an optional time-vs-money weight) and explains
   every decision; execution runs dependency waves in parallel.
-* **Resources**: logical metrics + recommended simulator, NISQ duration /
-  success probability per modality profile, surface-code fault-tolerant
-  estimate (distance, factories, physical qubits, runtime).
+
+Simulator selection, the device emulator and resource estimation are not here: see the table in
+[Package layering](#package-layering).
 
 ## 4b. Side packages: noise, FT, GPU, network
 
 * **`qumo/noise`**: `NoiseModel` from calibration data, `apply_noise_model`, randomized benchmarking,
-  T1/Ramsey, readout calibration and mitigation, M3. Used by `exec.emulate` and `algorithms.mitigation`.
+  T1/Ramsey, readout calibration and mitigation, M3, and `emulate` (a compiled circuit under its target's
+  noise; `noise/emulate.mojo`). Used by `algorithms.mitigation`.
   See [QEC.md](QEC.md) (Characterization).
 * **`qumo/ft`**: the fault-tolerant programming layer: `LogicalProgram`, stabilizer codes, Steane and
   Iceberg architectures, factories, Clifford+T `Rz` synthesis, verification on the tableau; its tools are
   in `qumo/ai/ft_tools.mojo`. Imports are listed in the docstring of `qumo/ft/__init__.mojo`.
 * **`qumo/gpu`**: vendor-neutral GPU state-vector and Pauli-frame back ends on MAX (NVIDIA, AMD, Apple),
   compiled only with `-D QUMO_GPU`; `make gpu-check` cross-compiles them without a device.
-* **`qumo/net`**: native HTTP/1.1 and TLS client (OpenSSL 3 loaded at run time) used by the hardware and
-  LLM clients in `exec`; it imports nothing from QUMO.
+* **`qumo/net`**: native HTTP/1.1 and TLS client (OpenSSL 3 loaded at run time). It imports nothing from
+  QUMO and names no vendor. Nothing else in `qumo/` imports it: its users are the vendor clients of
+  `plugins/hardware/native/qumo_hw`. It is the one implementation of the stack (libc bindings, sockets,
+  TLS, URLs, HTTP/1.1, the URL guard, SSE). The agent harness re-exports `libc` and `fdutil` from it; the
+  modules that raise coded errors are generated into `agents/mojo/qumo_agent/net/` with the harness's
+  codes (`QA-E104`/`QA-E105` for `QM-E959`/`QM-E951`) and `tests/test_net_mirror.mojo` fails when a
+  generated file differs. Edit `qumo/net`, then run
+  `QUMO_UPDATE_NET=1 .venv/bin/mojo run -I . tests/test_net_mirror.mojo`.
+
+## 4c. Vendor code (outside `qumo/`)
+
+**Rule: nothing under `qumo/` imports a vendor module.** The core has no client of a hardware service and
+no vendor wire format; `make check-neutrality` (`tests/check_neutrality.sh`, part of `make test` and of
+the CI checks job) fails if a file under `qumo/` or `cli/` has a `from qumo_hw...` or `import qumo_hw...`
+line, or if a file under `qumo/` is named after one of the clients (`<vendor>*.mojo` for each
+`<vendor>_api.mojo`). It is a text scan: it does not see `qumo_hw` listed after another module in one
+`import` statement, or a new vendor's file in `qumo/`. The build is the other guard (below).
+
+Vendor code is in `plugins/hardware`:
+
+* `plugins/hardware/native/qumo_hw` (Mojo): one REST client per service (`ionq_api`, `ibm_api`,
+  `quantinuum_api`, `speqtrum_api`, `qbraid_api`, `pasqal_api`; they were `qumo/exec/*_api.mojo`),
+  `pasqal_pulser` (Pulser's abstract representation of an analog program and the device specs Pasqal
+  Cloud returns; it was in `qumo/ir/analog.mojo`) and `common` (the one loopback-host test they share).
+  The package imports `qumo.core`, `qumo.ir` and `qumo.net`, never the other way round.
+* `plugins/hardware/qumo_hardware` (Python): the provider interface, the CLI `qumo-hardware` and the
+  optional vendor-SDK fallbacks ([HARDWARE_PLUGINS.md](HARDWARE_PLUGINS.md)).
+
+`qumo_hw` is not on the import path of the core: `make cli` and `make test` build with `-I .` alone, so
+a vendor import in `qumo/` does not compile there. Only the builds that bind or use the clients add
+`-I plugins/hardware/native`: the `qumo_py` extension (`make py`, `make py-gpu`, and the builds of
+`bench/run_benchmarks.py`; `python/qumo_py.mojo` exports the IBM, IonQ, Quantinuum, SpeQtrum and qBraid
+clients to the Python plugins) and the Mojo examples under `examples/hardware`
+(`examples/run_examples.py` adds the path to every Mojo example). `pasqal_api` is not bound: it has no
+Python provider, and `examples/hardware/pasqal_mis.mojo` calls it from Mojo. Build commands and
+environment variables: [plugins/hardware/native/README.md](../plugins/hardware/native/README.md).
+
+What stays in the core is neutral: `qumo/ir/analog.mojo` is the program model of any analog Rydberg
+device (register, pulses, waveforms; `qumo.sim.rydberg` simulates it) and imports nothing, `Target` is
+data with presets named by modality and topology, and `qumo/net` is a generic HTTP client.
 
 ## 5. Algorithms (`qumo/algorithms`) and QEC (`qumo/qec`)
 
@@ -263,5 +329,5 @@ detector error model → swappable decoders → Sinter-style statistics.
 | Qubit order | little-endian (bit k of a basis index = qubit k); bitstrings Qiskit-style (leftmost = highest clbit) |
 | Errors | `QM-E0xx` circuit · `E1xx` params · `E2xx` functors · `E3xx` Pauli · `E4xx` simulation/execution · `E5xx` QASM · `E6xx` compiler · `E7xx` QEC · `E8xx` algorithms · `E9xx` interface · `W0xx` lint |
 | Randomness | explicit `seed` everywhere; identical inputs → identical outputs |
-| Neutrality | no vendor default; modality presets; benchmarks weigh all modalities |
+| Neutrality | no vendor default; modality presets; benchmarks weigh all modalities; nothing under `qumo/` imports a vendor module (`make check-neutrality`) |
 | Mojo dialect | pinned in [MOJO_GUIDE.md](MOJO_GUIDE.md) |

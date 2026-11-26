@@ -27,41 +27,59 @@ from typing import Any
 
 from langchain_core.tools import tool
 
-from qumo_agents import modules
+from qumo_agents import guard_spec, modules
 
 USER_AGENT = "qumo-agents/0.1 (+https://github.com/ANFAIA/QUMO)"
 MAX_BYTES = 400_000
-MAX_REDIRECTS = 3
+MAX_REDIRECTS = guard_spec.RESEARCH["max_redirects"]  # agents/spec/guard_rules.json
 TIMEOUT = 30
 ATOM = "{http://www.w3.org/2005/Atom}"
 # Hosts the API tools may call. fetch_page reads any public https host.
-API_HOSTS = frozenset({"export.arxiv.org", "pypi.org", "api.github.com"})
+API_HOSTS = frozenset(guard_spec.RESEARCH["api_hosts"])
+SCHEME = guard_spec.RESEARCH["scheme"]
+PORT = guard_spec.RESEARCH["port"]
 # Network and parse failures become an error result for the model, never an exception
 # that stops the whole agent run (OSError covers URLError, timeouts and resets).
 NET_ERRORS = (OSError, http.client.HTTPException, ET.ParseError, ValueError, KeyError)
 
 
+# What `ipaddress.is_global` calls global but a fetch must not reach (guard_rules.json):
+# an address that embeds an IPv4 address is judged as that address (NAT64 64:ff9b::/96, so
+# 64:ff9b::7f00:1 is 127.0.0.1), and IPv4-compatible (::a.b.c.d) and multicast addresses are
+# refused outright.
+_EMBEDDED_V4 = tuple(ipaddress.ip_network(n) for n in guard_spec.RESEARCH["embedded_ipv4_prefixes"])
+_REFUSED_NETS = tuple(ipaddress.ip_network(n) for n in guard_spec.RESEARCH["refused_networks"])
+
+
+def _address_is_public(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    if isinstance(ip, ipaddress.IPv6Address):
+        if ip.ipv4_mapped is not None:
+            ip = ip.ipv4_mapped
+        elif any(ip in net for net in _EMBEDDED_V4):
+            ip = ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
+    if any(ip.version == net.version and ip in net for net in _REFUSED_NETS):
+        return False
+    return ip.is_global
+
+
 def _public_host(host: str) -> None:
     """Refuse a host unless every address it resolves to is globally routable."""
     try:
-        infos = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+        infos = socket.getaddrinfo(host, PORT, type=socket.SOCK_STREAM)
     except socket.gaierror as e:
         raise ValueError(f"cannot resolve {host}") from e
     for info in infos:
-        ip = ipaddress.ip_address(info[4][0].split("%")[0])
-        if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
-            ip = ip.ipv4_mapped
-        if not ip.is_global:
+        if not _address_is_public(ipaddress.ip_address(info[4][0].split("%")[0])):
             raise ValueError(f"{host} is not a public address")
 
 
 def _check_url(url: str, hosts: frozenset[str] | None = None) -> None:
     parts = urllib.parse.urlsplit(url)
-    if parts.scheme != "https":
+    if parts.scheme != SCHEME:
         raise ValueError("only https URLs are fetched")
     if parts.username is not None or parts.password is not None:
         raise ValueError("URLs with credentials are refused")
-    if parts.port not in (None, 443):
+    if parts.port not in (None, PORT):
         raise ValueError("only the default https port is fetched")
     host = parts.hostname or ""
     if not host:

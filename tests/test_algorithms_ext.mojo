@@ -16,8 +16,9 @@ from qumo.algorithms.library import (
 )
 from qumo.algorithms.hamiltonians import (
     heisenberg_xxz, transverse_field_ising, dense_matrix, ground_energy,
-    projected_hamiltonian, subspace_ground_energy,
+    projected_hamiltonian, subspace_ground_energy, exact_spectrum, PauliOperator,
 )
+from qumo.algorithms.linalg import HermitianOperator, lanczos, vec_dot, vec_norm, vec_axpy
 
 
 def _err_code(msg: String) -> String:
@@ -213,6 +214,86 @@ def test_subspace_energy() raises:
     assert_almost_equal(prev, e0, atol=1e-10)
 
 
+struct _DenseOp(Movable, HermitianOperator):
+    """Row-major dense complex matrix as a `HermitianOperator` (reference operator for the kernel test)."""
+
+    var re: List[Float64]
+    var im: List[Float64]
+    var dim: Int
+
+    def __init__(out self, var re: List[Float64], var im: List[Float64], dim: Int):
+        self.re = re^
+        self.im = im^
+        self.dim = dim
+
+    def apply_vec(self, xr: List[Float64], xi: List[Float64], mut yr: List[Float64], mut yi: List[Float64]):
+        for r in range(self.dim):
+            var ar = 0.0
+            var ai = 0.0
+            for c in range(self.dim):
+                var hr = self.re[r * self.dim + c]
+                var hi = self.im[r * self.dim + c]
+                ar += hr * xr[c] - hi * xi[c]
+                ai += hr * xi[c] + hi * xr[c]
+            yr[r] = ar
+            yi[r] = ai
+
+
+def test_lanczos_kernel() raises:
+    """The shared `lanczos` of qumo.algorithms.linalg against dense Jacobi
+    (`exact_spectrum`), with two different operators for the same matrix."""
+    var n = 6
+    var dim = 1 << n
+    var h = _random_hamiltonian(n, 22, 41)  # complex Hermitian
+    var e0 = exact_spectrum(h, n)[0]
+    var dm = dense_matrix(h, n)
+    var dense = _DenseOp(dm[0].copy(), dm[1].copy(), dim)
+    var pop = PauliOperator(h, n)
+    var rng = Rng(5)
+    var xr = List[Float64](length=dim, fill=0.0)
+    var xi = List[Float64](length=dim, fill=0.0)
+    for i in range(dim):
+        xr[i] = rng.uniform() - 0.5
+        xi[i] = rng.uniform() - 0.5
+    var nrm = vec_norm(xr, xi)
+    for i in range(dim):
+        xr[i] /= nrm
+        xi[i] /= nrm
+    # full Krylov space: exact to rounding, orthonormal basis, T = V^dagger H V
+    var full = lanczos(dense, xr.copy(), xi.copy(), dim, 1e-10)
+    assert_equal(full.steps, dim)
+    assert_equal(len(full.beta), dim - 1)
+    assert_almost_equal(full.lowest(), e0, atol=1e-10)
+    for a in range(0, dim, 7):
+        for b in range(0, dim, 5):
+            var d = vec_dot(full.vr[a], full.vi[a], full.vr[b], full.vi[b])
+            assert_almost_equal(d[0], 1.0 if a == b else 0.0, atol=1e-10)
+            assert_almost_equal(d[1], 0.0, atol=1e-10)
+    # Ritz vector: residual ||H x - theta x||
+    var vr = List[Float64](length=dim, fill=0.0)
+    var vi = List[Float64](length=dim, fill=0.0)
+    full.ritz_vector(vr, vi)
+    assert_almost_equal(vec_norm(vr, vi), 1.0, atol=1e-10)
+    var wr = List[Float64](length=dim, fill=0.0)
+    var wi = List[Float64](length=dim, fill=0.0)
+    dense.apply_vec(vr, vi, wr, wi)
+    vec_axpy(wr, wi, -e0, 0.0, vr, vi)
+    assert_true(vec_norm(wr, wi) < 1e-8, "Ritz vector residual")
+    # convergence stop: fewer steps, same eigenvalue; the Pauli operator gives the same recurrence
+    var a1 = lanczos(dense, xr.copy(), xi.copy(), dim, 1e-10, 1e-13)
+    var a2 = lanczos(pop, xr.copy(), xi.copy(), dim, 1e-10, 1e-13)
+    assert_true(a1.steps < dim and a1.steps % 4 == 0, "stops on a convergence check")
+    assert_equal(a1.steps, a2.steps)
+    assert_almost_equal(a1.lowest(), e0, atol=1e-10)
+    assert_almost_equal(a2.lowest(), a1.lowest(), atol=1e-12)
+    # step limit and breakdown: an eigenvector as start vector stops after one step
+    assert_equal(lanczos(dense, xr.copy(), xi.copy(), 9, 1e-10).steps, 9)
+    var one = lanczos(dense, vr.copy(), vi.copy(), dim, 1e-6)
+    assert_equal(one.steps, 1)
+    assert_almost_equal(one.lowest(), e0, atol=1e-10)
+    print("  lanczos kernel: E0=", full.lowest(), " exact=", e0, " steps to converge=", a1.steps)
+
+
 def test_errors() raises:
     var codes = List[String]()
     var c = Circuit(4)
@@ -267,5 +348,6 @@ def main() raises:
     test_modmul_and_order()
     test_projected_hamiltonian()
     test_subspace_energy()
+    test_lanczos_kernel()
     test_errors()
     print("test_algorithms_ext OK")

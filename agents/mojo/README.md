@@ -127,6 +127,8 @@ sandbox applies.
 main.mojo               exit(main_entry(args))
 qumo_agent/native/      libc bindings, spawn, files, regex, sandbox (the only place with external_call)
 qumo_agent/net/         URL, sockets, HTTP/1.1, TLS (OpenSSL), SSE
+qumo_agent/core/        messages, errors, replay; guard_rules.mojo is generated from agents/spec/guard_rules.json
+                        (the security rules shared with the Python harness, see agents/spec/README.md)
 qumo_agent/llm/         the OpenAI-compatible model client
 qumo_agent/mcp/         MCP over stdio and HTTP; the stdio server
 qumo_agent/harness/     the deepagents port: loop, file tools, eviction, summarization, subagents

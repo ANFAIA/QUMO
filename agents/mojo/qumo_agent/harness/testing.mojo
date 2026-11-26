@@ -46,6 +46,7 @@ struct FakeAgent(Copyable):
     var subagents: List[String]
     var tools: List[String]
     var recursion_limit: Int        # -1 = default
+    var untrusted_subagents: List[String]
 
 
 struct FakeShared(Movable):
@@ -97,7 +98,8 @@ def parse_fake_agents(agents_json: String) raises -> List[FakeAgent]:
             tools = ["echo", "big", "parts", "fail"]
         out.append(FakeAgent(a.get_string("name", ""), a.get_string("description", ""),
                              a.get_string("prompt", ""), a.get_string("model", "m"),
-                             _strings(a.get("subagents")), tools^, a.get_int("recursion_limit", -1)))
+                             _strings(a.get("subagents")), tools^, a.get_int("recursion_limit", -1),
+                             _strings(a.get("untrusted_subagents"))))
     return out^
 
 
@@ -168,7 +170,7 @@ struct FakeEnv(AgentEnv):
         var limit = a.recursion_limit
         if limit < 0:
             limit = 200 if len(ancestors) == 0 else 9999
-        return AgentDef(a.name, a.description, a.prompt, a.model, subs^, limit)
+        return AgentDef(a.name, a.description, a.prompt, a.model, subs^, limit, a.untrusted_subagents.copy())
 
     def for_agent(self, name: String) raises -> Self:
         _ = self._find(name)

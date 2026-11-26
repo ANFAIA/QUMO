@@ -63,6 +63,7 @@ The four synthesis passes share one argument set:
 | `method` (or a bare word) | `auto` \| `exact` \| `astar` \| `greedy` \| `policy` (`auto`) | `auto` = exact for small blocks, policy when a model matches, greedy otherwise |
 | `max_qubits` | int (Clifford 9, linear 9, permutation 12, Pauli 6) | block width cap (IBM collector defaults) |
 | `min_block` | int (Clifford 2, others 4) | minimum gates per block |
+| `max_rotations` | int (2048; `pauli_network` only) | most non-Clifford rotations of one block; a longer run of rotations is split into consecutive blocks, each synthesised and verified on its own. Synthesis time grows with the square of the rotations of a block, so this bounds it; `0` lifts the cap. Not an IBM collector option |
 | `direction` | `forward` \| `backward` \| `both` (`both`) | collection direction (IBM `collect_from_back`) |
 | `commute` | `0` \| `1` (`1`) | commutation-aware collection |
 | `reps` | int (10) | collect-and-collapse repetitions |
