@@ -14,7 +14,7 @@ from std.testing import assert_equal, assert_true, assert_false
 from std.time import perf_counter_ns
 
 from qumo.net.errors import E_NETWORK, E_TLS_SETUP
-from qumo.net.guard import UrlGuard, no_guard
+from qumo.net.guard import UrlGuard, no_guard, literal_is_global
 from qumo.net.http import (
     HttpClient, HttpOptions, HttpRequest, HttpResponse, request_head, read_response,
     MAX_INTERIM_RESPONSES, REDIRECT_NONE,
@@ -109,6 +109,10 @@ def test_guard_and_loopback() raises:
     assert_true(is_loopback_host("localhost") and is_loopback_host("127.0.0.1") and is_loopback_host("::1"))
     assert_false(is_loopback_host("127.0.0.1.attacker.example"))
     assert_false(no_guard().enabled)
+    # NAT64-embedded loopback, IPv4-compatible and multicast are refused in the core guard too
+    for host in ["64:ff9b::7f00:1", "::127.0.0.1", "224.0.0.1", "ff02::1"]:
+        assert_equal(literal_is_global(host), 0, host)
+    assert_equal(literal_is_global("64:ff9b::808:808"), 1, "NAT64 of a public address")
     # public_only: a loopback address is refused before a socket is opened.
     var got = String()
     try:
