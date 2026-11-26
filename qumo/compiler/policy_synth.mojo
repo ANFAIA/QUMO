@@ -59,7 +59,7 @@ from qumo.compiler.blockalg import (
 )
 from qumo.compiler.policy import (
     ModelFile, MLPPolicy, ModelMatch, load_model_file, find_model, find_model_rows,
-    ModelIndexEntry, load_synth_index,
+    ModelIndexEntry, load_synth_index, synth_index_problems,
     MODEL_KIND_CLIFFORD, MODEL_KIND_LINEAR, MODEL_KIND_PERM, MODEL_KIND_PAULI,
     model_kind_name, fnv_words,
 )
@@ -834,6 +834,7 @@ struct PolicySession(Movable):
 
     var dirs: List[String]
     var rows: List[ModelIndexEntry]
+    var index_problem: String  # '' or why a synth/INDEX.json of `dirs` was ignored
     var model_dirs: List[String]
     var models: List[ModelFile]
     var policies: List[MLPPolicy]
@@ -841,6 +842,7 @@ struct PolicySession(Movable):
     def __init__(out self, dirs: List[String]):
         self.dirs = dirs.copy()
         self.rows = load_synth_index(dirs)
+        self.index_problem = synth_index_problems(dirs)
         self.model_dirs = List[String]()
         self.models = List[ModelFile]()
         self.policies = List[MLPPolicy]()
@@ -868,7 +870,10 @@ struct PolicySession(Movable):
             return ModelMatch()
         var mm = find_model_rows(kind, g, model, self.rows)
         if not mm.ok and model != "auto":
-            raise Error("QM-E616: unknown or incompatible synthesis model '" + model + "' for a " + String(g.n) + "-qubit " + model_kind_name(kind) + " block. Hint: use model=auto, model=off, or a model id listed in <model_dir>/synth/INDEX.json whose graph embeds into the block graph.")
+            var cause = String()
+            if self.index_problem.byte_length() > 0:
+                cause = " (" + self.index_problem + ")"
+            raise Error("QM-E616: unknown or incompatible synthesis model '" + model + "' for a " + String(g.n) + "-qubit " + model_kind_name(kind) + " block" + cause + ". Hint: use model=auto, model=off, or a model id listed in <model_dir>/synth/INDEX.json whose graph embeds into the block graph.")
         return mm^
 
     def loaded_index(self, dir: String) -> Int:
