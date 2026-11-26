@@ -19,7 +19,7 @@ def _odd(counts: dict) -> float:
 
 
 def test_presets_mirror_hardware_profiles():
-    # qumo/exec/resources.mojo HardwareProfile presets (1q, 2q, readout)
+    # qumo/compiler/resources.mojo HardwareProfile presets (1q, 2q, readout)
     assert NOISE_PRESETS["superconducting"] == (2.5e-4, 3e-3, 1e-2)
     assert NOISE_PRESETS["trapped_ion"] == (3e-5, 1e-3, 3e-3)
     assert NOISE_PRESETS["neutral_atom"] == (5e-4, 5e-3, 1e-2)

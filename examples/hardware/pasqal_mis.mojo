@@ -12,11 +12,11 @@ it, so the bitstring 10101 (atom 0 leftmost, 1 = Rydberg) should dominate.
 
 The program is built with qumo.ir.analog, simulated with QUMO's Rydberg state-vector simulator
 (noiseless reference), and, with --submit, sent to Pasqal Cloud with the native client
-(qumo.exec.pasqal_api): FRESNEL specs and layout, one job of 200 runs on EMU_FREE by default.
+(qumo_hw.pasqal_api): FRESNEL specs and layout, one job of 200 runs on EMU_FREE by default.
 
 Run:
-  .venv/bin/mojo run -I . examples/hardware/pasqal_mis.mojo                      # local only
-  .venv/bin/mojo run -I . examples/hardware/pasqal_mis.mojo --submit [DEVICE]    # + Pasqal (needs
+  .venv/bin/mojo run -I . -I plugins/hardware/native examples/hardware/pasqal_mis.mojo                      # local only
+  .venv/bin/mojo run -I . -I plugins/hardware/native examples/hardware/pasqal_mis.mojo --submit [DEVICE]    # + Pasqal (needs
       PASQAL_USERNAME/PASQAL_PASSWORD or PASQAL_user/PASQAL_pass, and PASQAL_PROJECT_ID)
 example-meta: {"framework": "pulser", "tier": "fast", "timeout": 120, "requires": [], "args": []}
 """
@@ -25,7 +25,7 @@ from std.math import pi
 from std.sys import argv
 from std.time import sleep
 
-from qumo.exec.pasqal_api import pasqal_job_counts, pasqal_job_status, pasqal_submit
+from qumo_hw.pasqal_api import pasqal_job_counts, pasqal_job_status, pasqal_submit
 from qumo.ir.analog import AnalogProgram, adiabatic_sweep, blockade_radius, c6_for_level
 from qumo.sim.rydberg import bitstring_of, sample_analog, simulate_analog
 from qumo.testing.checks import CheckLog

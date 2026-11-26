@@ -39,7 +39,7 @@ from qumo.sim.runner import evolve, evolve_into, bitstring
 from qumo.core.rng import Rng
 from qumo.algorithms.library import qft, iqft
 from qumo.algorithms.linalg import sv_dot
-from qumo.exec.dispatch import sample_on
+from qumo.gpu.dispatch import sample_on
 from qumo.testing.checks import CheckLog
 
 

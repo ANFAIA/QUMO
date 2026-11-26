@@ -2,7 +2,7 @@
 at random), zero-noise extrapolation factories and the ZNE driver.
 Prints `test_mitigation OK`."""
 
-from std.math import pi, exp
+from std.math import pi, exp, sqrt
 from std.testing import assert_true, assert_almost_equal, assert_equal
 
 from qumo.ir.circuit import Circuit
@@ -183,6 +183,32 @@ def test_zne_ghz() raises:
     assert_true(abs(est2[0] - exact2) <= 4.0 * est2[1] + 1e-12, "noisy_expectation (zero noise) within 4 sigma")
 
 
+def test_shot_std_uses_the_covariance() raises:
+    """sampled_expectation / noisy_expectation are the shared estimator (qumo.sim.qwc):
+    the terms of a QWC group share their shots, and it is the Estimator's number."""
+    var bell = Circuit(2)
+    bell.h(0)
+    bell.cx(0, 1)
+    var diff = PauliSum()
+    diff.add_label(1.0, "IZ")
+    diff.add_label(-1.0, "ZI")
+    var d = sampled_expectation(bell, diff, 4000, 3)
+    assert_almost_equal(d[0], 0.0)
+    assert_true(d[1] < 1e-12, "Z0 - Z1 has no shot noise")
+    var summ = PauliSum()
+    summ.add_label(1.0, "IZ")
+    summ.add_label(1.0, "ZI")
+    var s = noisy_expectation(bell, summ, NoiseModel(2), 4000, 3)
+    assert_almost_equal(s[1], 2.0 / sqrt(4000.0), atol=1e-4)
+    # terminal measurements are replaced, the basis change comes before the readout
+    var hm = Circuit(1, 1)
+    hm.h(0)
+    hm.measure(0, 0)
+    var x = PauliSum()
+    x.add_label(1.0, "X")
+    assert_almost_equal(sampled_expectation(hm, x, 500, 1)[0], 1.0)
+
+
 def test_errors() raises:
     var codes = List[String]()
     var c = ghz(3)
@@ -240,5 +266,6 @@ def main() raises:
     test_folding_symbolic_and_measurements()
     test_extrapolation()
     test_zne_ghz()
+    test_shot_std_uses_the_covariance()
     test_errors()
     print("test_mitigation OK")

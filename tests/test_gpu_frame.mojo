@@ -33,7 +33,7 @@ from qumo.gpu.frame_gpu import (
     GpuFrameSampler, skip_thresholds, skip_lookup, noise_mask, THR_INF, FRAME_CHUNK_WORDS,
 )
 from qumo.gpu.device import gpu_compiled, gpu_available, gpu_info
-from qumo.exec.dispatch import sample_on, frame_eligible_gpu
+from qumo.gpu.dispatch import sample_on, frame_eligible_gpu
 
 
 def check_thresholds() raises:

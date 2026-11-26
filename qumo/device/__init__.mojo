@@ -3,6 +3,7 @@
 Modules:
   target   Target (coupling graph, native basis, per-gate errors and durations, T1/T2), the modality
            and topology presets, and `parse_target` / `parse_basis` for one-line specs
+  conformance  `conformance_error`: first violation of basis, coupling, angle bounds or width, or ""
   format   `basis_str` and `fmt_num`, the text helpers `Target.describe()` and the compiler reports share
 
 `qumo.device` imports only `qumo.ir`. The compiler, the simulators, the noise model, the execution layer

@@ -1,6 +1,9 @@
 from qumo.ir.circuit import Circuit
 from qumo.ir.pauli import parse_pauli_sum, PauliSum
 from qumo.exec.primitives import EstimatorPub, EstimatorResult, SamplerPub, run_estimator, run_sampler
+from qumo.exec.primitives import qwc_setting, qwc_group_stats, pop_parity  # old import path of the QWC helpers
+from qumo.sim.qwc import qwc_estimate, shots_for_precision
+from qumo.sim.runner import sample, SampleResult
 from std.testing import assert_equal, assert_true, assert_almost_equal, assert_raises
 from std.math import cos, pi, sqrt
 
@@ -100,7 +103,33 @@ def test_shots_honour_reset_noise_and_mid_circuit_measurement() raises:
     assert_almost_equal(e.evs[0][0], 1.0)
 
 
+def _plain(c: Circuit, shots: Int, seed: UInt64) raises -> SampleResult:
+    return sample(c, shots, seed)
+
+
+def test_one_shot_estimator() raises:
+    """run_estimator's shot path is qumo.sim.qwc.qwc_estimate: same seeds, same numbers,
+    and the helpers are still importable from qumo.exec.primitives."""
+    var bell = _bell()
+    var h = parse_pauli_sum("X0 X1 + 0.5*Z0 - 0.25*Z1 + 0.3*Y0 Y1 + 0.7")
+    var r = _shots_run(bell, "X0 X1 + 0.5*Z0 - 0.25*Z1 + 0.3*Y0 Y1 + 0.7", 0.02, 9)
+    var obs = List[PauliSum]()
+    obs.append(h.copy())
+    var shots = shots_for_precision(obs, 0.02)
+    assert_equal(r.shots_per_set, shots)
+    var direct = qwc_estimate(_plain, bell, h, shots, 9)
+    assert_equal(r.evs[0][0], direct[0])
+    assert_equal(r.stds[0][0], direct[1])
+    var groups = h.group_qwc()
+    var base = 7
+    var m = qwc_setting(bell, h, groups[0], base)
+    assert_equal(base, 0)
+    var st = qwc_group_stats(sample(m, 100, 1), h, groups[0], base)
+    assert_true(st[1] >= 0.0 and pop_parity(7) and not pop_parity(3))
+
+
 def main() raises:
+    test_one_shot_estimator()
     test_group_std_uses_the_covariance()
     test_precision_is_the_standard_error()
     test_observable_wider_than_circuit()

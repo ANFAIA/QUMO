@@ -1,4 +1,4 @@
-"""Quantinuum native client (qumo/exec/quantinuum_api.mojo) against a fake Nexus on 127.0.0.1.
+"""Quantinuum native client (plugins/hardware/native/qumo_hw/quantinuum_api.mojo) against a fake Nexus on 127.0.0.1.
 
 Request bodies are compared with what qnexus 0.51 itself builds, and circuits / results with
 pytket, when those packages are installed (they are references only; the native path does not
