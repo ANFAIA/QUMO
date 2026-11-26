@@ -101,13 +101,14 @@ def _lt(u: UInt32, t: UInt32) -> Bool:
 def skip_lookup(u: UInt32, thr: U32Ptr, base: Int) -> Int:
     """Geometric skip capped at 64: the largest k in [0, 64] with u < T_k
     (T_0 = +inf, T_k = thr[base + k - 1] non-increasing). P(skip >= k) =
-    T_k / 2^32 = (1 - p)^k up to 2^-32 rounding."""
-    if u < thr[unsafe_offset=base + 63]:
+    T_k / 2^32 = (1 - p)^k up to 2^-32 rounding. T_k == THR_INF means
+    probability one (`_lt`): u = 0xFFFFFFFF passes it too."""
+    if _lt(u, thr[unsafe_offset=base + 63]):
         return 64
     var k = 0
     comptime for j in range(6):
         comptime s = 32 >> j
-        if u < thr[unsafe_offset=base + k + s - 1]:
+        if _lt(u, thr[unsafe_offset=base + k + s - 1]):
             k += s
     return k
 
