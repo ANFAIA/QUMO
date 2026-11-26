@@ -518,4 +518,4 @@ def code_by_name(name: String) raises -> StabilizerCode:
 
 
 def code_names() -> String:
-    return "steane, five_qubit, css_422, noncss_422, iceberg_<even k>, surface_<d>, repetition_<d>, identity_<k>"
+    return "steane, five_qubit, css_422, noncss_422, helix, helix_10_2_3, iceberg_<even k>, surface_<d>, repetition_<d>, identity_<k>"

@@ -30,7 +30,7 @@ from qumo.sim.rng import Rng
 from qumo.sim.frame import FrameSimulator, DetectorSamples, MeasurementSamples
 from qumo.qec.codes import generate_code, NoiseParams
 from qumo.gpu.frame_gpu import (
-    GpuFrameSampler, skip_thresholds, noise_mask, THR_INF, FRAME_CHUNK_WORDS,
+    GpuFrameSampler, skip_thresholds, skip_lookup, noise_mask, THR_INF, FRAME_CHUNK_WORDS,
 )
 from qumo.gpu.device import gpu_compiled, gpu_available, gpu_info
 from qumo.exec.dispatch import sample_on, frame_eligible_gpu
@@ -75,6 +75,40 @@ def check_thresholds() raises:
         assert_true(abs(Float64(lane63) / Float64(words) - p) < 5 * sl + 1e-9, "lane 63 rate p=" + String(p))
         _ = len(thr)
     _ = len(one)
+
+
+def check_skip_lookup() raises:
+    """Geometric skip = the largest k in [0, 64] with u < T_k, where a
+    threshold of THR_INF is probability one: the largest draw passes it too."""
+    for p in [0.0, 1e-13, 1e-12]:  # every threshold is THR_INF: nothing ever fires
+        var thr = List[UInt32]()
+        skip_thresholds(p, thr)
+        assert_equal(thr[63], THR_INF)
+        var ptr = thr.unsafe_ptr().unsafe_mut_cast[True]().as_unsafe_any_origin()
+        for u in [UInt32(0), UInt32(1) << 31, UInt32(0xFFFFFFFE), UInt32(0xFFFFFFFF)]:
+            assert_equal(skip_lookup(u, ptr, 0), 64, "p = " + String(p) + ", u = " + String(u))
+        _ = len(thr)
+    # mixed table: the first thresholds are THR_INF, the later ones are not
+    var thr = List[UInt32]()
+    skip_thresholds(1e-11, thr)
+    var ninf = 0
+    while ninf < 64 and thr[ninf] == THR_INF:
+        ninf += 1
+    assert_true(ninf > 0 and ninf < 64, "expected a mixed table, got " + String(ninf) + " THR_INF entries")
+    var ptr = thr.unsafe_ptr().unsafe_mut_cast[True]().as_unsafe_any_origin()
+    assert_equal(skip_lookup(UInt32(0xFFFFFFFF), ptr, 0), ninf)
+    assert_equal(skip_lookup(UInt32(0), ptr, 0), 64)
+    _ = len(thr)
+    # brute force over a table without THR_INF
+    var t2 = List[UInt32]()
+    skip_thresholds(0.05, t2)
+    var p2 = t2.unsafe_ptr().unsafe_mut_cast[True]().as_unsafe_any_origin()
+    for u in [UInt32(0), UInt32(123456789), UInt32(1) << 31, UInt32(4000000000), UInt32(0xFFFFFFFF)]:
+        var k = 0
+        while k < 64 and u < t2[k]:
+            k += 1
+        assert_equal(skip_lookup(u, p2, 0), k)
+    _ = len(t2)
 
 
 def pop_count64(v: UInt64) -> Int:
@@ -320,6 +354,7 @@ def run_suite(emulate: Bool) raises:
 
 def main() raises:
     check_thresholds()
+    check_skip_lookup()
     run_suite(True)
     check_errors_and_dispatch()
     check_table_noise_is_refused()

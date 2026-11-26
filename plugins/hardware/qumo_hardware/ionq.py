@@ -20,7 +20,8 @@ Backends: the IonQ simulator (API name `simulator`, 29 qubits) with a noise mode
 `ideal` is refused. QPUs are listed by `backends --online` but not enabled for submission.
 
 Cost: IonQ publishes no simulator price and its estimate endpoint refuses simulator
-backends, so the cost unit is "unknown" and the amount is 0.
+backends, so the cost unit is "unknown" and the amount is 0. A --max-cost cap cannot be
+compared with that, so a submission that carries one is refused (QM-E956).
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ from .base import (
     JobHandle,
     TargetSpec,
     check_confirmed,
+    check_cost_cap,
 )
 from .compile import CompiledCircuit, load_qumo_py
 from .errors import (
@@ -221,6 +223,7 @@ class IonQProvider:
         noise = _parse_backend(backend)
         if shots < 1 or shots > MAX_SHOTS:
             raise HardwareError(E_LIMIT, f"shots must be in 1..{MAX_SHOTS} for {backend}", HINT_SHOTS)
+        check_cost_cap(self.estimate_cost(compiled, shots, backend), max_cost)  # no quote, so no cap
         qasm = payload if isinstance(payload, str) else compiled.qasm
         self._check(qasm, noise)  # width and gateset, before anything leaves the machine
         sampler_seed = int(seed or 0)
