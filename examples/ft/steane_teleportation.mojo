@@ -30,7 +30,7 @@ example-meta: {"framework": "guppyft", "tier": "fast", "timeout": 600, "requires
 
 from qumo.ir.circuit import Circuit
 from qumo.qec.codes import NoiseParams
-from qumo.exec.resources import estimate_resources
+from qumo.compiler.resources import estimate_resources
 from qumo.ft.arch import SteaneBuilder, QECPolicy, FactoryConf, Architecture
 from qumo.ft.encode import compile, encode
 from qumo.ft.implement import implement_ops

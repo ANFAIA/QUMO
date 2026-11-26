@@ -47,7 +47,7 @@ from qumo.gpu.device import (
     gpu_precision_available, check_gpu_precision, GPU_PRECISION_ENV,
     gpu_state_bytes, host_memory_bytes, check_gpu_state_memory,
 )
-from qumo.exec.dispatch import choose_method, sample_auto, sample_on
+from qumo.gpu.dispatch import choose_method, sample_auto, sample_on
 from qumo.exec.orchestrator import Workflow, Device
 from qumo.ai.registry import full_registry
 from qumo.core.json import parse_json

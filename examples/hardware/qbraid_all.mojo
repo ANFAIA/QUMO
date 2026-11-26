@@ -4,14 +4,14 @@ Reproduces: qBraid - list devices and submit a job through the qBraid Runtime AP
 Source: https://docs.qbraid.com/v2/api-reference/rest/post-quantum-jobs (qBraid documentation)
 Framework: qBraid - https://github.com/qBraid/qBraid
 
-No Python: the qBraid client (qumo.exec.qbraid_api), the OpenQASM parser and exporter
+No Python: the qBraid client (qumo_hw.qbraid_api), the OpenQASM parser and exporter
 (qumo.ir.qasm) and the HTTP/TLS stack (qumo.net) are QUMO's own Mojo code.
 
 A device is run only when it is free and runnable: ONLINE, gate-model, accepts qasm2 or
 qasm3, has no per-task / per-shot / per-minute price, and qBraid's quote for the job is 0
 credits. Everything else (QPUs, simulators billed per minute) is listed but never submitted.
 
-Run:  .venv/bin/mojo run -I . examples/hardware/qbraid_all.mojo        (needs QBRAID_API_KEY)
+Run:  .venv/bin/mojo run -I . -I plugins/hardware/native examples/hardware/qbraid_all.mojo        (needs QBRAID_API_KEY)
       add --list to only list the devices
 example-meta: {"framework": "qbraid", "tier": "slow", "timeout": 1200, "requires": ["network"], "args": ["--list"]}
 """
@@ -19,7 +19,7 @@ example-meta: {"framework": "qbraid", "tier": "slow", "timeout": 1200, "requires
 from std.sys import argv
 from std.time import sleep
 
-from qumo.exec.qbraid_api import (
+from qumo_hw.qbraid_api import (
     QbraidDevice, qbraid_cost_estimate, qbraid_devices, qbraid_job, qbraid_result_counts, qbraid_submit,
 )
 from qumo.ir.qasm import parse_qasm, to_qasm

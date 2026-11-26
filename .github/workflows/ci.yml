@@ -2,7 +2,7 @@
 #
 # STATUS: the workflow has run on GitHub since 2026-11-13 (see the Actions tab). It was reshaped to make
 # pull requests faster; the jobs are:
-#   checks    (pull requests, blocking): build, smoke test, independence, example index, Python static check
+#   checks    (pull requests, blocking): build, smoke test, independence, neutrality, example index, Python static check
 #             (ruff, error rules only), Python package tests
 #   tests     (pull requests, blocking): the Mojo test files, split over 4 parallel shards (about 10 min of wall time)
 #   rl        (pull requests, blocking): the fast RL tests (make test-rl)
@@ -62,6 +62,9 @@ jobs:
 
       - name: Independence of rl/ from qumo.*
         run: make check-independence
+
+      - name: Neutrality of qumo/ (no vendor module imported)
+        run: make check-neutrality
 
       - name: Example headers and generated indexes are current
         run: python3 examples/run_examples.py --check-index

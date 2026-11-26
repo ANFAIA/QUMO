@@ -46,7 +46,7 @@ from qumo.ir.circuit import Circuit
 from qumo.ir.pauli import PauliSum
 from qumo.sim.runner import evolve
 from qumo.exec.primitives import EstimatorPub, run_estimator, SamplerPub, run_sampler
-from qumo.exec.resources import estimate_resources, estimate_hardware, HardwareProfile
+from qumo.compiler.resources import estimate_resources, estimate_hardware, HardwareProfile
 from qumo.algorithms.hamiltonians import Graph, maxcut
 from qumo.algorithms.library import qaoa_maxcut_ansatz, bitstring_to_int
 from qumo.algorithms.optimizers import Objective, NelderMead

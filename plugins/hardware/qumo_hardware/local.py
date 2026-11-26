@@ -11,7 +11,7 @@ Backends:
 * `qumo-sim[:<topology>[/<basis>]]+noise:<modality>` - the same, plus a
   vendor-neutral noise model named after a hardware *modality*, not a vendor:
   `superconducting`, `trapped_ion`, `neutral_atom` (rates of QUMO's
-  HardwareProfile presets, qumo/exec/resources.mojo) or `custom(p1,p2,pm)`.
+  HardwareProfile presets, qumo/compiler/resources.mojo) or `custom(p1,p2,pm)`.
   After QUMO compiles the circuit for the target, a depolarizing channel is
   inserted after every gate (`depolarize1(p1)` / `depolarize2(p2)`) and a bit
   flip `x_error(pm)` before every measurement, as `#pragma qumo` noise that
@@ -37,7 +37,7 @@ from .errors import E_LIMIT, E_UNKNOWN_BACKEND, HINT_LOCAL_QUBITS, HardwareError
 SIM_MAX_QUBITS = 26
 
 # Modality noise presets: (1q gate error, 2q gate error, readout error). Same
-# numbers as QUMO's HardwareProfile presets (qumo/exec/resources.mojo), so the
+# numbers as QUMO's HardwareProfile presets (qumo/compiler/resources.mojo), so the
 # emulator and `qumo_estimate_resources` agree on what a modality means.
 NOISE_PRESETS: dict[str, tuple[float, float, float]] = {
     "superconducting": (2.5e-4, 3e-3, 1e-2),

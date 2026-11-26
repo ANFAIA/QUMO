@@ -903,7 +903,8 @@ def mojo_build(ctx, out, src, defines=(), timeout=1800, extra=()):
     if not ctx.mojo or not os.path.exists(ctx.mojo):
         return False, {"error": err(E_TOOL, f"Mojo compiler not found at {ctx.mojo}")}
     os.makedirs(os.path.dirname(out), exist_ok=True)
-    cmd = [ctx.mojo, "build", "-I", ".", *sum((["-D", d] for d in defines), []), *extra, "-o", out, src]
+    # plugins/hardware/native: the vendor clients that python/qumo_py.mojo binds (not part of qumo/)
+    cmd = [ctx.mojo, "build", "-I", ".", "-I", "plugins/hardware/native", *sum((["-D", d] for d in defines), []), *extra, "-o", out, src]
     ctx.log("build: " + " ".join(cmd[1:]))
     r = run_cmd(cmd, timeout=timeout)
     info = {"binary": os.path.relpath(out, ROOT), "built": True, "command": r["cmd"].replace(ROOT + os.sep, ""),

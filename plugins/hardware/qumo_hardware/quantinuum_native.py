@@ -1,6 +1,6 @@
 """Quantinuum plugin, native client (default) for System Model H2 devices in Nexus.
 
-The Nexus protocol runs in Mojo (qumo/exec/quantinuum_api.mojo):
+The Nexus protocol runs in Mojo (plugins/hardware/native/qumo_hw/quantinuum_api.mojo):
 * the session reuses the tokens that Quantinuum's own `qnx login` stores in ~/.qnx/auth;
 * the compiled circuit is converted to a native pytket circuit (Rz / PhasedX / ZZPhase);
 * the client finds or creates the project, uploads the circuit, starts the execute job
@@ -27,7 +27,7 @@ from .compile import CompiledCircuit, load_qumo_py
 from .errors import E_JOB, E_LIMIT, HINT_COST, HINT_SHOTS, HardwareError
 from .quantinuum import DEVICES, MAX_SHOTS, QuantinuumProvider, _device, clbit_registers, hqc_cost
 
-NATIVE = "qumo/exec/quantinuum_api.mojo"
+NATIVE = "plugins/hardware/native/qumo_hw/quantinuum_api.mojo"
 
 
 def _native_error(exc: Exception) -> HardwareError:
