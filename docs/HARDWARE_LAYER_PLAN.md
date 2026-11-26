@@ -7,9 +7,9 @@ behaviour changed. The first step was judged not clearly safe and was not implem
 
 Every provider exists twice:
 
-* **Mojo**: `plugins/hardware/native/qumo_hw/{ibm,ionq,quantinuum,speqtrum}_api.mojo` (they were in `qumo/exec` until the vendor code left the core) (878, 493, 705 and 756 lines). These are
-  exported to Python as `qumo_py` functions (`python/qumo_py.mojo`) and are what the CLI and the MCP server
-  call.
+* **Mojo**: `plugins/hardware/native/qumo_hw/{ibm,ionq,quantinuum,speqtrum}_api.mojo` (875, 490, 702 and 753 lines; they were in
+  `qumo/exec` until the vendor code left the core). These are exported to Python as `qumo_py` functions
+  (`python/qumo_py.mojo`) and are what the `qumo-hardware` CLI calls.
 * **Python**: `plugins/hardware/qumo_hardware/` (5,099 lines). The base classes (`ibm.py`, `ionq.py`,
   `quantinuum.py`, `speqtrum.py`) and the `*_native.py` subclasses. The registry (`registry.py`) makes the
   native subclass the default client: `NATIVE` maps `ibm`, `quantinuum`, `ionq` and `speqtrum` to a class

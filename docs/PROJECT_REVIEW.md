@@ -174,7 +174,7 @@ decoder) were read from source, not exercised.
 | A1 front door | Done (prelude, Python package) |
 | A2 surface consistency | Mostly done; default seeds not unified (item 7, owner decision) |
 | A3 dependency cycles | Mostly done (item 2): json moved to `qumo/core`, `sim` no longer imports `compiler`. The last cycle (`exec/tools` and `ft/tools` imported `qumo.ai`) is closed: both files moved to `qumo/ai` (`exec_tools.mojo`, `ft_tools.mojo`) |
-| A4 duplicated hardware layer | Plan written (`docs/HARDWARE_LAYER_PLAN.md`); not implemented (item 3, owner decision) |
+| A4 duplicated hardware layer | Plan written (`docs/HARDWARE_LAYER_PLAN.md`); not implemented (item 3, owner decision). Since then the Mojo clients have moved out of the core, to `plugins/hardware/native/qumo_hw`; both layers still exist |
 | A5 top-level layout | Done in the docs (item 4); directories not moved |
 | A6 distribution | Editable install done. Relocatable binary spiked and works; wheel not built: the licence needs confirmation (item 1) |
 | A7 stale claims | Text corrected. Re-measuring not done: machine was under load (item 5) |

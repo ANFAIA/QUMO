@@ -47,7 +47,7 @@ today (`qumo/*/*.mojo`, `from qumo.X` lines; the re-export shims for old paths a
 | 3 | `qec` | codes, DEM, decoders, sweeps | `core`, `ir`, `sim` |
 | 3 | `gpu` | vendor-neutral GPU state-vector and frame back ends (`-D QUMO_GPU`); simulator selection over CPU and GPU (`dispatch`: `sample_auto`, `sample_on`) | `core`, `ir`, `sim` |
 | 3 | `net` | HTTP/1.1 + TLS client (no QUMO imports). No package of `qumo/` imports it: its users are the vendor clients outside the core | nothing from QUMO |
-| 4 | `algorithms` | kernels, gradients, optimizers, VQE/QAOA, mitigation | `core`, `ir`, `sim`, `noise`, `qec`, `gpu`, `exec` (one file) |
+| 4 | `algorithms` | kernels, gradients, optimizers, VQE/QAOA, mitigation | `core`, `ir`, `sim`, `noise`, `gpu` |
 | 4 | `exec` | orchestration only: PUB primitives and the HEFT orchestrator | `ir`, `sim`, `gpu` |
 | 4 | `ft` | fault-tolerant programming layer (Steane, Iceberg, Rz synthesis) | `core`, `ir`, `sim`, `qec` |
 | 5 | `ai` | tool registry, the tool handlers of every module, diagnostics, describe, MCP | `core`, `ir`, `device`, `sim`, `noise`, `compiler`, `qec`, `gpu`, `algorithms`, `ft` |
@@ -261,25 +261,23 @@ Simulator selection, the device emulator and resource estimation are not here: s
   in `qumo/ai/ft_tools.mojo`. Imports are listed in the docstring of `qumo/ft/__init__.mojo`.
 * **`qumo/gpu`**: vendor-neutral GPU state-vector and Pauli-frame back ends on MAX (NVIDIA, AMD, Apple),
   compiled only with `-D QUMO_GPU`; `make gpu-check` cross-compiles them without a device.
-
-* **`qumo/net`**: native HTTP/1.1 and TLS client (OpenSSL 3 loaded at run time) used by the hardware and
-  LLM clients in `exec`; it imports nothing from QUMO. It is the one implementation of the stack (libc
-  bindings, sockets, TLS, URLs, HTTP/1.1, the URL guard, SSE). The agent harness re-exports `libc` and
-  `fdutil` from it; the modules that raise coded errors are generated into
-  `agents/mojo/qumo_agent/net/` with the harness's codes (`QA-E104`/`QA-E105` for `QM-E959`/`QM-E951`)
-  and `tests/test_net_mirror.mojo` fails when a generated file differs. Edit `qumo/net`, then run
-  `QUMO_UPDATE_NET=1 .venv/bin/mojo run -I . tests/test_net_mirror.mojo`.
-
 * **`qumo/net`**: native HTTP/1.1 and TLS client (OpenSSL 3 loaded at run time). It imports nothing from
-  QUMO and names no vendor. Nothing else in `qumo/` imports it: its only users are the vendor clients of
-  `plugins/hardware/native/qumo_hw` (the Mojo agents have their own client, `agents/mojo/qumo_agent/net`).
+  QUMO and names no vendor. Nothing else in `qumo/` imports it: its users are the vendor clients of
+  `plugins/hardware/native/qumo_hw`. It is the one implementation of the stack (libc bindings, sockets,
+  TLS, URLs, HTTP/1.1, the URL guard, SSE). The agent harness re-exports `libc` and `fdutil` from it; the
+  modules that raise coded errors are generated into `agents/mojo/qumo_agent/net/` with the harness's
+  codes (`QA-E104`/`QA-E105` for `QM-E959`/`QM-E951`) and `tests/test_net_mirror.mojo` fails when a
+  generated file differs. Edit `qumo/net`, then run
+  `QUMO_UPDATE_NET=1 .venv/bin/mojo run -I . tests/test_net_mirror.mojo`.
 
 ## 4c. Vendor code (outside `qumo/`)
 
 **Rule: nothing under `qumo/` imports a vendor module.** The core has no client of a hardware service and
 no vendor wire format; `make check-neutrality` (`tests/check_neutrality.sh`, part of `make test` and of
-the CI checks job) fails if a file under `qumo/` or `cli/` imports the vendor package or is named after
-one of its clients.
+the CI checks job) fails if a file under `qumo/` or `cli/` has a `from qumo_hw...` or `import qumo_hw...`
+line, or if a file under `qumo/` is named after one of the clients (`<vendor>*.mojo` for each
+`<vendor>_api.mojo`). It is a text scan: it does not see `qumo_hw` listed after another module in one
+`import` statement, or a new vendor's file in `qumo/`. The build is the other guard (below).
 
 Vendor code is in `plugins/hardware`:
 
@@ -293,8 +291,12 @@ Vendor code is in `plugins/hardware`:
 
 `qumo_hw` is not on the import path of the core: `make cli` and `make test` build with `-I .` alone, so
 a vendor import in `qumo/` does not compile there. Only the builds that bind or use the clients add
-`-I plugins/hardware/native`: the `qumo_py` extension (`make py`, `make py-gpu`; `python/qumo_py.mojo`
-exports the clients to the Python plugins) and the Mojo examples under `examples/hardware`.
+`-I plugins/hardware/native`: the `qumo_py` extension (`make py`, `make py-gpu`, and the builds of
+`bench/run_benchmarks.py`; `python/qumo_py.mojo` exports the IBM, IonQ, Quantinuum, SpeQtrum and qBraid
+clients to the Python plugins) and the Mojo examples under `examples/hardware`
+(`examples/run_examples.py` adds the path to every Mojo example). `pasqal_api` is not bound: it has no
+Python provider, and `examples/hardware/pasqal_mis.mojo` calls it from Mojo. Build commands and
+environment variables: [plugins/hardware/native/README.md](../plugins/hardware/native/README.md).
 
 What stays in the core is neutral: `qumo/ir/analog.mojo` is the program model of any analog Rydberg
 device (register, pulses, waveforms; `qumo.sim.rydberg` simulates it) and imports nothing, `Target` is
