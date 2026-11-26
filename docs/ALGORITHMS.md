@@ -124,6 +124,11 @@ removed and re-appended. The exact Estimator primitive (`run_estimator` with
 `precision <= 0`) and `expectation` refuse a circuit with noise channels (QM-E416),
 so noisy estimates sample instead.
 
+`sampled_expectation`, `noisy_expectation`, `trex_expectation` and the shot path of
+`run_estimator` are one estimator, `qumo/sim/qwc.mojo` (`qwc_setting`, `qwc_group_stats`,
+`qwc_estimate`): the terms of a qubit-wise-commuting group are read from the same shots, and
+the standard error is that of their per-shot weighted sum, covariance included.
+
 Measured (tests/examples): GHZ-6 <Z^6> with gate errors e1 = 1e-3, e2 = 1e-2
 (DEPOLARIZE1(1.5e-3), DEPOLARIZE2(1.25e-2)), scales [1, 3, 5], 20k shots:
 raw 0.9327 -> ZNE (global, Richardson) 0.9952 (ideal 1). Folded circuits equal the
@@ -338,7 +343,11 @@ screening helps depends on the system, as the addon says, so compare against
 device. A random X before each measurement with a classical flip turns any readout
 channel, asymmetric too, into a rescaling of each Pauli, and calibrating on |0...0>
 measures it. With p01 = 0.02 and p10 = 0.12 a value of 0.7925 reads 0.63 raw and
-0.785 +- 0.007 mitigated. Asymmetric readout cannot come from
+0.785 +- 0.006 mitigated. The standard error is that of the shared shot estimator
+(`qumo/sim/qwc.mojo`), with each term weighted by 1 / its calibration factor, plus the
+error of the calibration factors, which every term shares (delta method on the calibration
+shots). Terminal measurements of the circuit are replaced by the setting's own, as in
+`sampled_expectation`. Asymmetric readout cannot come from
 `apply_noise_model`, which symmetrises it, so the tests use a classical channel. Not
 compared with `qiskit_mitigation.TREX`, which needs `Executor`.
 

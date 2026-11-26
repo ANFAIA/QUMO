@@ -46,7 +46,7 @@ today (`qumo/*/*.mojo`, `from qumo.X` lines; the re-export shims for old paths a
 | 3 | `qec` | codes, DEM, decoders, sweeps | `core`, `ir`, `sim` |
 | 3 | `gpu` | vendor-neutral GPU state-vector and frame back ends (`-D QUMO_GPU`) | `core`, `ir`, `sim` |
 | 3 | `net` | HTTP/1.1 + TLS client for hardware and LLM endpoints (no QUMO imports) | nothing from QUMO |
-| 4 | `algorithms` | kernels, gradients, optimizers, VQE/QAOA, mitigation | `core`, `ir`, `sim`, `noise`, `qec`, `gpu`, `exec` (one file) |
+| 4 | `algorithms` | kernels, gradients, optimizers, VQE/QAOA, mitigation | `core`, `ir`, `sim`, `noise`, `qec`, `gpu` |
 | 4 | `exec` | primitives, dispatch, orchestrator, emulate, resources | `core`, `ir`, `device`, `sim`, `noise`, `compiler`, `gpu`, `net` |
 | 4 | `ft` | fault-tolerant programming layer (Steane, Iceberg, Rz synthesis) | `core`, `ir`, `sim`, `qec` |
 | 5 | `ai` | tool registry, the tool handlers of every module, diagnostics, describe, MCP | `core`, `ir`, `device`, `sim`, `compiler`, `qec`, `gpu`, `algorithms`, `exec`, `ft` |
@@ -56,15 +56,17 @@ today (`qumo/*/*.mojo`, `from qumo.X` lines; the re-export shims for old paths a
 `ai` is the top row: no other package imports it, and the package graph has no cycle. The agent-tool
 handlers of every module are in `qumo/ai` (`exec_tools.mojo`, `algorithm_tools.mojo`, `ft_tools.mojo`;
 the first and the last were `qumo/exec/tools.mojo` and `qumo/ft/tools.mojo`), so `exec`, `ft` and
-`algorithms` do not import `ai`, and `exec` no longer imports `algorithms`. Two imports go sideways or
-up inside the stack, neither closes a cycle: `algorithms/mitigation.mojo` imports `exec.primitives` (the
-QWC measurement helpers; `exec.primitives` itself imports only `core`, `ir` and `sim`), and `compiler`
-imports `sim` (for `program_compile` and `resynth`).
+`algorithms` do not import `ai`, `exec` no longer imports `algorithms`, and `algorithms` no longer
+imports `exec`: the shot-based expectation estimator (QWC measurement settings, per-group statistics,
+the precision-to-shots rule) is `qumo/sim/qwc.mojo`, which `exec.primitives` and
+`algorithms/mitigation.mojo` both call. One import goes sideways inside the stack and closes no cycle:
+`compiler` imports `sim` (for `program_compile` and `resynth`).
 
 Old import paths are kept for one release as one-line re-exports: `qumo.sim.rng` (now `qumo.core.rng`),
 `qumo.compiler.target` and the `basis_str` / `fmt_num` names of `qumo.compiler.common` (now `qumo.device`),
 `qumo.qec.characterization` and `qumo.qec.mthree` (now `qumo.noise`), and the circuit and program JSON
-functions of `qumo.ai.describe` (now `qumo.ir.json`). `qumo.exec.tools` and `qumo.ft.tools` have no
+functions of `qumo.ai.describe` (now `qumo.ir.json`), and `qwc_setting`, `qwc_group_stats`, `pop_parity` and
+`MAX_ESTIMATOR_SHOTS` of `qumo.exec.primitives` (now `qumo.sim.qwc`). `qumo.exec.tools` and `qumo.ft.tools` have no
 re-export: one inside `exec` or `ft` would import `ai` again. Import `qumo.ai.exec_tools` and
 `qumo.ai.ft_tools`.
 
@@ -135,6 +137,11 @@ The IR is self-contained: `qumo/ir` imports nothing from the simulators, the com
   memory for the whole run of gates).
 * **Determinism**: xoshiro256** seeded by SplitMix64 (`Rng`, in `qumo/core/rng.mojo`); `split(k)` per worker.
 
+* **Shot estimator**: `qwc.mojo` is the one implementation of "<H> from shots": a measurement
+  setting per qubit-wise-commuting group (`qwc_setting`), the mean and the variance of the per-shot
+  weighted sum of the group's terms (`qwc_moments`, `qwc_group_stats`), the loop over groups through a
+  caller's `run(circuit, shots, seed)` closure (`qwc_estimate`) and `shots_for_precision`. The Estimator
+  primitive, `sampled_expectation` / `noisy_expectation` (so ZNE) and T-REX are callers.
 * **Programs**: `program_runner.mojo` walks the graph shot by shot through a static
   `ShotBackend` (state vector, tableau, branching). A program without runtime regions
   is a circuit and goes to `sample`, as a static circuit always did.
