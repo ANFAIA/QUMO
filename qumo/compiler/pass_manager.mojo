@@ -40,7 +40,7 @@ from qumo.compiler.routing import (
     RouteOptions, RoutePlan, route_circuit, star_preroute, plan_route, finish_route, has_exact_layout,
 )
 from qumo.compiler.resynth import SynthOptions, SynthStats, resynthesize_blocks
-from qumo.compiler.ai_route import AIRouteOptions, ai_route, routed_cost
+from qumo.compiler.ai_route import AIRouteOptions, ai_route, routed_cost, route_index_warning
 from qumo.compiler.wrap import wrap_angles
 from qumo.compiler.layout_fidelity import post_layout
 
@@ -1473,6 +1473,9 @@ def _ai_route_portfolio(pre: Circuit, mut c: Circuit, target: Target, opts: Rout
         il = ail^
         fl = afl^
         return tag + ": kept ai-route (" + _json_safe(anote) + ")"
+    var warn = route_index_warning(a2)  # the note of the discarded proposal carried it
+    if warn.byte_length() > 0:
+        return tag + ": kept sabre (" + _json_safe(warn) + ")"
     return tag + ": kept sabre"
 
 

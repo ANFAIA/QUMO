@@ -232,6 +232,21 @@ def test_errors() raises:
     except e:
         raised = String(e).startswith("QM-E805")
     assert_true(raised, "QM-E805")
+    # an observable on a qubit the circuit lacks: refused before the kernels read it
+    raised = False
+    try:
+        _ = gpu_value_and_gradient[DType.float64](c, parse_pauli_sum("X2"), [0.3], emulate=True)
+    except e:
+        raised = String(e).startswith("QM-E")
+    assert_true(raised, "gradient of an observable wider than the circuit")
+    raised = False
+    try:
+        var obs = List[PauliSum]()
+        obs.append(parse_pauli_sum("X2"))
+        _ = expectations_emulated_gpu[DType.float64](c, obs, [0.3])
+    except e:
+        raised = String(e).startswith("QM-E476")
+    assert_true(raised, "QM-E476 for a Pauli mask above the state (expectations_emulated_gpu)")
     # terminal measurements are ignored; d/dt <Z0> of RX(t)|0> = -sin t
     var r = gpu_value_and_gradient[DType.float64](c, h, [0.3], emulate=True)
     from std.math import sin, cos
