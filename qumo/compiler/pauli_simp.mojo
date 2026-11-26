@@ -38,6 +38,7 @@ from qumo.ir.circuit import Circuit, Instruction, QUARTER_TURN_LIMIT
 from qumo.compiler.common import TWO_PI, wrap_angle, shell_like
 from qumo.ir.gateset import GateSet, HALF_PI, QUARTER_PI, ANG_TOL, EXACT_TOL
 from qumo.ir.gateset import expand_rule
+from qumo.ir.clifford_table import clifford_heisenberg
 from qumo.compiler.optimize import cancel_inverses, commute_rotations
 from qumo.compiler.kak import consolidate_2q
 from qumo.compiler.phase_fold import phase_fold
@@ -100,86 +101,6 @@ struct Tableau(Movable):
             self.x[base + j] = rx[j]
             self.z[base + j] = rz[j]
         self.k[row] = rk & 3
-
-
-# G^dag A G tables (XZ form): per gate, for A in (X_a, Z_a, X_b, Z_b):
-# (x_a, z_a, x_b, z_b, k). Verified numerically (see tests).
-def _table(kind: Int, idx: Int, mut xa: Int, mut za: Int, mut xb: Int, mut zb: Int, mut k: Int) -> Bool:
-    xa = 0; za = 0; xb = 0; zb = 0; k = 0
-    if kind == Op.H:
-        if idx == 0: za = 1
-        else: xa = 1
-        return True
-    if kind == Op.S:
-        if idx == 0: xa = 1; za = 1; k = 3
-        else: za = 1
-        return True
-    if kind == Op.SDG:
-        if idx == 0: xa = 1; za = 1; k = 1
-        else: za = 1
-        return True
-    if kind == Op.X:
-        if idx == 0: xa = 1
-        else: za = 1; k = 2
-        return True
-    if kind == Op.Y:
-        if idx == 0: xa = 1; k = 2
-        else: za = 1; k = 2
-        return True
-    if kind == Op.Z:
-        if idx == 0: xa = 1; k = 2
-        else: za = 1
-        return True
-    if kind == Op.SX:
-        if idx == 0: xa = 1
-        else: xa = 1; za = 1; k = 1
-        return True
-    if kind == Op.SXDG:
-        if idx == 0: xa = 1
-        else: xa = 1; za = 1; k = 3
-        return True
-    if kind == Op.I:
-        if idx == 0: xa = 1
-        else: za = 1
-        return True
-    if kind == Op.CX:
-        if idx == 0: xa = 1; xb = 1
-        elif idx == 1: za = 1
-        elif idx == 2: xb = 1
-        else: za = 1; zb = 1
-        return True
-    if kind == Op.CZ:
-        if idx == 0: xa = 1; zb = 1
-        elif idx == 1: za = 1
-        elif idx == 2: za = 1; xb = 1
-        else: zb = 1
-        return True
-    if kind == Op.CY:
-        if idx == 0: xa = 1; xb = 1; zb = 1; k = 1
-        elif idx == 1: za = 1
-        elif idx == 2: za = 1; xb = 1
-        else: za = 1; zb = 1
-        return True
-    if kind == Op.SWAP:
-        if idx == 0: xb = 1
-        elif idx == 1: zb = 1
-        elif idx == 2: xa = 1
-        else: za = 1
-        return True
-    if kind == Op.ISWAP or kind == Op.ISWAPDG:
-        var kk = 3 if kind == Op.ISWAP else 1
-        if idx == 0: za = 1; xb = 1; zb = 1; k = kk
-        elif idx == 1: zb = 1
-        elif idx == 2: xa = 1; za = 1; zb = 1; k = kk
-        else: za = 1
-        return True
-    if kind == Op.ECR:
-        if idx == 0: xa = 1; za = 1; xb = 1; k = 3
-        elif idx == 1: za = 1; k = 2
-        elif idx == 2: xb = 1
-        else: za = 1; xb = 1; zb = 1; k = 1
-        return True
-    return False
 
 
 def _is_clifford_kind(k: Int) -> Bool:
@@ -268,7 +189,7 @@ struct _Extract(Movable):
             var xb = 0
             var zb = 0
             var k = 0
-            _ = _table(kind, idx, xa, za, xb, zb, k)
+            _ = clifford_heisenberg(kind, idx, xa, za, xb, zb, k)
             var ok = 0
             self.tab.image(qa, xa, za, qb, xb, zb, k, self.ox, self.oz, ok)
             for j in range(w):

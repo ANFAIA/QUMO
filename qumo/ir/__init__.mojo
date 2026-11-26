@@ -33,6 +33,7 @@ Circuits and gates:
     pauli.mojo         Pauli strings and sums (observables, Hamiltonians), up to 64 qubits
     kraus.mojo         noise channels beyond Pauli ones, as Kraus operators
     pauli_noise.mojo   what each Pauli noise opcode draws (one definition for every sampler)
+    clifford_table.mojo  Clifford conjugation of Paulis (G^dag P G, G P G^dag), sign included
     draw.mojo          the text drawing behind `Circuit.draw()` and `qumo draw`
 
 Text formats:
