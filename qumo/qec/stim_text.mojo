@@ -57,12 +57,22 @@ struct _Parser:
 
 
 def _split_instruction(line: String, mut name: String, mut args: List[Float64], mut targets: List[String], where_: Int) raises:
-    """`NAME(a, b) t0 t1`: fields, stripped."""
+    """`NAME(a, b) t0 t1`: fields, stripped. A tag, `NAME[text](a) t0`, stays part of
+    `name` as written, so a tagged instruction matches no known one and is refused by
+    name: dropping a tag could change what the line means."""
     var bs = line.as_bytes()
     var i = 0
-    while i < len(bs) and Int(bs[i]) != ord(" ") and Int(bs[i]) != ord("("):
+    while i < len(bs) and Int(bs[i]) != ord(" ") and Int(bs[i]) != ord("(") and Int(bs[i]) != ord("["):
         i += 1
     name = String(line[byte=0:i]).upper()
+    if i < len(bs) and Int(bs[i]) == ord("["):
+        var start = i
+        while i < len(bs) and Int(bs[i]) != ord("]"):  # Stim writes a literal ']' as \C
+            i += 1
+        if i == len(bs):
+            raise _stim_error(where_, "missing ']' in '" + line + "'. Hint: a tag looks like NAME[tag](0.1)")
+        i += 1
+        name += String(line[byte=start:i])
     var rest = String(line[byte=i:].strip())
     args.clear()
     if rest.startswith("("):
@@ -73,7 +83,10 @@ def _split_instruction(line: String, mut name: String, mut args: List[Float64], 
         for a in inner.split(","):
             var t = String(a.strip())
             if t.byte_length() > 0:
-                args.append(Float64(t))
+                try:
+                    args.append(Float64(t))
+                except:
+                    raise _stim_error(where_, "'" + t + "' in '" + line + "' is not a number. Hint: arguments look like NAME(0.1, 0.2)")
         var tail = String(rest[byte=close + 1:].strip())
         rest = tail^
     targets.clear()
