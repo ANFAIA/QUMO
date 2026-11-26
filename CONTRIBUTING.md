@@ -1,6 +1,6 @@
 # Contributing to QUMO
 
-QUMO is a research prototype (v0.3.0, Apache-2.0). Bug reports, examples, benchmark results and code are welcome. This page says how to set up, how to check your change, and what a reproducible report looks like.
+QUMO is a research prototype (v0.4.0, Apache-2.0). Bug reports, examples, benchmark results and code are welcome. This page says how to set up, how to check your change, and what a reproducible report looks like.
 
 ## Ways to contribute
 
