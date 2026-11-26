@@ -629,7 +629,11 @@ local emulator needs pre-release quantum-pecos 0.8.0.dev8, which requires
 selene-sim < 0.3 while guppylang 1.2 requires >= 0.3.1: install `[helios]` and
 `[local-quantinuum]` in separate environments. qiskit-ibm-runtime must be >= 0.50.1
 (0.50.0 `FoldRzzAngle` emits a `GlobalPhaseGate`, invalid on IBM hardware), which
-matters only on that fallback path.
+matters only on that fallback path. The `[ibm]` extra also requires < 0.53: runtime
+releases can break APIs (0.52.0 did). On 2026-11-26 the plugin tests (offline, with
+fake backends and local fake servers) passed on 0.51.0 and on 0.52.1; raise the bound
+after they pass on a newer release. 0.52.0 made the top-level `Sampler` / `Estimator`
+client-side; the plugin imports its `Sampler` from `executor_sampler`.
 
 ```bash
 uv pip install --python bench/.venv/bin/python qnexus pytket-quantinuum          # IBM deps already in bench/.venv

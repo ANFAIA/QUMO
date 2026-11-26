@@ -20,7 +20,9 @@ dependencies = []
 # IBM: --client python, fake_* backends (Aer), ecr / fractional rzz, dynamic circuits, --ibm-dry-run
 ibm = [
     "qiskit>=2.3",
-    "qiskit-ibm-runtime>=0.50.1", # client-side executor Sampler; 0.50.0 FoldRzzAngle emits a GlobalPhaseGate (invalid ISA)
+    # client-side executor Sampler; 0.50.0 FoldRzzAngle emits a GlobalPhaseGate (invalid ISA).
+    # Upper bound: runtime releases break APIs (0.52.0 did); raise it after the plugin tests pass on the new one.
+    "qiskit-ibm-runtime>=0.50.1,<0.53",
     "qiskit-aer>=0.17",           # local mode for fake backends
 ]
 # Quantinuum: --client python, Helios (HUGR), TKET comparison mode
