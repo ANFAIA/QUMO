@@ -73,7 +73,7 @@ def plan_windows(dem: DetectorErrorModel, rounds_of: List[Int], window: Int, ste
     for r in rounds_of:
         rounds = max(rounds, r + 1)
     if step <= 0 or window < step or (window < rounds and (rounds - window) % step != 0):
-        raise Error("QM-E736: window " + String(window) + ", step " + String(step) + " for " + String(rounds) + " rounds. Hint: 0 < step <= window and (rounds - window) % step == 0.")
+        raise Error("QM-E736: window " + String(window) + ", step " + String(step) + " for " + String(rounds) + " rounds. Hint: 0 < step <= window, and (rounds - window) % step == 0 when window < rounds.")
     var plan = WindowPlan(List[DetectorErrorModel](), List[_Window](), dem.num_detectors, dem.num_observables)
     if window >= rounds:
         var w = _Window(0, 1, List[Int](), List[Int](), 0)

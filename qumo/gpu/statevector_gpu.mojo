@@ -45,8 +45,14 @@ only with `-D QUMO_GPU`; otherwise it raises QM-E470.
 
 Error codes: QM-E470 not compiled, QM-E471 dynamic/noisy circuit on the GPU
 sampler, QM-E472 fp64 on Apple, QM-E473 zero-norm state, QM-E474 circuit wider
-than the GPU state, QM-E475 unsupported plan op, QM-E941 unknown precision
-selector.
+than the GPU state, QM-E475 unsupported plan op, QM-E476 invalid operand of a
+direct call (qubit out of range or repeated, Pauli mask with bits at or above
+num_qubits, lists of different lengths), QM-E477 state larger than the memory
+the device / host reports, QM-E941 unknown precision selector.
+
+Operands are checked on the host, once per call, before anything is scheduled
+(`tiles.check_kop_qubits` for every gate of a flush, `pauli_sums` for masks):
+the kernels trust their tables and never test an index.
 """
 
 from std.math import cos, sin, ceildiv
@@ -75,6 +81,7 @@ from qumo.gpu.emulate import (
 from qumo.gpu.device import (
     GPU_COMPILED, GPU_DEFAULT_DTYPE, GPU_FP64_RUNTIME, GpuProfile, TileKernelLimits, device_kernels_enabled,
     precision_name, gpu_not_compiled_error, gpu_fp64_error, resolve_gpu_precision,
+    gpu_operand_error, host_memory_bytes, device_free_memory_bytes, check_gpu_state_memory,
 )
 
 
@@ -228,9 +235,17 @@ struct GpuStateVector[dtype: DType = GPU_DEFAULT_DTYPE](Movable):
     def __init__(out self, num_qubits: Int, emulate: Bool = False,
                  ctx_in: Optional[DeviceContext] = None) raises:
         """|0...0> on the GPU (emulate=False) or in the host emulator. A GPU
-        state creates its own DeviceContext unless `ctx_in` gives one."""
+        state creates its own DeviceContext unless `ctx_in` gives one.
+
+        QM-E404 past 32 qubits, QM-E476 for a negative width, QM-E477 when
+        the two arrays (2 x 2^n x 4 or 8 bytes) are larger than the memory
+        that can be queried: the device's free memory as MAX reports it for a
+        GPU state, the machine's physical memory for an emulated one (no
+        check where the query fails)."""
         comptime assert Self.dtype == DType.float32 or Self.dtype == DType.float64, "GpuStateVector supports float32 and float64"
         check_statevector_size(num_qubits)
+        if num_qubits < 0:
+            raise gpu_operand_error("a GPU state cannot have " + String(num_qubits) + " qubits")
         self.num_qubits = num_qubits
         self.emulated = emulate
         self.ctx = None
@@ -255,11 +270,14 @@ struct GpuStateVector[dtype: DType = GPU_DEFAULT_DTYPE](Movable):
         self.profile = GpuProfile.emulator()
         var n = 1 << num_qubits
         if emulate:
+            check_gpu_state_memory(num_qubits, size_of[Self.dtype](), host_memory_bytes(), "host physical memory")
             self.hre = List[Scalar[Self.dtype]](length=n, fill=0)
             self.him = List[Scalar[Self.dtype]](length=n, fill=0)
         else:
             comptime if device_kernels_enabled[Self.dtype]():
                 var ctx = ctx_in.value() if ctx_in else DeviceContext()
+                check_gpu_state_memory(num_qubits, size_of[Self.dtype](), device_free_memory_bytes(ctx),
+                                       "device memory free now")
                 var prof = GpuProfile.of(ctx)
                 # blocks above TILE_SAFE_THREADS threads only once the compiled
                 # kernel reports that they launch (registers per thread)
@@ -402,7 +420,11 @@ struct GpuStateVector[dtype: DType = GPU_DEFAULT_DTYPE](Movable):
 
     def run_program(mut self, var prog: TileProgram[Self.dtype]) raises:
         """Enqueue a finalized TileProgram as is (diagnostics and probes:
-        `bench_gpu ... probe` builds synthetic runs with it)."""
+        `bench_gpu ... probe` builds synthetic runs with it). The program
+        must have been built for this state's width (QM-E474); its ops are
+        not checked again."""
+        if prog.n != self.num_qubits:
+            raise Error("QM-E474: tile program built for " + String(prog.n) + " qubits but the GPU state has " + String(self.num_qubits) + ". Hint: build the TileProgram with the state's num_qubits.")
         self._launch(prog^)
 
     def _launch(mut self, var prog: TileProgram[Self.dtype]) raises:
@@ -669,10 +691,19 @@ struct GpuStateVector[dtype: DType = GPU_DEFAULT_DTYPE](Movable):
 
         Terms are grouped by X mask; one launch reduces up to EXP_G terms of a
         group in one pass over the state; one device->host copy for all.
+        QM-E476 when xs and zs differ in length or a mask is negative or has
+        a bit at or above num_qubits (the kernel reads psi[i ^ x] unchecked).
         """
-        self._materialize()
         var n = self.size()
         var nt = len(xs)
+        if len(zs) != nt:
+            raise gpu_operand_error("pauli_sums got " + String(nt) + " X masks and " + String(len(zs)) + " Z masks")
+        for t in range(nt):
+            if xs[t] < 0 or xs[t] >= n or zs[t] < 0 or zs[t] >= n:
+                raise gpu_operand_error("Pauli term " + String(t) + " (x mask " + String(xs[t]) + ", z mask " + String(zs[t])
+                                        + ") is negative or has a bit at or above qubit " + String(self.num_qubits)
+                                        + " of a " + String(self.num_qubits) + "-qubit GPU state")
+        self._materialize()
         var nb = reduction_blocks(n)
         var out = List[Float64](length=2 * nt, fill=0.0)
         if nt == 0:
@@ -785,9 +816,13 @@ struct GpuStateVector[dtype: DType = GPU_DEFAULT_DTYPE](Movable):
         return total
 
     def segment_sums(self, seg: Int) raises -> List[Float64]:
-        """Probability mass of each `seg`-amplitude segment (one block each)."""
-        self._materialize()
+        """Probability mass of each `seg`-amplitude segment (one block each).
+        QM-E476 unless seg divides the 2^n amplitudes (1 <= seg <= 2^n)."""
         var n = self.size()
+        if seg < 1 or seg > n or n % seg != 0:
+            raise gpu_operand_error("segment size " + String(seg) + " does not divide the " + String(n) + " amplitudes of a "
+                                    + String(self.num_qubits) + "-qubit GPU state")
+        self._materialize()
         var nseg = n // seg
         var out = List[Float64](length=nseg, fill=0.0)
         if self.emulated:

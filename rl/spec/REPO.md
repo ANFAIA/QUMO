@@ -451,7 +451,10 @@ tensors[{name,shape,dtype,offset}]):
   fallback, failed}]}.
   `load_route_model` requires obs.size==128, horizon==8, num_active_swaps==16, 0<hidden<=4096.
 * Loader integrity: QM-E617 on missing file, bad JSON, unsupported format, size/offset error,
-  `weights_bytes` mismatch, fnv mismatch; QM-E620 incompatible router.
+  `weights_bytes` mismatch, fnv mismatch; QM-E620 incompatible router. The manifest is outside the
+  checksum, so its numbers are checked too (QM-E617): `weights_file` a plain file name inside the
+  directory, at most 4096 tensors of rank at most 8, dimensions > 0, shape product and offset
+  checked against the file length without overflow (same code in `qrl/model.mojo`).
 
 `INDEX.json` per sub-root (`models/ai_transpiler/synth/INDEX.json`, `.../route/INDEX.json`):
 `json.dump(indent=1)` of a list sorted by directory name: `{id, kind, num_qubits, edges, wl_hash,

@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from . import jobs as job_store
-from .base import BIT_ORDER, DONE, FINAL_STATES, CostEstimate, JobHandle, requires_confirmation
+from .base import BIT_ORDER, DONE, FINAL_STATES, CostEstimate, JobHandle, check_cost_cap, requires_confirmation
 from .compile import CompiledCircuit, compile_for_target
 from .errors import E_CONFIRM, E_JOB, E_LIMIT, HINT_COST, HINT_SHOTS, HardwareError
 
@@ -122,6 +122,11 @@ def run(source: Any, provider: Any, backend: str, shots: int = 1000, level: int 
     if dry_run:
         out.update({"dry_run": True, "submitted": False})
         return out
+    try:
+        check_cost_cap(p.cost, max_cost)
+    except HardwareError as exc:
+        exc.details = {**(exc.details or {}), "plan": out}
+        raise
     if max_cost is not None and p.cost.billable and p.cost.amount > max_cost:
         raise HardwareError(E_LIMIT, f"estimated cost {p.cost.summary()} exceeds --max-cost {max_cost}",
                             HINT_COST, details={"plan": out})

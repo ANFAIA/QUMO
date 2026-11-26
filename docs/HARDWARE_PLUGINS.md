@@ -548,7 +548,12 @@ free).
   remote backend with QM-E957, so calling a provider directly is not a way
   around the gate.
 * `--dry-run` and `estimate` never submit. `--max-cost` refuses (QM-E956)
-  when the estimate is above the limit. Every remote job also carries a
+  when the estimate is above the limit. It is read in the unit of the estimate
+  (Quantinuum HQC/eHQC, IBM QPU seconds, qBraid credits). When there is no
+  estimate to compare it with (unit `unknown`: IonQ simulator, SpeQtrum, a qBraid
+  device without a quote) the cap cannot be enforced, so the submission is
+  refused with QM-E956 as well, by the runner and by `Provider.submit`: drop
+  `--max-cost` to accept the unquoted job, or pick a backend with a quote. Every remote job also carries a
   server-side cap: Quantinuum `max_cost` (`--max-cost`, else
   `1.25 × estimate + 1` HQC) and IBM `max_execution_time` (`--max-cost`, else
   `max(30 s, 2 × estimate)` QPU seconds).
@@ -595,7 +600,7 @@ New range **QM-E950–QM-E959** (inside QUMO's `QM-E9xx` interface range;
 | QM-E953 | unknown provider/backend, or not available to the account | `backends --provider P [--online]` |
 | QM-E954 | cannot compile (parse error, too many qubits, unbound parameters, missing file) | fix the circuit / pick a larger device |
 | QM-E955 | payload rejected by the provider's own validation, or it cannot be lowered to the provider's program format (e.g. conditions on Helios) | follow the hint; for a bridge failure report the payload (`--show-qasm`) |
-| QM-E956 | shot, size or cost limit exceeded; the hint is specific to the limit | shots: lower `--shots` or split the run; local emulator size: shrink the circuit or use a cloud emulator; cost: raise `--max-cost` only if intended |
+| QM-E956 | shot, size or cost limit exceeded; the hint is specific to the limit | shots: lower `--shots` or split the run; local emulator size: shrink the circuit or use a cloud emulator; cost: raise `--max-cost` only if intended; no quote for the backend: drop `--max-cost` or pick a backend with a quote |
 | QM-E957 | not submitted: confirmation required | review the plan, add `--yes` |
 | QM-E958 | unknown job id | `jobs` |
 | QM-E959 | job failed, cancelled or not finished | `status JOB`, `result JOB --wait` |
