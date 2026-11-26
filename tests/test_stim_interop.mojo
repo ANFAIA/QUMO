@@ -385,6 +385,26 @@ def test_nesting_and_budget() raises:
     print("  nesting limit, repeat budget, normal repeats")
 
 
+def test_tags_and_bad_arguments_are_coded() raises:
+    """A `(` inside a tag used to split the instruction name, and a non-number argument
+    raised an uncoded "String is not convertible to float"."""
+    for src in ["I[R_Z(theta=0.25*pi)] 0\nM 0\n", "H[mine] 0\n", "X_ERROR[a b](0.1) 0\n",
+                "X_ERROR(abc) 0\n", "I[unterminated(1) 0\n"]:
+        var message = String()
+        try:
+            _ = from_stim(src)
+        except e:
+            message = String(e)
+        assert_true(message.startswith("QM-E734: Stim circuit line 1: "), src + " -> " + message)
+    var tagged = String()
+    try:
+        _ = from_stim("I[R_Z(theta=0.25*pi)] 0\n")
+    except e:
+        tagged = String(e)
+    assert_true(tagged.find("I[R_Z(theta=0.25*pi)]") >= 0, "the message names the whole instruction: " + tagged)
+    print("  tags and bad arguments give QM-E734")
+
+
 def main() raises:
     test_round_trip_generated()
     test_syntax()
@@ -399,4 +419,5 @@ def main() raises:
     test_dem_piece_without_detectors()
     test_dem_piece_with_three_detectors()
     test_nesting_and_budget()
+    test_tags_and_bad_arguments_are_coded()
     print("test_stim_interop OK")
