@@ -112,6 +112,13 @@ are placed over CPU and GPU. Shared helpers live in `hetero_common.py`
 --yes --max-cost` rules, HEFT, reports). Reports go to
 `build/hetero/<pipeline>/seed<N>/report.{json,md}`.
 
+## Verified discovery loop
+
+[`discovery_loop/`](discovery_loop/) is a different split: teams (a REINFORCE policy, and offline rules or a
+model) propose parallel-search programs, a separate verifier runs them in QUMO against a frozen specification,
+and only verified ones enter a shared wiki. After Shirobokov et al. ([arXiv:2611.09822](https://arxiv.org/abs/2611.09822));
+its README says what it does not reproduce.
+
 ## Choosing the model
 
 One standard-library client (`llm_client.py`, `urllib`) speaks the

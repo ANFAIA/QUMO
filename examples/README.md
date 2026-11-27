@@ -81,7 +81,7 @@ Every example below is run and verified by `bench/.venv/bin/python examples/run_
 | [`compilation/`](compilation/) | 6 | Q# / Azure Quantum, QUMO, Qiskit (IBM), TKET (Quantinuum) | 6 / 0 |
 | [`simulation/`](simulation/) | 4 | Amazon Braket, CUDA-Q (NVIDIA), Q# / Azure Quantum | 3 / 1 |
 | [`control_flow/`](control_flow/) | 2 | QUMO | 2 / 0 |
-| [`heterogeneous/`](heterogeneous/) | 6 | QUMO | 6 / 0 |
+| [`heterogeneous/`](heterogeneous/) | 7 | QUMO | 7 / 0 |
 
 Every example with its origin, its original and what it reproduces: [`CATALOG.md`](CATALOG.md).
 

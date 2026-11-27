@@ -8,6 +8,10 @@ QUMO is a research prototype. Its version string is `0.4.0` (`build/qumo version
 
 ### Added
 
+- Example `examples/heterogeneous/discovery_loop/`: a toy version of the discovery loop of Shirobokov et al. ([arXiv:2611.09822](https://arxiv.org/abs/2611.09822)). A REINFORCE team and a rules-or-model team propose parallel Find-Any programs (five fields of data, no code); a separate verifier builds each as a QUMO program with a `while` loop and checks it against a hash-pinned specification; only verified programs enter the wiki. From independent searches (cost 0.967) it reaches 0.8185 to 0.8210 on five seeds (1/2 + 1/pi = 0.8183), and a planted shortcut is refused for wrong answers. The verifier tests at 7 to 18 qubits and proves nothing, the search space contains the paper's answer, and the paper's own loop is not reinforcement learning. Optionally reads the claimed constant from a clone of the authors' Lean repository, without checking the proof.
+
+### Added
+
 - `qumo.qec.distance`: `circuit_distance` and `verify_witness`, the exact circuit distance of a detector error model with hyperedges kept whole, by the weight-bounded search of Cheng, Guo and Pan ([arXiv:2611.08247](https://arxiv.org/abs/2611.08247), SI Sec. 5.1): exact when a completed threshold meets a verified witness, an interval when the node budget runs out. Certifies distance 3 and 5 for QUMO's surface-code memory circuits; d = 7 is out of reach of this minimal search. `tests/test_qec_distance.mojo` compares it with brute force on seeded random hypergraph models; `examples/error_correction/circuit_distance_exact.mojo` ([QEC](docs/QEC.md)). New error code QM-E740. (weekly job, 2026-11-27)
 
 ### Changed
