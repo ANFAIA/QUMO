@@ -6,6 +6,10 @@ QUMO is a research prototype. Its version string is `0.4.0` (`build/qumo version
 
 ## [Unreleased]
 
+### Added
+
+- Example `examples/algorithms/parallel_grover_find_any.mojo`: the parallel Find-Any program of Shirobokov et al. ([arXiv:2611.09822](https://arxiv.org/abs/2611.09822) v3, Appendix E.3, written from the operators in the authors' Lean files). m query slots share one register, the m parallel oracle calls give a phase of -1 to address tuples with an odd number of marked items, and a one-query weak measurement runs in a `while` loop until it hits. Exact state-vector checks at four sizes (7 to 18 qubits) and sampled program runs at two of them: every hit is an odd tuple, the probability of a hit is the same on each check, and every shot returns a marked item. The closed form tends to 1/2 + 1/pi rounds over (pi/4) sqrt(N/mk); at the simulated sizes it is 1.08 to 1.56, worse than that reference. Only Find-Any: not the paper's Find-All, arcsin or resource estimates, and its Lean proofs are not checked.
+
 ### Changed
 
 - The hardware plugin's `[ibm]` extra requires `qiskit-ibm-runtime>=0.50.1,<0.53` (it had no upper bound; 0.52.0 is a breaking release). The plugin tests pass on 0.51.0 and 0.52.1.
