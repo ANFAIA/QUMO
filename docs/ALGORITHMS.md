@@ -68,7 +68,7 @@ Run the tests and examples from the repo root:
 | `append_pauli_rotation(mut c, x, z, theta)` | Pauli string from symplectic masks | theta (one gate: RZ/RZZ/ladder+RZ) | basis change + CX ladder + RZ (TKET `PauliExpBox`, Qiskit `PauliEvolutionGate`) |
 | `append_pauli_exponential(mut c, term, t)` | | `exp(-i t c P)` (angle `2 c t`) | |
 | `pauli_exponential(term, num_qubits, time=1.0, param_name="")` | 0..num_qubits-1 | optional symbolic time | |
-| `trotter(h, time, steps, order=1, num_qubits=-1, param_name="")` | 0..n-1 | optional symbolic total time | Lie-Trotter (order 1), Strang (order 2) |
+| `trotter(h, time, steps, order=1, num_qubits=-1, param_name="", scheme="suzuki")` | 0..n-1 | optional symbolic total time | Lie-Trotter (order 1), Strang (order 2), Suzuki (even orders); `scheme="mo8_q21"`: 21-step order-8 formula (Maležič and Ostmeyer, arXiv:2611.27896) |
 | `hardware_efficient_ansatz(n, layers, entanglement="linear", rotations="ry,rz", prefix="theta")` | 0..n-1; entanglement `linear` / `circular` / `full` / `none` | `theta[k]`, k < n R (layers+1), layer-major, then qubit, then rotation | Kandala 2017, Qiskit `EfficientSU2` |
 | `append_entangler(mut c, n, entanglement)` | | none | |
 | `qaoa_ansatz(cost, p, num_qubits=-1)` | 0..n-1 | `gamma[0..p-1]`, `beta[0..p-1]` (that order) | Farhi et al., Qiskit `QAOAAnsatz`; any diagonal cost (ZZ -> one RZZ, Z -> RZ), mixer RX(2 beta) |
@@ -297,6 +297,18 @@ with `method="approx"`, bounds the L1 norm of the coefficients, which amplifies 
 noise (-1, 1.9648...). `mpf_expectation` post-processes Trotter expectations: on a
 4-qubit Ising chain steps 2, 3, 4 give error 4.5e-6, against 2.2e-2 for 4 steps alone.
 
+`trotter(..., order=8, scheme="mo8_q21")` replaces Suzuki's 125 Strang steps per step by the
+21 of Maležič and Ostmeyer ([arXiv:2611.27896](https://arxiv.org/abs/2611.27896), Table 3;
+`mo8_q21_weights()`, w_j = 2 c_j). It is order 8: from 2 to 4 steps the state error on a
+4-qubit Ising chain falls by 245 (tested), and at 126 against 125 Strang steps it is 2.7e5 times
+smaller than Suzuki's order 8 there. On the paper's XZ chain (L = 6, local ordering, t = 10,
+`examples/chemistry_and_physics/trotter_order8_cost.mojo`) it needs the fewest rotations for a
+state error of 1e-4, 1e-6 and 1e-8 (at 1e-6: 13020, against 22475 for Suzuki order 6 and 62000
+for order 8) and more than Suzuki order 4 at 1e-1 and 1e-2 (2604 against 1860, 3906 against 3100).
+These are noiseless results; the paper finds Strang the best choice at a two-qubit error rate of
+1e-3. The default stays `scheme="suzuki"`. Rotation counts are those `trotter` emits; the half
+steps where two Strang steps meet are not merged.
+
 ## Trotter error: a bound and an estimate (`trotter_error.mojo`)
 
 `trotter_error(h, time, steps, order=1, num_qubits=-1, norm="auto") -> TrotterError` gives two
@@ -410,7 +422,7 @@ Every error starts with a stable code and ends with a `Hint:` where a fix is kno
 | QM-E805 | `check_differentiable`, adjoint | circuit not differentiable (classical control, reset, noise, mid-circuit measurement) |
 | QM-E806 | `minimize`, `grad_method_from_name` | unknown optimiser or gradient method |
 | QM-E807 | `ground_state`, `dense_matrix`, `exact_spectrum`, `trotter_error(norm="exact")`, `Graph.max_cut`, `projected_hamiltonian`, `subspace_ground_energy` | problem too large for an exact / brute-force routine (subspaces: > 4096 basis states) |
-| QM-E808 | `trotter`, `trotter_error` | steps < 1, or an order `trotter` does not take (1 or even); `trotter_error` takes order 1 only |
+| QM-E808 | `trotter`, `trotter_error` | steps < 1, order not 1 or even, unknown `scheme`, or `scheme="mo8_q21"` with order other than 8; `trotter_error` takes order 1 only |
 | QM-E809 | `Graph` | self-loop, negative node, unparsable edge text |
 | QM-E810 | `qpe` | n_eval outside 1..16, empty unitary, state_prep too wide |
 
@@ -441,6 +453,9 @@ Every error starts with a stable code and ends with a `Hint:` where a fix is kno
   ancilla-free weight-phase circuit is not explicit: for n <= 31, and for the 31-qubit blocks it
   uses when n >= 32, the paper relies on generic exact synthesis, so no explicit circuit is given;
   and it is an unreviewed v1.
+* **Maležič and Ostmeyer, arXiv:2611.27896**: the 21-step order-8 composition of Table 3
+  (`trotter(..., 8, scheme="mo8_q21")`). Their 30-step generic scheme (Table 4) is not a product
+  of Strang steps and is not implemented.
 
 ## Limitations
 
