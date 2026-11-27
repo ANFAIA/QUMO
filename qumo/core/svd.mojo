@@ -27,12 +27,17 @@ are then the column norms of G and the left singular vectors its normalized colu
   QM-E431 (it has not happened in the tests; Jacobi converges quadratically).
 * Wide matrices (m < n) are decomposed through A^H, so the working matrix always has at least
   as many rows as columns.
-* A singular value that is exactly zero has no column of G to normalize; its left singular
-  vector is completed by Gram-Schmidt (two passes) against the other columns of U, so U has
-  orthonormal columns also for rank-deficient input.
 * The input is scaled by its largest entry modulus before the sweeps and the singular values
-  scaled back, so overflow does not occur; entries smaller than about 1e-154 times the largest
-  one underflow when squared and count as zero in the pivots.
+  scaled back, so overflow does not occur.
+* Negligible columns: a column of G whose norm falls below 1e-40 (of the scaled matrix) is not
+  rotated any more. In a rank-deficient matrix the columns that carry rounding noise shrink by
+  about 2^-52 per sweep; rotating them on into subnormal numbers made the complex phase of a
+  rotation lose its unit modulus, so the rotation was no longer unitary and the large singular
+  values went wrong (at 1e-6 in a case met by the MPS simulator). Such a column, and a column
+  that is exactly zero, has its left singular vector completed by Gram-Schmidt (two passes)
+  against the other columns of U, so U has orthonormal columns also for rank-deficient input.
+  Its singular value is the column norm as computed: below 1e-40 times the largest entry
+  modulus, with no relative accuracy.
 
 Bounds (QM-E430): min(m, n) <= SVD_MAX_MIN_DIM (1024) and m * n <= SVD_MAX_ENTRIES (2^22, 64 MiB
 of complex entries); entries must be finite. A sweep costs O(m n^2) flops for n <= m, so the
@@ -45,6 +50,7 @@ comptime SVD_MAX_MIN_DIM = 1024
 comptime SVD_MAX_ENTRIES = 1 << 22
 comptime SVD_MAX_SWEEPS = 60
 comptime SVD_EPS = 2.220446049250313e-16  # 2^-52
+comptime SVD_TINY = 1e-80  # squared column norm (input scaled to max |a_ij| = 1) below which a column is not rotated
 comptime CMATRIX_MAX_ENTRIES = 1 << 28
 
 
@@ -140,7 +146,7 @@ def _jacobi_sweeps(mut wr: List[Float64], mut wi: List[Float64], p: Int, q: Int,
                     b += yr * yr + yi * yi
                     cr += xr * yr + xi * yi  # conj(x) * y
                     ci += xr * yi - xi * yr
-                if a == 0.0 or b == 0.0:
+                if a < SVD_TINY or b < SVD_TINY:
                     continue
                 var cabs = sqrt(cr * cr + ci * ci)
                 if cabs <= tol * sqrt(a) * sqrt(b):
@@ -253,7 +259,7 @@ def svd(a: CMatrix) raises -> SVDResult:
         var j = order[t]
         var nj = norms[j]
         s[t] = nj * scale
-        if nj > 0.0:
+        if nj * nj >= SVD_TINY:
             var r = 1.0 / nj
             for i in range(p):
                 ur[t * p + i] = wr[j * p + i] * r

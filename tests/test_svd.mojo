@@ -182,6 +182,40 @@ def main() raises:
         check_known(s2, r, 1e-13, "rank 3")
         for t in range(3, 8):
             assert_true(r.s[t] <= 1e-13, "rank 3: trailing s = " + String(r.s[t]))
+    # Regression: a rank-2 4 x 4 matrix with two zero rows (a two-site block met by the MPS
+    # simulator). The noise columns shrank into subnormal numbers, the rotations stopped
+    # being unitary and s[1] came out 1e-6 off. Plus many random small rank-deficient
+    # matrices, with and without zero rows.
+    var s7: List[Float64] = [0.9, 0.35]
+    for trial in range(300):
+        var m7 = 2 + trial % 7
+        var n7 = 2 + (trial // 7) % 7
+        var r7 = 1 + trial % min(m7, n7)
+        var sk = List[Float64]()
+        for t in range(r7):
+            sk.append(1.0 / Float64(t + 1))
+        var a7 = known_spectrum(m7, n7, sk, rng)
+        if trial % 2 == 0 and m7 >= 3:  # zero every other row
+            for r in range(1, m7, 2):
+                for c in range(n7):
+                    a7.set(r, c, 0.0, 0.0)
+            var r7b = svd(a7)
+            check_valid(a7, r7b, 1e-12, "rank-deficient with zero rows")
+        else:
+            var r7b = svd(a7)
+            check_valid(a7, r7b, 1e-12, "rank-deficient")
+            check_known(sk, r7b, 1e-13, "rank-deficient")
+    var u8 = orthonormal_columns(2, 2, rng)
+    var v8 = orthonormal_columns(4, 2, rng)
+    var b8 = compose(u8, s7, v8)
+    var a8 = CMatrix(4, 4)
+    for c in range(4):
+        a8.set(0, c, b8.get_re(0, c), b8.get_im(0, c))
+        a8.set(2, c, b8.get_re(1, c), b8.get_im(1, c))
+    var r8 = svd(a8)
+    check_valid(a8, r8, 1e-13, "two zero rows")
+    check_known(s7, r8, 1e-14, "two zero rows")
+
     # Exactly zero singular values: zero columns, the zero matrix (U completed by Gram-Schmidt).
     var z = CMatrix(6, 4)
     for i in range(6):
