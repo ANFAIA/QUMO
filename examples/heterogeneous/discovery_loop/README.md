@@ -83,12 +83,21 @@ The space is small, so this says little about harder searches.
 |---|---|
 | policy updates, screening | CPU |
 | verifier shots (dynamic circuits) | CPU for these widths |
-| widest exact check (18 qubits) | GPU through `expectation_device` with a `make py-gpu` build; otherwise CPU. **The GPU path of this example has not been run** (no Metal toolchain on the test machine) |
+| widest exact check (18 qubits) | GPU through `expectation_device` with a `make py-gpu` build; otherwise CPU. On an Apple M5 (Metal, `fp32`, 2026-11-27, seeds 7 and 1) it differs from the model by 2e-6 to 3e-6; no NVIDIA or AMD GPU has been tried |
 | one attempt of the winner, N = 8 | vendor-neutral noisy QPU emulator; remote targets are refused |
 
 On the emulator (seed 7, 89 two-qubit gates), confirmed-but-wrong answers went from 0 without noise to 4.9%
 with it. The confirming query is itself noisy, so on hardware the returned address must be checked
 classically. The device stage runs one unrolled attempt, not the `while` loop.
+
+For the GPU build (on macOS it needs Xcode's Metal Toolchain: `xcodebuild -downloadComponent MetalToolchain`):
+
+```bash
+make py-gpu
+```
+```bash
+PYTHONPATH=build/gpu:plugins/hardware bench/.venv/bin/python examples/heterogeneous/discovery_loop/discovery_loop.py --seed 7
+```
 
 ## A model as the second team
 
