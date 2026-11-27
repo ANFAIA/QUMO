@@ -459,6 +459,7 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E737", "qec", "missing_detectors needs a Clifford circuit with at most 20000 measurements.", "Bind parameters and remove non-Clifford gates.")
     _e(c, "QM-E731", "qec", "Correlated matching needs error probabilities up to 0.5.", "Use plain 'mwpm' for this detector error model.")
     _e(c, "QM-E739", "qec", "apply_noise_model got a unitary gate of arity 3 (CCX, CSWAP, CCZ) while the noise model has gate errors; a 3-qubit gate has no gate-error rule.", "Decompose it into 1- and 2-qubit gates first (qumo.compiler.basis.unroll_3q, or transpile to a target without CCX), then add noise.")
+    _e(c, "QM-E740", "qec", "circuit_distance got an invalid argument (max_weight < 1 or node_limit < 1), a model with more than 64 observables or a negative detector id, or a mechanism whose ^ pieces do not XOR to its symptom.", "Use max_weight >= 1 and node_limit >= 1; running out of node_limit is not an error (status 'budget').")
     _e(c, "QM-E730", "ft", "A computational circuit given to encode() contains noise channels, QEC annotations or unbound symbolic parameters.", "Encode noiseless, QEC-agnostic, bound circuits; add noise with qumo.ft.emulate.add_noise; use the comparator circuit for run-time angles.")
     _e(c, "QM-E738", "ft", "Input outside the scope of the exact fault-tolerance check (qumo.ft.faults): non-CSS code or state, more than 64 qubits or measurements, a conditioned or unsupported operation, a random verification measurement, a state group too large, or more fault sets than max_fault_sets.", "Use a CSS code and a one-block preparation of reset, measure, H, S, SDG, X, Y, Z, CX, CZ whose verification measurements are deterministic; lower t or raise max_fault_sets.")
     # algorithms
@@ -469,7 +470,7 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E805", "algorithms", "Circuit not supported by the chosen gradient/analysis method.", "Use parameter-shift or bind the unsupported gates.")
     _e(c, "QM-E806", "algorithms", "Unknown optimizer or gradient method.", "Use one of the documented method names.")
     _e(c, "QM-E807", "algorithms", "Problem too large for an exact/brute-force routine.", "Reduce the size or use a variational method.")
-    _e(c, "QM-E808", "algorithms", "Invalid Trotterization options.", "steps >= 1, order 1 or even.")
+    _e(c, "QM-E808", "algorithms", "Invalid Trotterization options.", "steps >= 1, order 1 or even; scheme 'suzuki' (default) or 'mo8_q21', which needs order 8.")
     _e(c, "QM-E809", "algorithms", "Invalid graph specification.", "Edges are 'i-j' pairs of distinct non-negative nodes.")
     _e(c, "QM-E816", "algorithms", "Invalid SQD policy or trim settings.", "policy 'standard' or 'trim', ratios in (0, 1].")
     _e(c, "QM-E817", "algorithms", "Invalid multi-product formula: step counts must be distinct and positive, with a feasible L1 bound.", "Use distinct steps; 'approx' needs max_l1 >= 1.")
