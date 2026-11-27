@@ -240,7 +240,7 @@ The defaults of `sample`, `run` and `transpile` are those of the command line.
 | `ghz(n, measure=False)`, `qft(n, do_swaps=True)` | `Circuit` |
 | `hardware_efficient_ansatz(n, layers=1, entanglement="linear", rotations="ry,rz")` | parametric `Circuit` |
 | `qaoa_maxcut_ansatz(edges, p=1)`, `uccsd_ansatz(num_qubits, num_electrons)`, `h2_ansatz()` | parametric `Circuit` |
-| `trotter(hamiltonian, time, steps=1, order=1, num_qubits=None)` | `Circuit` |
+| `trotter(hamiltonian, time, steps=1, order=1, num_qubits=None, scheme="suzuki")` | `Circuit` |
 
 Optimiser names are in `qumo.OPTIMIZERS`; `grad` is `"adjoint"`,
 `"parameter-shift"` or `"finite-diff"`. Hamiltonians are plain lists, so

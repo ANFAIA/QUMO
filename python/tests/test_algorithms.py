@@ -105,3 +105,14 @@ def test_circuit_library():
     step = qumo.trotter("Z0 Z1 + 0.5 * X0", time=0.3, steps=4, order=2)
     exact = qumo.statevector(qumo.trotter("Z0 Z1 + 0.5 * X0", time=0.3, steps=200, order=2))
     assert abs(np.vdot(exact, qumo.statevector(step))) > 0.9999
+    # order 8, 21 Strang steps (arXiv:2611.27896 Table 3), against exp(-iHt) by diagonalisation
+    z = np.diag([1.0, -1.0])
+    x = np.array([[0.0, 1.0], [1.0, 0.0]])
+    ham = np.kron(z, z) + 0.5 * np.kron(np.eye(2), x)  # qubit 0 is the low bit
+    vals, vecs = np.linalg.eigh(ham)
+    psi = vecs @ (np.exp(-0.3j * vals) * vecs.conj()[0])
+    mo8 = qumo.trotter("Z0 Z1 + 0.5 * X0", time=0.3, steps=1, order=8, scheme="mo8_q21")
+    assert abs(abs(np.vdot(psi, qumo.statevector(mo8))) - 1.0) < 1e-12
+    with pytest.raises(qumo.QumoError) as err:
+        qumo.trotter("Z0 Z1", time=0.3, order=6, scheme="mo8_q21")
+    assert err.value.code == "QM-E808"

@@ -10,7 +10,9 @@ from qumo.sim.rng import Rng
 from qumo.algorithms.hamiltonians import (
     Graph, fermi_hubbard, exact_spectrum, exact_evolve, transverse_field_ising, subspace_ground_energy,
 )
-from qumo.algorithms.library import trotter, suzuki_weights
+from qumo.algorithms.library import trotter, suzuki_weights, mo8_q21_weights
+from qumo.ir.gates import Op
+from qumo.ir.json import circuit_to_json
 from qumo.algorithms.qgeometry import lie_closure
 from qumo.algorithms.iqp import IqpModel, append_iqp, iqp_expval
 from qumo.algorithms.mpf import mpf_coefficients, mpf_expectation
@@ -221,6 +223,73 @@ def test_suzuki() raises:
     print("  Suzuki orders 4 and 6 scale as expected")
 
 
+def _rotations(c: Circuit) -> Int:
+    """Pauli exponentials in a trotter() circuit: each one is a single RZ or RZZ."""
+    var k = 0
+    for g in c.ops:
+        if g.kind == Op.RZ or g.kind == Op.RZZ:
+            k += 1
+    return k
+
+
+def _e808(h: PauliSum, order: Int, scheme: String) raises -> Bool:
+    try:
+        _ = trotter(h, 1.0, 1, order, 4, "", scheme)
+    except e:
+        return String(e).startswith("QM-E808")
+    return False
+
+
+def test_mo8_q21() raises:
+    """21-step order-8 composition of arXiv:2611.27896, Table 3."""
+    var w = mo8_q21_weights()
+    assert_equal(len(w), 21, "21 Strang steps")
+    for j in range(21):
+        assert_true(w[j] == w[20 - j], "palindrome at j = " + String(j))
+    var s1 = 0.0
+    var s3 = 0.0
+    var s5 = 0.0
+    var s7 = 0.0
+    var s9 = 0.0
+    for x in w:
+        s1 += x
+        s3 += x * x * x
+        s5 += x * x * x * x * x
+        s7 += x * x * x * x * x * x * x
+        s9 += x * x * x * x * x * x * x * x * x
+    # every single-digit error at or above the 15th decimal of one c_j moves s1 by >= 1.7e-15
+    assert_true(abs(s1 - 1.0) <= 8e-16, "sum w = 1: " + String(s1 - 1.0))
+    assert_true(abs(s3) <= 1e-16, "sum w^3 = 0: " + String(s3))
+    assert_true(abs(s5) <= 1e-16, "sum w^5 = 0: " + String(s5))
+    assert_true(abs(s7) <= 1e-16, "sum w^7 = 0: " + String(s7))
+    assert_true(abs(s9) > 1e-6, "sum w^9 != 0, so the order is 8 and not 10: " + String(s9))
+    var n = 4
+    var h = transverse_field_ising(n, 1.0, 0.8)
+    var prep = StateVector(n)
+    var t = 1.0
+    var exact = exact_evolve(h, prep, t)
+    # order 8: doubling the steps divides the state error by about 2^8
+    var a = state_error(evolve(trotter(h, t, 2, 8, n, "", "mo8_q21")), exact)
+    var b = state_error(evolve(trotter(h, t, 4, 8, n, "", "mo8_q21")), exact)
+    assert_true(a / b > 256.0 / 3.0 and a / b < 256.0 * 3.0, "order 8 scaling " + String(a / b))
+    # one step emits 21 Strang steps of 2 * 7 - 1 exponentials
+    var one = trotter(h, t, 1, 8, n, "", "mo8_q21")
+    assert_equal(_rotations(one), 21 * (2 * len(h.terms) - 1), "rotations per step")
+    # equal cost: 6 steps (126 Strang steps) against one Suzuki step of order 8 (125)
+    var mo8 = state_error(evolve(trotter(h, t, 6, 8, n, "", "mo8_q21")), exact)
+    var suz8 = state_error(evolve(trotter(h, t, 1, 8, n)), exact)
+    assert_true(mo8 < suz8 / 1000.0, "126 Strang steps: mo8_q21 " + String(mo8) + " against Suzuki-8 " + String(suz8))
+    # the default is Suzuki, and scheme="suzuki" changes nothing
+    for order in [1, 2, 4, 8]:
+        var d = circuit_to_json(trotter(h, t, 3, order, n))
+        var s = circuit_to_json(trotter(h, t, 3, order, n, "", "suzuki"))
+        assert_true(d == s, "default scheme is suzuki at order " + String(order))
+    assert_true(_e808(h, 6, "mo8_q21"), "mo8_q21 needs order 8")
+    assert_true(_e808(h, 1, "mo8_q21"), "mo8_q21 is not an order-1 formula")
+    assert_true(_e808(h, 8, "yoshida8"), "unknown scheme")
+    print("  mo8_q21: order 8, error", mo8, "against Suzuki-8", suz8, "at 126 vs 125 Strang steps")
+
+
 def test_pub_split() raises:
     var c = Circuit(3)
     var th = c.parameters("t", 3)
@@ -323,6 +392,7 @@ def main() raises:
     test_iqp()
     test_mpf()
     test_suzuki()
+    test_mo8_q21()
     test_pub_split()
     test_trim_sqd()
     print("test_algorithms_tier1 OK")

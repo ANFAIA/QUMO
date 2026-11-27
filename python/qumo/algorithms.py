@@ -220,7 +220,12 @@ def h2_ansatz() -> Circuit:
     return Circuit.from_native(_call(_q.h2_ansatz))
 
 
-def trotter(hamiltonian, time: float, steps: int = 1, order: int = 1, num_qubits: int | None = None) -> Circuit:
-    """Trotter-Suzuki circuit for ``exp(-i H time)`` (`order` 1, 2 or 4)."""
+def trotter(hamiltonian, time: float, steps: int = 1, order: int = 1, num_qubits: int | None = None,
+            scheme: str = "suzuki") -> Circuit:
+    """Product-formula circuit for ``exp(-i H time)``: `order` 1 or any even order (Suzuki).
+
+    ``scheme="mo8_q21"`` (with ``order=8``) uses the 21-step order-8 formula of
+    Maležič and Ostmeyer, arXiv:2611.27896, Table 3, instead of Suzuki's 125 steps.
+    """
     return Circuit.from_native(_call(_q.trotter, _observable(hamiltonian), float(time), steps, order,
-                                     0 if num_qubits is None else num_qubits))
+                                     0 if num_qubits is None else num_qubits, scheme))
