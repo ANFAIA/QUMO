@@ -13,6 +13,7 @@ qumo/algorithms/
   variational.mojo   VQE, QAOA-MaxCut, parameter sweeps / landscapes
   linalg.mojo        state-vector BLAS-1, Jacobi eigensolver, tridiagonal bisection, the Lanczos recurrence (`lanczos`)
   mitigation.mojo    zero-noise extrapolation: unitary folding, Richardson/poly/exp extrapolation, ZNE driver
+  trotter_error.mojo first-order Trotter error: rigorous commutator bound and leading-order estimate
 ```
 
 Run the tests and examples from the repo root:
@@ -21,6 +22,7 @@ Run the tests and examples from the repo root:
 .venv/bin/mojo run -I . tests/test_algorithms.mojo     # prints "test_algorithms OK"
 .venv/bin/mojo run -I . tests/test_algorithms_ext.mojo # permutation oracles, order finding, subspace projection
 .venv/bin/mojo run -I . tests/test_mitigation.mojo     # folding + zero-noise extrapolation
+.venv/bin/mojo run -I . tests/test_trotter_error.mojo  # Trotter bound and estimate against dense exact errors
 .venv/bin/mojo run -I . examples/chemistry_and_physics/vqe_h2.mojo
 .venv/bin/mojo run -I . examples/optimization/qaoa_maxcut.mojo
 .venv/bin/mojo run -I . examples/algorithms/grover.mojo
@@ -295,6 +297,49 @@ with `method="approx"`, bounds the L1 norm of the coefficients, which amplifies 
 noise (-1, 1.9648...). `mpf_expectation` post-processes Trotter expectations: on a
 4-qubit Ising chain steps 2, 3, 4 give error 4.5e-6, against 2.2e-2 for 4 steps alone.
 
+## Trotter error: a bound and an estimate (`trotter_error.mojo`)
+
+`trotter_error(h, time, steps, order=1, num_qubits=-1, norm="auto") -> TrotterError` gives two
+numbers for the circuit `trotter(h, time, steps, order=1)`, in its term order (terms[0] applied
+first; reordering the terms changes both). With tau = time / steps and
+C_p = -(i/2) sum_{q<p} [H_p, H_q] (`trotter_commutators(h)`, real Pauli sums built with
+`pauli_half_commutator` of `qumo.ir.pauli`):
+
+| field | value | what it is |
+|---|---|---|
+| `bound` | steps * alpha_1 * tau^2, alpha_1 = sum_p \|\|C_p\|\| | **rigorous** upper bound on \|\|e^{-iHt} - S(tau)^steps\|\| (spectral norm), for every time and step count |
+| `estimate` | steps * \|\|C_1 + ... + C_m\|\| * tau^2 | **estimate, not a bound**: the leading term of the error, exact as tau -> 0 |
+
+The bound is the first-order commutator bound of Childs, Su, Tran, Wiebe and Zhu (PRX 11, 011020,
+2021), eq. 6 of Dion and D'Anjou ([arXiv:2611.33438](https://arxiv.org/abs/2611.33438)); the
+estimate is that paper's phase-operator term ||Phi_2|| tau^2 (eq. 16, 19-20). estimate <= bound
+always, with equality for two terms. `norm`: `"l1"` (sum of |coefficients|, an upper bound at
+any size), `"exact"` (dense eigenvalues, n <= 7; the bound adds 1e-12 times the L1 norm for the
+eigensolver's rounding), `"auto"` (exact up to 7 qubits). No Lanczos norm is used: a Ritz value
+is a lower bound on the norm.
+
+How far the estimate can be from the true error (deep review of the paper, 2026-11-27, numpy
+`expm`, independent of QUMO): over one step, the true error exceeded the estimate in 32% of 300
+random Pauli Hamiltonians at tau ||H|| = 0.003 (by under 0.1%, since it is exact to leading order), 3% at
+tau ||H|| = 1 (up to 1.29x) and 1.1% at tau ||H|| = 2 (up to 1.57x), with a 4.1x outlier in another
+sample. Over many steps the true error usually falls below the estimate (0.88x at 6152 steps in
+the example); the paper's argument that it becomes a per-step bound for many steps is a
+heuristic, and needed 10 to 30 steps in the worst cases. `tests/test_trotter_error.mojo` checks
+the bound against dense exact errors on 48 seeded random Hamiltonians (2 to 4 qubits, 3 to 16
+random Pauli strings, 1, 2 and 5 steps, t ||H||_1 from 0.1 to 6): never exceeded, max ratio
+0.99998; the estimate was exceeded by up to 1.047x there.
+
+Example (`examples/chemistry_and_physics/trotter_error_bound.mojo`): an open 6-qubit XXZ chain
+with a field (21 terms) has alpha_1 / ||Phi_2|| = 2.94. For an error of 1e-3 at t = 1 the bound
+asks for 20595 steps, the estimate for 7006, and the true minimum is 6152. For the 3-term guide
+Hamiltonian (`hamiltonian_simulation_guide.mojo`) the guide's 0.54 / 2 = 0.27 is already
+alpha_1 and equals ||Phi_2||.
+
+Not implemented: order 2 and higher (`order != 1` raises QM-E808). The paper's second-order
+bound (eq. 7) is exceeded by the true error in tests when read with the ordering of its eq. 4 (up
+to 2.0x), and its eq. 18 (second-order Phi_3 = 1/4 of the first-order one) could not be
+reproduced, so neither is shipped.
+
 ## Lattice models
 
 `Graph.square_lattice(rows, cols, periodic)`, `Graph.triangular_lattice(rows, cols)`
@@ -358,14 +403,14 @@ Every error starts with a stable code and ends with a `Hint:` where a fix is kno
 
 | Code | Raised by | Meaning |
 |---|---|---|
-| QM-E801 | `hardware_efficient_ansatz`, `append_entangler`, excitations, `modmul_permutation`, mitigation | invalid option (unknown entanglement / rotation, wrong orbital ordering, gcd(a, N) != 1, folding scale < 1 or an unfoldable circuit, unknown folding / extrapolation method, data an exponential fit cannot take) |
+| QM-E801 | `hardware_efficient_ansatz`, `append_entangler`, excitations, `modmul_permutation`, mitigation, `trotter_error` (unknown norm) | invalid option (unknown entanglement / rotation, wrong orbital ordering, gcd(a, N) != 1, folding scale < 1 or an unfoldable circuit, unknown folding / extrapolation method, data an exponential fit cannot take) |
 | QM-E802 | builders, `h2_sto3g`, model Hamiltonians, permutation oracles, subspace projection, extrapolation | invalid size or index (n out of range, marked item outside search space, duplicate marked item, missing ancillas, perm not a permutation of 2^k entries, duplicate / out-of-range basis states, mismatched or too few extrapolation points) |
 | QM-E803 | `PauliOperator`, `ExpectationEngine`, `append_pauli_rotation` | Hamiltonian / Pauli string acts on more qubits than the circuit/state |
 | QM-E804 | `ExpectationEngine`, optimisers, sweeps | parameter vector length or parameter index mismatch |
 | QM-E805 | `check_differentiable`, adjoint | circuit not differentiable (classical control, reset, noise, mid-circuit measurement) |
 | QM-E806 | `minimize`, `grad_method_from_name` | unknown optimiser or gradient method |
-| QM-E807 | `ground_state`, `dense_matrix`, `exact_spectrum`, `Graph.max_cut`, `projected_hamiltonian`, `subspace_ground_energy` | problem too large for an exact / brute-force routine (subspaces: > 4096 basis states) |
-| QM-E808 | `trotter` | steps < 1 or order not in {1, 2} |
+| QM-E807 | `ground_state`, `dense_matrix`, `exact_spectrum`, `trotter_error(norm="exact")`, `Graph.max_cut`, `projected_hamiltonian`, `subspace_ground_energy` | problem too large for an exact / brute-force routine (subspaces: > 4096 basis states) |
+| QM-E808 | `trotter`, `trotter_error` | steps < 1, or an order `trotter` does not take (1 or even); `trotter_error` takes order 1 only |
 | QM-E809 | `Graph` | self-loop, negative node, unparsable edge text |
 | QM-E810 | `qpe` | n_eval outside 1..16, empty unitary, state_prep too wide |
 

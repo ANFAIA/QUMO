@@ -112,6 +112,7 @@ Versions: Qiskit 2.6.1, qiskit-ibm-runtime 0.51, Aer 0.18.2, pytket 2.18.5, tket
 | PUB `split` | Braket 1.120 | done, `split_pub`, seeds follow the original index |
 | MPF | qiskit-addon-mpf | done, `qumo.algorithms.mpf` |
 | Suzuki orders above 2 | PennyLane, CUDA-Q Algorithms | done, `trotter(order=4, 6, ...)` |
+| First-order Trotter error: rigorous bound and leading-order estimate (`trotter_error`) | Dion and D'Anjou, arXiv:2611.33438 (eq. 6, 16, 19-20; eq. 6 is Childs et al., PRX 11, 011020); research-watch 2026-11-27 | done, `qumo.algorithms.trotter_error`, [ALGORITHMS](ALGORITHMS.md); example `examples/chemistry_and_physics/trotter_error_bound.mojo`. Order 1 only: the paper's eq. 7 (second-order bound) is exceeded in tests as printed, and eq. 18 could not be reproduced; the estimate is labelled as not a bound |
 | Arithmetic, QROM | QDK 1.25-1.31, PennyLane | deferred |
 | LCU, qubitization, QSVT | CUDA-Q Algorithms, PennyLane, Qibo | deferred |
 | Classical shadows, tomography | Qibo 0.3.6 | deferred |
