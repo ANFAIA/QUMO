@@ -6,7 +6,7 @@ Appendices B and C): teams propose programs, a verifier they cannot edit checks 
 specification, and only verified programs enter a shared wiki.
 
 The task is the paper's parallel Find-Any search. The straight (non-learning) form of the winning program is
-[`examples/algorithms/parallel_grover_find_any.mojo`](https://github.com/ANFAIA/QUMO/pull/99).
+`examples/algorithms/parallel_grover_find_any.mojo` (added by a separate pull request, #99).
 
 ```bash
 make py
