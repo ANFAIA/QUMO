@@ -6,6 +6,10 @@ QUMO is a research prototype. Its version string is `0.4.0` (`build/qumo version
 
 ## [Unreleased]
 
+### Added
+
+- Example `examples/compilation/clocked_processor.mojo`: the noise-free, single-qubit routing construction of Sec. 2.1.1 of Pattison, Haah and Preskill ([arXiv:2611.23919](https://arxiv.org/abs/2611.23919) v1). Six logical qubits flow along two rings past fixed H and T gates, and a program only chooses which SWAPs route them; three programs are compared amplitude by amplitude with the 6-qubit logical circuit. As read here, equation (1) drives the entry and exit SWAPs with one bit, which reaches 16 of the 64 one-pass H programs (every bit stream of up to W + 4 cycles); the example uses one bit per station, which reaches all 64. No error correction, no CS gate, and nothing of the paper's threshold theorem is checked.
+
 ### Changed
 
 - The hardware plugin's `[ibm]` extra requires `qiskit-ibm-runtime>=0.50.1,<0.53` (it had no upper bound; 0.52.0 is a breaking release). The plugin tests pass on 0.51.0 and 0.52.1.
