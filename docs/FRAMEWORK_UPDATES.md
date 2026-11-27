@@ -97,6 +97,7 @@ review are in [their own section](#candidates-of-the-2026-11-26-review).
 | BP+OSD, Relay-BP, BB codes | cudaq-qec 0.5-0.8 | deferred |
 | QRE v3 Pareto estimator, tiered estimator | QDK 1.28-1.33, `pennylane.estimator`, CUDA-Q Logical | deferred |
 | Colour codes, chunks, flows | Stim, Chromobius | deferred |
+| Exact error of small magic-state factories (3 T to CS, 8-input CCZ, 9-input T) | Balada Gaggioli and Marecek, arXiv:2610.31115; research-watch 2026-11-27 | done as an example, `examples/error_correction/magic_state_distillation_exact.mojo`, [QEC](QEC.md). Polynomials and harmful counts confirmed by state-vector enumeration; optimality claims, larger factories and 15-to-1 not checked; `resources.mojo` unchanged |
 | 15-to-1 distillation gadget | guppyft PR 483 | deferred, unreleased upstream |
 | Parallel fused MWPM | NV-Fusion | deferred |
 | `ChainedDecoder`, DEM options | cudaq-qec | deferred |
