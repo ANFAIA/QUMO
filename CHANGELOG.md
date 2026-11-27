@@ -6,6 +6,10 @@ QUMO is a research prototype. Its version string is `0.4.0` (`build/qumo version
 
 ## [Unreleased]
 
+### Fixed
+
+- Writing a deep classical expression to OpenQASM 3 (and drawing it) no longer recurses: `to_qasm` and `draw_program` walk the expression with an explicit stack. The old guard (QM-E552 beyond 16384 levels) sat above the real stack limit on Linux x86-64 with Mojo 1.2.0, where `tests/test_program_surfaces.mojo` segfaulted before the guard fired (#94). There is no depth limit on writing any more; the output is unchanged (byte-identical to the old emitter on 6000 random expressions, errors included).
+
 ### Changed
 
 - Version string `0.4.0` (was `0.3.0`), after #78 to #86: `build/qumo version`, the MCP server info, `qumo.__version__`, `pyproject.toml` and `CITATION.cff`.
