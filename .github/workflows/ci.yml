@@ -9,8 +9,9 @@
 #   nightly   (nightly, push to main, manual): the full Mojo suite, the GPU test files on the CPU, the slow RL
 #             tests, GPU cross-compilation, the examples, every Python test (make test-py: package, examples
 #             runner, hardware plugins) and the agent layer tests (make test-agents). Runs only when the change is merged or on schedule.
-#   nightly-linux (nightly, experimental): the full suite on ubuntu-latest (x86-64). UNVERIFIED on Linux:
-#             allowed to fail (continue-on-error) until someone has seen it pass.
+#   nightly-linux (nightly, push to main, manual): make cli and the full Mojo suite (make test) on
+#             ubuntu-latest (x86-64). A failure fails the run. It does not run make py, make test-py,
+#             the GPU checks or the examples, which run on macOS only.
 #
 # Platforms: macos-15 (Apple silicon) is what QUMO is developed on. The pull-request jobs run only there.
 # The GPU test files (tests/test_gpu*.mojo) are not run on pull requests: they need a device for the real
@@ -205,10 +206,9 @@ jobs:
           if-no-files-found: ignore
 
   nightly-linux:
-    name: nightly (full suite, ubuntu-latest, experimental)
+    name: nightly (full suite, ubuntu-latest)
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    continue-on-error: true   # UNVERIFIED on Linux: see the header
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
