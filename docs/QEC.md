@@ -243,6 +243,41 @@ surface d = 7 graph (337 nodes) and 25 ms for d = 11 (1321 nodes) on one laptop 
 
 Not implemented: sector reduction, rank DP, time collapse, lifting, symmetry, and the dual ascent.
 
+### Magic-state factory error by fault enumeration (example)
+
+`examples/error_correction/magic_state_distillation_exact.mojo` computes the exact acceptance and
+output error of three small factories from Balada Gaggioli and Marecek, arXiv:2610.31115: 3 T to
+CS|++>, the 8-input CCZ cube factory, and the 9-input T factory of their Proposition 7. No library
+code is added; the example uses `Circuit`, `evolve` and `StateVector`.
+
+Noise model (the paper's): each input |T> = (|0> + e^{i pi/4}|1>)/sqrt(2) is replaced by Z|T> with
+probability p, independently; Cliffords, Pauli measurements and decoding are ideal. For every one of
+the 2^n fault patterns the example prepares the noisy inputs, projects onto the code by applying
+(I + g)/2 per stabilizer, and records the accepted weight a_e and the part h_e that is not the
+target. Weighting by p^|e| (1-p)^(n-|e|) and summing is the exact density-matrix result, and
+eps = sum w h / sum w a is the error conditional on acceptance.
+
+What it confirms (CHECK lines, all against the simulation):
+
+| Factory | Fault-free acceptance | eps(p) | Checked how |
+|---|---|---|---|
+| 3 T to CS | 1/2 | 3p(1-p) | exact, at four p |
+| 9-input T (Prop. 7) | 1/128 | N(p)/D(p), (27/2) p^2 + O(p^3) | acceptance D/256 and harmful weight N/256 at four p, harmful counts 36, 45, 90, 75, 76, 15, 6, 1 at weights 2 to 9 |
+| 8-input CCZ | 1/16 (single-code form), 1 (circuit form) | 28 p^2 + O(p^3) | odd weights rejected, all 28 weight-2 patterns harmful, p^2 coefficient 28 |
+
+The CCZ factory is built twice. The paper's single-code form (X on even and Y on odd cube
+vertices, Z on four faces; the rendered text gives no signs, and + is the choice with G_00 = 1/16)
+postselects every stabilizer outcome. The circuit form puts data a, b, c and a check qubit in |+>,
+applies T or T^dag on the eight parities u.(a,b,c) xor check (their phases sum to CCZ on the data
+and the identity on the check) and keeps the run when the check reads + in X. It accepts the
+fault-free run always, and is compared with CCZ|+++> built by a separate circuit. Both forms reject
+and harm the same patterns, so their eps(p) agree; the harmful counts are 28, 56 and 28 at
+weights 2, 4 and 6, and eps(0.001) = 2.806e-5.
+
+Not checked: the paper's optimality and lower-bound claims (from code searches), the 36- and
+48-input CCZ factories, and the 15-to-1 figure 35 p^3. The p_out = 35 p_in^3 used by
+`qumo.compiler.resources` is unchanged and is not tested by this example.
+
 ## Decoders (`qumo.qec.decoders`)
 
 ```mojo

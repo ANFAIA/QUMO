@@ -46,6 +46,7 @@ For research use: the reference by module below, [EXTENDING](EXTENDING.md), the 
 - [ARCHITECTURE](ARCHITECTURE.md): layers and design decisions.
 - [ANALYSIS](ANALYSIS.md): analysis of the 8 reference frameworks and the synthesis.
 - [FRAMEWORK_UPDATES](FRAMEWORK_UPDATES.md): features tracked across frameworks (done, deferred, skipped).
+- [TSIM_BLOQADE_PLAN](TSIM_BLOQADE_PLAN.md): research on tsim and bloqade-analog and a proposed integration (nothing implemented).
 - [QILISDK_MAPPING](QILISDK_MAPPING.md): qilisdk to QUMO mapping.
 
 ## Benchmarks

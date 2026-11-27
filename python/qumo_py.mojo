@@ -2057,8 +2057,9 @@ def py_h2_ansatz() raises -> PythonObject:
 
 
 def py_trotter(observable: PythonObject, time: PythonObject, steps: PythonObject, order: PythonObject,
-               num_qubits: PythonObject) raises -> PythonObject:
-    return _wrap(trotter(_pauli(observable), Float64(py=time), Int(py=steps), Int(py=order), Int(py=num_qubits)))
+               num_qubits: PythonObject, scheme: PythonObject) raises -> PythonObject:
+    return _wrap(trotter(_pauli(observable), Float64(py=time), Int(py=steps), Int(py=order), Int(py=num_qubits), "",
+                         String(py=scheme)))
 
 
 def _experiment_dict(r: ExperimentResult) raises -> PythonObject:
@@ -2327,7 +2328,7 @@ def PyInit_qumo_py() abi("C") -> PythonObject:
         m.def_function[py_qaoa_maxcut_ansatz]("qaoa_maxcut_ansatz", docstring="qaoa_maxcut_ansatz(num_nodes, edges, p) -> Circuit\n\nQAOA ansatz for MaxCut; parameters gamma[0..p-1], beta[0..p-1].")
         m.def_function[py_uccsd_ansatz]("uccsd_ansatz", docstring="uccsd_ansatz(num_qubits, num_electrons) -> Circuit\n\nUCCSD ansatz (Jordan-Wigner).")
         m.def_function[py_h2_ansatz]("h2_ansatz", docstring="h2_ansatz() -> Circuit\n\nOne-parameter ansatz for 4-qubit H2.")
-        m.def_function[py_trotter]("trotter", docstring="trotter(observable, time, steps, order, num_qubits) -> Circuit\n\nTrotter-Suzuki circuit of exp(-i H time); order 1, 2 or 4; num_qubits <= 0 = from the observable.")
+        m.def_function[py_trotter]("trotter", docstring="trotter(observable, time, steps, order, num_qubits, scheme) -> Circuit\n\nTrotter-Suzuki circuit of exp(-i H time); order 1 or any even order; num_qubits <= 0 = from the observable; scheme 'suzuki' or 'mo8_q21' (order 8, arXiv:2611.27896).")
         m.def_function[py_memory_experiment]("memory_experiment", docstring="memory_experiment(code, distance, rounds, p, shots, decoder, seed, max_errors) -> dict\n\nQEC memory experiment: sampling and decoding fused natively over all cores, no per-shot data in Python. code: 'surface_z' | 'surface_x' | 'repetition'; rounds < 1 = distance; decoder: 'mwpm' | 'mwpm_correlated' | 'mwpm_dense' | 'uf' | 'lookup'; max_errors > 0 stops early. Returns shots, errors, logical_error_rate, std_error, wilson, per_round_error_rate, seconds, ...")
         m.def_function[py_threshold_sweep]("threshold_sweep", docstring="threshold_sweep(code, distances, ps, shots, decoder, seed, max_errors, rounds) -> dict\n\nGrid of memory experiments. Lists of len(distances) * len(ps) values, distance-major: shots, errors, logical_error_rate, std_error, wilson_lo, wilson_hi, per_round_error_rate, seconds, rounds.")
         var mod = m.finalize()
