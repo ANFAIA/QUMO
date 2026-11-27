@@ -270,42 +270,75 @@ struct MatchingGraph(Copyable, Writable):
         return self.eu[e] + self.ev[e] - v
 
     def graphlike_distance(self) -> Int:
-        """Fewest graph-like errors forming an undetectable logical error (flipping
-        observable 0); -1 if none. BFS over (node, observable parity) states."""
+        """Graph-like distance of this matching graph: the fewest edges whose XOR
+        flips no detector and flips at least one observable; -1 if no such set.
+
+        Such an edge set has even degree at every detector (and so at the
+        boundary), so it splits into cycles and one of them flips some
+        observable k an odd number of times. The answer is therefore the shortest
+        cycle with odd observable-k parity, minimised over k. For each k it runs
+        a BFS over (node, parity) states from every start node, boundary first:
+        the shortest odd closed walk from s bounds a logical from above, and
+        the start that lies first on a shortest odd cycle finds it exactly.
+        Nodes already used as a start are skipped by later searches (every odd
+        cycle through them was already found).
+
+        It counts edges of the graph, not DEM mechanisms. A hyperedge enters as
+        its decomposition pieces (each piece is one edge), parallel errors are
+        merged into one edge (with conflicting observables only one survives,
+        `num_conflicts`), undecomposable hyperedges are dropped (`num_dropped`)
+        and mechanisms without detectors are skipped (`num_undetectable`). So the
+        result is neither a lower nor an upper bound on the circuit distance in
+        general; `qumo.qec.distance.circuit_distance` gives that. On a model
+        whose errors all have at most two detectors and no `^` pieces, on
+        distinct detector pairs, with no undetectable mechanism, the two are
+        equal (checked against brute force in tests/test_qec.mojo)."""
         var nn = self.num_nodes()
+        var flips: UInt64 = 0
+        for o in self.eobs:
+            flips |= o
+        var order = List[Int](capacity=nn)
+        order.append(self.boundary)
+        for v in range(self.num_detectors):
+            order.append(v)
         var best = -1
-        var starts = List[Int]()
-        if self.adj_off[self.boundary + 1] > self.adj_off[self.boundary]:
-            starts.append(self.boundary)
-        else:
-            for v in range(nn):
-                starts.append(v)
         var dist = List[Int](length=2 * nn, fill=-1)
+        var done = List[Bool](length=nn, fill=False)
         var queue = List[Int]()
-        for s in starts:
-            for i in range(2 * nn):
-                dist[i] = -1
-            queue.clear()
-            dist[2 * s] = 0
-            queue.append(2 * s)
-            var head = 0
-            while head < len(queue):
-                var st = queue[head]
-                head += 1
-                var v = st >> 1
-                var par = st & 1
-                if best >= 0 and dist[st] >= best:
-                    break
-                for a in range(self.adj_off[v], self.adj_off[v + 1]):
-                    var e = self.adj_edge[a]
-                    var w = self.other(e, v)
-                    var np = par ^ Int(self.eobs[e] & 1)
-                    var ns = 2 * w + np
-                    if dist[ns] < 0:
-                        dist[ns] = dist[st] + 1
-                        queue.append(ns)
-            if dist[2 * s + 1] >= 0 and (best < 0 or dist[2 * s + 1] < best):
-                best = dist[2 * s + 1]
+        for k in range(64):
+            if ((flips >> UInt64(k)) & 1) == 0:
+                continue
+            for v in range(nn):
+                done[v] = False
+            for s in order:
+                if self.adj_off[s + 1] == self.adj_off[s]:
+                    done[s] = True
+                    continue
+                queue.clear()
+                dist[2 * s] = 0
+                queue.append(2 * s)
+                var head = 0
+                while head < len(queue):
+                    var st = queue[head]
+                    head += 1
+                    if best >= 0 and dist[st] + 1 >= best:
+                        break  # every closed walk still to be found is >= best
+                    var v = st >> 1
+                    var par = st & 1
+                    for a in range(self.adj_off[v], self.adj_off[v + 1]):
+                        var e = self.adj_edge[a]
+                        var w = self.other(e, v)
+                        if done[w]:
+                            continue
+                        var ns = 2 * w + (par ^ Int((self.eobs[e] >> UInt64(k)) & 1))
+                        if dist[ns] < 0:
+                            dist[ns] = dist[st] + 1
+                            queue.append(ns)
+                if dist[2 * s + 1] >= 0 and (best < 0 or dist[2 * s + 1] < best):
+                    best = dist[2 * s + 1]
+                for st in queue:  # reset only the states this search touched
+                    dist[st] = -1
+                done[s] = True
         return best
 
     def write_to(self, mut w: Some[Writer]):

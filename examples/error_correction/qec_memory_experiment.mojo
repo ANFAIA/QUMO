@@ -37,7 +37,7 @@ def main() raises:
     # 2. Detector error model (identical to Stim's) and its matching graph.
     var dem = detector_error_model(cc.circuit)
     var g = MatchingGraph(dem)
-    print(dem, g, "circuit distance =", g.graphlike_distance())
+    print(dem, g, "graph-like distance =", g.graphlike_distance())
     var lines = dem.to_text().split("\n")
     for i in range(4):
         print("   ", lines[i])
