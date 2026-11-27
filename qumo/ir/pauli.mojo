@@ -76,6 +76,23 @@ struct PauliTerm(ImplicitlyCopyable, Writable):
             elif hz: w.write(" Z", q)
 
 
+def pauli_half_commutator(a: PauliTerm, b: PauliTerm) -> PauliTerm:
+    """-(i/2) [a, b] as one real Pauli term (coefficient 0 when a and b commute).
+
+    For anticommuting Pauli strings [P, Q] = 2 P Q, and P Q = i^k R with k odd
+    (R = the Pauli string with masks x_a ^ x_b, z_a ^ z_b), so
+    -(i/2) [a P, b Q] = +a b R for k = 1 and -a b R for k = 3. The phase uses
+    P = i^{|x&z|} X^x Z^z and Z^z X^x = (-1)^{|z&x|} X^x Z^z.
+    """
+    var x = a.x ^ b.x
+    var z = a.z ^ b.z
+    if a.commutes_with(b):
+        return PauliTerm(0.0, x, z)
+    var k = (a.num_y() + b.num_y() + 2 * Int(pop_count(a.z & b.x)) - Int(pop_count(x & z))) & 3
+    var c = a.coeff * b.coeff
+    return PauliTerm(c if k == 1 else -c, x, z)
+
+
 struct PauliSum(Copyable, Writable, Sized):
     var terms: List[PauliTerm]
 

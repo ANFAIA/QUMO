@@ -118,6 +118,7 @@ review are in [their own section](#candidates-of-the-2026-11-26-review).
 | MPF | qiskit-addon-mpf | done, `qumo.algorithms.mpf` |
 | Suzuki orders above 2 | PennyLane, CUDA-Q Algorithms | done, `trotter(order=4, 6, ...)` |
 | Optimised order-8 product formula, 21 Strang steps | Maležič and Ostmeyer, arXiv:2611.27896 (Table 3); research-watch 2026-11-27 | done, `trotter(order=8, scheme="mo8_q21")`, `mo8_q21_weights`, [ALGORITHMS](ALGORITHMS.md); example `examples/chemistry_and_physics/trotter_order8_cost.mojo`. Opt-in: Suzuki order 4 is cheaper at loose targets (1e-1, 1e-2) in the measured case (XZ chain, t = 10); where it loses depends on t. The 30-step generic scheme (Table 4) is deferred: it is not a list of Strang weights |
+| First-order Trotter error: rigorous bound and leading-order estimate (`trotter_error`) | Dion and D'Anjou, arXiv:2611.33438 (eq. 6, 16, 19-20; eq. 6 is Childs et al., PRX 11, 011020); research-watch 2026-11-27 | done, `qumo.algorithms.trotter_error`, [ALGORITHMS](ALGORITHMS.md); example `examples/chemistry_and_physics/trotter_error_bound.mojo`. Order 1 only: the paper's eq. 7 (second-order bound) is exceeded in tests as printed, and eq. 18 could not be reproduced; the estimate is labelled as not a bound |
 | Arithmetic, QROM | QDK 1.25-1.31, PennyLane | deferred |
 | LCU, qubitization, QSVT | CUDA-Q Algorithms, PennyLane, Qibo | deferred |
 | Classical shadows, tomography | Qibo 0.3.6 | deferred |
