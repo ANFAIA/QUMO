@@ -505,3 +505,70 @@ the MCP tools measure all qubits instead and add the note QM-W004.
 
 Errors: `QM-E407` (invalid swap-layer bits), `QM-E408` (invalid block size);
 see docs/ERRORS.md.
+
+## 9. Matrix product states
+
+`qumo.sim.mps` simulates noiseless circuits as a matrix product state (Vidal,
+[quant-ph/0301063](https://arxiv.org/abs/quant-ph/0301063)): one tensor per qubit, so memory and
+time grow linearly in the number of qubits and polynomially in the bond dimension. It is not a
+replacement for the state vector: it wins when the entanglement across every cut of the qubit
+line stays low, and automatic dispatch (`qumo.sim.dispatch`, `qumo.gpu.dispatch`) never chooses it.
+Call it directly:
+
+```mojo
+from qumo.ir.circuit import Circuit
+from qumo.sim.mps import mps_evolve
+
+var c = Circuit(60)
+c.h(0)
+for q in range(59):
+    c.cx(q, q + 1)
+var st = mps_evolve(c, max_bond=64, cutoff=1e-14)   # an MPS from |0...0>
+var counts = st.sample(1000, 7)                     # Dict[String, Int], keys as in sample()
+var label = String("Z")
+for _ in range(58):
+    label += "I"
+label += "Z"
+var zz = st.expectation_label(label)              # leftmost character = qubit 59
+print(zz, len(counts), st.error_bound, st.discarded_weight, st.bond_dims()[30])
+```
+
+| What | How |
+|---|---|
+| Gates | 1- and 2-qubit unitaries on any pair. A gate on non-neighbours swaps the farther qubit next to the nearer one, applies the gate and swaps it back, so qubit k stays on site k. CCX, CCZ and CSWAP run through the exact rewrite of `qumo.ir.gateset.expand_rule`. |
+| Not supported (QM-E432) | a gate on a qubit after it was measured, reset, noise channels, classically conditioned gates. Terminal measurements, barriers and annotations are ignored, as in `evolve`. |
+| Splitting | every 2-qubit gate moves the orthogonality centre to its left site, contracts the two sites and splits them with the one-sided Jacobi SVD of `qumo.core.svd`. |
+| Truncation | singular values are kept while the index is below `max_bond` (1 to 512), the value is non-zero and larger than `cutoff` (in [0, 1)) times the largest one. |
+| Queries | `amplitude(bits)` (bits[q] = value of qubit q), `amplitude_index(i)` (little-endian, n <= 62), `expectation_label`, `expectation_ops`, `expectation(PauliSum)` (normalized state), `sample(shots, seed)` (all qubits, Qiskit-style keys, normalized state), `bond_dims()`, `norm_sq()`. |
+| Limits (QM-E433) | 1 to 4096 qubits; tensors that could exceed 4 GiB for the given `max_bond` are refused before anything runs; 1 to 10^7 shots. |
+
+**What the reported error bounds.** The state is not renormalized after a truncation.
+`discarded_weight` is the sum over truncations of the squared singular values dropped there,
+and equals 1 - ||phi||^2 for the final MPS phi (each truncation is an orthogonal projection,
+because the environment of the split is orthonormal). `error_bound` is the sum over
+truncations of the square root of the weight dropped there, and bounds the 2-norm distance
+||psi - phi|| to the exact final state psi: the earlier error is mapped by a unitary or a
+projection, neither of which increases a norm, and each truncation adds a component of norm
+sqrt(w). With delta = `error_bound`: amplitudes are within delta, the normalized state used by
+`expectation` and `sample` is within 2 delta, a Pauli expectation value is within 4 delta per
+unit of |coefficient|, and the sampled distribution is within total variation 2 delta. Rounding
+is not included (about 1e-13 on the 12-qubit example). The bound is a sum of norms and is loose:
+on strongly entangled circuits it passes 2 and says nothing. With `cutoff = 0` and `max_bond` at
+least 2^floor(n/2) nothing is truncated and both numbers are exactly 0.
+
+**Checks.** `tests/test_mps.mojo` compares every amplitude of seeded random circuits (1 to 9
+qubits, every 1-, 2- and 3-qubit opcode, adjacent and non-adjacent, both operand orders) with
+`evolve` (max distance 1e-12), Pauli expectation values, and sampled frequencies (5 sigma); under
+truncation it checks ||psi - phi|| <= `error_bound`, the norm identity and expectation values
+within 4 delta; and GHZ states on 64 and 100 qubits, past the 32-qubit state vector, against
+their closed form. `examples/simulation/mps_wide_states.mojo` adds an 80-qubit cluster state and
+a table of distance against bound for bond dimensions 2 to 64.
+
+**Cost.** One split is an SVD of a (2D) x (2D) matrix, O(D^3), single-threaded. Measured on an
+Apple M5 (one run each, `mps_evolve`, default cutoff): a 1000-qubit GHZ chain in 0.002 s; 50 qubits,
+20 layers of random 1-qubit gates and a CX brickwork, in 0.19 s at `max_bond` 16, 8.2 s at 64 and
+57 s at 128 (all three truncate; the bounds are 12.9, 8.1 and 3.2, so vacuous). The SVD alone takes
+0.19 s at 256 x 256 and 1.6 s at 512 x 512.
+
+**Not done.** Noise, mid-circuit measurement and feed-forward; a layout that follows the swaps
+instead of undoing them; time evolution (TDVP) and DMRG; GPU; parallel SVDs.

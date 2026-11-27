@@ -68,7 +68,7 @@ review are in [their own section](#candidates-of-the-2026-11-26-review).
 | Density matrix, Kraus channels | QDK 1.28, CUDA-Q, Cirq, Aer | done, `qumo.sim.density`, `qumo.ir.kraus` |
 | Stabilizer branching | QDK 1.32 | done, `qumo.sim.branching`, with a measurement that never grows the list |
 | Pauli propagation, OBP | cuPauliProp, pauli-prop, addon-obp | deferred |
-| MPS | CUDA-Q, qibotn, Aer | deferred: the complex SVD it needs is done (`qumo.core.svd`, one-sided Jacobi, LAPACK Working Note 15); the simulator is not |
+| MPS | CUDA-Q, qibotn, Aer | done, noiseless: `qumo.sim.mps` (Vidal, quant-ph/0301063) over `qumo.core.svd`; reports its truncation error bound; not in automatic dispatch; no noise, mid-circuit measurement or GPU |
 | Twirling, template programs, Samplomatic model | Qiskit | deferred |
 | PEC, PEA, Pauli-Lindblad learning | Qiskit | deferred |
 | Native Pauli rotation kernel | Lightning 0.45 | deferred |

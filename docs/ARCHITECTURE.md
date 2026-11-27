@@ -41,7 +41,7 @@ today (`qumo/*/*.mojo`, `from qumo.X` lines; the re-export shims for old paths a
 | 0 | `core` | JSON writer and parser, `Rng`, complex SVD (`svd`) | nothing from QUMO |
 | 1 | `ir` | gates, `Circuit`, `Program`, Pauli, QASM, circuit/program JSON (`ir/json.mojo`) | `core` |
 | 2 | `device` | `Target`: coupling graph, basis, errors, durations, presets, `parse_target`; `conformance_error` | `ir` |
-| 2 | `sim` | state vector, tableau, Pauli frames, runners, density, branching, CPU simulator selection (`dispatch`) | `core`, `ir` |
+| 2 | `sim` | state vector, tableau, Pauli frames, matrix product states (`mps`), runners, density, branching, CPU simulator selection (`dispatch`) | `core`, `ir` |
 | 3 | `noise` | `NoiseModel`, `apply_noise_model`, RB, T1/Ramsey, readout mitigation, M3, the device emulator (`emulate`) | `core`, `ir`, `device`, `sim` |
 | 3 | `compiler` | pass manager, routing, synthesis, `Program` compilation, static resource estimation (`resources`) | `core`, `ir`, `device`, `sim` |
 | 3 | `qec` | codes, DEM, decoders, sweeps | `core`, `ir`, `sim` |
@@ -145,6 +145,10 @@ The IR is self-contained: `qumo/ir` imports nothing from the simulators, the com
   **Pauli-frame sampler**: one reference run, then 512 shots per
   `SIMD[uint64, 8]` batch, parallel over batches (Stim's key idea; 3–4× Stim
   single-threaded on surface-code memory circuits).
+* **Matrix product states** (`mps.mojo`): noiseless circuits beyond the state-vector limit when the
+  entanglement is low; 2-qubit gates split by the SVD of `qumo.core.svd`, non-adjacent gates through
+  swaps, an error bound reported for every truncation. Not chosen by automatic dispatch
+  ([SIMULATION.md](SIMULATION.md#9-matrix-product-states)).
 * **Automatic dispatch** (`qumo.sim.dispatch` for the CPU methods, `qumo.gpu.dispatch` for `sample_auto` /
   `sample_on`, which add the GPU): noisy Clifford circuits with
   many shots → Pauli frames; other Clifford circuits → tableau; everything else
