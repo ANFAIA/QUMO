@@ -708,7 +708,16 @@ def test_oversize_width_is_refused() raises:
     print("  oversize width refused")
 
 
+def test_trotter_empty_hamiltonian() raises:
+    """An empty PauliSum with order >= 2 read terms[-1] and aborted the process."""
+    for order in [1, 2, 4, 8]:
+        var c = trotter(PauliSum(), 1.0, 3, order, 2)
+        assert_equal(c.num_qubits, 2)
+        assert_equal(len(c.ops), 0, "order " + String(order))
+
+
 def main() raises:
+    test_trotter_empty_hamiltonian()
     test_oversize_width_is_refused()
     test_ghz_qft()
     test_dicke()

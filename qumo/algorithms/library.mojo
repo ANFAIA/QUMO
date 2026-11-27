@@ -607,7 +607,7 @@ def trotter(h: PauliSum, time: Float64, steps: Int, order: Int = 1, num_qubits: 
     if scheme == "mo8_q21":
         slices = mo8_q21_weights()
     for _ in range(steps):
-        if order == 1 or nt == 1:
+        if order == 1 or nt <= 1:  # nt == 0: nothing to evolve
             for t in h.terms:
                 append_pauli_exponential(c, t, dt)
         else:
