@@ -229,6 +229,16 @@ Fix: Pass a finite offset and a standard deviation >= 0, e.g. gaussian_angle_per
 **evolve()/expectation() (CPU and GPU) cannot take a circuit with a reset, a noise channel or a mid-circuit measurement: a pure state would silently drop it.**  
 Fix: Use sample() (trajectories) or the density-matrix simulator; terminal measurements are fine.
 
+### QM-E430
+
+**The complex SVD (qumo.core.svd) refused its input: a negative dimension, a matrix over its cap (min(m, n) <= 1024 and m * n <= 2^22; a CMatrix holds at most 2^28 entries), or a NaN or infinite entry.**  
+Fix: Pass a finite matrix within the cap; for an MPS, lower max_bond.
+
+### QM-E431
+
+**The one-sided Jacobi SVD did not converge within its sweep limit (60).**  
+Fix: Report the matrix; check it for entries spanning more than about 300 orders of magnitude.
+
 ### QM-E408
 
 **Invalid cache-block size for execute_plan_reordered (need 1 <= nb <= num_qubits).**  
