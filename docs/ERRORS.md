@@ -865,6 +865,11 @@ Fix: Use plain 'mwpm' for this detector error model.
 **apply_noise_model got a unitary gate of arity 3 (CCX, CSWAP, CCZ) while the noise model has gate errors; a 3-qubit gate has no gate-error rule.**  
 Fix: Decompose it into 1- and 2-qubit gates first (qumo.compiler.basis.unroll_3q, or transpile to a target without CCX), then add noise.
 
+### QM-E740
+
+**circuit_distance got an invalid argument (max_weight < 1 or node_limit < 1), a model with more than 64 observables or a negative detector id, or a mechanism whose ^ pieces do not XOR to its symptom.**  
+Fix: Use max_weight >= 1 and node_limit >= 1; running out of node_limit is not an error (status 'budget').
+
 ### QM-E730
 
 **A computational circuit given to encode() contains noise channels, QEC annotations or unbound symbolic parameters.**  
