@@ -1,4 +1,4 @@
-# Framework updates reviewed, 2026-11-01
+# Framework updates reviewed, 2026-11-26
 
 What changed in the frameworks QUMO draws from, and what QUMO did about it. Status:
 **done** (with the place it landed), **deferred** (worth doing, not in this round;
@@ -6,10 +6,14 @@ tier 2 or 3) or **skipped** (with the reason). "Have" means QUMO already had it.
 Cross-checks live in `bench/crosscheck/tier1.py`; per-feature numbers are in the
 module docs linked below.
 
-Versions: Qiskit 2.6.1, qiskit-ibm-runtime 0.51, Aer 0.18.2, pytket 2.18.5, tket-py
-0.15.13, guppylang 1.2.0, guppyft 0.5.1, CUDA-Q 0.16.0.post1, cudaq-qec 0.8.1, PennyLane
-0.45.1, Catalyst 0.15, Cirq 1.7.0, Stim 1.16, PyMatching 2.4, QDK 1.33.1, Braket
-1.127.7, Qibo 0.3.6. Toolchain: Mojo 1.2.0, MAX 26.7.0.
+Versions (2026-11-26): Qiskit 2.6.2, qiskit-ibm-runtime 0.52.1, Aer 0.18.4, pytket
+2.18.5, tket-py 0.15.16, tket (Rust) 0.23.1, guppylang 1.2.2, guppyft 0.7.0, CUDA-Q
+0.17.0, cudaq-qec 0.9.1, PennyLane 0.45.1, Catalyst 0.15.0, Cirq 1.7.0, Stim 1.16.0,
+PyMatching 2.4.0, QDK 1.34.0, Braket 1.128.2, Qibo 0.3.7; also reviewed: bloqade-tsim
+1.1.0, bloqade-analog 0.16.9. Toolchain: Mojo 1.2.0, MAX 26.7.0. The versions are those
+of the latest review; rows from earlier rounds name the version they came from, and
+"done" rows were not re-checked against the new releases. Candidates of the 2026-11-26
+review are in [their own section](#candidates-of-the-2026-11-26-review).
 
 ## Language and IR
 
@@ -113,12 +117,41 @@ Versions: Qiskit 2.6.1, qiskit-ibm-runtime 0.51, Aer 0.18.2, pytket 2.18.5, tket
 | PUB `split` | Braket 1.120 | done, `split_pub`, seeds follow the original index |
 | MPF | qiskit-addon-mpf | done, `qumo.algorithms.mpf` |
 | Suzuki orders above 2 | PennyLane, CUDA-Q Algorithms | done, `trotter(order=4, 6, ...)` |
+| Optimised order-8 product formula, 21 Strang steps | Maležič and Ostmeyer, arXiv:2611.27896 (Table 3); research-watch 2026-11-27 | done, `trotter(order=8, scheme="mo8_q21")`, `mo8_q21_weights`, [ALGORITHMS](ALGORITHMS.md); example `examples/chemistry_and_physics/trotter_order8_cost.mojo`. Opt-in: Suzuki order 4 is cheaper at loose targets (1e-1, 1e-2) in the measured case (XZ chain, t = 10); where it loses depends on t. The 30-step generic scheme (Table 4) is deferred: it is not a list of Strang weights |
 | Arithmetic, QROM | QDK 1.25-1.31, PennyLane | deferred |
 | LCU, qubitization, QSVT | CUDA-Q Algorithms, PennyLane, Qibo | deferred |
 | Classical shadows, tomography | Qibo 0.3.6 | deferred |
 | Fermion mappers, FCIDUMP | qiskit-fermions, CUDA-Q | deferred |
 | Cutting in Mojo | addon-cutting | deferred |
 | Momentum QNG, `conjugate()` | PennyLane | deferred |
+
+## Candidates of the 2026-11-26 review
+
+Proposals only: nothing in this table is implemented. Each row keeps the file's status vocabulary (nothing is **done**; "adopt now" and "prototype" rows are **deferred** until a change lands) and adds the review's rank.
+
+| Feature | Source and date | Status |
+|---|---|---|
+| Import `T`, `T_DAG`, `S[T]`, `S_DAG[T]` in `from_stim`, with raw detector sampling and early post-selection on the branching simulator; other tagged forms get a coded error (today `I[R_Z(theta=...)]` raises an uncoded one) | tsim 1.1.0; 2026-11-26 | deferred (rank: adopt now): [plan](TSIM_BLOQADE_PLAN.md#16-recommended-first-slice) |
+| AHS JSON export with a capabilities-driven limits check, in the hardware plugins | bloqade-analog 0.16.9, Braket AHS schema; 2026-11-26 | deferred (rank: adopt now): [plan](TSIM_BLOQADE_PLAN.md#25-recommended-first-slice) |
+| Run the IBM plugin tests on qiskit-ibm-runtime 0.52.1, then document the result or bound the version (`>=0.50.1` has no upper bound; 0.52.0 is breaking) | qiskit-ibm-runtime 0.52.0 (2026-11-09), 0.52.1 (2026-11-12); 2026-11-26 | deferred (rank: adopt now): tests not run; the module paths the plugin imports for `is_isa_circuit`, `FoldRzzAngle` and the executor `Sampler` exist at tag 0.52.1 |
+| Before a Mojo 1.3 upgrade, audit `String.find()`/`rfind()` uses and `UnsafePointer` | Mojo 1.3 nightly, unreleased (2026-11-25); 2026-11-26 | deferred (rank: adopt now): not built against the nightly |
+| Active-width planner (report only), then a compile-once active-state-vector sampler | tsim 1.0.0 (2026-11-04), Clifft; 2026-11-26 | deferred (rank: prototype): go/no-go on the measured width |
+| Local detuning in `qumo.ir.analog` and `qumo.sim.rydberg` | bloqade-analog 0.16.9 (2026-03-02); 2026-11-26 | deferred (rank: prototype): must stay device-neutral |
+| Parallel-window decoding | CUDA-Q QEC 0.9.0 (2026-11-16); 2026-11-26 | deferred (rank: prototype): QUMO has only the serial `SlidingWindowDecoder`; compare logical error rate and throughput |
+| Learning DEM error rates from detector data | CUDA-Q QEC 0.9.0, closed source; 2026-11-26 | deferred (rank: prototype): needs an open published method first |
+| Mixed (probabilistic) Rz synthesis | PennyLane development changelog (unreleased), arXiv:2203.10064 (not read); 2026-11-26 | deferred (rank: prototype): compare expected T count at equal channel error |
+| Cross-check `pauli_simp(objective=t)` with `phase_fold` against tket Pauli-graph resynthesis | tket (Rust) 0.22.1 (2026-10-28); 2026-11-26 | deferred (rank: prototype): independent T and two-qubit counts |
+| Amplitude estimation and iterative QPE as library functions | Qibo 0.3.7 (2026-11-10); 2026-11-26 | deferred (rank: prototype): `qumo.algorithms.library` has neither; some examples build their own |
+| A user-facing agent skill for QUMO and an execution-verified evaluation of agents writing QUMO code | vendor agent skills (Qiskit, AWS, CUDA-Q Algorithms, tsim), arXiv:2604.08570; 2026-11-26 | deferred (rank: prototype): measure pass@1 with and without skill and feedback |
+| tsim cross-check script (after the first slice) and AHS emulator cross-check (after the export); AHS import; blockade-subspace emulator | tsim 1.1.0, bloqade-analog 0.16.9; 2026-11-26 | deferred (rank: defer): optional, no CI dependency |
+| Parametric ZX engine; non-Clifford fault distance and determined measurements | tsim (the last two unreleased and experimental); 2026-11-26 | deferred (rank: defer): depends on the width results |
+| Native Braket AHS client or gate-model Braket provider | Braket SDK 1.128.2 (2026-11-23); 2026-11-26 | deferred (rank: defer): needs credentials and paid shots |
+| Spacetime Pauli checks; fermion and boson operator packages | IBM QDC 2026 (2026-11-11); 2026-11-26 | deferred (rank: defer) |
+| Gadget audit with certified fault-distance bounds | QDK `qdk.ec`, 1.33; 2026-11-26 | deferred (rank: defer): `qumo.ft.faults` covers state preparation only |
+| Decoder ensembles, cancellation, task graphs, chunked DEMs | CUDA-Q QEC 0.9.0; 2026-11-26 | deferred (rank: defer): wait for a real-time use case |
+| Stabilizer-rank sampling, a tsim or bloqade-analog Python bridge, GPU near-Clifford sampling, a sweep/builder language, three-level atom emulation | tsim 1.1.0, bloqade-analog 0.16.9; 2026-11-26 | skipped (rank: skip): provisional upstream, heavy dependencies or low value now |
+| IBM `Calibrator`, `resource_units`, IBM Quantum Functions, pulse access | qiskit-ibm-runtime 0.52.0, QDC 2026; 2026-11-26 | skipped (rank: skip): vendor service features |
+| CUDA-Q Decoding Server, EDEM, TCBP/JOBS, `custabilizer` | CUDA-Q 0.17.0, QEC 0.9.0 (2026-11-16); 2026-11-26 | skipped (rank: skip): vendor-bound, closed or declared unstable; QUMO has a GPU frame sampler (speed not compared) |
 
 ## Toolchain and ecosystem
 
