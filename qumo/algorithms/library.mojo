@@ -571,7 +571,7 @@ def pauli_exponential(term: PauliTerm, num_qubits: Int, time: Float64 = 1.0, par
     return c^
 
 
-def trotter(h: PauliSum, time: Float64, steps: Int, order: Int = 1, num_qubits: Int = -1, param_name: String = "") raises -> Circuit:
+def trotter(h: PauliSum, time: Float64, steps: Int, order: Int = 1, num_qubits: Int = -1, param_name: String = "", scheme: String = "suzuki") raises -> Circuit:
     """Product-formula approximation of exp(-i H t).
 
     order 1 (Lie-Trotter): (prod_k e^{-i c_k P_k dt})^steps, error O(t^2/steps).
@@ -579,6 +579,10 @@ def trotter(h: PauliSum, time: Float64, steps: Int, order: Int = 1, num_qubits: 
     order 2k (Suzuki):     S_2k(t) = S_(2k-2)(u t)^2 S_(2k-2)((1 - 4u) t) S_(2k-2)(u t)^2,
                            u = 1 / (4 - 4^(1/(2k-1))); 5^(k-1) Strang steps per step,
                            error O(t^(2k+1)/steps^(2k)).
+    scheme selects the Strang weights of one step for order >= 2: "suzuki"
+    (default, the recursion above) or "mo8_q21" (order 8 only): the 21-step
+    composition of Malezic and Ostmeyer, arXiv:2611.27896 Table 3
+    (`mo8_q21_weights`); 21 Strang steps per step instead of Suzuki's 125.
     Layout: qubits 0..n-1 (n = num_qubits or h.num_qubits()). Params: none, or a
     symbolic total time named `param_name` (each slice uses param * 1/steps).
     Identity terms become a global phase (constant time only).
@@ -587,6 +591,10 @@ def trotter(h: PauliSum, time: Float64, steps: Int, order: Int = 1, num_qubits: 
         raise Error("QM-E808: trotter() needs steps >= 1, got " + String(steps) + ".")
     if order != 1 and (order < 2 or order % 2 != 0):
         raise Error("QM-E808: trotter() supports order 1 (Lie-Trotter) or an even order (Strang 2, Suzuki 4, 6, ...), got " + String(order) + ". Hint: Suzuki's recursion raises the order by 2.")
+    if scheme != "suzuki" and scheme != "mo8_q21":
+        raise Error("QM-E808: trotter() scheme must be 'suzuki' or 'mo8_q21', got '" + scheme + "'. Hint: use scheme='suzuki' (order 1 or any even order) or scheme='mo8_q21' with order=8.")
+    if scheme == "mo8_q21" and order != 8:
+        raise Error("QM-E808: trotter() scheme 'mo8_q21' is an order-8 formula, got order " + String(order) + ". Hint: pass order=8 with scheme='mo8_q21', or scheme='suzuki' for other orders.")
     var n = num_qubits if num_qubits > 0 else max(h.num_qubits(), 1)
     var c = Circuit(n, name="trotter")
     var tot = Param(time)
@@ -596,8 +604,10 @@ def trotter(h: PauliSum, time: Float64, steps: Int, order: Int = 1, num_qubits: 
     var half = tot * (0.5 / Float64(steps))
     var nt = len(h.terms)
     var slices = suzuki_weights(max(order, 2))
+    if scheme == "mo8_q21":
+        slices = mo8_q21_weights()
     for _ in range(steps):
-        if order == 1 or nt == 1:
+        if order == 1 or nt <= 1:  # nt == 0: nothing to evolve
             for t in h.terms:
                 append_pauli_exponential(c, t, dt)
         else:
@@ -624,6 +634,45 @@ def suzuki_weights(order: Int) -> List[Float64]:
         var f = (1.0 - 4.0 * u) if r == 2 else u
         for w in inner:
             out.append(f * w)
+    return out^
+
+
+def mo8_q21_weights() -> List[Float64]:
+    """Time fraction of each Strang step in one step of the 21-step order-8 formula.
+
+    Maležič and Ostmeyer, arXiv:2611.27896 (v1), Table 3. The paper writes the
+    scheme in ramp notation, e^{c_1 hA} e^{c_1 hB} e^{d_1 hB} e^{d_1 hA} ..., with
+    c_j = d_j here, so cycle j is e^{c_j hA} e^{2 c_j hB} e^{c_j hA} = S2(2 c_j h):
+    the Strang weight is w_j = 2 c_j. The c_j below are Table 3, rows j = 1..21,
+    digit for digit (c_j = c_{22-j}). Order conditions: sum w = 1 and
+    sum w^3 = sum w^5 = sum w^7 = 0 (tests/test_algorithms_tier1.mojo).
+    """
+    var c: List[Float64] = [
+        0.041644811759980006,   # c_1
+        0.082401316690625129,   # c_2
+        -0.100053679877075558,  # c_3
+        0.056276640904364281,   # c_4
+        0.054789293427501641,   # c_5
+        0.052417975744997715,   # c_6
+        0.202143137014514557,   # c_7
+        -0.156387050011859596,  # c_8
+        0.047476878333309942,   # c_9
+        0.077958103121855915,   # c_10
+        -0.217334854216428036,  # c_11 (centre)
+        0.077958103121855915,   # c_12
+        0.047476878333309942,   # c_13
+        -0.156387050011859596,  # c_14
+        0.202143137014514557,   # c_15
+        0.052417975744997715,   # c_16
+        0.054789293427501641,   # c_17
+        0.056276640904364281,   # c_18
+        -0.100053679877075558,  # c_19
+        0.082401316690625129,   # c_20
+        0.041644811759980006,   # c_21
+    ]
+    var out = List[Float64](capacity=len(c))
+    for x in c:
+        out.append(2.0 * x)
     return out^
 
 
