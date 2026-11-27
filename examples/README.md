@@ -50,7 +50,7 @@ reference numbers and optional cross-check scripts are in [`origins/<framework>/
 | [`error_correction/`](error_correction/) | Surface-code memory experiment end to end, plugging in your own decoder, Stim interoperability |
 | [`ft/`](ft/) | Fault-tolerant programming on stabilizer codes: Steane, Iceberg, Helix, magic-state T gates, logical-error sweeps ([docs/FT.md](../docs/FT.md)) |
 | [`noise_and_mitigation/`](noise_and_mitigation/) | Pauli-channel noise, trajectories, zero-noise extrapolation, readout mitigation, XEB, randomized benchmarking, quantum volume, calibration to noise model |
-| [`compilation/`](compilation/) | Compiling for several hardware modalities, noise-aware layout, Pauli-based computation, measurement reduction, resource estimation |
+| [`compilation/`](compilation/) | Compiling for several hardware modalities, noise-aware layout, Pauli-based computation, measurement reduction, resource estimation, a clocked processor whose program is a stream of routing bits (noise-free, not fault tolerant) |
 | [`simulation/`](simulation/) | CPU vs GPU sampling, batched expectation values and parallel gradients, stabilizer branching beyond the state vector, device emulation |
 | [`control_flow/`](control_flow/) | Programs with `while` and classical variables: repeat-until-success, and iterative phase estimation with a gate angle computed during the shot ([docs/CONTROL_FLOW.md](../docs/CONTROL_FLOW.md)) |
 | [`heterogeneous/`](heterogeneous/) | A model (OpenRouter, a local Ollama / LM Studio server, or offline rules) chooses the algorithm; QUMO runs it partly on a GPU, partly on a CPU and partly on a QPU (local noisy emulator by default) ([README](heterogeneous/README.md)) |
@@ -78,7 +78,7 @@ Every example below is run and verified by `bench/.venv/bin/python examples/run_
 | [`error_correction/`](error_correction/) | 5 | Cirq (Google), QUMO | 5 / 0 |
 | [`ft/`](ft/) | 8 | Guppy FT (Quantinuum), QUMO | 7 / 1 |
 | [`noise_and_mitigation/`](noise_and_mitigation/) | 8 | Amazon Braket, CUDA-Q (NVIDIA), Cirq (Google), Classiq, QUMO, Qiskit (IBM) | 7 / 1 |
-| [`compilation/`](compilation/) | 6 | Q# / Azure Quantum, QUMO, Qiskit (IBM), TKET (Quantinuum) | 6 / 0 |
+| [`compilation/`](compilation/) | 7 | Q# / Azure Quantum, QUMO, Qiskit (IBM), TKET (Quantinuum) | 7 / 0 |
 | [`simulation/`](simulation/) | 4 | Amazon Braket, CUDA-Q (NVIDIA), Q# / Azure Quantum | 3 / 1 |
 | [`control_flow/`](control_flow/) | 2 | QUMO | 2 / 0 |
 | [`heterogeneous/`](heterogeneous/) | 6 | QUMO | 6 / 0 |

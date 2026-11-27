@@ -8,6 +8,7 @@ QUMO is a research prototype. Its version string is `0.4.0` (`build/qumo version
 
 ### Added
 
+- Example `examples/compilation/clocked_processor.mojo`: the noise-free, single-qubit routing construction of Sec. 2.1.1 of Pattison, Haah and Preskill ([arXiv:2611.23919](https://arxiv.org/abs/2611.23919) v1). Six logical qubits flow along two rings past fixed H and T gates, and a program only chooses which SWAPs route them; three programs are compared amplitude by amplitude with the 6-qubit logical circuit. As read here, equation (1) drives the entry and exit SWAPs with one bit, which reaches 16 of the 64 one-pass H programs (every bit stream of up to W + 4 cycles); the example uses one bit per station, which reaches all 64. No error correction, no CS gate, and nothing of the paper's threshold theorem is checked.
 - `qumo.qec.distance`: `circuit_distance` and `verify_witness`, the exact circuit distance of a detector error model with hyperedges kept whole, by the weight-bounded search of Cheng, Guo and Pan ([arXiv:2611.08247](https://arxiv.org/abs/2611.08247), SI Sec. 5.1): exact when a completed threshold meets a verified witness, an interval when the node budget runs out. Certifies distance 3 and 5 for QUMO's surface-code memory circuits; d = 7 is out of reach of this minimal search. `tests/test_qec_distance.mojo` compares it with brute force on seeded random hypergraph models; `examples/error_correction/circuit_distance_exact.mojo` ([QEC](docs/QEC.md)). New error code QM-E740. (weekly job, 2026-11-27)
 
 ### Changed

@@ -183,6 +183,7 @@ Compiling for targets, resource estimation, Pauli-based computation, measurement
 
 | Example | Origin | Reproduces | Tier | Source |
 |---|---|---|---|---|
+| [`clocked_processor.mojo`](compilation/clocked_processor.mojo) — A clocked processor where the program is data: logical qubits flow past fixed gates | [QUMO](https://github.com/ANFAIA/QUMO) | Pattison, Haah, Preskill - controlled gates by routing on two tapes (Sec. 2.1.1, noise-free) | fast | [source](https://arxiv.org/abs/2611.23919) |
 | [`compile_demo.mojo`](compilation/compile_demo.mojo) — Compile demo: QFT + Clifford+T circuits for several hardware modalities | [QUMO](https://github.com/ANFAIA/QUMO) |  | fast |  |
 | [`measurement_reduction.mojo`](compilation/measurement_reduction.mojo) — Measurement reduction: naive vs qubit-wise-commuting vs commuting sets | [TKET (Quantinuum)](https://github.com/Quantinuum/tket) | TKET - Advanced expectation values and measurement reduction | fast | [source](https://docs.quantinuum.com/tket/user-guide/examples/algorithms_and_protocols/measurement_reduction_example.html) |
 | [`multi_controlled_gates.mojo`](compilation/multi_controlled_gates.mojo) — Multi-controlled gates in OpenQASM 3 and from the builder API | [Qiskit (IBM)](https://github.com/Qiskit/qiskit) | Qiskit - synth_mcx_noaux_v24, synth_mcx_1_clean_kg24, synth_mcx_n_dirty_i15 and `ctrl(k) @` export | fast | [source](https://quantum.cloud.ibm.com/docs/en/api/qiskit/synthesis#multipliers) |
