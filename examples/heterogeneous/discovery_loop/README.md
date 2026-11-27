@@ -124,10 +124,27 @@ git -C ../formal-quantum-computation fetch origin discoveries:discoveries
 
 add `--formal-repo ../formal-quantum-computation`. The run reads the constant (`relCost`) claimed by their
 Find-Any solution (commit `a88de8ff65` on 2026-11-27: within 2e-21 of 1/2 + 1/pi by its own docstring) and
-compares it with 1/2 + 1/pi and with the loop's best. It **only reads the text**: no Lean proof is built or
-checked, no code is copied, and this loop's candidates are not Lean programs, so their Comparator cannot judge
-them. To check the authors' own proof, follow their `QuantumComputationDiscoveries/README.md` (they report
-about 3 minutes for Find-Any with `lake comparator`; not run here).
+compares it with 1/2 + 1/pi and with the loop's best. The run itself **only reads the text**: it builds and
+checks no Lean proof, no code is copied, and this loop's candidates are not Lean programs, so their Comparator
+cannot judge them.
+
+### The authors' Find-Any proof, built once by hand
+
+On 2026-11-27, at commit `a88de8ff65`, macOS arm64, Lean 4.35.0 (`elan`, then `lake exe cache get`):
+
+```bash
+lake build QuantumComputationDiscoveries.Algorithms.GroverFindAny
+```
+
+- the build succeeded (2951 jobs, 111 s with the Mathlib cache);
+- `#print axioms` for `groverFindAny_correctness` and `groverFindAny_rel_cost` lists only `propext`,
+  `Classical.choice` and `Quot.sound` (no `sorryAx`);
+- `diff` of the solution file against `QuantumComputationSpecs/Algorithms/Grover.lean` shows one added import
+  and the Find-Any `sorry`s filled in; the Find-All ones remain.
+
+**`lake comparator`, their full verifier, was not run.** It needs the Linux `bwrap` sandbox, and its option to
+run without a sandbox was not used. The text diff does not replace its check that every definition the
+statements depend on matches the specification. Find-All and the other solutions were not built.
 
 ## Output
 
