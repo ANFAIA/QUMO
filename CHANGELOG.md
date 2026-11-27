@@ -8,6 +8,7 @@ QUMO is a research prototype. Its version string is `0.4.0` (`build/qumo version
 
 ### Added
 
+- Example `examples/error_correction/magic_state_distillation_exact.mojo`: exact acceptance and output error of the 3 T to CS, 8-input CCZ and 9-input T factories of Balada Gaggioli and Marecek ([arXiv:2610.31115](https://arxiv.org/abs/2610.31115)), by state-vector simulation of all 2^n input Z-fault patterns. Confirms eps = 3p(1-p), the exact N(p)/D(p) of the 9-input T factory ((27/2) p^2 leading, acceptance 1/128) and 28 p^2 for the CCZ factory, which is built both as the paper's single-code projection and as an independent T-gate circuit. No library change; the 35 p^3 constant in `qumo.compiler.resources` is unchanged ([QEC](docs/QEC.md)). (weekly job, 2026-11-27)
 - `qumo.qec.distance`: `circuit_distance` and `verify_witness`, the exact circuit distance of a detector error model with hyperedges kept whole, by the weight-bounded search of Cheng, Guo and Pan ([arXiv:2611.08247](https://arxiv.org/abs/2611.08247), SI Sec. 5.1): exact when a completed threshold meets a verified witness, an interval when the node budget runs out. Certifies distance 3 and 5 for QUMO's surface-code memory circuits; d = 7 is out of reach of this minimal search. `tests/test_qec_distance.mojo` compares it with brute force on seeded random hypergraph models; `examples/error_correction/circuit_distance_exact.mojo` ([QEC](docs/QEC.md)). New error code QM-E740. (weekly job, 2026-11-27)
 
 ### Changed
