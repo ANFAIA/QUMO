@@ -14,6 +14,7 @@ QUMO is a research prototype. Its version string is `0.4.0` (`build/qumo version
 
 ### Changed
 
+- Docs: [docs/ANALYSIS.md](docs/ANALYSIS.md) reviewed again on 2026-11-26: versions and §0 to §13 updated, statements that were already wrong on 2026-11-01 corrected and listed, one matrix rating changed (Qibo circuit optimisation), and a new §14 on tsim and bloqade-analog with a proposed, not implemented, integration plan in [docs/TSIM_BLOQADE_PLAN.md](docs/TSIM_BLOQADE_PLAN.md). [docs/FRAMEWORK_UPDATES.md](docs/FRAMEWORK_UPDATES.md) has the new versions and ranked candidates. No code or test changes.
 - The hardware plugin's `[ibm]` extra requires `qiskit-ibm-runtime>=0.50.1,<0.53` (it had no upper bound; 0.52.0 is a breaking release). The plugin tests pass on 0.51.0 and 0.52.1.
 - CI: a failure of the Linux job (`make cli` and `make test` on ubuntu-latest, x86-64) now fails the run; `continue-on-error` is removed. The job had passed 27 of its 28 runs from 2026-11-16 to 2026-11-26; the one failure (commit `2dc0aec`, a duplicate error code on `main`) was a real defect.
 - Version string `0.4.0` (was `0.3.0`), after #78 to #86: `build/qumo version`, the MCP server info, `qumo.__version__`, `pyproject.toml` and `CITATION.cff`.
