@@ -254,16 +254,14 @@ def test_json_keeps_short_circuits_whole() raises:
     _reject(loop.replace("\"for_ranges\":[-1,-1,-1,", "\"for_ranges\":[4611686018427387904,-1,-1,"), "QM-E587")
 
 
-def test_an_expression_too_deep_to_write_is_refused() raises:
+def test_a_very_deep_expression_is_written_without_recursion() raises:
     var src = String(H + "output int r; int x = 1; x = x; r = x")
-    for _ in range(17000):
+    for _ in range(60000):
         src += " + x"
-    var message = String()
-    try:
-        _ = to_qasm(parse_qasm_program(src + ";"))
-    except e:
-        message = String(e)
-    assert_true(message.startswith("QM-E552"), message)
+    var program = parse_qasm_program(src + ";")
+    var text = to_qasm(program)
+    assert_equal(text.count(" + "), 60000)
+    assert_equal(to_qasm(parse_qasm_program(text)), text)
 
 
 def test_unassigned_read_in_json_is_refused() raises:
@@ -530,7 +528,7 @@ def main() raises:
     test_json_refuses_what_a_shot_would_trust()
     test_json_checks_nodes_inside_expressions()
     test_json_keeps_short_circuits_whole()
-    test_an_expression_too_deep_to_write_is_refused()
+    test_a_very_deep_expression_is_written_without_recursion()
     test_unassigned_read_in_json_is_refused()
     test_run_tool()
     test_run_tool_takes_input_values()

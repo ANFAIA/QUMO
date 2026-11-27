@@ -312,7 +312,6 @@ comptime _PR_MUL = 10
 comptime _PR_UNARY = 11
 comptime _PR_POW = 12
 comptime _PR_ATOM = 13
-comptime _MAX_EXPR_TEXT_DEPTH = 16384  # 60000 overflows an 8 MB stack
 
 
 def _op_text(op: Int) -> String:
@@ -424,13 +423,6 @@ def _is_soft_cast(p: Program, n: Int) -> Bool:
     return g.ty.tag == CTypeKind.UINT and (src.tag == CTypeKind.BIT or src.tag == CTypeKind.BOOL) and src.width == g.ty.width
 
 
-def _child(p: Program, n: Int, names: _PNames, want: Int, plain: Bool, depth: Int) raises -> String:
-    var t = _node_text(p, n, names, plain, depth)
-    if t[1] < want:
-        return "(" + t[0] + ")"
-    return t[0]
-
-
 def _bits_text(first: Int, count: Int, names: _PNames) -> String:
     if count == names.num_clbits and first == 0 and count > 1:
         return String("c")
@@ -439,58 +431,102 @@ def _bits_text(first: Int, count: Int, names: _PNames) -> String:
     return "c[" + String(first) + ":" + String(first + count - 1) + "]"
 
 
-def _node_text(p: Program, n: Int, names: _PNames, plain: Bool = False, depth: Int = 0) raises -> Tuple[String, Int]:
-    """Text of node `n` and the precedence of its outermost operator. This recurses
-    on the expression, which the stack limits."""
-    if depth > _MAX_EXPR_TEXT_DEPTH:
-        raise Error("QM-E552: an expression is nested more than " + String(_MAX_EXPR_TEXT_DEPTH) + " deep, too deep to write out. Hint: split it with a variable.")
-    ref g = p.nodes[n]
-    var op = g.op
-    if op == CNodeOp.CONST:
-        var text = _const_text(g, plain, names)
-        # a negative constant is a sign and a number: it binds like a unary minus
-        return (text, _PR_UNARY if text.startswith("-") else _PR_ATOM)
-    if op == CNodeOp.VAR:
-        return (names.stores[g.x], _PR_ATOM)
-    if op == CNodeOp.INPUT:
-        return (names.params[g.x], _PR_ATOM)
-    if op == CNodeOp.BITS:
-        return (_bits_text(g.x, g.y, names), _PR_ATOM)
-    if op == CNodeOp.CAST:
-        if _is_soft_cast(p, n):
-            return _node_text(p, g.x, names, plain, depth + 1)
-        var inner = _node_text(p, g.x, names, True, depth + 1)[0]
-        # the table has no bit -> float, so that step stays written
-        if g.ty.tag == CTypeKind.FLOAT and _is_soft_cast(p, g.x) and p.nodes[p.nodes[g.x].x].ty.tag == CTypeKind.BIT:
-            inner = type_name(p.nodes[g.x].ty) + "(" + inner + ")"
-        return (type_name(g.ty) + "(" + inner + ")", _PR_ATOM)
-    if op == CNodeOp.NEG or op == CNodeOp.LNOT or op == CNodeOp.BNOT:
-        var mark = String("-" if op == CNodeOp.NEG else ("!" if op == CNodeOp.LNOT else "~"))
-        return (mark + _child(p, g.x, names, _PR_UNARY, False, depth + 1), _PR_UNARY)
-    if op == CNodeOp.FN:
-        var args = _node_text(p, g.x, names, True, depth + 1)[0]
-        if g.y >= 0:
-            args += ", " + _node_text(p, g.y, names, True, depth + 1)[0]
-        return (_fn_text(g.i) + "(" + args + ")", _PR_ATOM)
-    if op == CNodeOp.SC_END:
-        var m = n - 1
-        while not ((p.nodes[m].op == CNodeOp.SC_AND or p.nodes[m].op == CNodeOp.SC_OR) and p.nodes[m].y == n):
-            m -= 1
-        var is_and = p.nodes[m].op == CNodeOp.SC_AND
-        var pr = _PR_AND if is_and else _PR_OR
-        var left = _child(p, p.nodes[m].x, names, pr, False, depth + 1)
-        var right = _child(p, g.x, names, pr + 1, False, depth + 1)
-        return (left + (" && " if is_and else " || ") + right, pr)
-    # binary: a constant takes the type of its sibling back when parsed again
-    var pr = _op_prec(op)
-    var l = p.nodes[g.x]
-    var r = p.nodes[g.y]
-    var same = l.ty == r.ty or op == CNodeOp.SHL or op == CNodeOp.SHR or op == CNodeOp.POW
-    var lp = same and l.op == CNodeOp.CONST and r.op != CNodeOp.CONST
-    var rp = same and r.op == CNodeOp.CONST and l.op != CNodeOp.CONST
-    var lwant = pr + 1 if op == CNodeOp.POW else pr
-    var rwant = pr if op == CNodeOp.POW else pr + 1
-    return (_child(p, g.x, names, lwant, lp, depth + 1) + " " + _op_text(op) + " " + _child(p, g.y, names, rwant, rp, depth + 1), pr)
+@fieldwise_init
+struct _Piece(Copyable, Movable):
+    """One pending piece of an expression's text: `text` as written, or node
+    `node` when it is not -1."""
+
+    var node: Int
+    var plain: Bool  # a constant drops its type
+    var want: Int  # parenthesise below this precedence
+    var text: String
+
+    @staticmethod
+    def lit(var s: String) -> Self:
+        return Self(-1, False, 0, s^)
+
+    @staticmethod
+    def expr(n: Int, plain: Bool = False, want: Int = 0) -> Self:
+        return Self(n, plain, want, String(""))
+
+
+def _node_text(p: Program, n: Int, names: _PNames, plain: Bool = False) raises -> String:
+    """Text of node `n`. The expression is walked with an explicit stack: how deep
+    it nests is not limited by the machine stack."""
+    var out = String("")
+    var todo = List[_Piece]()
+    todo.append(_Piece.expr(n, plain))
+    while len(todo) > 0:
+        var item = todo.pop()
+        if item.node < 0:
+            out += item.text
+            continue
+        var cur = item.node
+        while _is_soft_cast(p, cur):  # written as its operand
+            cur = p.nodes[cur].x
+        ref g = p.nodes[cur]
+        var op = g.op
+        var prec = _PR_ATOM
+        var parts = List[_Piece]()  # in reading order
+        if op == CNodeOp.CONST:
+            var text = _const_text(g, item.plain, names)
+            # a negative constant is a sign and a number: it binds like a unary minus
+            if text.startswith("-"):
+                prec = _PR_UNARY
+            parts.append(_Piece.lit(text^))
+        elif op == CNodeOp.VAR:
+            parts.append(_Piece.lit(names.stores[g.x]))
+        elif op == CNodeOp.INPUT:
+            parts.append(_Piece.lit(names.params[g.x]))
+        elif op == CNodeOp.BITS:
+            parts.append(_Piece.lit(_bits_text(g.x, g.y, names)))
+        elif op == CNodeOp.CAST:
+            # the table has no bit -> float, so that step stays written
+            var step = g.ty.tag == CTypeKind.FLOAT and _is_soft_cast(p, g.x) and p.nodes[p.nodes[g.x].x].ty.tag == CTypeKind.BIT
+            parts.append(_Piece.lit(type_name(g.ty) + "("))
+            if step:
+                parts.append(_Piece.lit(type_name(p.nodes[g.x].ty) + "("))
+            parts.append(_Piece.expr(g.x, True))
+            parts.append(_Piece.lit(String("))" if step else ")")))
+        elif op == CNodeOp.NEG or op == CNodeOp.LNOT or op == CNodeOp.BNOT:
+            prec = _PR_UNARY
+            parts.append(_Piece.lit(String("-" if op == CNodeOp.NEG else ("!" if op == CNodeOp.LNOT else "~"))))
+            parts.append(_Piece.expr(g.x, False, _PR_UNARY))
+        elif op == CNodeOp.FN:
+            parts.append(_Piece.lit(_fn_text(g.i) + "("))
+            parts.append(_Piece.expr(g.x, True))
+            if g.y >= 0:
+                parts.append(_Piece.lit(String(", ")))
+                parts.append(_Piece.expr(g.y, True))
+            parts.append(_Piece.lit(String(")")))
+        elif op == CNodeOp.SC_END:
+            var m = cur - 1
+            while not ((p.nodes[m].op == CNodeOp.SC_AND or p.nodes[m].op == CNodeOp.SC_OR) and p.nodes[m].y == cur):
+                m -= 1
+            var is_and = p.nodes[m].op == CNodeOp.SC_AND
+            prec = _PR_AND if is_and else _PR_OR
+            parts.append(_Piece.expr(p.nodes[m].x, False, prec))
+            parts.append(_Piece.lit(String(" && " if is_and else " || ")))
+            parts.append(_Piece.expr(g.x, False, prec + 1))
+        else:
+            # binary: a constant takes the type of its sibling back when parsed again
+            prec = _op_prec(op)
+            var l = p.nodes[g.x]
+            var r = p.nodes[g.y]
+            var same = l.ty == r.ty or op == CNodeOp.SHL or op == CNodeOp.SHR or op == CNodeOp.POW
+            var lp = same and l.op == CNodeOp.CONST and r.op != CNodeOp.CONST
+            var rp = same and r.op == CNodeOp.CONST and l.op != CNodeOp.CONST
+            var lwant = prec + 1 if op == CNodeOp.POW else prec
+            var rwant = prec if op == CNodeOp.POW else prec + 1
+            parts.append(_Piece.expr(g.x, lp, lwant))
+            parts.append(_Piece.lit(" " + _op_text(op) + " "))
+            parts.append(_Piece.expr(g.y, rp, rwant))
+        if prec < item.want:
+            out += "("
+            todo.append(_Piece.lit(String(")")))
+        while len(parts) > 0:
+            todo.append(parts.pop())
+    return out^
 
 
 def _value_text(p: Program, e: Int, ty: CType, names: _PNames) raises -> String:
@@ -498,8 +534,8 @@ def _value_text(p: Program, e: Int, ty: CType, names: _PNames) raises -> String:
     var root = p.expr_root[e]
     ref g = p.nodes[root]
     if g.op == CNodeOp.CAST and g.ty == ty and can_imply(p.nodes[g.x].ty, ty):
-        return _node_text(p, g.x, names, True)[0]
-    return _node_text(p, root, names, True)[0]
+        return _node_text(p, g.x, names, True)
+    return _node_text(p, root, names, True)
 
 
 def can_imply(src: CType, dst: CType) -> Bool:
