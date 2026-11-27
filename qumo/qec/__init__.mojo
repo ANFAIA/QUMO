@@ -3,6 +3,7 @@
     qumo.qec.codes            repetition / rotated surface code memory circuits, to_stim()
     qumo.qec.dem              detector error model extraction (Stim-exact, with decomposition)
     qumo.qec.dem_compare      gather_dem, compare_dem: exact DEM comparison by symptom class (DEMVal oracle)
+    qumo.qec.distance         circuit_distance, verify_witness: exact circuit distance of a DEM (hyperedges kept)
     qumo.qec.decoders         MatchingGraph, UnionFindDecoder, MwpmDecoder, LookupTableDecoder
     qumo.qec.experiments      Sinter-style memory experiments and threshold sweeps
     qumo.qec.characterization re-export of qumo.noise.characterization (kept for one release)

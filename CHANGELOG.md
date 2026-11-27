@@ -6,6 +6,10 @@ QUMO is a research prototype. Its version string is `0.4.0` (`build/qumo version
 
 ## [Unreleased]
 
+### Added
+
+- `qumo.qec.distance`: `circuit_distance` and `verify_witness`, the exact circuit distance of a detector error model with hyperedges kept whole, by the weight-bounded search of Cheng, Guo and Pan ([arXiv:2611.08247](https://arxiv.org/abs/2611.08247), SI Sec. 5.1): exact when a completed threshold meets a verified witness, an interval when the node budget runs out. Certifies distance 3 and 5 for QUMO's surface-code memory circuits; d = 7 is out of reach of this minimal search. `tests/test_qec_distance.mojo` compares it with brute force on seeded random hypergraph models; `examples/error_correction/circuit_distance_exact.mojo` ([QEC](docs/QEC.md)). New error code QM-E740. (weekly job, 2026-11-27)
+
 ### Changed
 
 - The hardware plugin's `[ibm]` extra requires `qiskit-ibm-runtime>=0.50.1,<0.53` (it had no upper bound; 0.52.0 is a breaking release). The plugin tests pass on 0.51.0 and 0.52.1.

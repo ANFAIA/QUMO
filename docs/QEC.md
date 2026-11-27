@@ -98,7 +98,7 @@ Outputs: `DetectorSamples` (bit-packed detection events + observable flips,
   (NE, SE, NW, SW), Z checks in "Z" order (NE, NW, SE, SW): hook errors are
   perpendicular to the logical they could shorten, so the circuit distance
   equals d (`MatchingGraph.graphlike_distance()` checks this in the tests and
-  Stim's `shortest_graphlike_error` agrees).
+  Stim's `shortest_graphlike_error` agrees; `circuit_distance` (below) certifies it on the undecomposed model, hyperedges whole, for d = 3 and 5).
 * `NoiseParams(after_clifford_depolarization, before_measure_flip_probability,
   after_reset_flip_probability, before_round_data_depolarization)`;
   `NoiseParams.uniform(p)` = Stim/Sinter "uniform circuit noise".
@@ -175,6 +175,54 @@ are not checked. Detector labels are not aligned: both models must number
 detectors and observables the same way. Compare models with `compare_dem`, not by
 `to_text()` of gathered models: merging in a different order can change the last
 digit of a rate.
+
+### Exact circuit distance (`qumo.qec.distance`)
+
+```mojo
+from qumo.qec.distance import circuit_distance, verify_witness
+
+var dem = detector_error_model(cc.circuit, decompose=False)
+var r = circuit_distance(dem)            # max_weight=32, node_limit=50_000_000
+print(r)                                 # DistanceResult(status=exact, lower=5, upper=5, weight=5, nodes=2060362)
+```
+
+The circuit distance is the fewest error mechanisms whose detectors cancel and whose observables
+do not: min |F| over nonempty F with the XOR of the symptoms empty and the XOR of the observables
+nonzero. The symptoms are the full `dets` of each mechanism, so hyperedges (more than two
+detectors) stay whole. Probabilities are ignored, repeated ids inside one mechanism cancel, equal
+mechanisms are merged, and `^` pieces are checked to XOR to the symptom but otherwise not used.
+A decomposed model gives the same value, so `decompose=False` is the clearer choice.
+
+The method is Cheng, Guo and Pan, arXiv:2611.08247, SI Sec. 5.1: iterative deepening on the
+weight, roots anchored at the smallest column, branching on an unsatisfied detector, a covering
+bound computed in integer arithmetic, and a close at zero syndrome (Lemma 5.1). QUMO adds one
+restriction: only columns that flip an observable are used as anchors.
+
+`DistanceResult` has `status`, `lower`, `upper`, `exact`, `witness` (indices into `dem.errors`)
+and `nodes`:
+
+* `exact`: `lower == upper == len(witness)` is the distance. The witness is re-checked by
+  `verify_witness` before it is returned.
+* `budget`: `node_limit` ran out inside threshold `K`. `lower = K`, `upper = -1`, no witness. A
+  budget never yields an upper bound.
+* `above_max_weight`: no logical of weight up to `max_weight`; `lower = max_weight + 1`.
+* `no_logical`: no mechanism flips an observable; `lower = max_weight + 1`, no search.
+
+`lower` is always a proven bound: the thresholds always start at 1, so no caller claim is needed.
+
+Measured here (Mojo, one laptop run, `tests/test_qec_distance.mojo` and the example): the surface
+Z memory with rounds = d, p = 0.001, full DEM, takes 749 nodes and about 0.1 ms for d = 3 and
+2,060,362 nodes and about 240 ms for d = 5; the repetition code with d = 5 takes 560 nodes. The
+Python prototype in the review did not finish d = 7 within 80M nodes. Measured in Mojo: surface Z
+memory with d = 7, rounds = 7, p = 0.001, full DEM (5473 mechanisms), the default `node_limit` gives
+status `budget` with lower = 5 after 50,000,001 nodes, about 9.5 s, and no upper bound. So d = 7 is
+not certified by this minimal search; it needs the paper's sector reduction and rank DP.
+
+`MatchingGraph.graphlike_distance()` is a different quantity. It counts pieces of the decomposed
+matching graph and reads observable 0 only, so it is not a certificate of the circuit distance.
+It is unchanged. On the hook-safe surface schedule both give d.
+
+Not implemented: sector reduction, rank DP, time collapse, lifting, symmetry, and the dual ascent.
 
 ## Decoders (`qumo.qec.decoders`)
 
@@ -516,6 +564,7 @@ struct NeuralDecoder(Decoder):
 | QM-E735 | Stim detector error model text could not be parsed (the message has the line), or a probability above 1 | Stim's format: `error(p) D0 D1 ^ D2 L0`, `detector`, `logical_observable`, `shift_detectors`, `repeat` |
 | QM-E736 | Invalid sliding-window setup: `step <= 0`, `window < step`, `(rounds - window) % step != 0` when `window < rounds`, no detector rounds, a decoder count that differs from the window count, or more than 63 observables | `0 < step <= window` and `(rounds - window) % step == 0`; `window >= rounds` is allowed and is the plain decoder |
 | QM-E737 | `missing_detectors` needs a Clifford circuit with at most 20000 measurements | bind parameters and remove non-Clifford gates |
+| QM-E740 | `circuit_distance`: `max_weight < 1`, `node_limit < 1`, more than 64 observables, a negative detector id, or `^` pieces that do not XOR to the symptom | use `max_weight >= 1` and `node_limit >= 1`; a spent budget is not an error (status `budget`) |
 
 ## Benchmarks
 
