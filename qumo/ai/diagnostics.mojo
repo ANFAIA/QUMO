@@ -470,7 +470,7 @@ def error_catalog() -> List[ErrorInfo]:
     _e(c, "QM-E805", "algorithms", "Circuit not supported by the chosen gradient/analysis method.", "Use parameter-shift or bind the unsupported gates.")
     _e(c, "QM-E806", "algorithms", "Unknown optimizer or gradient method.", "Use one of the documented method names.")
     _e(c, "QM-E807", "algorithms", "Problem too large for an exact/brute-force routine.", "Reduce the size or use a variational method.")
-    _e(c, "QM-E808", "algorithms", "Invalid Trotterization options.", "steps >= 1, order 1 or even.")
+    _e(c, "QM-E808", "algorithms", "Invalid Trotterization options.", "steps >= 1, order 1 or even; scheme 'suzuki' (default) or 'mo8_q21', which needs order 8.")
     _e(c, "QM-E809", "algorithms", "Invalid graph specification.", "Edges are 'i-j' pairs of distinct non-negative nodes.")
     _e(c, "QM-E816", "algorithms", "Invalid SQD policy or trim settings.", "policy 'standard' or 'trim', ratios in (0, 1].")
     _e(c, "QM-E817", "algorithms", "Invalid multi-product formula: step counts must be distinct and positive, with a feasible L1 bound.", "Use distinct steps; 'approx' needs max_l1 >= 1.")

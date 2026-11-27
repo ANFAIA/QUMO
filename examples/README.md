@@ -73,7 +73,7 @@ Every example below is run and verified by `bench/.venv/bin/python examples/run_
 | [`foundations/`](foundations/) | 17 | Amazon Braket, Cirq (Google), Classiq, QUMO, Qiskit (IBM), TKET (Quantinuum) | 17 / 0 |
 | [`algorithms/`](algorithms/) | 30 | Cirq (Google), Classiq, Q# / Azure Quantum, QUMO, Qibo, Qiskit (IBM), TKET (Quantinuum) | 30 / 0 |
 | [`optimization/`](optimization/) | 10 | CUDA-Q (NVIDIA), Classiq, QUMO, Qiskit (IBM) | 10 / 0 |
-| [`chemistry_and_physics/`](chemistry_and_physics/) | 17 | CUDA-Q (NVIDIA), Cirq (Google), Classiq, QUMO, Qibo, Qiskit (IBM), TKET (Quantinuum) | 16 / 1 |
+| [`chemistry_and_physics/`](chemistry_and_physics/) | 18 | CUDA-Q (NVIDIA), Cirq (Google), Classiq, QUMO, Qibo, Qiskit (IBM), TKET (Quantinuum) | 17 / 1 |
 | [`qml/`](qml/) | 14 | PennyLane (Xanadu), QUMO, Qibo | 14 / 0 |
 | [`error_correction/`](error_correction/) | 5 | Cirq (Google), QUMO | 5 / 0 |
 | [`ft/`](ft/) | 8 | Guppy FT (Quantinuum), QUMO | 7 / 1 |

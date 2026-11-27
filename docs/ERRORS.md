@@ -920,7 +920,7 @@ Fix: Reduce the size or use a variational method.
 ### QM-E808
 
 **Invalid Trotterization options.**  
-Fix: steps >= 1, order 1 or even.
+Fix: steps >= 1, order 1 or even; scheme 'suzuki' (default) or 'mo8_q21', which needs order 8.
 
 ### QM-E809
 
