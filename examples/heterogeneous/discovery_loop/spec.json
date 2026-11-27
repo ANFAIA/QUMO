@@ -1,0 +1,20 @@
+{
+  "schema": "qumo.discovery_spec.v1",
+  "problem": "parallel Find-Any: N = 2^n items, k marked, m marking-oracle slots queried in one round",
+  "cost": "expected number of parallel query rounds, divided by (pi/4) sqrt(N/(m k)), averaged over screening_cells",
+  "correctness": [
+    "the program terminates",
+    "every returned address is marked (zero error)"
+  ],
+  "screening_n": 30,
+  "screening_cells": [[1, 1], [2, 1], [2, 2], [3, 1]],
+  "verification_cells": [[6, 1, 1], [5, 2, 1], [6, 2, 2]],
+  "wide_cell": [8, 2, 1],
+  "genome": {
+    "family": ["restart", "weak"],
+    "diffusion": ["per_slot", "joint"],
+    "readout": ["checked", "trusted"],
+    "a": [0.05, 1.5],
+    "c": [0.25, 16.0]
+  }
+}
