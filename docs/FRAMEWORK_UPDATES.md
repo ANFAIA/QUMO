@@ -86,7 +86,7 @@ review are in [their own section](#candidates-of-the-2026-11-26-review).
 | Stim text import, `PAULI_CHANNEL_2`, `E`, `MPP` | Stim, QDK-Stim | done, `from_stim`, [QEC](QEC.md) |
 | DEM parser, DEM sampler | cudaq-qec 0.7, cuStabilizer 0.3 | done, `parse_dem`, `sample_dem` |
 | Exact DEM comparison (`gather_dem`, `compare_dem`) | DEMVal, Luo and Suzuki, arXiv:2611.20501; research-watch 2026-11-22 | done, `qumo.qec.dem_compare`, [QEC](QEC.md); example `examples/error_correction/dem_exact_comparison.mojo`. Oracle only: no injection reference, no label alignment |
-| Exact circuit distance of a DEM (`circuit_distance`) | Cheng, Guo and Pan, arXiv:2611.08247 (SI Sec. 5.1); research-watch 2026-11-27 | done, `qumo.qec.distance`, [QEC](QEC.md); example `examples/error_correction/circuit_distance_exact.mojo`. Weight-bounded search only: no sector reduction, rank DP or time collapse, so d <= 5 on full surface-code DEMs; tropidist not compared |
+| Exact circuit distance of a DEM (`circuit_distance`) | Cheng, Guo and Pan, arXiv:2611.08247 (SI Sec. 5.1); research-watch 2026-11-27 | done, `qumo.qec.distance`, [QEC](QEC.md); example `examples/error_correction/circuit_distance_exact.mojo`. Weight-bounded search, plus row projection onto detector sectors (exact odd-closed-walk solve when graph-like) and lifting with a replayed witness (`circuit_distance_reduced`): surface-code memories certified to d = 15. No rank DP, time collapse or completion tables; tropidist not compared |
 | `missing_detectors`, `count_determined_measurements` | Stim 1.16 | done, `qumo.qec.lint`, matches Stim |
 | Sliding-window decoder | cudaq-qec 0.5 | done, `SlidingWindowDecoder[D]` |
 | `reichardt` QEC style | guppyft 0.5 | done; not compared with guppyft on Selene |

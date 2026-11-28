@@ -1,4 +1,8 @@
-"""Tests for qumo.qec.distance: exact circuit distance against brute force and theory."""
+"""Tests for qumo.qec.distance: exact circuit distance against brute force and theory.
+
+The reduced path (row projection lower bound, shortest odd closed walk, lifting) is checked against
+brute force on the original and on an independently projected model; see test_projection_random,
+test_graphlike_random and test_reduced_circuits."""
 
 from std.bit import pop_count
 from std.time import perf_counter_ns
@@ -7,7 +11,15 @@ from qumo.core.rng import Rng
 from qumo.qec.codes import NoiseParams, surface_code_memory, repetition_code_memory
 from qumo.qec.dem import DetectorErrorModel, DemError, detector_error_model
 from qumo.qec.stim_text import parse_dem
-from qumo.qec.distance import DistanceResult, circuit_distance, verify_witness
+from qumo.qec.distance import (
+    DistanceResult,
+    circuit_distance,
+    circuit_distance_reduced,
+    circuit_distance_with_sectors,
+    detector_sectors,
+    projected_distance,
+    verify_witness,
+)
 
 
 def _brute(dem: DetectorErrorModel) -> Int:
@@ -349,6 +361,268 @@ def test_verify_witness() raises:
     assert_true(not verify_witness(cancel, [0, 1]), "cancels but observables do not flip")
 
 
+# ---------------------------------------------------------------------------------------------
+# Reduced path: row projection (lower bound), odd closed walk (graph-like projections), lifting.
+# ---------------------------------------------------------------------------------------------
+
+
+def _project_dem(dem: DetectorErrorModel, keep: List[Bool]) -> DetectorErrorModel:
+    """The row projection built here, independently of the library: drop every detector not kept."""
+    var out = DetectorErrorModel(dem.num_detectors, dem.num_observables)
+    for e in dem.errors:
+        var ds = List[Int]()
+        for d in e.dets:
+            if keep[d]:
+                ds.append(d)
+        out.errors.append(DemError(e.p, ds^, e.obs))
+    return out^
+
+
+def _random_sector(mut rng: Rng, nd: Int) -> List[Int]:
+    var s = List[Int]()
+    for d in range(nd):
+        if rng.uniform() < 0.5:
+            s.append(d)
+    if len(s) == 0:
+        s.append(rng.below(nd))
+    return s^
+
+
+def _keep(nd: Int, s: List[Int]) -> List[Bool]:
+    var k = List[Bool](length=nd, fill=False)
+    for d in s:
+        k[d] = True
+    return k^
+
+
+def _check_against(r: DistanceResult, b: Int, max_weight: Int, dem: DetectorErrorModel, msg: String) raises:
+    """Full-budget result must equal brute force b (b < 0: no logical of any weight)."""
+    if b >= 0 and b <= max_weight:
+        assert_equal(r.status, "exact", msg)
+        assert_equal(r.lower, b, msg)
+        assert_equal(r.upper, b, msg)
+        assert_equal(len(r.witness), b, msg)
+        assert_true(verify_witness(dem, r.witness), msg)
+    else:
+        assert_true(r.status == "above_max_weight" or r.status == "no_logical", msg)
+        assert_equal(r.upper, -1, msg)
+        assert_equal(r.lower, max_weight + 1, msg)
+
+
+def _check_interrupted(r: DistanceResult, b: Int, msg: String) raises:
+    """Any budget: lower never exceeds the truth; an upper bound appears only with an exact answer."""
+    if b >= 0:
+        assert_true(r.lower <= b, msg)
+    if r.status == "exact":
+        assert_equal(r.lower, b, msg)
+        assert_equal(r.upper, b, msg)
+    else:
+        assert_equal(r.upper, -1, msg)
+        assert_equal(len(r.witness), 0, msg)
+
+
+def test_projection_random() raises:
+    """Random hypergraph models and random detector sectors against two brute forces:
+    the projected optimum equals brute force on the independently projected model, it never exceeds
+    the original's brute-force distance (the relaxation claim), and the full reduced pipeline
+    (projection, lifting, fallback search) returns exactly the original's brute-force distance."""
+    var rng = Rng(20261128)
+    var finite = 0
+    var weaker = 0
+    var budget = 0
+    for trial in range(400):
+        var dem = _random_dem(rng, 14)
+        var nd = dem.num_detectors
+        var b = _brute(dem)
+        var s1 = _random_sector(rng, nd)
+        var s2 = _random_sector(rng, nd)
+        var bp = _brute(_project_dem(dem, _keep(nd, s1)))
+        var msg = "model " + String(trial) + " brute=" + String(b) + " projected brute=" + String(bp)
+        if b >= 0:
+            finite += 1
+            assert_true(bp >= 1 and bp <= b, msg + " relaxation must not exceed the distance")
+            if bp < b:
+                weaker += 1
+        var pd = projected_distance(dem, s1, max_weight=20)
+        _check_against_projection(pd, bp, msg + " projected got " + String(pd))
+        var secs = List[List[Int]]()
+        secs.append(s1.copy())
+        secs.append(s2.copy())
+        var r = circuit_distance_with_sectors(dem, secs, max_weight=20)
+        _check_against(r, b, 20, dem, msg + " with sectors got " + String(r))
+        var ra = circuit_distance_reduced(dem, max_weight=20)
+        _check_against(ra, b, 20, dem, msg + " reduced got " + String(ra))
+        for lim in [1, 3, 10, 40, 200]:
+            var r2 = circuit_distance_with_sectors(dem, secs, max_weight=20, node_limit=lim)
+            _check_interrupted(r2, b, msg + " node_limit=" + String(lim) + " got " + String(r2))
+            if r2.status == "budget":
+                budget += 1
+    print("  projection: finite", finite, "of 400; projection weaker than the distance in", weaker, "; budget outcomes", budget)
+    assert_true(finite >= 150, "too few finite models")
+    assert_true(weaker >= 50, "too few models where the relaxation is strict (lifting must fail there)")
+    assert_true(budget >= 100, "too few budget outcomes")
+
+
+def _check_against_projection(r: DistanceResult, bp: Int, msg: String) raises:
+    if bp >= 0 and bp <= 20:
+        assert_equal(r.status, "exact", msg)
+        assert_equal(r.lower, bp, msg)
+        assert_equal(r.upper, bp, msg)
+        assert_equal(len(r.witness), bp, msg)
+    else:
+        assert_true(r.status == "above_max_weight" or r.status == "no_logical", msg)
+        assert_equal(r.upper, -1, msg)
+
+
+def _random_graph_dem(mut rng: Rng) -> DetectorErrorModel:
+    """Random graph-like model: every mechanism has 0, 1 or 2 detectors; cycles that avoid the
+    boundary are common (few 1-detector mechanisms); 1..3 observables."""
+    var nd = 2 + rng.below(9)
+    var nc = 3 + rng.below(15)
+    var nobs = 1 + rng.below(3)
+    var dem = DetectorErrorModel(nd, nobs)
+    var p_bound = rng.uniform() * 0.4
+    for _i in range(nc):
+        var dets = List[Int]()
+        var u = rng.uniform()
+        if u < 0.04:
+            pass
+        elif u < 0.04 + p_bound:
+            dets.append(rng.below(nd))
+        else:
+            var a = rng.below(nd)
+            var c = rng.below(nd - 1)
+            if c >= a:
+                c += 1
+            dets.append(min(a, c))
+            dets.append(max(a, c))
+        var obs: UInt64 = 0
+        for l in range(nobs):
+            if rng.uniform() < 0.25:
+                obs |= UInt64(1) << UInt64(l)
+        dem.errors.append(DemError(0.01, dets^, obs))
+    return dem^
+
+
+def test_graphlike_random() raises:
+    """The shortest-odd-closed-walk solve (identity sector, so every column is graph-like) against
+    brute force, including cycles that avoid the boundary and several observables."""
+    var rng = Rng(424242)
+    var finite = 0
+    var interior = 0
+    for trial in range(600):
+        var dem = _random_graph_dem(rng)
+        var b = _brute(dem)
+        var all = List[Int]()
+        for d in range(dem.num_detectors):
+            all.append(d)
+        var r = projected_distance(dem, all, max_weight=20)
+        var msg = "graph model " + String(trial) + " brute=" + String(b) + " got " + String(r)
+        _check_against_projection(r, b, msg)
+        if b >= 0:
+            finite += 1
+            assert_true(verify_witness(dem, r.witness), msg)  # identity projection: a real witness
+            var bdry = 0
+            for i in r.witness:
+                if len(dem.errors[i].dets) == 1:
+                    bdry += 1
+            if bdry == 0:
+                interior += 1
+        var secs = List[List[Int]]()
+        secs.append(all^)
+        _check_against(circuit_distance_with_sectors(dem, secs, max_weight=20), b, 20, dem, msg + " (with sectors)")
+    print("  graph-like: finite", finite, "of 600; optimum avoids the boundary in", interior)
+    assert_true(finite >= 250, "too few finite graph-like models")
+    assert_true(interior >= 50, "too few optima that avoid the boundary")
+
+
+def test_reduced_circuits() raises:
+    """Surface-code memories: the reduced path equals the plain search at d = 3, 5, and gives d at
+    d = 7, 9, 11 with a witness replayed on the full model. At d = 7 the sector lower bound is
+    cross-checked by the plain weight-bounded search on the independently projected model."""
+    for d in [3, 5]:
+        for basis in ["Z", "X"]:
+            var dem = _circuit_dem("surface", d, basis, False)
+            var a = circuit_distance(dem)
+            var r = circuit_distance_reduced(dem)
+            var label = "surface d=" + String(d) + " " + basis + " plain " + String(a) + " reduced " + String(r)
+            assert_equal(a.status, "exact", label)
+            assert_equal(r.status, "exact", label)
+            assert_equal(r.lower, a.lower, label)
+            assert_equal(r.upper, a.upper, label)
+            assert_true(verify_witness(dem, r.witness), label)
+    for d in [7, 9, 11]:
+        for basis in ["Z", "X"]:
+            var dem = _circuit_dem("surface", d, basis, False)
+            var t0 = perf_counter_ns()
+            var r = circuit_distance_reduced(dem)
+            var ms = Float64(perf_counter_ns() - t0) / 1e6
+            var label = "surface d=" + String(d) + " " + basis + " reduced " + String(r)
+            print("  ", label, "ms=", ms)
+            assert_equal(r.status, "exact", label)
+            assert_equal(r.lower, d, label)
+            assert_equal(r.upper, d, label)
+            assert_equal(len(r.witness), d, label)
+            assert_true(verify_witness(dem, r.witness), label)
+    # d = 7 sector bound by an independent algorithm: plain search on the projected model.
+    var dem7 = _circuit_dem("surface", 7, "Z", False)
+    var secs = detector_sectors(dem7)
+    var best = 0
+    var best_s = 0
+    for i in range(len(secs)):
+        var pd = projected_distance(dem7, secs[i])
+        assert_equal(pd.status, "exact", String(pd))
+        if pd.lower > best:
+            best = pd.lower
+            best_s = i
+    assert_equal(best, 7, "d=7 sector lower bound")
+    var proj = _project_dem(dem7, _keep(dem7.num_detectors, secs[best_s]))
+    var plain = circuit_distance(proj)
+    assert_equal(plain.status, "exact", "plain search on the projected d=7 model " + String(plain))
+    assert_equal(plain.lower, 7, "plain search on the projected d=7 model " + String(plain))
+    print("   d=7 sector of", len(secs[best_s]), "detectors: odd-walk 7, plain search on the projection", String(plain))
+    # Repetition memory and the decomposed d=3 model take the same path.
+    assert_equal(circuit_distance_reduced(_circuit_dem("repetition", 5, "Z", False)).upper, 5, "repetition d=5")
+    assert_equal(circuit_distance_reduced(_circuit_dem("surface", 3, "Z", True)).upper, 3, "decomposed d=3")
+
+
+def test_reduced_budget_and_args() raises:
+    var dem = _circuit_dem("surface", 5, "Z", False)
+    var r1 = circuit_distance_reduced(dem, node_limit=1)
+    assert_equal(r1.status, "budget", String(r1))
+    assert_equal(r1.lower, 1, String(r1))
+    assert_equal(r1.upper, -1, String(r1))
+    assert_equal(len(r1.witness), 0, String(r1))
+    var r2 = circuit_distance_reduced(dem, max_weight=4)
+    assert_equal(r2.status, "above_max_weight", String(r2))
+    assert_equal(r2.lower, 5, String(r2))
+    assert_equal(len(circuit_distance_with_sectors(dem, List[List[Int]]()).witness), 5, "no sectors = plain search")
+    var msgs = List[String]()
+    var empty = List[List[Int]]()
+    empty.append(List[Int]())
+    var big = List[List[Int]]()
+    var b: List[Int] = [0, dem.num_detectors]
+    big.append(b^)
+    var neg = List[List[Int]]()
+    var n: List[Int] = [-1]
+    neg.append(n^)
+    for secs in [empty.copy(), big.copy(), neg.copy()]:
+        try:
+            _ = circuit_distance_with_sectors(dem, secs)
+            msgs.append(String())
+        except e:
+            msgs.append(String(e))
+    try:
+        _ = projected_distance(dem, List[Int]())
+        msgs.append(String())
+    except e:
+        msgs.append(String(e))
+    for m in msgs:
+        assert_true(m.startswith("QM-E741"), m)
+        assert_true(m.find("Hint:") >= 0, m)
+    print("  reduced: budget, max_weight, empty sector list, 4 of 4 bad sectors raise QM-E741")
+
+
 def main() raises:
     test_random_vs_brute()
     test_code_capacity()
@@ -359,4 +633,8 @@ def main() raises:
     test_above_max_weight()
     test_invalid_args()
     test_verify_witness()
+    test_projection_random()
+    test_graphlike_random()
+    test_reduced_circuits()
+    test_reduced_budget_and_args()
     print("test_qec_distance OK")

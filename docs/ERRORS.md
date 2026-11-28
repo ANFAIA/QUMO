@@ -870,6 +870,11 @@ Fix: Decompose it into 1- and 2-qubit gates first (qumo.compiler.basis.unroll_3q
 **circuit_distance got an invalid argument (max_weight < 1 or node_limit < 1), a model with more than 64 observables or a negative detector id, or a mechanism whose ^ pieces do not XOR to its symptom.**  
 Fix: Use max_weight >= 1 and node_limit >= 1; running out of node_limit is not an error (status 'budget').
 
+### QM-E741
+
+**A detector sector given to circuit_distance_with_sectors or projected_distance is empty or names a detector id the model does not have (neither below num_detectors nor up to the largest id a mechanism names).**  
+Fix: Pass nonempty lists of valid detector ids, or let circuit_distance_reduced choose them with detector_sectors(dem).
+
 ### QM-E730
 
 **A computational circuit given to encode() contains noise channels, QEC annotations or unbound symbolic parameters.**  
