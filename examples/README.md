@@ -79,7 +79,7 @@ Every example below is run and verified by `bench/.venv/bin/python examples/run_
 | [`ft/`](ft/) | 8 | Guppy FT (Quantinuum), QUMO | 7 / 1 |
 | [`noise_and_mitigation/`](noise_and_mitigation/) | 8 | Amazon Braket, CUDA-Q (NVIDIA), Cirq (Google), Classiq, QUMO, Qiskit (IBM) | 7 / 1 |
 | [`compilation/`](compilation/) | 7 | Q# / Azure Quantum, QUMO, Qiskit (IBM), TKET (Quantinuum) | 7 / 0 |
-| [`simulation/`](simulation/) | 5 | Amazon Braket, CUDA-Q (NVIDIA), Q# / Azure Quantum, QUMO | 4 / 1 |
+| [`simulation/`](simulation/) | 6 | Amazon Braket, CUDA-Q (NVIDIA), Q# / Azure Quantum, QUMO | 5 / 1 |
 | [`control_flow/`](control_flow/) | 2 | QUMO | 2 / 0 |
 | [`heterogeneous/`](heterogeneous/) | 6 | QUMO | 6 / 0 |
 

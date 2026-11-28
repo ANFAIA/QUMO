@@ -239,6 +239,21 @@ Fix: Pass a finite matrix within the cap; for an MPS, lower max_bond.
 **The one-sided Jacobi SVD did not converge within its sweep limit (60).**  
 Fix: Report the matrix; check it for entries spanning more than about 300 orders of magnitude.
 
+### QM-E432
+
+**The matrix product state simulator (qumo.sim.mps) cannot run this circuit: a measurement followed by more gates on the measured qubit, a reset, a noise channel or a classically conditioned gate. Terminal measurements are ignored.**  
+Fix: Use sample() (trajectories) or the density-matrix simulator for these circuits.
+
+### QM-E433
+
+**Invalid MPS options or size: num_qubits outside [1, 4096], max_bond outside [1, 512], cutoff outside [0, 1), tensors that could exceed 4 GiB, shots outside [1, 10^7], or more than 2^27 sampled bits (shots x num_qubits) in one sample call.**  
+Fix: Lower max_bond or the number of qubits; cutoff is relative to the largest singular value of a split.
+
+### QM-E434
+
+**An MPS query or gate got an invalid argument: a qubit outside the state, the same qubit twice, a bit list or Pauli label of the wrong length or with a bad character, a basis index out of range, or a state truncated to zero norm.**  
+Fix: Pass one bit (0/1) or one Pauli (I/X/Y/Z, label leftmost = qubit n-1) per qubit, and distinct qubits 0 .. n-1.
+
 ### QM-E408
 
 **Invalid cache-block size for execute_plan_reordered (need 1 <= nb <= num_qubits).**  
