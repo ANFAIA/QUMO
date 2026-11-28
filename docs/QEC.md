@@ -243,13 +243,14 @@ paper (Methods, "Reductions, relaxation and lifting"; SI Sec. 5.4):
    every start vertex and every observable bit. A BFS on the parity double cover finds it in
    polynomial time. (A walk taken mod 2 is a solution no longer than the walk; an optimal solution
    is an even subgraph, one of whose cycles is odd.) The BFS starts at every vertex, not only at
-   the boundary: an odd cycle need not touch it. Otherwise the weight-bounded search above runs on
+   the boundary: an odd cycle need not touch it. This odd-walk solver is QUMO's own: the paper
+   solves projected problems with a rank dynamic program or the weight-bounded search. Otherwise the weight-bounded search above runs on
    the projection.
 3. **Lifting, the upper bound.** Each optimal projected solution (up to 64 are kept) is lifted by
    picking one original mechanism per projected column, with the same projected detectors and the
    same observables, so that the detectors outside S cancel (at most 65,536 tries). A lifted set of
    weight equal to the lower bound that passes `verify_witness` on the original model gives
-   `exact`. Nothing else does.
+   `exact`. A failed lift proves nothing.
 4. **Fallback.** When no lift is found, the weight-bounded search on the full model runs from
    threshold K = lower bound. The thresholds below are already excluded by step 1, so the first
    solution found is still a minimum. `node_limit` covers the odd-walk states and both searches;
@@ -264,7 +265,8 @@ sector problems in the paper's SI Tables 1 and 3. The choice of S changes how st
 is, never whether it is sound. `circuit_distance_with_sectors(dem, sectors)` takes your own
 sectors (an empty list is plain `circuit_distance`), and `projected_distance(dem, sector)` returns
 the projected optimum alone: a lower bound, whose witness solves the projection but not
-necessarily the model. A bad sector (empty, or an id outside 0 .. num_detectors - 1) raises
+necessarily the model. A bad sector (empty, or an id that is neither below num_detectors nor up to the largest id a
+mechanism names) raises
 QM-E741.
 
 Measured here (Mojo, one Apple laptop run of `tests/test_qec_distance.mojo` and the example, surface

@@ -872,7 +872,7 @@ Fix: Use max_weight >= 1 and node_limit >= 1; running out of node_limit is not a
 
 ### QM-E741
 
-**A detector sector given to circuit_distance_with_sectors or projected_distance is empty or names a detector id outside 0 .. num_detectors - 1.**  
+**A detector sector given to circuit_distance_with_sectors or projected_distance is empty or names a detector id the model does not have (neither below num_detectors nor up to the largest id a mechanism names).**  
 Fix: Pass nonempty lists of valid detector ids, or let circuit_distance_reduced choose them with detector_sectors(dem).
 
 ### QM-E730

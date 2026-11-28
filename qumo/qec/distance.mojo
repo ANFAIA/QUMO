@@ -470,12 +470,12 @@ def circuit_distance(dem: DetectorErrorModel, max_weight: Int = 32, node_limit: 
 # A projected solution says nothing about the original model until it is lifted: one original column
 # per projected column, chosen so that the detectors outside S cancel too. A lifted set of weight
 # equal to the lower bound, re-checked by `verify_witness` on the original model, is the UPPER bound
-# that makes the result exact. Nothing else is reported as exact.
+# that makes the result exact. Otherwise only the full search on the original model reports exact.
 # ---------------------------------------------------------------------------------------------
 
 
 def _sector_error(what: String) -> Error:
-    return Error("QM-E741: circuit_distance sector " + what + ". Hint: a sector is a nonempty list of detector ids 0 .. num_detectors - 1 (see detector_sectors).")
+    return Error("QM-E741: circuit_distance sector " + what + ". Hint: a sector is a nonempty list of detector ids of the model: below num_detectors, or up to the largest id a mechanism names (see detector_sectors).")
 
 
 def _project(full: _Cols, keep: List[Bool]) -> _Cols:
