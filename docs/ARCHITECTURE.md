@@ -41,7 +41,7 @@ today (`qumo/*/*.mojo`, `from qumo.X` lines; the re-export shims for old paths a
 | 0 | `core` | JSON writer and parser, `Rng` | nothing from QUMO |
 | 1 | `ir` | gates, `Circuit`, `Program`, Pauli, QASM, circuit/program JSON (`ir/json.mojo`) | `core` |
 | 2 | `device` | `Target`: coupling graph, basis, errors, durations, presets, `parse_target`; `conformance_error` | `ir` |
-| 2 | `sim` | state vector, tableau, Pauli frames, runners, density, branching, CPU simulator selection (`dispatch`) | `core`, `ir` |
+| 2 | `sim` | state vector, tableau, Pauli frames, runners, density, branching, Pauli propagation (`pauli_prop`), CPU simulator selection (`dispatch`) | `core`, `ir` |
 | 3 | `noise` | `NoiseModel`, `apply_noise_model`, RB, T1/Ramsey, readout mitigation, M3, the device emulator (`emulate`) | `core`, `ir`, `device`, `sim` |
 | 3 | `compiler` | pass manager, routing, synthesis, `Program` compilation, static resource estimation (`resources`) | `core`, `ir`, `device`, `sim` |
 | 3 | `qec` | codes, DEM, decoders, sweeps | `core`, `ir`, `sim` |

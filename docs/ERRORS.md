@@ -229,6 +229,16 @@ Fix: Pass a finite offset and a standard deviation >= 0, e.g. gaussian_angle_per
 **evolve()/expectation() (CPU and GPU) cannot take a circuit with a reset, a noise channel or a mid-circuit measurement: a pure state would silently drop it.**  
 Fix: Use sample() (trajectories) or the density-matrix simulator; terminal measurements are fine.
 
+### QM-E430
+
+**Pauli propagation (propagate_pauli) cannot take the circuit: more than 64 qubits, a classically conditioned gate, a reset, a mid-circuit measurement, a Kraus channel, PAULI_CHANNEL_2 or a correlated error.**  
+Fix: It takes unitary gates, terminal measurements and X/Y/Z_ERROR, PAULI_CHANNEL_1, DEPOLARIZE1/2 noise; use density_evolve() or sample() for the rest.
+
+### QM-E431
+
+**Pauli propagation holds more Pauli strings than max_terms (default 2^22), or max_terms < 1.**  
+Fix: Truncate with min_abs_coeff or max_weight and read the reported error bound, or raise max_terms if memory allows (up to about 140 bytes per string of max_terms at the peak).
+
 ### QM-E408
 
 **Invalid cache-block size for execute_plan_reordered (need 1 <= nb <= num_qubits).**  

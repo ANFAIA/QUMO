@@ -443,6 +443,52 @@ the method, and the estimated fidelity of the circuit on the device; with `--jso
 the fields are `counts`, `method`, `shots`, `seed`, `num_qubits`, `compiled`,
 `estimated_fidelity` and `target` (the MCP tool `qumo_emulate` returns the same).
 
+### Pauli propagation (Heisenberg picture)
+
+`propagate_pauli(circuit, observable, options, params)` (`qumo.sim.pauli_prop`)
+computes <0^n| U^dag O U |0^n> without a state: it walks the circuit backwards and
+replaces each Pauli string P of O by G^dag P G. A Clifford opcode maps one string
+to one (the shared table `qumo.ir.clifford_table.clifford_heisenberg`); a rotation
+exp(-i t G/2) leaves commuting strings alone and turns an anticommuting one into
+cos(t) P + sin(t) (-i P G). Other gates are rewritten exactly as rotations and
+Cliffords (T, U, CP, CRX/CRY/CRZ, CH, CCX, CCZ, CSWAP); X/Y/Z_ERROR,
+PAULI_CHANNEL_1 and DEPOLARIZE1/2 multiply each string by 1 - 2 (probability of the
+anticommuting Paulis), which is exact. The method and its error bound are those of
+Rudolph et al., [arXiv:2505.21606](https://arxiv.org/abs/2505.21606) (PauliPropagation.jl).
+
+| Option | Effect |
+|---|---|
+| `min_abs_coeff` (default 0, off) | drop strings with \|c\| below it after every gate |
+| `max_weight` (default -1, off) | drop strings on more qubits than it after every gate |
+| `max_terms` (default 2^22) | hard cap: QM-E431 when more strings survive a gate; memory peaks at about 140 bytes per string of the cap (600 MB at the default) |
+
+The result holds `expectation`, the propagated operator (`observable`),
+`discarded_terms` and `discarded_abs_sum`, the sum of |c| over every dropped
+string. In exact arithmetic |exact - expectation| <= `discarded_abs_sum`, for any
+angles, noise included, and the same holds for the returned operator evaluated in
+any other state (a dropped piece D contributes |Tr(rho D)| <= ||D|| <= sum |c|, and
+unitaries and Pauli channels do not increase the norm). It is a worst-case bound, not an estimate: on the random circuits of
+`tests/test_pauli_prop.mojo` the actual error averages 1.6% of it, and on the
+32-qubit, 32-layer example below it is 3.3, larger than the range of the
+observable, so it says nothing there. With no truncation (`is_exact()`) nothing is
+dropped but exact zeros.
+
+Numbers (`tests/test_pauli_prop.mojo`, `examples/simulation/pauli_propagation.mojo`):
+every opcode after a random 3-qubit state, on all 63 Pauli strings, matches the
+state vector to 7.8e-16; 40 seeded random circuits of 2 to 10 qubits with every
+supported gate, untruncated, to 6.7e-16 (up to 758137 strings); 12 noisy circuits
+match the density matrix to 7e-17. The README case of PauliPropagation.jl (32-qubit
+periodic TFI Trotter circuit, 32 layers, dt = 0.1, <Z_16>, max_weight 6,
+min_abs_coeff 1e-4) gives 0.1545967282414, the README's 0.154596728241, in 0.01 s.
+
+Limits: at most 64 qubits (one 64-bit word per X and Z part); initial state
+|0^n> only (prepend X gates for another basis state, or evaluate the returned
+operator in any state); no resets, mid-circuit measurements, classical conditions,
+Kraus channels, PAULI_CHANNEL_2 or correlated errors (QM-E430; terminal
+measurements are ignored, as `expectation()` does). Single-threaded; strings are
+merged with a hash index rebuilt at every rotation. No frequency or path
+truncation, no Monte Carlo, no OBP.
+
 ### Reading results
 
 `print(sv)` of a `StateVector` lists the nonzero amplitudes by bitstring (the
@@ -483,6 +529,9 @@ the MCP tools measure all qubits instead and add the note QM-W004.
   (`build_plan`) but not this executor or its index-bit swaps: it has its own
   shared-memory tile scheduler (`qumo/gpu/tiles.mojo`, docs/GPU.md).
 
+* Pauli propagation (`propagate_pauli`) stops at 64 qubits and at `max_terms`
+  strings (QM-E430, QM-E431); its truncation error bound is worst case and can
+  exceed the range of the observable on deep circuits.
 * The density matrix has no selective measurement; the state-vector path covers
   feed-forward. `sample_density` refuses mid-circuit measurements.
 * `sample_ptsbe` takes the Pauli channels X, Y, Z, DEPOLARIZE1/2, PAULI_CHANNEL_1 and
