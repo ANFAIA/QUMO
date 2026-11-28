@@ -98,7 +98,7 @@ Outputs: `DetectorSamples` (bit-packed detection events + observable flips,
   (NE, SE, NW, SW), Z checks in "Z" order (NE, NW, SE, SW): hook errors are
   perpendicular to the logical they could shorten, so the circuit distance
   equals d (`MatchingGraph.graphlike_distance()` checks this in the tests and
-  Stim's `shortest_graphlike_error` agrees; `circuit_distance` (below) certifies it on the undecomposed model, hyperedges whole, for d = 3 and 5).
+  Stim's `shortest_graphlike_error` agrees; `circuit_distance` (below) certifies it on the undecomposed model, hyperedges whole, for d = 3 and 5, and `circuit_distance_reduced` for d = 3 to 15).
 * `NoiseParams(after_clifford_depolarization, before_measure_flip_probability,
   after_reset_flip_probability, before_round_data_depolarization)`;
   `NoiseParams.uniform(p)` = Stim/Sinter "uniform circuit noise".
@@ -216,13 +216,76 @@ Z memory with rounds = d, p = 0.001, full DEM, takes 749 nodes and about 0.1 ms 
 Python prototype in the review did not finish d = 7 within 80M nodes. Measured in Mojo: surface Z
 memory with d = 7, rounds = 7, p = 0.001, full DEM (5473 mechanisms), the default `node_limit` gives
 status `budget` with lower = 5 after 50,000,001 nodes, about 9.5 s, and no upper bound. So d = 7 is
-not certified by this minimal search; it needs the paper's sector reduction and rank DP.
+not certified by this minimal search; `circuit_distance_reduced` below certifies it.
+
+#### Past d = 5: row projection and lifting
+
+```mojo
+from qumo.qec.distance import circuit_distance_reduced, circuit_distance_with_sectors
+from qumo.qec.distance import detector_sectors, projected_distance
+
+var r = circuit_distance_reduced(dem)    # surface Z memory d = 7: exact 7, 57,512 nodes, about 10 ms
+```
+
+`circuit_distance_reduced(dem)` returns the same quantity, with the same `status`, `lower`,
+`upper` and `witness` semantics, as `circuit_distance`; only the route and the `nodes` count
+differ (the witness may be another one of the same weight). It follows the reductions of the same
+paper (Methods, "Reductions, relaxation and lifting"; SI Sec. 5.4):
+
+1. **Row projection, a lower bound.** Keep only the detectors of a set S. Any F that solves the
+   model also solves the projection (its detectors on S still cancel, its observables still flip),
+   so the projected optimum is at most the circuit distance, for any S. The projection keeps a
+   mechanism whose detectors all fall outside S when it flips an observable (it is a weight-1
+   logical of the projection); dropping it would make the bound unsound.
+2. **Exact projected optimum.** When every projected mechanism has at most 2 detectors (true for the
+   measured-basis sector of QUMO's surface and repetition memories), the optimum is the shortest
+   closed walk with an odd observable bit, in the graph with one boundary vertex, minimised over
+   every start vertex and every observable bit. A BFS on the parity double cover finds it in
+   polynomial time. (A walk taken mod 2 is a solution no longer than the walk; an optimal solution
+   is an even subgraph, one of whose cycles is odd.) The BFS starts at every vertex, not only at
+   the boundary: an odd cycle need not touch it. Otherwise the weight-bounded search above runs on
+   the projection.
+3. **Lifting, the upper bound.** Each optimal projected solution (up to 64 are kept) is lifted by
+   picking one original mechanism per projected column, with the same projected detectors and the
+   same observables, so that the detectors outside S cancel (at most 65,536 tries). A lifted set of
+   weight equal to the lower bound that passes `verify_witness` on the original model gives
+   `exact`. Nothing else does.
+4. **Fallback.** When no lift is found, the weight-bounded search on the full model runs from
+   threshold K = lower bound. The thresholds below are already excluded by step 1, so the first
+   solution found is still a minimum. `node_limit` covers the odd-walk states and both searches;
+   lifting has its own bound (64 projected solutions, 65,536 tries each).
+
+`detector_sectors(dem)` picks S automatically: components of the graph of 2-detector
+mechanisms, leaving out an edge {a, b} whose observable mask is the XOR of a 1-detector mechanism
+on a and one on b (a Y-type fault at a boundary, which joins the two bases). On QUMO's CSS memories
+the components are the two bases' detectors; for the rotated surface code the measured-basis
+sector has 55, 301, 883 and 1945 merged columns for d = 3, 5, 7, 9, the column counts of the
+sector problems in the paper's SI Tables 1 and 3. The choice of S changes how strong the bound
+is, never whether it is sound. `circuit_distance_with_sectors(dem, sectors)` takes your own
+sectors (an empty list is plain `circuit_distance`), and `projected_distance(dem, sector)` returns
+the projected optimum alone: a lower bound, whose witness solves the projection but not
+necessarily the model. A bad sector (empty, or an id outside 0 .. num_detectors - 1) raises
+QM-E741.
+
+Measured here (Mojo, one Apple laptop run of `tests/test_qec_distance.mojo` and the example, surface
+memory, rounds = d, p = 0.001, full DEM, both bases): exact distance d with a witness replayed on
+the full model for d = 7 (5473 mechanisms, 57,512 nodes, about 10 ms), 9 (266,149 nodes, about
+30 ms), 11 (895,736 nodes, about 90 ms), 13 (about 0.2 s) and 15 (66,089 mechanisms, about 0.4 s),
+for both Z and X memories. The d = 7 sector bound is cross-checked in the test by the plain search
+on an independently projected model (exact 7, 1,131,393 nodes).
+
+Limits: the lower bound is only as strong as the sectors. A circuit whose sector problem has a
+lower distance than the circuit (a schedule whose bad faults touch both bases), or whose
+projections have hyperedges and a large distance, falls back to the full search and its cost.
+`detector_sectors` is a heuristic tuned on CSS memories; it is not a proof of anything, and
+nothing depends on it being right.
 
 `MatchingGraph.graphlike_distance()` is a different quantity. It counts pieces of the decomposed
 matching graph and reads observable 0 only, so it is not a certificate of the circuit distance.
 It is unchanged. On the hook-safe surface schedule both give d.
 
-Not implemented: sector reduction, rank DP, time collapse, lifting, symmetry, and the dual ascent.
+Not implemented: rank DP, time collapse, completion tables, symmetry, the dual ascent, and the
+paper's per-circuit sector-exactness check (QUMO lifts and replays each witness instead).
 
 ### Magic-state factory error by fault enumeration (example)
 

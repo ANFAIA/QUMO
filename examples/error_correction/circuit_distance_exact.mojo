@@ -1,6 +1,6 @@
 """Exact circuit distance of a detector error model, hyperedges kept whole.
 
-Reproduces: Cheng, Guo, Pan - weight-bounded search with a covering bound for code and circuit distances (SI Sec. 5.1, Lemma 5.1, Thm 5.2)
+Reproduces: Cheng, Guo, Pan - weight-bounded search with a covering bound for code and circuit distances (SI Sec. 5.1, Lemma 5.1, Thm 5.2), and the row-projection lower bound with lifting (Methods "Reductions, relaxation and lifting", SI Sec. 5.4)
 Source: https://arxiv.org/abs/2611.08247
 Framework: QUMO - https://github.com/ANFAIA/QUMO
 
@@ -11,6 +11,12 @@ the full symptoms, so each mechanism is one column. A result is exact when a com
 search meets a witness of the same weight, and the witness is re-checked; a node budget gives an
 interval (lower bound, no upper bound) and never a wrong exact value.
 
+Past d = 5 the plain search is too slow, so `circuit_distance_reduced` adds the paper's
+reductions: keep only one basis's detectors (any detector subset gives a lower bound, because a
+solution of the model solves its projection), solve that graph-like problem exactly as a shortest
+odd closed walk, then lift an optimal projected solution back to real mechanisms and replay it on
+the full model. Exact only when the lifted weight meets the lower bound.
+
 Checks:
 - [[15,1,3]] Reed-Muller code capacity: Z-type distance 3, X-type distance 7 (classical RM theory), and both equal brute force;
 - Steane code capacity: 3;
@@ -18,7 +24,10 @@ Checks:
 - 20 seeded random hypergraph models of at most 12 mechanisms: search equals brute force on every one;
 - rotated surface code Z memory, rounds = d, p = 0.001, full DEM: distance 3 and 5, witness verified;
 - repetition code d = 5, rounds = 5: 5;
-- a 100-node budget on the d = 5 surface model gives an interval (lower <= 5, no upper bound), never a wrong exact value.
+- a 100-node budget on the d = 5 surface model gives an interval (lower <= 5, no upper bound), never a wrong exact value;
+- reduced path: 20 seeded random models with a random detector sector each equal brute force, and every projected optimum is at most the brute-force distance;
+- reduced path: surface d = 5 equals the plain search; surface Z memory d = 7, 9, 11, 13, 15 and X memory d = 7 give exactly d
+  (the hook-safe schedule's distance; d = 7 is also the value of the paper's SI Table 3), each witness replayed on the full model.
 
 Run: .venv/bin/mojo run -I . examples/error_correction/circuit_distance_exact.mojo
 example-meta: {"framework": "qumo", "tier": "fast", "timeout": 180, "requires": [], "args": []}
@@ -29,7 +38,7 @@ from qumo.core.rng import Rng
 from qumo.qec.codes import NoiseParams, surface_code_memory, repetition_code_memory
 from qumo.qec.dem import DetectorErrorModel, DemError, detector_error_model
 from qumo.qec.stim_text import parse_dem
-from qumo.qec.distance import DistanceResult, circuit_distance, verify_witness
+from qumo.qec.distance import DistanceResult, circuit_distance, circuit_distance_reduced, circuit_distance_with_sectors, projected_distance, verify_witness
 from qumo.testing.checks import CheckLog
 
 
@@ -151,6 +160,30 @@ def _mismatch_count(mut rng: Rng, models: Int) raises -> Int:
     return mismatches
 
 
+def _reduced_mismatches(mut rng: Rng, models: Int) raises -> Int:
+    """Random model, random sector: the projection never exceeds brute force, the pipeline equals it."""
+    var mismatches = 0
+    for _i in range(models):
+        var dem = _random_dem(rng, 10)
+        var b = _brute(dem)
+        var sector = List[Int]()
+        for d in range(dem.num_detectors):
+            if rng.uniform() < 0.5:
+                sector.append(d)
+        if len(sector) == 0:
+            sector.append(0)
+        var pd = projected_distance(dem, sector, max_weight=20)
+        var secs = List[List[Int]]()
+        secs.append(sector^)
+        var r = circuit_distance_with_sectors(dem, secs, max_weight=20)
+        if b < 0:
+            if r.exact or r.upper != -1:
+                mismatches += 1
+        elif pd.lower > b or r.status != "exact" or r.lower != b or not verify_witness(dem, r.witness):
+            mismatches += 1
+    return mismatches
+
+
 def main() raises:
     var log = CheckLog("error_correction/circuit_distance_exact")
 
@@ -197,5 +230,26 @@ def main() raises:
     var budget = circuit_distance(surf5_dem, node_limit=100)
     print(String(budget))
     _ = log.check("budget gives an interval", budget.status == "budget" and budget.upper == -1 and budget.lower <= 5, String(budget))
+
+    var rng2 = Rng(11)
+    var red_mm = _reduced_mismatches(rng2, 20)
+    _ = log.check("reduced path with random sectors matches brute force", red_mm == 0, "models=20 mismatches=" + String(red_mm))
+
+    var red5 = circuit_distance_reduced(surf5_dem)
+    print(String(red5))
+    _ = log.close("surface d=5 reduced distance", Float64(red5.upper), 5.0, 0.0)
+
+    for d in [7, 9, 11, 13, 15]:
+        var cc = surface_code_memory(d, d, NoiseParams.uniform(0.001), "Z")
+        var dem = detector_error_model(cc.circuit, decompose=False)
+        var r = circuit_distance_reduced(dem)
+        print("d=" + String(d), len(dem.errors), "mechanisms:", String(r))
+        _ = log.check("surface Z memory d=" + String(d) + " reduced exact, witness replayed", r.status == "exact" and verify_witness(dem, r.witness), String(r))
+        _ = log.close("surface Z memory d=" + String(d) + " reduced distance", Float64(r.upper), Float64(d), 0.0)
+    var ccx = surface_code_memory(7, 7, NoiseParams.uniform(0.001), "X")
+    var demx = detector_error_model(ccx.circuit, decompose=False)
+    var rx = circuit_distance_reduced(demx)
+    print(String(rx))
+    _ = log.close("surface X memory d=7 reduced distance", Float64(rx.upper), 7.0, 0.0)
 
     log.finish()
