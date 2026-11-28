@@ -1,5 +1,6 @@
 from std.math import pi, sqrt, exp
 from std.collections import Dict
+from std.bit import pop_count
 from std.testing import assert_equal, assert_true
 
 from qumo.ir.circuit import Circuit
@@ -8,7 +9,8 @@ from qumo.sim.rng import Rng
 from qumo.sim.stabilizer import TableauSimulator, sample_stabilizer
 from qumo.sim.frame import FrameSimulator
 from qumo.qec.codes import NoiseParams, surface_code_memory, repetition_code_memory, generate_code, to_stim
-from qumo.qec.dem import detector_error_model, depolarize1_independent, combine_independent
+from qumo.qec.dem import DetectorErrorModel, DemError, detector_error_model, depolarize1_independent, combine_independent
+from qumo.qec.stim_text import parse_dem
 from qumo.qec.decoders import (
     Decoder, MatchingGraph, UnionFindDecoder, MwpmDecoder, LookupTableDecoder, min_weight_boundary_matching,
     count_logical_errors, UF_SCALE,
@@ -240,6 +242,7 @@ def main() raises:
 
     test_uf_buffer_reuse()
     test_noise_model_arity3()
+    test_graphlike_distance()
     print("test_qec OK")
 
 
@@ -621,3 +624,138 @@ def _with_readout(c: Circuit, m: NoiseModel) raises -> Circuit:
         else:
             out.append(g)
     return out^
+
+
+def _min_logical(dm: List[UInt64], om: List[UInt64]) -> Int:
+    """Brute force: fewest columns whose detector masks XOR to 0 and observable
+    masks XOR to non-zero; -1 if none. Plain subset enumeration (<= 20 columns)."""
+    var n = len(dm)
+    var best = -1
+    for s in range(1, 1 << n):
+        var w = Int(pop_count(UInt64(s)))
+        if best >= 0 and w >= best:
+            continue
+        var d: UInt64 = 0
+        var o: UInt64 = 0
+        for j in range(n):
+            if ((s >> j) & 1) == 1:
+                d ^= dm[j]
+                o ^= om[j]
+        if d == 0 and o != 0:
+            best = w
+    return best
+
+
+def _dem_brute(dem: DetectorErrorModel) -> Int:
+    """Reference on the DEM itself: mechanisms with their full symptom."""
+    var dm = List[UInt64]()
+    var om = List[UInt64]()
+    for e in dem.errors:
+        var m: UInt64 = 0
+        for d in e.dets:
+            m ^= UInt64(1) << UInt64(d)
+        dm.append(m)
+        om.append(e.obs)
+    return _min_logical(dm, om)
+
+
+def _graph_brute(g: MatchingGraph) -> Int:
+    """Reference on the graph's own edge list (the boundary flips no detector)."""
+    var dm = List[UInt64]()
+    var om = List[UInt64]()
+    for i in range(g.num_edges()):
+        var m = UInt64(1) << UInt64(g.eu[i])
+        if g.ev[i] != g.boundary:
+            m ^= UInt64(1) << UInt64(g.ev[i])
+        dm.append(m)
+        om.append(g.eobs[i])
+    return _min_logical(dm, om)
+
+
+def _random_obs(mut rng: Rng, nobs: Int) -> UInt64:
+    var o: UInt64 = 0
+    for k in range(nobs):
+        if rng.below(10) < 3:
+            o |= UInt64(1) << UInt64(k)
+    return o
+
+
+def test_graphlike_distance() raises:
+    """MatchingGraph.graphlike_distance is the exact graph-like distance: every
+    start node (not only the boundary) and every observable (not only L0),
+    checked against brute force over the DEM and over the graph's edges."""
+    # Odd cycle that avoids the boundary: 3 (the boundary-only BFS gave 5).
+    var a = MatchingGraph(parse_dem("error(0.01) D0\nerror(0.01) D0 D1 L0\nerror(0.01) D1 D2\nerror(0.01) D0 D2\n"))
+    assert_equal(a.graphlike_distance(), 3, "bulk odd cycle")
+    # Only L1 can flip: 3 (observable 0 only gave -1).
+    var b = MatchingGraph(parse_dem("error(0.01) D0 L1\nerror(0.01) D0 D1\nerror(0.01) D1\n"))
+    assert_equal(b.graphlike_distance(), 3, "logical on L1")
+    # L0 needs 4 edges, L1 needs 3: 3 (gave 4).
+    var b2 = MatchingGraph(parse_dem("error(0.01) D0 L1\nerror(0.01) D0 D1\nerror(0.01) D1\nerror(0.01) D2 L0\nerror(0.01) D2 D3\nerror(0.01) D3 D4\nerror(0.01) D4\n"))
+    assert_equal(b2.graphlike_distance(), 3, "shorter logical on L1")
+    # Counted in decomposition pieces, not mechanisms (definitional, documented):
+    # the graph has a 3-edge logical, the DEM needs 4 mechanisms.
+    var c1 = parse_dem("error(0.01) D0 D1 L0 ^ D2 D3\nerror(0.01) D2 D3\nerror(0.01) D0\nerror(0.01) D1\n")
+    assert_equal(MatchingGraph(c1).graphlike_distance(), 3)
+    assert_equal(_dem_brute(c1), 4)
+    # A dropped hyperedge hides a 2-mechanism logical from the graph.
+    var c2 = parse_dem("error(0.01) D0 L0 ^ D1 D2\nerror(0.01) D0 D1 D2\n")
+    var gc2 = MatchingGraph(c2)
+    assert_equal(gc2.num_dropped, 1)
+    assert_equal(gc2.graphlike_distance(), -1)
+    assert_equal(_dem_brute(c2), 2)
+
+    var rng = Rng(2611)
+    # Graph-like models on distinct detector pairs: graph == DEM, compare with the DEM brute force.
+    var nontrivial = 0
+    for trial in range(400):
+        var nd = 2 + rng.below(6)
+        var nobs = 1 + rng.below(3)
+        var with_boundary = rng.below(3) != 0
+        var dem = DetectorErrorModel(nd, nobs)
+        for u in range(nd):
+            for v in range(u, nd + 1):
+                if v == u or (v == nd and not with_boundary):
+                    continue
+                if rng.below(10) >= 4 or len(dem.errors) >= 16:
+                    continue
+                var dets = List[Int]()
+                dets.append(u)
+                if v < nd:
+                    dets.append(v)
+                dem.errors.append(DemError(0.01, dets^, _random_obs(rng, nobs)))
+        var g = MatchingGraph(dem)
+        var want = _dem_brute(dem)
+        if want > 0:
+            nontrivial += 1
+        assert_equal(g.graphlike_distance(), want, "graph-like random model " + String(trial))
+        assert_equal(_graph_brute(g), want)
+    print("graphlike_distance: random graph-like models with a logical:", nontrivial, "of 400")
+    assert_true(nontrivial > 100, "random models must often contain a logical")
+    # Models with hyperedges, merged and conflicting parallel errors: compare with
+    # brute force over the graph's edges (the quantity the function defines).
+    for trial in range(300):
+        var nd = 3 + rng.below(4)
+        var nobs = 1 + rng.below(2)
+        var dem = DetectorErrorModel(nd, nobs)
+        var ne = 4 + rng.below(9)
+        for _ in range(ne):
+            var k = 1 + rng.below(4)
+            var dets = List[Int]()
+            for d in range(nd):
+                if len(dets) < k and rng.below(nd) < k:
+                    dets.append(d)
+            if len(dets) == 0:
+                dets.append(rng.below(nd))
+            dem.errors.append(DemError(0.01, dets^, _random_obs(rng, nobs)))
+        var g = MatchingGraph(dem)
+        assert_true(g.num_edges() <= 20)
+        assert_equal(g.graphlike_distance(), _graph_brute(g), "hypergraph random model " + String(trial))
+    # Code values are unchanged (the boundary start already found them).
+    for d in range(3, 8, 2):
+        for basis in ["Z", "X"]:
+            var cc = surface_code_memory(d, d, NoiseParams.uniform(0.001), basis)
+            assert_equal(MatchingGraph(detector_error_model(cc.circuit)).graphlike_distance(), d)
+        var rc = repetition_code_memory(d, d, NoiseParams.uniform(0.001))
+        assert_equal(MatchingGraph(detector_error_model(rc.circuit)).graphlike_distance(), d)
+    print("graphlike_distance ok")

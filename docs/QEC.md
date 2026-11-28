@@ -218,9 +218,28 @@ memory with d = 7, rounds = 7, p = 0.001, full DEM (5473 mechanisms), the defaul
 status `budget` with lower = 5 after 50,000,001 nodes, about 9.5 s, and no upper bound. So d = 7 is
 not certified by this minimal search; it needs the paper's sector reduction and rank DP.
 
-`MatchingGraph.graphlike_distance()` is a different quantity. It counts pieces of the decomposed
-matching graph and reads observable 0 only, so it is not a certificate of the circuit distance.
-It is unchanged. On the hook-safe surface schedule both give d.
+`MatchingGraph.graphlike_distance()` is a different quantity: the fewest edges of the decomposed
+matching graph whose XOR flips no detector and at least one observable (the shortest cycle, through
+the boundary or not, with odd parity on some observable). It counts graph edges, not mechanisms: a
+hyperedge counts as its decomposition pieces, parallel errors are one edge (with conflicting
+observables only one survives, `num_conflicts`), undecomposable hyperedges (`num_dropped`) and
+mechanisms without detectors (`num_undetectable`) are not in the graph. So it is neither an upper
+nor a lower bound on the circuit distance in general. Two hand models from
+`tests/test_qec.mojo`: `D0 D1 L0 ^ D2 D3`, `D2 D3`, `D0`, `D1` has graph-like distance 3 and
+circuit distance 4; `D0 L0 ^ D1 D2`, `D0 D1 D2` (the second is dropped) has no graph-like logical
+(-1) and circuit distance 2. On a model whose errors all have at most two detectors and no `^`
+pieces, on distinct detector pairs, with no undetectable mechanism, the two are equal. On the hook-safe surface schedule both
+give d.
+
+Until 2026-11-27 `graphlike_distance()` started its search only at the boundary when the boundary
+had an edge, and read observable 0 only. An odd cycle that avoids the boundary was missed (the
+model `D0`, `D0 D1 L0`, `D1 D2`, `D0 D2` gave 5 instead of 3) and a logical on another observable
+was not seen (`D0 L1`, `D0 D1`, `D1` gave -1 instead of 3). It now starts at every node (nodes
+already used as a start are skipped) and takes the minimum over observables. The surface (Z and X)
+and repetition values for d = 3, 5, 7 are unchanged (d). Cost: one breadth-first search per node
+and per observable that some edge flips, with pruning at the best value found; about 1 ms for the
+surface d = 7 graph (337 nodes) and 25 ms for d = 11 (1321 nodes) on one laptop run, against
+0.03 ms and 0.1 ms before.
 
 Not implemented: sector reduction, rank DP, time collapse, lifting, symmetry, and the dual ascent.
 
@@ -270,7 +289,8 @@ trait Decoder(Copyable, Deinitable):
 * `MatchingGraph(dem)`: nodes = detectors + boundary; edges from graph-like
   errors and decomposition pieces, weight log((1−p)/p); undecomposed
   hyperedges are decomposed against existing edges or dropped (counted).
-  `graphlike_distance()` = fewest graph-like errors forming a logical.
+  `graphlike_distance()` = fewest graph edges forming a logical on any
+  observable (see "Exact circuit distance" for what it does and does not bound).
   DEM import (`parse_dem`) keeps Stim's `^` pieces; `graph_pieces`
   (`qumo/qec/decoders.mojo`) is the one rule for them, shared by
   `MatchingGraph`, `graphlike_dem` and the correlated decoder. A piece with no
