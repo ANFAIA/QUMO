@@ -7,6 +7,7 @@ order and sign of s, and agreement with the known singular values.
 """
 
 from std.math import sqrt
+from std.time import perf_counter_ns
 from std.testing import assert_true, assert_equal
 from qumo.core.rng import Rng
 from qumo.core.svd import CMatrix, SVDResult, svd, check_svd_size, SVD_MAX_MIN_DIM
@@ -267,6 +268,43 @@ def main() raises:
         var r6 = svd(a6)
         for t in range(4):
             assert_true(abs(r6.s[t] / sc - s1[t]) <= 1e-13, "scaled " + String(sc))
+
+    # Review findings (2026-11-27). Subnormal largest entry: 1 / scale overflowed to inf,
+    # [[1e-310]] gave s = [nan] and diag(1e-310, 1e-311) a false QM-E431.
+    var t1 = CMatrix(1, 1)
+    t1.set(0, 0, 1e-310)
+    var rt1 = svd(t1)
+    assert_true(abs(rt1.s[0] - 1e-310) <= 1e-322, "1x1 subnormal: " + String(rt1.s[0]))
+    assert_true(abs(rt1.u.get_re(0, 0) * rt1.v.get_re(0, 0) - 1.0) <= 1e-15, "1x1 subnormal vectors")
+    var t2 = CMatrix(2, 2)
+    t2.set(0, 0, 1e-310)
+    t2.set(1, 1, 0.0, 1e-311)
+    var rt2 = svd(t2)
+    assert_true(abs(rt2.s[0] - 1e-310) <= 1e-322 and abs(rt2.s[1] - 1e-311) <= 1e-322, "diagonal subnormal")
+    assert_true(orthonormality_error(rt2.u) <= 1e-15 and orthonormality_error(rt2.v) <= 1e-15, "subnormal: orthonormal")
+    var t3 = random_matrix(5, 3, rng)
+    for i in range(len(t3.re)):
+        t3.re[i] *= 1e-310
+        t3.im[i] *= 1e-310
+    var rt3 = svd(t3)
+    for t in range(3):
+        assert_true(rt3.s[t] == rt3.s[t] and rt3.s[t] > 0.0, "subnormal random: finite")
+    # Completion of the left vectors of zero singular values was O(k^3 p) (zero 256 x 256:
+    # 5 s, 512 x 512: 83 s); it is O(p k^2) now. A zero 384 x 384 matrix (about 25 s
+    # before) and a rank-1 300 x 200 one must finish well inside the limit below, with U
+    # orthonormal.
+    var tz0 = perf_counter_ns()
+    var rz384 = svd(CMatrix(384, 384))
+    var r1 = CMatrix(300, 200)
+    for r in range(300):
+        for c in range(200):
+            r1.set(r, c, Float64(r % 7 + 1) * Float64(c % 5 + 1), 0.25 * Float64(r % 7 + 1))
+    var rr1 = svd(r1)
+    var dtz = Float64(perf_counter_ns() - tz0) / 1e9
+    assert_true(dtz < 5.0, "zero-singular-value completion took " + String(dtz) + " s")
+    assert_true(orthonormality_error(rz384.u) <= 1e-13, "zero 384: U orthonormal")
+    check_valid(r1, rr1, 1e-12, "rank 1, 300 x 200")
+    print("  zero 384x384 + rank-1 300x200:", dtz, "s")
 
     # Size cap and invalid input.
     expect_code(SVD_MAX_MIN_DIM + 1, SVD_MAX_MIN_DIM + 1, "QM-E430")
