@@ -38,7 +38,7 @@ today (`qumo/*/*.mojo`, `from qumo.X` lines; the re-export shims for old paths a
 
 | Row | Package | Role | Imports |
 |---|---|---|---|
-| 0 | `core` | JSON writer and parser, `Rng` | nothing from QUMO |
+| 0 | `core` | JSON writer and parser, `Rng`, complex SVD (`svd`) | nothing from QUMO |
 | 1 | `ir` | gates, `Circuit`, `Program`, Pauli, QASM, circuit/program JSON (`ir/json.mojo`) | `core` |
 | 2 | `device` | `Target`: coupling graph, basis, errors, durations, presets, `parse_target`; `conformance_error` | `ir` |
 | 2 | `sim` | state vector, tableau, Pauli frames, runners, density, branching, CPU simulator selection (`dispatch`) | `core`, `ir` |
@@ -126,7 +126,7 @@ The IR is self-contained: `qumo/ir` imports nothing from the simulators, the com
 * **JSON**: `qumo/ir/json.mojo` writes and reads `qumo.circuit.v1` and `qumo.program.v1`
   (`circuit_to_json`, `circuit_from_json`, `program_to_json`, `program_from_json`);
   `qumo.ai.describe` keeps only the agent-facing descriptions and re-exports these for one release.
-* **Shared utilities**: `qumo/core` (JSON writer and parser, and the seeded `Rng`) imports nothing from QUMO and is
+* **Shared utilities**: `qumo/core` (JSON writer and parser, the seeded `Rng`, and the complex one-sided Jacobi SVD `qumo.core.svd`) imports nothing from QUMO and is
   used by every layer above the IR. `GateSet` and the multi-qubit rewrite rules (`expand_rule`)
   live in `qumo/ir/gateset.mojo`, so the simulator does not depend on the compiler.
 
