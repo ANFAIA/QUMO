@@ -246,7 +246,7 @@ Fix: Use sample() (trajectories) or the density-matrix simulator for these circu
 
 ### QM-E433
 
-**Invalid MPS options or size: num_qubits outside [1, 4096], max_bond outside [1, 512], cutoff outside [0, 1), tensors that could exceed 4 GiB, or shots outside [1, 10^7].**  
+**Invalid MPS options or size: num_qubits outside [1, 4096], max_bond outside [1, 512], cutoff outside [0, 1), tensors that could exceed 4 GiB, shots outside [1, 10^7], or more than 2^27 sampled bits (shots x num_qubits) in one sample call.**  
 Fix: Lower max_bond or the number of qubits; cutoff is relative to the largest singular value of a split.
 
 ### QM-E434

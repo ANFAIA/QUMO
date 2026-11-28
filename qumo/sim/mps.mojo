@@ -43,7 +43,11 @@ total variation distance 2 delta of the exact one. The bounds do not include flo
 rounding (about 1e-15 per gate on small states). With cutoff = 0 and a max_bond no smaller than
 2^floor(n / 2), nothing is truncated and discarded_weight and error_bound are exactly 0.
 
-Bounds (QM-E433): 1 <= num_qubits <= MPS_MAX_QUBITS, 1 <= max_bond <= MPS_MAX_BOND (512, so
+Gate angles (after binding `params`) and the global phase must be finite (QM-E482).
+
+Bounds (QM-E433): `sample` takes 1 to MPS_MAX_SHOTS shots and at most MPS_MAX_SAMPLE_BITS
+(2^27) sampled bits per call (shots * num_qubits: every distinct outcome keeps an n-character
+key); 1 <= num_qubits <= MPS_MAX_QUBITS, 1 <= max_bond <= MPS_MAX_BOND (512, so
 that every SVD stays within the cap of `qumo.core.svd`), 0 <= cutoff < 1, and the largest
 memory the tensors can reach, sum over sites of 32 D_{k-1} D_k bytes with
 D_k = min(2^(k+1), 2^(n-k-1), max_bond), at most MPS_MAX_BYTES (4 GiB). A 2-qubit gate costs
@@ -52,13 +56,13 @@ D = 128, 1.6 s at D = 256), plus up to
 2 |q0 - q1| - 2 more for the swaps of a non-adjacent gate.
 """
 
-from std.math import sqrt, cos, sin
+from std.math import sqrt, cos, sin, isnan, isinf
 from std.collections import Dict
 from qumo.core.rng import Rng
 from qumo.core.svd import CMatrix, svd
 from qumo.ir.circuit import Circuit, Instruction, check_finite_values
 from qumo.ir.gates import (
-    Op, op_arity, op_is_unitary, op_is_noise, op_is_annotation, op_name, M2, M4,
+    Op, op_arity, op_num_params, op_is_unitary, op_is_noise, op_is_annotation, op_name, M2, M4,
     matrix_1q, matrix_2q,
 )
 from qumo.ir.gateset import GateSet, expand_rule
@@ -68,6 +72,7 @@ comptime MPS_MAX_QUBITS = 4096
 comptime MPS_MAX_BOND = 512
 comptime MPS_MAX_BYTES = 1 << 32
 comptime MPS_MAX_SHOTS = 10_000_000
+comptime MPS_MAX_SAMPLE_BITS = 1 << 27  # shots * num_qubits: bounds the memory of the count keys
 
 
 struct MPSSite(Copyable):
@@ -534,6 +539,8 @@ struct MPS(Copyable):
         Qiskit-style (leftmost character = qubit n - 1). Moves the centre to site 0."""
         if shots < 1 or shots > MPS_MAX_SHOTS:
             raise Error("QM-E433: shots must be in [1, " + String(MPS_MAX_SHOTS) + "], got " + String(shots) + ". Hint: split the run into several calls with different seeds.")
+        if shots > MPS_MAX_SAMPLE_BITS // self.num_qubits:
+            raise Error("QM-E433: " + String(shots) + " shots of " + String(self.num_qubits) + " qubits is over the limit of 2^27 sampled bits (shots * num_qubits): each distinct outcome keeps an n-character key. Hint: at most " + String(MPS_MAX_SAMPLE_BITS // self.num_qubits) + " shots per call; split the run into calls with different seeds.")
         self.move_center(0)
         if self.norm_sq() <= 0.0:
             raise Error("QM-E434: the MPS has zero norm (everything was truncated). Hint: raise max_bond or lower cutoff.")
@@ -646,6 +653,16 @@ def mps_evolve(circuit: Circuit, max_bond: Int = 64, cutoff: Float64 = 1e-14,
     if len(params) != circuit.num_params():
         raise Error("QM-E101: circuit has " + String(circuit.num_params()) + " parameters " + circuit.param_names_str() + " but " + String(len(params)) + " values were given.")
     check_finite_values(params)
+    if isnan(circuit.global_phase) or isinf(circuit.global_phase):
+        raise Error("QM-E482: the circuit's global phase is " + String(circuit.global_phase) + ". Hint: a global phase must be a finite number.")
+    for i in range(len(circuit.ops)):
+        ref g = circuit.ops[i]
+        if not op_is_unitary(g.kind):
+            continue
+        for j in range(op_num_params(g.kind)):
+            var v = g.p0.resolve(params) if j == 0 else (g.p1.resolve(params) if j == 1 else g.p2.resolve(params))
+            if isnan(v) or isinf(v):
+                raise Error("QM-E482: gate '" + op_name(g.kind) + "' (instruction #" + String(i) + ") has angle " + String(v) + ". Hint: gate angles must be finite numbers; a NaN would run on as a NaN state.")
     var st = MPS(circuit.num_qubits, max_bond, cutoff)
     for g in circuit.ops:
         if op_is_unitary(g.kind):

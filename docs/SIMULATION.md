@@ -540,7 +540,8 @@ print(zz, len(counts), st.error_bound, st.discarded_weight, st.bond_dims()[30])
 | Splitting | every 2-qubit gate moves the orthogonality centre to its left site, contracts the two sites and splits them with the one-sided Jacobi SVD of `qumo.core.svd`. |
 | Truncation | singular values are kept while the index is below `max_bond` (1 to 512), the value is non-zero and larger than `cutoff` (in [0, 1)) times the largest one. |
 | Queries | `amplitude(bits)` (bits[q] = value of qubit q), `amplitude_index(i)` (little-endian, n <= 62), `expectation_label`, `expectation_ops`, `expectation(PauliSum)` (normalized state), `sample(shots, seed)` (all qubits, Qiskit-style keys, normalized state), `bond_dims()`, `norm_sq()`. |
-| Limits (QM-E433) | 1 to 4096 qubits; tensors that could exceed 4 GiB for the given `max_bond` are refused before anything runs; 1 to 10^7 shots. |
+| Limits (QM-E433) | 1 to 4096 qubits; tensors that could exceed 4 GiB for the given `max_bond` are refused before anything runs; 1 to 10^7 shots, and at most 2^27 sampled bits (shots x qubits) per `sample` call, since every distinct outcome keeps an n-character key. |
+| Non-finite values (QM-E482) | a gate angle (after binding `params`) or a global phase that is NaN or infinite is refused: it would run on as a NaN state with an error bound of 0. |
 
 **What the reported error bounds.** The state is not renormalized after a truncation.
 `discarded_weight` is the sum over truncations of the squared singular values dropped there,

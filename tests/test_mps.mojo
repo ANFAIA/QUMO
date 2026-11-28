@@ -321,6 +321,37 @@ def test_errors() raises:
         raise Error("wide observable accepted")
     except e:
         expect_code("QM-E405", String(e))
+    # Review findings (2026-11-27). Sampling memory: shots * num_qubits is capped
+    # (4096 qubits x 100000 shots took 1.7 GB of keys); refused before any work.
+    var wide = MPS(4096, 1, 0.0)
+    for shots in [100000, (1 << 27) // 4096 + 1]:
+        try:
+            _ = wide.sample(shots, 1)
+            raise Error(String(shots) + " shots of 4096 qubits accepted")
+        except e:
+            expect_code("QM-E433", String(e))
+    var ok = wide.sample(8, 1)
+    assert_equal(ok.get(String("0") * 4096, 0), 8, "|0...0> samples one key")
+    # Non-finite angles and global phase were run and gave NaN amplitudes with
+    # error_bound 0 and plausible counts; they are refused (QM-E482).
+    var nan = Float64(0.0) / Float64(0.0)
+    var inf = Float64(1.0) / Float64(0.0)
+    for which in range(4):
+        var cn = Circuit(2)
+        cn.h(0)
+        if which == 0:
+            cn.rx(nan, 1)
+        elif which == 1:
+            cn.u(0.1, inf, 0.2, 0)
+        elif which == 2:
+            cn.rzz(-inf, 0, 1)
+        else:
+            cn.global_phase = nan
+        try:
+            _ = mps_evolve(cn)
+            raise Error("non-finite value accepted, case " + String(which))
+        except e:
+            expect_code("QM-E482", String(e))
     print("  coded errors ok")
 
 
