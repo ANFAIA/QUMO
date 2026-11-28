@@ -27,8 +27,11 @@ are then the column norms of G and the left singular vectors its normalized colu
   QM-E431 (it has not happened in the tests; Jacobi converges quadratically).
 * Wide matrices (m < n) are decomposed through A^H, so the working matrix always has at least
   as many rows as columns.
-* The input is scaled by its largest entry modulus before the sweeps and the singular values
-  scaled back, so overflow does not occur.
+* The input is divided by its largest entry modulus before the sweeps (a division, so a
+  subnormal largest entry works too) and the singular values are multiplied back. Nothing
+  overflows inside the sweeps; a singular value above the largest double (possible only when
+  entries are within a factor sqrt(m n) of it) comes back as inf, and singular values in the
+  subnormal range lose relative precision as such numbers do.
 * Negligible columns: a column of G whose norm falls below 1e-40 (of the scaled matrix) is not
   rotated any more. In a rank-deficient matrix the columns that carry rounding noise shrink by
   about 2^-52 per sweep; rotating them on into subnormal numbers made the complex phase of a
@@ -40,8 +43,9 @@ are then the column norms of G and the left singular vectors its normalized colu
   modulus, with no relative accuracy.
 
 Bounds (QM-E430): min(m, n) <= SVD_MAX_MIN_DIM (1024) and m * n <= SVD_MAX_ENTRIES (2^22, 64 MiB
-of complex entries); entries must be finite. A sweep costs O(m n^2) flops for n <= m, so the
-cap also bounds the running time.
+of complex entries); entries must be finite. A sweep costs O(m n^2) flops for n <= m, and so
+does the completion of the left vectors of zero singular values (O(p k) per vector), so with
+at most SVD_MAX_SWEEPS sweeps the cap also bounds the running time.
 """
 
 from std.math import sqrt
@@ -215,11 +219,11 @@ def svd(a: CMatrix) raises -> SVDResult:
     # Working matrix W (p x q, column-major): A, or A^H when wide.
     var wr = List[Float64](length=p * q, fill=0.0)
     var wi = List[Float64](length=p * q, fill=0.0)
-    var inv = 1.0 / scale if scale > 0.0 else 1.0
+    var div = scale if scale > 0.0 else 1.0  # divide: 1 / scale overflows for a subnormal scale
     for r in range(m):
         for c in range(n):
-            var x = a.re[r * n + c] * inv
-            var y = a.im[r * n + c] * inv
+            var x = a.re[r * n + c] / div
+            var y = a.im[r * n + c] / div
             if wide:  # W = A^H: W[c, r] = conj(A[r, c]); column r of W
                 wr[r * p + c] = x
                 wi[r * p + c] = -y
@@ -266,8 +270,7 @@ def svd(a: CMatrix) raises -> SVDResult:
                 ui[t * p + i] = wi[j * p + i] * r
         else:
             zero_cols.append(t)
-    for t in zero_cols:
-        _complete_column(ur, ui, p, k, t)
+    _complete_columns(ur, ui, p, k, zero_cols)
     # Assemble U (m x k) and V (n x k), row-major.
     var u = CMatrix(m, k)
     var v = CMatrix(n, k)
@@ -286,18 +289,32 @@ def svd(a: CMatrix) raises -> SVDResult:
     return SVDResult(u^, s^, v^, sweeps)
 
 
-def _complete_column(mut ur: List[Float64], mut ui: List[Float64], p: Int, k: Int, t: Int):
-    """Column t of U (zero singular value): the unit vector e_r whose component orthogonal
-    to the other filled columns is largest, orthogonalized twice and normalized."""
-    var best = -1.0
-    var br = List[Float64](length=p, fill=0.0)
-    var bi = List[Float64](length=p, fill=0.0)
-    for r in range(p):
-        var xr = List[Float64](length=p, fill=0.0)
-        var xi = List[Float64](length=p, fill=0.0)
-        xr[r] = 1.0
+def _complete_columns(mut ur: List[Float64], mut ui: List[Float64], p: Int, k: Int, zero_cols: List[Int]):
+    """Fill the columns `zero_cols` of U (p x k, column-major; they hold zeros) with
+    orthonormal vectors orthogonal to the other columns. For each one, take the unit
+    vector e_r with the largest residual 1 - sum_c |U[r, c]|^2 over the columns already
+    filled (kept up to date in O(p) per column: at least (p - filled) / p > 0), project
+    out every filled column twice and normalize. O(p k) per column, O(p k^2) in all."""
+    if len(zero_cols) == 0:
+        return
+    var res = List[Float64](length=p, fill=1.0)
+    for c in range(k):
+        var o = c * p
+        for i in range(p):
+            res[i] -= ur[o + i] * ur[o + i] + ui[o + i] * ui[o + i]
+    var xr = List[Float64](length=p, fill=0.0)
+    var xi = List[Float64](length=p, fill=0.0)
+    for t in zero_cols:
+        var best = 0
+        for i in range(1, p):
+            if res[i] > res[best]:
+                best = i
+        for i in range(p):
+            xr[i] = 0.0
+            xi[i] = 0.0
+        xr[best] = 1.0
         for _pass in range(2):
-            for c in range(k):
+            for c in range(k):  # unfilled columns are zero: projecting on them is a no-op
                 if c == t:
                     continue
                 var o = c * p
@@ -306,19 +323,17 @@ def _complete_column(mut ur: List[Float64], mut ui: List[Float64], p: Int, k: In
                 for i in range(p):  # u_c^H x
                     dr += ur[o + i] * xr[i] + ui[o + i] * xi[i]
                     di += ur[o + i] * xi[i] - ui[o + i] * xr[i]
+                if dr == 0.0 and di == 0.0:
+                    continue
                 for i in range(p):  # x -= u_c (u_c^H x)
                     xr[i] -= ur[o + i] * dr - ui[o + i] * di
                     xi[i] -= ur[o + i] * di + ui[o + i] * dr
         var nn = 0.0
         for i in range(p):
             nn += xr[i] * xr[i] + xi[i] * xi[i]
-        if nn > best:
-            best = nn
-            br = xr^
-            bi = xi^
-        if best > 0.5:
-            break
-    var inv = 1.0 / sqrt(best)
-    for i in range(p):
-        ur[t * p + i] = br[i] * inv
-        ui[t * p + i] = bi[i] * inv
+        var inv = 1.0 / sqrt(nn)
+        var o = t * p
+        for i in range(p):
+            ur[o + i] = xr[i] * inv
+            ui[o + i] = xi[i] * inv
+            res[i] -= ur[o + i] * ur[o + i] + ui[o + i] * ui[o + i]
