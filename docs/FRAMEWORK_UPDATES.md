@@ -30,7 +30,7 @@ review are in [their own section](#candidates-of-the-2026-11-26-review).
 | `while`, classical variables, CFG IR | Qiskit, Guppy; `cirq.While` exists only in 1.8.dev, unreleased (the latest Cirq release is 1.7.0) | done on the CPU, `qumo.ir.program`: regions on a tape with a derived CFG, a separate type from `Circuit`, [CONTROL_FLOW](CONTROL_FLOW.md). Hardware and GPU are deferred |
 | Text circuit drawer | Cirq, Qibo, PennyLane | done, `Circuit.draw()`, `qumo draw`, `qumo_draw`, `qumo_py.draw` |
 | Quantikz / LaTeX drawing | Cirq 1.7 | deferred |
-| Multi-qubit Pauli operators beyond 64 qubits | Qiskit `SparseObservable` | deferred, needed for Pauli propagation |
+| Multi-qubit Pauli operators beyond 64 qubits | Qiskit `SparseObservable` | deferred; still needed for Pauli propagation past 64 qubits (`propagate_pauli` stops there with QM-E430) |
 | `defcal`, QPY, C API, Rust internals, HUGR internals | Qiskit, Quantinuum | skipped: no neutral value, or vendor formats |
 | `FreeParameterExpression` math functions | Braket 1.119 | skipped: affine `Param` is deliberate, adjoint gradients rely on it |
 | OpenQASM 2 `^` as the power operator; `pi`, `tau`, `euler` rejected as declared names (QM-E522) | Qiskit 2.6.x fixes (expression domain errors, constant-name collisions); research-watch 2026-11-17 | done, `qumo/ir/qasm_parser.mojo`, regression tests in `tests/test_qasm_qiskit26.mojo`. Both were QUMO bugs the tests exposed |
@@ -67,7 +67,8 @@ review are in [their own section](#candidates-of-the-2026-11-26-review).
 | M3 | `mthree` 3.0 | done, `mitigate_counts_m3`, matches to 5e-9 |
 | Density matrix, Kraus channels | QDK 1.28, CUDA-Q, Cirq, Aer | done, `qumo.sim.density`, `qumo.ir.kraus` |
 | Stabilizer branching | QDK 1.32 | done, `qumo.sim.branching`, with a measurement that never grows the list |
-| Pauli propagation, OBP | cuPauliProp, pauli-prop, addon-obp | deferred |
+| Pauli propagation | PauliPropagation.jl, Rudolph et al., arXiv:2505.21606; cuPauliProp, pauli-prop | done for <= 64 qubits, `qumo.sim.pauli_prop` (`propagate_pauli`), [SIMULATION](SIMULATION.md); example `examples/simulation/pauli_propagation.mojo` reproduces the package's README value. Coefficient and weight truncation with a worst-case error bound (sum of dropped \|c\|), hard term cap, exact Pauli noise; no frequency/path truncation, Monte Carlo or threading. The prerequisite of the row above (Paulis wider than 64 qubits) is not removed: circuits past 64 qubits are refused |
+| OBP (operator backpropagation) | addon-obp | deferred |
 | MPS | CUDA-Q, qibotn, Aer | deferred: needs a complex SVD |
 | Twirling, template programs, Samplomatic model | Qiskit | deferred |
 | PEC, PEA, Pauli-Lindblad learning | Qiskit | deferred |
